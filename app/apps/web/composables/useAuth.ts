@@ -76,6 +76,8 @@ export const useAuth = () => {
         user: data.user,
         spaceId: data.space_id,
       };
+      // 续期后立即回拉资料与积分，否则刷新页面后 credits 一直为 null（顶栏显示 0）
+      await me();
       return true;
     } catch {
       return false;

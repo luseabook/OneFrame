@@ -2,7 +2,7 @@
 // 工作台首页：1:1 对齐竞品 ReelMate App 首页（home.png）
 // 结构：居中大标题 → 双工作流入口卡 → 工具矩阵 → 活动轮播 → 案例墙
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "首页 · 万帧" });
+useHead({ title: "首页 · 一帧" });
 
 const tools = [
   { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true },

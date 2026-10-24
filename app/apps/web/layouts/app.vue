@@ -44,8 +44,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   <div class="shell" :class="{ collapsed }">
     <aside class="sidebar">
       <div class="brand">
-        <span class="logo-mark" aria-hidden="true">万</span>
-        <span v-if="!collapsed" class="logo-text">万帧</span>
+        <span class="logo-mark" aria-hidden="true">一</span>
+        <span v-if="!collapsed" class="logo-text">一帧</span>
         <button class="collapse-btn" :title="collapsed ? '展开' : '收起'" @click="collapsed = !collapsed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <rect x="3" y="4" width="18" height="16" rx="3" />

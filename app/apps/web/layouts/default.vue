@@ -10,8 +10,8 @@ const isLoginPage = computed(() => route.path === "/login");
   <div class="marketing">
     <header class="site-head">
       <NuxtLink to="/" class="brand">
-        <span class="logo-mark" aria-hidden="true">万</span>
-        <span class="logo-text">万帧</span>
+        <span class="logo-mark" aria-hidden="true">一</span>
+        <span class="logo-text">一帧</span>
       </NuxtLink>
       <nav class="nav">
         <!-- 登录态客户端渲染，避免 hydration 前后结构不一致 -->
@@ -38,7 +38,7 @@ const isLoginPage = computed(() => route.path === "/login");
         <NuxtLink to="/privacy">隐私政策</NuxtLink>
         <NuxtLink to="/report">举报投诉</NuxtLink>
       </div>
-      <p class="copy">内容由 AI 生成，请仔细甄别 · © 2026 万帧 WanFrame</p>
+      <p class="copy">内容由 AI 生成，请仔细甄别 · © 2026 一帧 OneFrame</p>
     </footer>
   </div>
 </template>

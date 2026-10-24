@@ -2,7 +2,7 @@
 // 工具箱：1:1 对齐竞品 ReelMate 工具箱页（tools.png）
 // 结构：标题 + 分类 Tab + 工具卡片网格（4 列）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "工具箱 · 万帧" });
+useHead({ title: "工具箱 · 一帧" });
 
 type Tool = {
   label: string;

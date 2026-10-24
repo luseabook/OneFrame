@@ -438,183 +438,335 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
   if (exportTimer) clearInterval(exportTimer);
 });
+
+// ── 流水线步骤（UI 编排层）──
+const steps = computed(() => [
+  { key: "outline" as const, label: "大纲", count: episodes.value.length || undefined },
+  { key: "characters" as const, label: "角色", count: characters.value.length || undefined },
+  { key: "storyboards" as const, label: "分镜", count: shots.value.length || undefined },
+  { key: "batch" as const, label: "投递", count: batchItems.value.length || undefined },
+]);
+
+function stepDone(key: "outline" | "characters" | "storyboards" | "batch"): boolean {
+  if (key === "outline") return episodes.value.length > 0;
+  if (key === "characters") return characters.value.length > 0 && characters.value.every((c) => c.status === 2);
+  if (key === "storyboards") return shots.value.length > 0;
+  return batchItems.value.some((b) => b.submitted);
+}
+
+async function selectEpisode(id: string): Promise<void> {
+  selectedEpisodeId.value = id;
+  await loadEpisode();
+}
+
 </script>
 
 <template>
-  <main class="page">
-    <div class="head">
-      <NuxtLink to="/projects" class="back">← 项目列表</NuxtLink>
-      <div class="title">
-        <h1>{{ project?.title ?? "项目" }}</h1>
-        <span class="muted">{{ project?.ratio }} · {{ episodes.length }} 集 · {{ characters.length }} 角色</span>
+  <div class="pipeline">
+    <!-- ── 页头：项目标题 + 流程步骤 ── -->
+    <header class="page-head">
+      <div class="head-left">
+        <NuxtLink to="/projects" class="back">← 项目列表</NuxtLink>
+        <div class="titles">
+          <h1>{{ project?.title ?? "项目" }}</h1>
+          <p class="meta">
+            <span>{{ project?.ratio ?? "9:16" }}</span>
+            <span class="sep">·</span>
+            <span>{{ episodes.length }} 集</span>
+            <span class="sep">·</span>
+            <span>{{ characters.length }} 角色</span>
+          </p>
+        </div>
       </div>
-    </div>
+      <div class="head-right">
+        <Tag v-if="project?.source_type === 1" tone="neutral">小说改编</Tag>
+        <Tag v-else-if="project?.source_type === 3" tone="neutral">导入剧本</Tag>
+        <Tag v-else tone="brand">一句话想法</Tag>
+      </div>
+    </header>
 
-    <div class="tabs">
-      <button :class="{ active: tab === 'outline' }" @click="tab = 'outline'">① 大纲</button>
-      <button :class="{ active: tab === 'characters' }" @click="tab = 'characters'">② 角色</button>
-      <button :class="{ active: tab === 'storyboards' }" @click="tab = 'storyboards'">③ 分镜</button>
-      <button :class="{ active: tab === 'batch' }" @click="tab = 'batch'">④ 投递</button>
-    </div>
+    <!-- ── 步骤条 ── -->
+    <nav class="steps" aria-label="流水线步骤">
+      <button
+        v-for="(s, i) in steps"
+        :key="s.key"
+        class="step"
+        :class="{ active: tab === s.key, done: stepDone(s.key) }"
+        @click="tab = s.key"
+      >
+        <span class="idx">{{ stepDone(s.key) ? "✓" : i + 1 }}</span>
+        <span class="label">{{ s.label }}</span>
+        <span v-if="s.count !== undefined" class="count">{{ s.count }}</span>
+      </button>
+    </nav>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="info" class="info">{{ info }}</p>
-    <p v-if="busy" class="muted">处理中：{{ busy }}…</p>
+    <!-- ── 提示条 ── -->
+    <Transition name="fade">
+      <p v-if="error" class="banner error">{{ error }}</p>
+    </Transition>
+    <Transition name="fade">
+      <p v-if="info" class="banner info">{{ info }}</p>
+    </Transition>
+    <p v-if="busy" class="banner busy">
+      <span class="pulse" />{{ busy }}…
+    </p>
 
-    <div class="body">
-      <aside class="panel episodes">
-        <h2>分集</h2>
-        <ul>
+    <!-- ── 主体：左分集 + 右内容 ── -->
+    <div class="workspace">
+      <aside class="episode-rail">
+        <div class="rail-head">
+          <span>分集</span>
+          <Tag v-if="episodes.length" tone="neutral" size="sm">{{ episodes.length }}</Tag>
+        </div>
+        <ul class="ep-list">
           <li
             v-for="ep in episodes"
             :key="ep.id"
-            class="ep"
+            class="ep-item"
             :class="{ active: ep.id === selectedEpisodeId }"
-            @click="selectedEpisodeId = ep.id; loadEpisode()"
+            @click="selectEpisode(ep.id)"
           >
-            <span>第{{ ep.ep_no }}集</span>
-            <span class="muted">{{ ep.title }}</span>
+            <span class="ep-no">第{{ ep.ep_no }}集</span>
+            <span class="ep-title">{{ ep.title }}</span>
+            <span class="ep-flag" :data-status="ep.status">{{ ep.status === 2 ? "已确认" : "草稿" }}</span>
           </li>
         </ul>
-        <p v-if="episodes.length === 0" class="muted">先生成大纲。</p>
+        <EmptyState
+          v-if="episodes.length === 0"
+          title="还没有分集"
+          description="先在第 ① 步生成大纲，确认分集后再继续。"
+        />
       </aside>
 
-      <section class="panel content">
+      <section class="stage">
+        <!-- ① 大纲 -->
         <template v-if="tab === 'outline'">
-          <div class="actions">
-            <Button :disabled="!!busy" @click="generateOutline">生成大纲</Button>
-            <Button variant="ghost" :disabled="!!busy || episodes.length === 0" @click="saveOutline">确认大纲</Button>
+          <div class="stage-head">
+            <div>
+              <h2>分集大纲</h2>
+              <p class="hint">编辑标题与梗概（自动保存）；确认后进入角色设计。</p>
+            </div>
+            <div class="actions">
+              <Button :disabled="!!busy" @click="generateOutline">
+                {{ episodes.length ? "重新生成" : "生成大纲" }}
+              </Button>
+              <Button variant="ghost" :disabled="!!busy || episodes.length === 0" @click="saveOutline">
+                确认大纲
+              </Button>
+            </div>
           </div>
-          <div class="episode-cards">
-            <article v-for="ep in episodes" :key="ep.id" class="box">
-              <div class="row">
-                <span class="tag">第{{ ep.ep_no }}集</span>
-                <span class="badge" :data-status="ep.status">{{ ep.status === 2 ? "已确认" : "草稿" }}</span>
+          <div class="outline-grid">
+            <article v-for="ep in episodes" :key="ep.id" class="outline-card">
+              <div class="card-top">
+                <span class="ep-chip">第{{ ep.ep_no }}集</span>
+                <Tag :tone="ep.status === 2 ? 'success' : 'neutral'" size="sm">
+                  {{ ep.status === 2 ? "已确认" : "草稿" }}
+                </Tag>
               </div>
-              <input v-model="ep.title" class="input" maxlength="100" @input="saveEpisodeDebounced(ep)" />
-              <textarea v-model="ep.synopsis" class="input textarea" maxlength="1000" @input="saveEpisodeDebounced(ep)" />
+              <input v-model="ep.title" class="title-input" maxlength="100" placeholder="分集标题" @input="saveEpisodeDebounced(ep)" />
+              <textarea
+                v-model="ep.synopsis"
+                class="synopsis-input"
+                maxlength="1000"
+                placeholder="本集梗概…"
+                @input="saveEpisodeDebounced(ep)"
+              />
             </article>
           </div>
+          <EmptyState
+            v-if="episodes.length === 0"
+            icon="✎"
+            title="从大纲开始"
+            description="AI 会把小说或想法拆成 3~6 集，每集含标题与梗概，可逐条修改。"
+          >
+            <Button :disabled="!!busy" @click="generateOutline">生成大纲</Button>
+          </EmptyState>
         </template>
 
+        <!-- ② 角色 -->
         <template v-else-if="tab === 'characters'">
-          <div class="actions">
-            <Button :disabled="!!busy" @click="generateCharacters">生成角色</Button>
-            <label class="inline">
-              定妆图数量
-              <select v-model.number="portraitCount" class="input small">
-                <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
-              </select>
-            </label>
-            <span class="muted">定妆图完成后自动定稿；未定稿角色不能进入批量投递。</span>
+          <div class="stage-head">
+            <div>
+              <h2>角色与定妆</h2>
+              <p class="hint">定妆图完成后自动定稿；未定稿角色不能进入批量投递。</p>
+            </div>
+            <div class="actions">
+              <label class="inline-field">
+                定妆图
+                <select v-model.number="portraitCount" class="mini-select">
+                  <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }} 张</option>
+                </select>
+              </label>
+              <Button :disabled="!!busy" @click="generateCharacters">生成角色</Button>
+            </div>
           </div>
           <div class="character-grid">
-            <article v-for="c in characters" :key="c.id" class="box character">
+            <article v-for="c in characters" :key="c.id" class="character-card">
               <div class="portrait">
                 <img v-if="c.portrait_url" :src="c.portrait_url" :alt="c.name" />
-                <span v-else class="muted">未生成定妆图</span>
-              </div>
-              <div class="row">
-                <b>{{ c.name }}</b>
-                <span class="badge" :data-status="c.status === 2 ? 3 : 1">{{ c.status === 2 ? "已定稿" : "草稿" }}</span>
-              </div>
-              <p class="muted">{{ c.description }}</p>
-              <div class="actions">
-                <Button variant="ghost" :disabled="!!busy" @click="generatePortrait(c)">
-                  {{ c.portrait_asset_id ? "重新生成" : "生成定妆图" }}
-                </Button>
-                <Button
-                  v-if="c.portrait_asset_id && c.status !== 2"
-                  :disabled="!!busy"
-                  @click="finalizeCharacter(c)"
+                <div v-else class="placeholder">
+                  <span>未生成</span>
+                  <span class="small">定妆图</span>
+                </div>
+                <Tag
+                  class="portrait-tag"
+                  :tone="c.status === 2 ? 'success' : 'warning'"
+                  size="sm"
+                  dot
                 >
-                  定稿
-                </Button>
-                <button v-if="c.source_task_id && c.status === 2" class="mini" @click="loadCandidates(c)">候选图</button>
-                <button
-                  v-if="c.portrait_asset_id && c.status === 2"
-                  class="mini"
-                  @click="promoteCharacter(c)"
-                >
-                  转通用资产
-                </button>
-                <NuxtLink v-if="c.source_task_id" class="mini" to="/tasks">任务详情</NuxtLink>
+                  {{ c.status === 2 ? "已定稿" : "待定稿" }}
+                </Tag>
+              </div>
+              <div class="char-body">
+                <b class="char-name">{{ c.name }}</b>
+                <p class="char-desc">{{ c.description || "—" }}</p>
+                <div class="char-actions">
+                  <Button size="sm" variant="ghost" :disabled="!!busy" @click="generatePortrait(c)">
+                    {{ c.portrait_asset_id ? "重新生成" : "生成定妆图" }}
+                  </Button>
+                  <Button
+                    v-if="c.portrait_asset_id && c.status !== 2"
+                    size="sm"
+                    :disabled="!!busy"
+                    @click="finalizeCharacter(c)"
+                  >
+                    定稿
+                  </Button>
+                  <button v-if="c.source_task_id && c.status === 2" class="mini-btn" @click="loadCandidates(c)">
+                    候选图
+                  </button>
+                  <button v-if="c.portrait_asset_id && c.status === 2" class="mini-btn" @click="promoteCharacter(c)">
+                    转通用资产
+                  </button>
+                </div>
               </div>
             </article>
           </div>
+          <EmptyState
+            v-if="characters.length === 0"
+            icon="☺"
+            title="还没有角色"
+            description="从已确认的大纲自动抽取角色卡（≤10 张），再逐个生成定妆图。"
+          >
+            <Button :disabled="!!busy" @click="generateCharacters">生成角色</Button>
+          </EmptyState>
         </template>
 
+        <!-- ③ 分镜 -->
         <template v-else-if="tab === 'storyboards'">
-          <div class="actions">
-            <Button variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="generateScriptDraft">
-              生成剧本草稿
-            </Button>
-            <label class="inline">
-              镜头数
-              <select v-model.number="shotCount" class="input small">
-                <option v-for="n in [6, 10, 16, 20]" :key="n" :value="n">{{ n }}</option>
-              </select>
-            </label>
-            <Button :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">生成分镜</Button>
+          <div class="stage-head">
+            <div>
+              <h2>分镜表</h2>
+              <p class="hint">逐镜编辑画面与提示词；时长由所选模型枚举约束。</p>
+            </div>
+            <div class="actions">
+              <label class="inline-field">
+                镜头数
+                <select v-model.number="shotCount" class="mini-select">
+                  <option v-for="n in [6, 10, 16, 20]" :key="n" :value="n">{{ n }}</option>
+                </select>
+              </label>
+              <Button variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="generateScriptDraft">
+                剧本草稿
+              </Button>
+              <Button :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">生成分镜</Button>
+            </div>
           </div>
-          <div v-if="episode?.script_text" class="script">
-            <h3>剧本草稿</h3>
+
+          <details v-if="episode?.script_text" class="script-box">
+            <summary>剧本草稿（点击展开）</summary>
             <pre>{{ episode.script_text }}</pre>
-          </div>
-          <div class="shots">
-            <div class="shot head-row">
-              <span>#</span><span>画面</span><span>视频提示词</span><span>时长</span><span>角色</span><span></span>
+          </details>
+
+          <div v-if="shots.length" class="shot-table">
+            <div class="shot-row shot-head">
+              <span class="c-no">#</span>
+              <span class="c-desc">画面</span>
+              <span class="c-prompt">视频提示词</span>
+              <span class="c-dur">时长</span>
+              <span class="c-char">角色</span>
+              <span class="c-op"></span>
             </div>
-            <div v-for="shot in shots" :key="shot.id" class="shot">
-              <span>{{ shot.shot_no }}</span>
-              <textarea v-model="shot.shot_desc" class="input mini-area" />
-              <textarea v-model="shot.video_prompt" class="input mini-area" />
-              <input v-model.number="shot.duration_s" type="number" min="1" max="30" class="input tiny" />
-              <span class="muted">{{ shot.character_ids.length }} 个</span>
-              <button class="mini" @click="saveShot(shot)">保存</button>
+            <div v-for="shot in shots" :key="shot.id" class="shot-row">
+              <span class="c-no shot-no">{{ shot.shot_no }}</span>
+              <textarea v-model="shot.shot_desc" class="cell-area" rows="2" />
+              <textarea v-model="shot.video_prompt" class="cell-area" rows="2" />
+              <input v-model.number="shot.duration_s" type="number" min="1" max="30" class="cell-num" />
+              <span class="c-char muted">{{ shot.character_ids.length }} 个</span>
+              <button class="mini-btn" @click="saveShot(shot)">保存</button>
             </div>
           </div>
-          <p v-if="shots.length === 0" class="muted">选择分集后生成分镜。</p>
+          <EmptyState
+            v-else
+            icon="▤"
+            title="还没有分镜"
+            description="选择左侧分集后生成分镜表；默认 10 镜，可调 4~30。"
+          />
         </template>
 
+        <!-- ④ 投递 -->
         <template v-else>
-          <div class="actions">
-            <label class="inline">
+          <div class="stage-head">
+            <div>
+              <h2>批量出片</h2>
+              <p class="hint">预算触顶时该镜不投递（745703），余额不足整单拒绝。</p>
+            </div>
+            <div class="actions">
+              <Button :disabled="!!busy || shots.length === 0" @click="submitBatch">
+                批量投递 {{ shots.length }} 镜
+              </Button>
+            </div>
+          </div>
+
+          <div class="dispatch-bar">
+            <label class="inline-field">
               模型
-              <select v-model="modelName" class="input">
+              <select v-model="modelName" class="mini-select wide">
                 <option v-for="m in models" :key="m.name" :value="m.name">{{ m.display_name }}</option>
               </select>
             </label>
-            <label class="inline">
+            <label class="inline-field">
               预算上限
-              <input v-model.number="budget" type="number" min="1" class="input small" @input="budgetTouched = true" />
+              <input v-model.number="budget" type="number" min="1" class="cell-num" @input="budgetTouched = true" />
             </label>
-            <Button variant="ghost" :disabled="!!busy || shots.length === 0" @click="prefillBudget">按报价预填</Button>
-            <Button :disabled="!!busy || shots.length === 0 || !allShotsSelected" @click="submitBatch">
-              批量投递（{{ shots.length }} 镜）
+            <Button size="sm" variant="ghost" :disabled="!!busy || shots.length === 0" @click="prefillBudget">
+              按报价预填
             </Button>
-            <Button variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
+            <span class="divider" />
+            <Button size="sm" variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
               {{ exporting ? "提交中…" : "导出本集 zip" }}
             </Button>
-            <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="download" target="_blank" rel="noreferrer">
+            <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="link" target="_blank" rel="noreferrer">
               下载 zip
             </a>
-            <span v-else-if="exportJob" class="muted">
-              导出：{{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : exportJob.status === 4 ? "失败" : "" }}
-            </span>
-            <Button v-if="exportJob?.status === 4" variant="ghost" @click="retryExportJob">重试导出</Button>
+            <Tag v-else-if="exportJob" :tone="exportJob.status === 4 ? 'danger' : 'info'" size="sm">
+              {{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : "失败" }}
+            </Tag>
+            <Button v-if="exportJob?.status === 4" size="sm" variant="text" @click="retryExportJob">重试</Button>
           </div>
-          <p v-if="budgetExceeded" class="error">预算不足，部分镜头未投递（745703）。</p>
-          <div v-if="materials.length > 0" class="materials">
-            <span class="muted">分镜素材</span>
+
+          <p v-if="budgetExceeded" class="banner warning">部分镜头因预算触顶未投递（745703）。提高预算后可继续投递。</p>
+
+          <div v-if="materials.length" class="materials">
+            <p class="block-label">分镜素材</p>
             <div class="material-grid">
-              <div v-for="material in materials" :key="material.id" class="material">
+              <figure v-for="material in materials" :key="material.id" class="material">
                 <img v-if="material.portrait_url" :src="material.portrait_url" :alt="material.name" />
-                <span>{{ material.name }}</span>
-              </div>
+                <figcaption>{{ material.name }}</figcaption>
+              </figure>
             </div>
           </div>
+
           <div v-if="matrix" class="matrix">
+            <div class="matrix-head">
+              <p class="block-label">分镜矩阵</p>
+              <div class="legend">
+                <span><i class="dot success" />成功</span>
+                <span><i class="dot running" />在途</span>
+                <span><i class="dot failed" />失败</span>
+                <span><i class="dot idle" />未投递</span>
+              </div>
+            </div>
             <div v-for="ep in matrix.episodes" :key="ep.id" class="matrix-row">
               <span class="matrix-label">第{{ ep.ep_no }}集</span>
               <button
@@ -629,26 +781,32 @@ onUnmounted(() => {
               </button>
               <span v-if="ep.shots.length === 0" class="muted">无分镜</span>
             </div>
-            <div class="legend muted">
-              <span><i class="dot success" />成功</span><span><i class="dot running" />在途</span><span><i class="dot failed" />失败</span><span><i class="dot idle" />未投递</span>
-            </div>
           </div>
-          <div class="batch-list">
-            <div v-for="item in batchItems" :key="item.shot_id" class="batch-item">
-              <span class="muted">镜头 {{ shots.find((s) => s.id === item.shot_id)?.shot_no ?? "-" }}</span>
-              <span v-if="item.submitted" class="ok">已提交</span>
-              <span v-else class="error">{{ item.code === 400105 ? "资产未定稿" : item.code === 745703 ? "超预算" : "未提交" }}</span>
-              <span v-if="item.task_id" class="muted">{{ item.task_id }}</span>
-              <span v-if="item.task_id && taskMap[item.task_id]" class="badge" :data-status="taskMap[item.task_id].status">
+
+          <div v-if="batchItems.length" class="batch-list">
+            <div v-for="item in batchItems" :key="item.shot_id" class="batch-row">
+              <span class="b-no">镜 {{ shots.find((s) => s.id === item.shot_id)?.shot_no ?? "-" }}</span>
+              <Tag v-if="item.submitted" tone="success" size="sm" dot>已提交</Tag>
+              <Tag v-else tone="danger" size="sm" dot>
+                {{ item.code === 400105 ? "资产未定稿" : item.code === 745703 ? "超预算" : "未提交" }}
+              </Tag>
+              <span v-if="item.task_id" class="mono">{{ item.task_id.slice(-8) }}</span>
+              <Tag v-if="item.task_id && taskMap[item.task_id]" tone="info" size="sm">
                 {{ statusLabel(taskMap[item.task_id].status) }}
-              </span>
+              </Tag>
             </div>
           </div>
-          <p v-if="batchItems.length === 0" class="muted">确认角色定稿、生成分镜后，在此选择模型与预算批量出片。</p>
+          <EmptyState
+            v-else
+            icon="▶"
+            title="准备批量出片"
+            description="确认角色定稿并生成分镜后，选择模型与预算，一键投递全部镜头。"
+          />
         </template>
       </section>
     </div>
-    <Modal :open="!!candidates" title="选择定妆图" @close="candidates = null">
+
+    <Modal :open="!!candidates" title="选择定妆图" width="720px" @close="candidates = null">
       <div class="candidate-grid">
         <button
           v-for="item in candidates?.list ?? []"
@@ -662,384 +820,768 @@ onUnmounted(() => {
       </div>
       <p v-if="!candidates?.list.length" class="muted">没有可用候选图。</p>
     </Modal>
-  </main>
+  </div>
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  max-width: 1180px;
-  width: 100%;
+.pipeline {
+  max-width: 1360px;
   margin: 0 auto;
-  padding: 24px 32px;
 }
-.head {
+
+/* ── 页头 ── */
+.page-head {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.head-left {
+  min-width: 0;
 }
 .back {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
-.title {
+.back:hover {
+  color: var(--brand-600);
+}
+.titles h1 {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+}
+.meta {
+  margin: var(--space-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  gap: 6px;
+  align-items: center;
 }
-h1 {
-  margin: 0;
-  font-size: 20px;
+.sep {
+  color: var(--border-3);
 }
-.tabs {
+.head-right {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--space-2);
+  padding-top: var(--space-6);
 }
-.tabs button {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-1);
-  color: var(--text-2);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.tabs button.active {
-  border-color: var(--brand-500);
-  color: var(--text-1);
-}
-.body {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-.panel {
-  background: var(--bg-raised);
+
+/* ── 步骤条 ── */
+.steps {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-surface);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-xl);
-  padding: 16px;
+  margin-bottom: var(--space-4);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-h2 {
-  margin: 0 0 10px;
-  font-size: 14px;
+.steps::-webkit-scrollbar {
+  display: none;
 }
-.episodes ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.ep {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 13px;
-}
-.ep:hover,
-.ep.active {
-  background: var(--bg-surface);
-}
-.content {
-  min-height: 420px;
-}
-.actions {
+.step {
+  flex: 1;
+  min-width: 140px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-lg);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast);
 }
-.episode-cards,
-.character-grid {
+.step:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.step.active {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-weight: 600;
+}
+.step.done .idx {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+.idx {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-2);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  place-items: center;
+  font-size: 11px;
+  flex-shrink: 0;
 }
-.box {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  padding: 12px;
+.step.active .idx {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: #fff;
+}
+.count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 提示条 ── */
+.banner {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
 }
-.row {
+.banner.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #6b2626;
+}
+.banner.info {
+  background: var(--info-bg);
+  color: var(--info);
+  border: 1px solid #1d4a76;
+}
+.banner.warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #6b4d12;
+}
+.banner.busy {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border: 1px solid var(--brand-200);
+}
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-500);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--duration-base);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ── 工作区 ── */
+.workspace {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.episode-rail {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  position: sticky;
+  top: calc(var(--header-h) + var(--space-4));
+}
+.rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-}
-.tag {
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-2);
 }
-.badge {
-  font-size: 11px;
-  color: var(--text-2);
-  border: 1px solid var(--border-1);
-  border-radius: 999px;
-  padding: 1px 8px;
+.ep-list {
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
 }
-.badge[data-status="2"],
-.badge[data-status="3"] {
-  color: #4ade80;
-  border-color: #4ade80;
-}
-.input {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-1);
+.ep-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.ep-item:hover {
+  background: var(--bg-hover);
+}
+.ep-item.active {
+  background: var(--brand-50);
+}
+.ep-no {
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-1);
-  padding: 6px 8px;
-  font-size: 12px;
-  outline: none;
-  width: 100%;
 }
-.textarea {
-  min-height: 70px;
-  resize: vertical;
+.ep-item.active .ep-no {
+  color: var(--brand-700);
 }
-.character .portrait {
-  height: 160px;
-  border-radius: var(--radius-md);
+.ep-title {
+  grid-column: 2;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-flag {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-4);
+}
+.ep-flag[data-status="2"] {
+  color: var(--success);
+}
+
+.stage {
   background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  min-height: 420px;
+}
+.stage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.stage-head h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.hint {
+  margin: var(--space-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ── 大纲 ── */
+.outline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+.outline-card {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: var(--bg-surface);
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+.outline-card:focus-within {
+  border-color: var(--brand-300);
+  box-shadow: 0 0 0 3px var(--brand-50);
+}
+.card-top {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.ep-chip {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--brand-700);
+  background: var(--brand-50);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.title-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-1);
+  padding: var(--space-1) 0;
+  outline: none;
+}
+.title-input:focus {
+  border-bottom-color: var(--brand-400);
+}
+.synopsis-input {
+  width: 100%;
+  min-height: 88px;
+  border: 0;
+  background: transparent;
+  resize: vertical;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+/* ── 角色 ── */
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-4);
+}
+.character-card {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+.character-card:hover {
+  border-color: var(--border-3);
+  box-shadow: var(--shadow-md);
+}
+.portrait {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--bg-sunken);
+  display: grid;
+  place-items: center;
   overflow: hidden;
 }
-.character .portrait img {
+.portrait img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.inline {
+.placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-2);
+  gap: 2px;
+  color: var(--text-4);
+  font-size: var(--text-sm);
 }
-.inline .input {
-  width: auto;
+.placeholder .small {
+  font-size: 11px;
 }
-.small {
-  width: 90px !important;
+.portrait-tag {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
 }
-.script {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  padding: 10px;
-  margin-bottom: 12px;
+.char-body {
+  padding: var(--space-3);
 }
-.script h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
+.char-name {
+  font-size: var(--text-base);
 }
-.script pre {
-  margin: 0;
-  white-space: pre-wrap;
-  font-size: 12px;
-  color: var(--text-2);
-  max-height: 180px;
-  overflow: auto;
-}
-.shots {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
+.char-desc {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.shot {
-  display: grid;
-  grid-template-columns: 28px 1.4fr 1.4fr 60px 60px 60px;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--border-1);
-  align-items: center;
-  font-size: 12px;
+.char-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
-.shot:last-child {
+
+/* ── 分镜表 ── */
+.script-box {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+}
+.script-box summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.script-box pre {
+  margin: var(--space-3) 0 0;
+  white-space: pre-wrap;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  font-family: var(--font-sans);
+}
+.shot-table {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.shot-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1.1fr) minmax(0, 1.3fr) 72px 60px 52px;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-1);
+}
+.shot-row:last-child {
   border-bottom: 0;
 }
-.head-row {
-  background: var(--bg-surface);
+.shot-row:hover:not(.shot-head) {
+  background: var(--bg-hover);
+}
+.shot-head {
+  background: var(--bg-sunken);
   color: var(--text-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
 }
-.mini-area {
-  min-height: 44px;
+.shot-no {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  padding-top: 6px;
+}
+.cell-area {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  padding: 4px 6px;
   resize: vertical;
+  outline: none;
 }
-.tiny {
-  width: 56px !important;
+.cell-area:hover {
+  border-color: var(--border-2);
 }
-.download {
-  color: var(--brand-500);
-  font-size: 12px;
+.cell-area:focus {
+  border-color: var(--brand-400);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--brand-50);
+}
+.cell-num {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  padding: 0 6px;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.cell-num:focus {
+  border-color: var(--brand-500);
+  box-shadow: 0 0 0 2px var(--brand-100);
+}
+.c-char {
+  font-size: var(--text-xs);
+  padding-top: 6px;
+}
+
+/* ── 投递 ── */
+.dispatch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+}
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.mini-select {
+  height: 28px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  padding: 0 var(--space-2);
+  outline: none;
+}
+.mini-select.wide {
+  min-width: 180px;
+}
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-2);
+}
+.link {
+  color: var(--brand-600);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+}
+.block-label {
+  margin: 0 0 var(--space-2);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 .materials {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-4);
 }
 .material-grid {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .material {
-  width: 100px;
+  margin: 0;
+  width: 104px;
+}
+.material img {
+  width: 104px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-1);
+}
+.material figcaption {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 矩阵 */
+.matrix {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.matrix-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.legend {
+  display: flex;
+  gap: var(--space-3);
   font-size: 11px;
   color: var(--text-3);
 }
-.material img {
-  width: 100px;
-  height: 70px;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-1);
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
-.matrix {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  padding: 10px;
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+.dot.success {
+  background: var(--success);
+}
+.dot.running {
+  background: var(--warning);
+}
+.dot.failed {
+  background: var(--danger);
+}
+.dot.idle {
+  background: var(--border-3);
 }
 .matrix-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-wrap: wrap;
+  margin-bottom: var(--space-2);
 }
 .matrix-label {
-  width: 60px;
-  font-size: 12px;
+  width: 56px;
   color: var(--text-3);
+  font-size: var(--text-xs);
 }
 .cell {
   width: 26px;
   height: 26px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-1);
   background: var(--bg-surface);
-  color: var(--text-2);
+  color: var(--text-3);
   font-size: 11px;
   cursor: pointer;
+  transition: transform var(--duration-fast);
+}
+.cell:hover {
+  transform: scale(1.12);
 }
 .cell.success {
-  background: #14532d;
-  border-color: #4ade80;
-  color: #bbf7d0;
+  background: var(--success-bg);
+  border-color: #1d5c3c;
+  color: var(--success);
 }
 .cell.running {
-  background: #713f12;
-  border-color: #fbbf24;
-  color: #fde68a;
+  background: var(--warning-bg);
+  border-color: #6b4d12;
+  color: var(--warning);
 }
 .cell.failed {
-  background: #7f1d1d;
-  border-color: #ef4444;
-  color: #fecaca;
+  background: var(--danger-bg);
+  border-color: #6b2626;
+  color: var(--danger);
 }
 .cell.idle {
-  background: #1f2937;
-  color: #9ca3af;
+  background: var(--bg-sunken);
+  color: var(--text-4);
 }
-.legend {
-  display: flex;
-  gap: 12px;
-  font-size: 11px;
-}
-.dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  margin-right: 4px;
-}
-.dot.success { background: #4ade80; }
-.dot.running { background: #fbbf24; }
-.dot.failed { background: #ef4444; }
-.dot.idle { background: #4b5563; }
-.candidate-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-.candidate {
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  background: none;
-  padding: 6px;
-  cursor: pointer;
+
+/* 批次结果 */
+.batch-list {
+  border-top: 1px solid var(--border-1);
+  padding-top: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
+}
+.batch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+}
+.b-no {
+  width: 60px;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-4);
+}
+
+/* 通用小件 */
+.mini-btn {
+  background: none;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.mini-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--border-3);
+}
+.muted {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+/* 候选图 */
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+.candidate {
+  padding: 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+.candidate:hover {
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 3px var(--brand-50);
 }
 .candidate img {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: var(--radius-sm);
+  display: block;
 }
-.candidate:hover {
-  border-color: var(--brand-500);
-}
-.mini {
-  background: none;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.batch-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.batch-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  font-size: 12px;
-}
-.ok {
-  color: #4ade80;
-}
-.muted {
+.candidate span {
+  display: block;
+  padding: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--text-3);
-  font-size: 12px;
 }
-.error {
-  color: #ff6b6b;
-  font-size: 12px;
-}
-.info {
-  color: var(--text-2);
-  font-size: 12px;
-}
-@media (max-width: 900px) {
-  .body {
+
+@media (max-width: 1100px) {
+  .workspace {
     grid-template-columns: 1fr;
   }
-  .episode-cards,
-  .character-grid {
-    grid-template-columns: 1fr;
+  .episode-rail {
+    position: static;
+  }
+  .ep-list {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    max-height: none;
+  }
+  .ep-item {
+    min-width: 150px;
+  }
+}
+@media (max-width: 760px) {
+  .stage {
+    padding: var(--space-4);
+  }
+  .stage-head {
+    flex-direction: column;
+  }
+  .shot-row {
+    grid-template-columns: 32px minmax(0, 1fr) 60px;
+  }
+  .c-prompt,
+  .c-char {
+    display: none;
   }
 }
 </style>

@@ -27,7 +27,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: "zh-CN" },
-      title: "AI 漫剧工作台 — 30 分钟产出一集短剧",
+      title: "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
       meta: [
         { name: "viewport", content: "width=device-width, initial-scale=1" },
         {
