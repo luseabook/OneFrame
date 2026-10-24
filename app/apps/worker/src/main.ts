@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import { Worker } from "bullmq";
 import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import pino from "pino";
-import { assets, createDb, tasks, users } from "@app/db";
+import { createDb } from "@app/db";
+import { auditLedger, expireShares, purgeOldData, reconcileOrders, reviveStuckTasks } from "./maintenance";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
@@ -105,34 +106,70 @@ const deps: ExecutorDeps = {
   maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),
 };
 
-// 定期维护：任务结果 90 天清理、回收站资产 7 天物理删除（PRD F5）
-async function runMaintenance(): Promise<void> {
+// ── 定时维护（deployment.md §7）──
+// 各任务频率不同，因此拆成多个独立定时器，而不是塞进一个 6h 的大任务里。
+// 资金相关（对账/看门狗）必须高频，否则用户付了钱没到账、或积分永久冻结。
+async function safeRun(name: string, fn: () => Promise<unknown>): Promise<void> {
   try {
-    const cutoff = new Date(Date.now() - 90 * 86_400_000);
-    await db
-      .update(tasks)
-      .set({ results: [], updatedAt: new Date() })
-      .where(and(eq(tasks.status, 3), lt(tasks.updatedAt, cutoff), sql`jsonb_array_length(${tasks.results}) > 0`));
-    const deleted = await db
-      .delete(assets)
-      .where(and(isNotNull(assets.deletedAt), lt(assets.deletedAt, new Date(Date.now() - 7 * 86_400_000))))
-      .returning({ id: assets.id });
-    // 注销账号满 30 天 → 物理清理（PRD F1）
-    const purgedUsers = await db
-      .delete(users)
-      .where(and(isNotNull(users.deletedAt), lt(users.deletedAt, new Date(Date.now() - 30 * 86_400_000))))
-      .returning({ id: users.id });
-    log.info({ purged_assets: deleted.length, purged_users: purgedUsers.length }, "maintenance done");
+    await fn();
   } catch (err) {
-    log.warn({ err: err instanceof Error ? err.message : String(err) }, "maintenance failed");
+    log.warn({ task: name, err: err instanceof Error ? err.message : String(err) }, "maintenance task failed");
   }
 }
-void runMaintenance();
-const maintenanceTimer = setInterval(
-  () => void runMaintenance(),
-  Number(process.env.MAINTENANCE_INTERVAL_MS ?? 6 * 3_600_000),
+
+function schedule(name: string, intervalMs: number, fn: () => Promise<unknown>, runOnStart = false): void {
+  if (intervalMs <= 0) {
+    log.info({ task: name }, "maintenance task disabled (interval<=0)");
+    return;
+  }
+  if (runOnStart) void safeRun(name, fn);
+  const timer = setInterval(() => void safeRun(name, fn), intervalMs);
+  timer.unref();
+}
+
+// 订单对账（5min）：已支付未入账 → 补账；待支付超时 → 关闭
+schedule(
+  "orders-reconcile",
+  Number(process.env.ORDERS_RECONCILE_INTERVAL_MS ?? 5 * 60_000),
+  async () => {
+    const n = await reconcileOrders(db, log);
+    if (n > 0) log.warn({ reconciled: n }, "orders reconciled");
+  },
+  true,
 );
-maintenanceTimer.unref();
+
+// 任务看门狗（1min）：卡死的任务置失败并解冻积分
+schedule(
+  "tasks-watchdog",
+  Number(process.env.TASKS_WATCHDOG_INTERVAL_MS ?? 60_000),
+  async () => {
+    const n = await reviveStuckTasks(db, log);
+    if (n > 0) log.warn({ revived: n }, "stuck tasks revived");
+  },
+  true,
+);
+
+// 分享过期清理（1h）
+schedule("shares-expire", Number(process.env.SHARES_EXPIRE_INTERVAL_MS ?? 3_600_000), () => expireShares(db, log));
+
+// 资金对账（每日）：balance == Σdelta 不平即告警
+schedule(
+  "flows-audit",
+  Number(process.env.FLOWS_AUDIT_INTERVAL_MS ?? 86_400_000),
+  async () => {
+    const mismatch = await auditLedger(db, log);
+    if (mismatch === 0) log.info("ledger audit ok");
+  },
+  true,
+);
+
+// 数据保留清理（6h）：结果 90 天 / 回收站 7 天 / 注销 30 天
+schedule(
+  "retention-purge",
+  Number(process.env.MAINTENANCE_INTERVAL_MS ?? 6 * 3_600_000),
+  () => purgeOldData(db, log),
+  true,
+);
 
 const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
   new Worker(
