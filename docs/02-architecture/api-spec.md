@@ -264,6 +264,41 @@ GET  /exports/{id}                                      // 状态查询；轮询
                                                         // SUCCEEDED 时 download_url 预签名(7 天有效)
 ```
 
+## 8.1 works（作品库与二次创作，PRD F9）
+
+> 作品 = 项目（1:1，不新增表）。作品库是「以剧为单位」的成果聚合视图，与任务中心（以次为单位的执行视图）互补。
+
+```
+GET /works?status=archived&page=1&page_size=24
+  ← {list:[{
+       id,title,ratio,source_type,archived_at,is_sample,created_at,
+       episode_count,            // 集数
+       shot_count,               // 分镜总数
+       done_count,               // 已成功出片镜头数
+       cover_uri,                // 已签名的封面 URL（优先已转存图片资产，退化角色定妆图）
+       work_state                // draft | producing | ready | archived
+     }], total, page, page_size}
+```
+
+**work_state 判定**：`archived_at != null → archived`；`shot_count === 0 → draft`；`done_count >= shot_count → ready`；否则 `producing`。
+
+```
+POST /projects/{id}/archive {archived:true|false}       // 归档/恢复（软标记 archived_at）
+  ← {id, archived}
+
+POST /projects/{id}/episodes {count:1..10}              // 二次创作：新增空集（复用已定稿角色，不复制分镜）
+  ← {created:[{id, ep_no}]}
+
+POST /projects/{id}/duplicate                           // 复制为我的项目（示例模板体验）
+  ← {id, episodes, characters}                          // 深拷贝骨架+角色（含定妆图绑定），不复制分镜与任务
+```
+
+```
+POST /me/onboarded                                      // 标记新手引导已读（幂等，PRD F10）
+  ← {onboarded:true}
+GET  /me                                                // 新增 onboarded 字段（false 时工作台展示引导条）
+```
+
 ## 9. assets
 
 ```
