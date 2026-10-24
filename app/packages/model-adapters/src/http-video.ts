@@ -112,9 +112,11 @@ export class HttpVideoAdapter implements ModelAdapter {
     return {
       status,
       ...(results.length > 0 ? { results } : {}),
-      ...(status === "failed" || status === "review_rejected"
-        ? { error: { code: "vendor_error", message: errorMessage ?? "vendor task failed" } }
-        : {}),
+      ...(status === "review_rejected"
+        ? { error: { code: "output_rejected", message: errorMessage ?? "content review rejected" } }
+        : status === "failed"
+          ? { error: { code: "vendor_error", message: errorMessage ?? "vendor task failed" } }
+          : {}),
       raw: data,
     };
   }

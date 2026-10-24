@@ -68,7 +68,15 @@ export class ArkVideoAdapter implements ModelAdapter {
 
     if (status === "failed") {
       const error = data.error as { message?: string } | undefined;
-      return { status, error: { code: "ark_failed", message: error?.message ?? "ark task failed" }, raw: data };
+      const rejected = rawStatus === "rejected" || rawStatus === "review_rejected";
+      return {
+        status: rejected ? "review_rejected" : "failed",
+        error: {
+          code: rejected ? "output_rejected" : "ark_failed",
+          message: error?.message ?? (rejected ? "content review rejected" : "ark task failed"),
+        },
+        raw: data,
+      };
     }
     if (status !== "succeeded") return { status, raw: data };
 

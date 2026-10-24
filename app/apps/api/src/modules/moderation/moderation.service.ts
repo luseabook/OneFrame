@@ -15,16 +15,24 @@ const BUILTIN_WORDS = [
   "爆炸物",
 ];
 
+/** 内置敏感词（输入审核与 LLM 输出审核共用） */
+export const BUILTIN_MODERATION_WORDS = BUILTIN_WORDS;
+
+/** 解析生效词表：内置词 + MODERATION_WORDS 扩展 */
+export function resolveModerationWords(): string[] {
+  const extra = (env.MODERATION_WORDS ?? "")
+    .split(",")
+    .map((word) => word.trim())
+    .filter(Boolean);
+  return [...BUILTIN_WORDS, ...extra];
+}
+
 @Injectable()
 export class ModerationService {
   private readonly words: string[];
 
   constructor() {
-    const extra = (env.MODERATION_WORDS ?? "")
-      .split(",")
-      .map((word) => word.trim())
-      .filter(Boolean);
-    this.words = [...BUILTIN_WORDS, ...extra];
+    this.words = resolveModerationWords();
   }
 
   assertText(text: string | null | undefined, field: string): void {

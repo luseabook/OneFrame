@@ -188,9 +188,14 @@ async function fail(
         memo: "task failed refund",
       });
     }
+    // PRD F7：审核拒绝 → 输出审核错误码 745802；其余失败 → 供应商错误
+    const errorCode =
+      status === TaskStatus.REVIEW_REJECTED || error.kind === "output_rejected"
+        ? 745802
+        : 745901;
     await tx
       .update(tasks)
-      .set({ status, error, finishedAt: new Date(), updatedAt: new Date() })
+      .set({ status, error: { ...error, code: errorCode }, finishedAt: new Date(), updatedAt: new Date() })
       .where(eq(tasks.id, task.id));
     // 视频失败/审核拒绝：分镜退回“确认”，允许重新投递
     await tx

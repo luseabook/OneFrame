@@ -172,6 +172,15 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(res.data.budget_exceeded).toBe(false);
   });
 
+  it("rejects a project whose source text hits the sensitive word filter", async () => {
+    const res = await inject("POST", "/projects", {
+      title: "违规项目",
+      source_type: 1,
+      source_text: "第一章：教人赌博的教程内容。",
+    });
+    expect(res.code).toBe(745801);
+  });
+
   it("promotes a finalized portrait to a general asset with a #role tag", async () => {
     const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
     const me = await inject("GET", "/me");

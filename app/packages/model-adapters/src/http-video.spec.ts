@@ -28,7 +28,7 @@ describe("HttpVideoAdapter", () => {
   let polls = 0;
   let lastAuth = "";
   let lastBody: Record<string, unknown> = {};
-  let mode: "success" | "fail" = "success";
+  let mode: "success" | "fail" | "review" = "success";
 
   beforeAll(async () => {
     server = createServer((req, res) => {
@@ -54,7 +54,9 @@ describe("HttpVideoAdapter", () => {
             JSON.stringify(
               mode === "success"
                 ? { status: "succeeded", results: [{ url: `${baseUrl}/media.mp4`, duration: 5 }] }
-                : { status: "failed", message: "vendor exploded" },
+                : mode === "review"
+                  ? { status: "review_rejected", message: "content violates policy" }
+                  : { status: "failed", message: "vendor exploded" },
             ),
           );
           return;
@@ -103,5 +105,16 @@ describe("HttpVideoAdapter", () => {
     const state = await adapter.poll("vendor-task-1");
     expect(state.status).toBe("failed");
     expect(state.error?.message).toContain("vendor exploded");
+  });
+
+  it("maps vendor review rejection to output_rejected", async () => {
+    polls = 0;
+    mode = "review";
+    const adapter = new HttpVideoAdapter({ baseUrl });
+    await adapter.submit(request);
+    await adapter.poll("vendor-task-1");
+    const state = await adapter.poll("vendor-task-1");
+    expect(state.status).toBe("review_rejected");
+    expect(state.error?.code).toBe("output_rejected");
   });
 });

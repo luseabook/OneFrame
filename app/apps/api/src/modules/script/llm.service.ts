@@ -14,8 +14,9 @@ import {
 } from "@app/shared";
 import { DeepSeekChatAdapter } from "@app/model-adapters";
 import { env } from "../../config/env";
+import { resolveModerationWords } from "../moderation/moderation.service";
 
-// LLM 步骤：mock 确定性输出（本地/CI），real 走 DeepSeek（JSON 强约束 + Zod 校验）
+// LLM 步骤：mock 确定性输出（本地/CI），real 走 DeepSeek（JSON 强约束 + Zod 校验 + 输出审核）
 @Injectable()
 export class LlmService {
   private readonly deepseek =
@@ -138,6 +139,21 @@ export class LlmService {
         issues: result.error.issues.slice(0, 3),
       });
     }
+    // PRD F7：LLM 输出同样过审（大纲/剧本/分镜提示词），未过返回 745802 且不落半写状态
+    this.assertOutput(result.data);
     return result.data;
+  }
+
+  // 输出审核：命中敏感词 → 745802（环节由调用方定位）
+  private assertOutput(value: unknown): void {
+    if (!env.MODERATION_ENABLED) return;
+    const words = resolveModerationWords();
+    const text = JSON.stringify(value ?? "").toLowerCase();
+    const hit = words.find((word) => text.includes(word.toLowerCase()));
+    if (hit) {
+      throw new AppError(ErrorCode.OUTPUT_REJECTED, "生成内容未通过审核，请改写后重试", {
+        keyword: hit,
+      });
+    }
   }
 }
