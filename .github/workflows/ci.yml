@@ -51,6 +51,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      # seed 通过 @app/db 导入 schema，需先构建共享包（CI 为干净检出，无 dist）
+      - run: pnpm --filter @app/shared build
+      - run: pnpm --filter @app/db build
       - run: pnpm --filter @app/api db:migrate
       - run: pnpm --filter @app/api db:seed
       - run: pnpm lint

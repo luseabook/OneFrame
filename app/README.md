@@ -23,6 +23,8 @@ packages/
 pnpm install
 docker compose -f docker-compose.dev.yml up -d   # PG/Redis/MinIO
 cp .env.example apps/api/.env                    # 本地默认值即可跑
+pnpm --filter @app/shared build && pnpm --filter @app/db build
+pnpm --filter @app/api db:migrate && pnpm --filter @app/api db:seed
 pnpm dev                                         # api:3000 · web:3001 · worker
 ```
 
