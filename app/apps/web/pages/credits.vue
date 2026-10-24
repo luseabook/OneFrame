@@ -4,19 +4,23 @@ import type { Credits, FlowDto } from "~/types/api";
 definePageMeta({ ssr: false, requiresAuth: true });
 
 const api = useApi();
-const auth = useAuth();
 const flows = ref<FlowDto[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = 30;
 const error = ref("");
+// 余额在客户端挂载后读取：首屏 SSR 无登录态，直接读 auth.state 会与 hydrate 结果不一致
+const balance = ref<number | null>(null);
+const frozen = ref<number | null>(null);
 
 async function load(): Promise<void> {
   try {
     const data = await api.get<{ list: FlowDto[]; total: number }>(`/credits/flows?page=${page.value}&page_size=${pageSize}`);
     flows.value = data.list;
     total.value = data.total;
-    await auth.me();
+    const me = await api.get<{ credits: { balance: number; frozen: number } }>("/me");
+    balance.value = me.credits.balance;
+    frozen.value = me.credits.frozen;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "加载失败";
   }
@@ -33,8 +37,8 @@ onMounted(load);
     <div class="head">
       <h1>积分</h1>
       <div class="balance">
-        <span>可用 <b>{{ auth.state.value.credits?.balance ?? "-" }}</b></span>
-        <span>冻结 <b>{{ auth.state.value.credits?.frozen ?? "-" }}</b></span>
+        <span>可用 <b>{{ balance ?? "-" }}</b></span>
+        <span>冻结 <b>{{ frozen ?? "-" }}</b></span>
       </div>
     </div>
 

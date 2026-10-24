@@ -15,6 +15,9 @@ export const useAuth = () => {
     spaceId: null,
     credits: null,
   }));
+  // 认证状态是否已确定：SSR 与客户端首次渲染时均为 false，
+  // 用于避免登录态分支在 hydrate 前后渲染不一致（hydration mismatch）
+  const ready = useState<boolean>("auth-ready", () => false);
   const config = useRuntimeConfig();
   const base = (config.public.apiBase as string) || "";
 
@@ -59,6 +62,7 @@ export const useAuth = () => {
       credits: null,
     };
     await me();
+    ready.value = true;
   }
 
   async function refresh(): Promise<boolean> {
@@ -93,13 +97,22 @@ export const useAuth = () => {
       if (state.value.accessToken) await call("/auth/logout", { method: "POST" });
     } finally {
       state.value = { accessToken: "", user: null, spaceId: null, credits: null };
+      ready.value = true;
     }
   }
 
   async function bootstrap(): Promise<void> {
-    if (state.value.accessToken) return;
-    await refresh();
+    try {
+      if (state.value.accessToken) {
+        await me();
+        return;
+      }
+      await refresh();
+    } finally {
+      // 认证状态已确定（无论成功与否）：供 UI 决定是否渲染登录态分支
+      ready.value = true;
+    }
   }
 
-  return { state, login, refresh, me, logout, bootstrap };
+  return { state, ready, login, refresh, me, logout, bootstrap };
 };

@@ -7,6 +7,9 @@ x-app-env: &app-env
   JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-me}
   ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+  # 本地 compose 为 HTTP 部署，Cookie 不能带 Secure（否则浏览器不保存 → 刷新掉登录）。
+  # 生产 HTTPS 部署请设为 true（.env.production.example 已注明）。
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
   STORAGE_DRIVER: s3
   STORAGE_S3_BUCKET: ${S3_BUCKET:-app-results}
   STORAGE_S3_REGION: ${S3_REGION:-us-east-1}

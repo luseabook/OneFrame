@@ -86,7 +86,8 @@ export class AuthController {
   private setRefreshCookie(res: FastifyReply, token: string): void {
     res.setCookie("refresh_token", token, {
       httpOnly: true,
-      secure: env.NODE_ENV === "production",
+      // 默认：production 走 Secure；可由 COOKIE_SECURE 显式覆盖（本地 HTTP 部署需为 false）
+      secure: env.COOKIE_SECURE ?? env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/v1/auth",
       maxAge: env.REFRESH_TTL_S,

@@ -1,5 +1,19 @@
 <script setup lang="ts">
-const auth = useAuth();
+// 定价页需登录：未登录时导航不暴露该入口，Alpha 期额度来自邀请码
+definePageMeta({ ssr: false, requiresAuth: true });
+
+const api = useApi();
+
+// 余额在客户端挂载后读取：首屏 SSR 无登录态，直接渲染会与客户端 hydrate 结果不一致
+const balance = ref<number | null>(null);
+onMounted(async () => {
+  try {
+    const me = await api.get<{ credits: { balance: number } }>("/me");
+    balance.value = me.credits.balance;
+  } catch {
+    balance.value = null;
+  }
+});
 
 const skus = [
   { price: 50, credits: 500 },
@@ -15,7 +29,7 @@ const skus = [
       <h1>价格透明，按量计费</h1>
       <p class="sub">10 积分 = 1 元；文生视频 5s/720p 低至 8 积分（0.8 元）。Alpha 期注册赠送 80 积分。</p>
       <p class="sub">
-        当前余额：<b>{{ auth.state.value.credits?.balance ?? "登录后可见" }}</b>
+        当前余额：<b>{{ balance ?? "-" }}</b>
       </p>
     </section>
 

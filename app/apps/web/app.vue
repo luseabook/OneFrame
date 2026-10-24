@@ -10,6 +10,7 @@ onMounted(async () => {
 const balance = computed(() => auth.state.value.credits?.balance ?? 0);
 const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
 const user = computed(() => auth.state.value.user);
+const authReady = computed(() => auth.ready.value);
 const isWorkspace = computed(() => route.path.startsWith("/create") || route.path.startsWith("/tasks"));
 
 async function logout(): Promise<void> {
@@ -23,7 +24,11 @@ async function logout(): Promise<void> {
     <header class="header">
       <NuxtLink to="/" class="logo">AI 漫剧工作台</NuxtLink>
       <nav class="nav">
-        <template v-if="user">
+        <!--
+          认证状态确定前（SSR 与客户端首次渲染一致）不渲染登录态分支，
+          避免 hydrate 前后结构不同导致 hydration mismatch。
+        -->
+        <template v-if="authReady && user">
           <NuxtLink to="/projects" class="nav-link">项目</NuxtLink>
           <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">文生视频</NuxtLink>
           <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
@@ -31,16 +36,14 @@ async function logout(): Promise<void> {
           <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
           <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
           <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
+          <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
+          <span class="nickname">{{ user.nickname }}</span>
+          <NuxtLink to="/settings" class="link-btn">设置</NuxtLink>
+          <button class="link-btn" @click="logout">退出</button>
         </template>
-        <ClientOnly>
-          <template v-if="user">
-            <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
-            <span class="nickname">{{ user.nickname }}</span>
-            <NuxtLink to="/settings" class="link-btn">设置</NuxtLink>
-            <button class="link-btn" @click="logout">退出</button>
-          </template>
-          <NuxtLink v-else to="/login" class="login-btn">登录 / 注册</NuxtLink>
-        </ClientOnly>
+        <template v-else-if="authReady">
+          <NuxtLink to="/login" class="login-btn">登录 / 注册</NuxtLink>
+        </template>
       </nav>
     </header>
     <NuxtPage />

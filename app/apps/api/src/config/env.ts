@@ -15,6 +15,13 @@ const envSchema = z.object({
   REFRESH_TTL_S: z.coerce.number().int().min(3600).default(14 * 24 * 3600),
   PHONE_HMAC_PEPPER: z.string().min(8).default("dev-only-phone-pepper"),
   PHONE_ENC_KEY: z.string().min(8).default("dev-only-phone-enc-key"),
+  // refresh_token Cookie 是否加 Secure：
+  // 生产 HTTPS 部署应为 true；本地/内网 HTTP 部署需显式设为 false，
+  // 否则浏览器不保存 Cookie → 刷新页面即掉登录（并引发 hydration 不一致）。
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
 
   // Alpha 准入 / 新人礼包
   AUTH_REQUIRE_INVITE: z
