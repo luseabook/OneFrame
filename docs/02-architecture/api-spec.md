@@ -334,15 +334,43 @@ GET /credits/flows?page=&page_size=&task_id   // {list:[{id,kind,delta,frozen_de
 
 ## 10. billing（Beta 支付）
 
+### 10.1 端点
+
 ```
-GET  /billing/skus           ← [{sku,kind,price_cents,credits,period,label}]
-POST /billing/orders         {sku_id, channel}
-  ← {order_id, pay_params:{code_url}}     // 微信 Native
-GET  /billing/orders/{id}    ← {status,…}  // 前端支付后轮询 ≤3min
-GET  /billing/flows?page=    ← 积分流水
-POST /billing/refund         {order_id, reason}  // 仅未消耗部分(Ph3)；写操作不得用 GET
-// 支付回调: POST /billing/notify/wechat (服务端回调, 不在本契约)
+GET  /billing/skus                        （公开）← [{id,sku,kind,label,price_cents,credits,period,cents_per_credit}]
+POST /billing/orders                      {sku, channel: wechat|alipay|mock}
+  ← {order_id, sku, amount_cents, credits, channel, status, status_label, pay_token, created_at, expires_at}
+GET  /billing/orders/{id}                 ← 同上（前端支付后轮询 ≤3min）
+GET  /billing/orders?page=&page_size=     ← 用户订单历史
+POST /billing/orders/{id}/close           ← 关闭待支付订单（幂等：非待支付返回 closed:false）
+POST /billing/orders/{id}/mock-pay        ← mock 渠道确认（PAYMENT_LIVE=true 时 403）
 ```
+
+### 10.2 渠道回调（服务端到服务端，不在用户契约）
+
+```
+POST /billing/notify/wechat               // header: wechatpay-timestamp/nonce/signature
+POST /billing/notify/alipay               // form 参数含 sign / sign_type
+POST /billing/notify/mock                 // 仅联调，PAYMENT_LIVE=true 时 403
+```
+
+### 10.3 幂等与安全（实现约束）
+
+| 约束 | 实现 |
+|---|---|
+| 订单价格快照 | `orders.amount_cents / orders.credits` 下单时冻结，调价不影响已下单订单 |
+| 重复下单 | 同 space + 同 sku + 60s 内未支付 → 复用同一订单（防双击） |
+| 重复回调 | 三重保证：`status=1` 才可流转；`SELECT ... FOR UPDATE` 行锁；`(channel, channel_order_id)` 唯一索引 |
+| 金额篡改 | 回调金额与订单快照不符 → `400101` 拒绝入账 |
+| 回调验签 | **默认拒绝**：未配置平台公钥一律 `401101`；微信校验 `timestamp\nnonce\nbody\n` 且时间戳容差 5 分钟；支付宝按 RSA2 拼接待签串 |
+| 微信资源解密 | AEAD_AES_256_GCM，`apiV3Key` 必须 32 字符；解密失败 `400101` |
+| 防假支付 | `PAYMENT_LIVE=false` 时非 mock 渠道下单直接拒绝；`mock-pay`/`notify/mock` 在 `PAYMENT_LIVE=true` 时 403 |
+
+### 10.4 未实现（依赖外部资质）
+
+- `POST /billing/refund` 退款：需商户号与退款 SOP，Ph3 再做；
+- 微信 Native 下单（`code_url`）与支付宝当面付：当前仅落订单与回调入账，拉起收银台需真实商户配置。
+
 
 ## 11. ops / admin（独立鉴权 admin_users）
 

@@ -47,7 +47,11 @@ const envSchema = z.object({
   ORDER_TTL_S: z.coerce.number().int().min(60).default(900), // 订单有效期 15min
   WECHAT_MCH_ID: z.string().optional(),
   WECHAT_API_V3_KEY: z.string().optional(),
+  /** 微信支付平台证书公钥（PEM，用于回调验签）；未配置则所有 wechat 回调被拒 */
+  WECHAT_PLATFORM_PUBLIC_KEY: z.string().optional(),
   ALIPAY_APP_ID: z.string().optional(),
+  /** 支付宝公钥（PEM，用于回调验签）；未配置则所有 alipay 回调被拒 */
+  ALIPAY_PUBLIC_KEY: z.string().optional(),
 
   // LLM 步骤（大纲/角色/剧本/分镜）：mock 用于本地/CI；real 需 DEEPSEEK_API_KEY
   LLM_MODE: z.enum(["mock", "real"]).default("mock"),
