@@ -1,9 +1,39 @@
+<script setup lang="ts">
+const auth = useAuth();
+const route = useRoute();
+
+onMounted(async () => {
+  await auth.bootstrap();
+  if (auth.state.value.accessToken) await auth.me().catch(() => undefined);
+});
+
+const balance = computed(() => auth.state.value.credits?.balance ?? 0);
+const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
+const user = computed(() => auth.state.value.user);
+const isWorkspace = computed(() => route.path.startsWith("/create") || route.path.startsWith("/tasks"));
+
+async function logout(): Promise<void> {
+  await auth.logout();
+  await navigateTo("/");
+}
+</script>
+
 <template>
   <div class="app">
     <header class="header">
       <NuxtLink to="/" class="logo">AI 漫剧工作台</NuxtLink>
       <nav class="nav">
-        <Button variant="ghost" disabled>登录（内测筹备中）</Button>
+        <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">创作</NuxtLink>
+        <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
+        <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
+        <ClientOnly>
+          <template v-if="user">
+            <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
+            <span class="nickname">{{ user.nickname }}</span>
+            <button class="link-btn" @click="logout">退出</button>
+          </template>
+          <NuxtLink v-else to="/login" class="login-btn">登录 / 注册</NuxtLink>
+        </ClientOnly>
       </nav>
     </header>
     <NuxtPage />
@@ -27,10 +57,50 @@
   justify-content: space-between;
   padding: 16px 32px;
   border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  background: rgba(11, 11, 16, 0.9);
+  backdrop-filter: blur(8px);
+  z-index: 10;
 }
 .logo {
   font-size: 16px;
   font-weight: 600;
+}
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+.nav-link {
+  color: var(--text-2);
+}
+.nav-link.active,
+.nav-link:hover {
+  color: var(--text-1);
+}
+.balance {
+  color: var(--text-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.nickname {
+  color: var(--text-2);
+}
+.link-btn {
+  background: none;
+  border: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 13px;
+}
+.login-btn {
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: var(--radius-m);
+  padding: 8px 16px;
 }
 .footer {
   margin-top: auto;

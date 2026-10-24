@@ -1,9 +1,20 @@
+const apiProxyTarget = process.env.NUXT_API_PROXY ?? "http://127.0.0.1:3000";
+
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-01",
   ssr: true,
   devtools: { enabled: false },
   typescript: { strict: true },
   css: ["~/assets/css/tokens.css"],
+  runtimeConfig: {
+    public: {
+      // 空 = 同源 /v1（本地由 NUXT_API_PROXY 代理，生产由 nginx 反代）
+      apiBase: process.env.NUXT_PUBLIC_API_BASE ?? "",
+    },
+  },
+  routeRules: {
+    "/v1/**": { proxy: `${apiProxyTarget}/v1/**` },
+  },
   app: {
     head: {
       htmlAttrs: { lang: "zh-CN" },

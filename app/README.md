@@ -45,8 +45,9 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] P1.2 数据层：drizzle schema（16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）
 - [x] P1.1 鉴权（mock 短信）：sms-code/login/refresh/logout/me + 邀请码/等待名单 + JWT/HttpOnly Cookie
 - [x] P1.3 任务脊柱：models/quote(batch)/generations/tasks + 冻结-结算 ledger + BullMQ mock 执行器
+- [x] P1.6/P1.7 Web 最小闭环：登录/模型选择/报价/生成/轮询/下载入口（生产构建已浏览器验证）
 - [ ] P1.4/P1.5 真实供应商适配器（火山/百炼/DeepSeek，待 Key 与企业认证）
-- [ ] P1.6/P1.7 工具页/任务历史前端 + 下载/分享
+- [ ] 工具页补齐图生视频/分享；剧本流水线前端（P1'/P2）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

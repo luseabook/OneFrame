@@ -1,0 +1,118 @@
+// Web 端 API 类型（与 docs/02-architecture/api-spec.md 对齐；仅前端消费所需字段）
+export interface Envelope<T> {
+  code: number;
+  msg: string;
+  data: T | null;
+}
+
+export interface AuthUser {
+  id: string;
+  nickname: string;
+  avatar: string | null;
+}
+
+export interface Credits {
+  balance: number;
+  frozen: number;
+}
+
+export interface MeResponse {
+  user: { id: string; nickname: string; avatar_uri: string | null };
+  space: { id: string; name: string };
+  credits: Credits;
+  vip: null;
+}
+
+export interface ResolutionOption {
+  value: string;
+  label: string;
+}
+
+export interface ModeConfig {
+  endpoint?: string;
+  ratios?: string[];
+  durations?: number[];
+  default_duration?: number;
+  default_ratio?: string;
+  default_resolution?: string;
+  resolution_options?: ResolutionOption[];
+  resolutions?: string[];
+  counts?: number[];
+  default_count?: number;
+  media_limits?: Record<string, number>;
+}
+
+export interface ModelDto {
+  name: string;
+  display_name: string;
+  vendor: string;
+  types: string[];
+  need_vip: boolean;
+  sort: number;
+  visible: boolean;
+  description: string;
+  logo: string;
+  tags: unknown;
+  promotions: unknown;
+  audio_video_support: boolean;
+  mode_order: Record<string, number>;
+  modes: Record<string, ModeConfig>;
+  scene_modes: Record<string, unknown>;
+}
+
+export interface QuoteResponse {
+  credits: number;
+  strike_credits: number;
+  discount: number;
+  points_code: string;
+  balance_after_estimate: number;
+  sufficient: boolean;
+  quote_id?: string;
+  quote_expires_at?: string;
+}
+
+export interface TaskDto {
+  task_id: string;
+  status: number;
+  progress: number;
+  mode: string;
+  capability: string;
+  model_id: string;
+  scene: string | null;
+  results: Array<{ uri?: string; preview_uri?: string }> | null;
+  error: { kind?: string; message?: string } | null;
+  credits_frozen: number;
+  credits_settled: number;
+  created_at: string;
+  finished_at: string | null;
+  input?: { prompt?: string };
+  options?: { ratio?: string; resolution?: string; duration?: number };
+}
+
+export interface Paginated<T> {
+  list: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export const TaskStatus = {
+  PENDING: 1,
+  RUNNING: 2,
+  SUCCEEDED: 3,
+  FAILED: 4,
+  CANCELED: 5,
+  REVIEWING: 6,
+  REVIEW_REJECTED: 7,
+} as const;
+
+export const statusLabel = (status: number): string =>
+  ({
+    1: "排队中",
+    2: "生成中",
+    3: "已完成",
+    4: "失败",
+    5: "已取消",
+    6: "审核中",
+    7: "审核未过",
+  })[status] ?? `未知(${status})`;
