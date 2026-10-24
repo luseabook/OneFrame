@@ -35,7 +35,7 @@ pnpm test && pnpm build           # CI 四件套本地预演
 
 ## 当前状态（对应 WBS）
 
-- [x] P0.1 Monorepo + CI（.github/workflows/ci.yml：lint/typecheck/test/build）
+- [x] P0.1 Monorepo + CI（仓库根 `.github/workflows/ci.yml`，工作目录 `app/`：lint/typecheck/test/build）
 - [x] P0.2 容器环境 + zod 配置层（启动即校验）
 - [x] P0.3 packages/shared + 单测
 - [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
