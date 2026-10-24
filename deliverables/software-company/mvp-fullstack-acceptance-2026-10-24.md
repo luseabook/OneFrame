@@ -28,6 +28,8 @@ services: postgres / redis / minio / minio-init / migrate / api / worker / web /
 | 流水线漏斗 | `GET /v1/ops/admin/funnel` | 6 段（建项→…→镜头成功） |
 | 任务指标 | `GET /v1/ops/admin/task-metrics` | failure_rate=0，adapter 延迟行 1 |
 | 失败清单导出 | `GET /v1/ops/admin/failed-tasks.csv` | 200，头 `task_id,space_id,model,mode,status,…` |
+| 协议/举报页 | `GET /terms` `/privacy` `/report` `/settings` | 全部 200 |
+| 账号注销 | `POST /v1/me/delete` | code=0，`ok=true`，`purge_after=+30d`；随后 `GET /v1/me` → **401101 account disabled**（token 即时失效） |
 
 > 注：跨账号访问他人任务/资产返回 400102（空间隔离生效），已确认属预期行为。
 
@@ -35,7 +37,7 @@ services: postgres / redis / minio / minio-init / migrate / api / worker / web /
 
 | 套件 | 数量 |
 |---|---|
-| API（flow/pipeline/assets/admin/files） | **45** |
+| API（flow/pipeline/assets/admin/files） | **46** |
 | adapters（mock/deepseek/http-video/ark） | **9** |
 | db schema 契约 | 26 表断言 |
 | storage（含 MinIO 集成，本地） | 6+1 |
