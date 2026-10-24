@@ -55,16 +55,16 @@
   justify-content: center;
 }
 .cta-btn {
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-md);
   padding: 10px 20px;
   font-size: 14px;
 }
 .cta-btn.primary {
-  background: var(--color-primary);
+  background: var(--brand-500);
   color: #fff;
 }
 .cta-btn.ghost {
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-1);
   color: var(--text-1);
 }
 .features {
@@ -74,9 +74,9 @@
   padding-bottom: 96px;
 }
 .card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 24px;
 }
 .card h3 {

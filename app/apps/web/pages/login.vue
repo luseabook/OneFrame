@@ -107,9 +107,9 @@ onUnmounted(() => {
 }
 .card {
   width: min(420px, 100%);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--dark-container);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-xl);
   padding: 32px;
 }
 h1 {
@@ -117,7 +117,7 @@ h1 {
   font-size: 24px;
 }
 .sub {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 13px;
   margin: 0 0 24px;
 }
@@ -138,13 +138,13 @@ h1 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
   cursor: pointer;
 }
 .hint {
   margin: 0;
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
 }
 .error {

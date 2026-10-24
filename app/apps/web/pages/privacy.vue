@@ -94,7 +94,7 @@ h2 {
 }
 p,
 li {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 13px;
 }
 ul {
@@ -102,13 +102,13 @@ ul {
   padding-left: 18px;
 }
 .muted {
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 12px;
 }
 .home {
   display: inline-block;
   margin-top: 24px;
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 12px;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const auth = useAuth();
@@ -120,7 +120,7 @@ h2 {
   background: #7f1d1d;
   border: 1px solid #ef4444;
   color: #fecaca;
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-md);
   padding: 8px 16px;
   font-size: 13px;
   cursor: pointer;

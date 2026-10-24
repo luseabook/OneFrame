@@ -1,39 +1,131 @@
 <script setup lang="ts">
 withDefaults(
-  defineProps<{ variant?: "primary" | "ghost"; disabled?: boolean }>(),
-  { variant: "primary", disabled: false },
+  defineProps<{
+    variant?: "primary" | "secondary" | "ghost" | "danger" | "text";
+    size?: "sm" | "md" | "lg";
+    disabled?: boolean;
+    loading?: boolean;
+    block?: boolean;
+    type?: "button" | "submit";
+  }>(),
+  { variant: "primary", size: "md", disabled: false, loading: false, block: false, type: "button" },
 );
 </script>
 
 <template>
-  <button class="btn" :class="variant" :disabled="disabled">
-    <slot />
+  <button
+    class="btn"
+    :class="[variant, size, { block, loading }]"
+    :disabled="disabled || loading"
+    :type="type"
+  >
+    <span v-if="loading" class="spinner" aria-hidden="true" />
+    <span class="label"><slot /></span>
   </button>
 </template>
 
 <style scoped>
 .btn {
-  border: 0;
-  border-radius: var(--radius-m);
-  padding: 10px 20px;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
-.btn.primary {
-  background: var(--color-primary);
+.btn.sm {
+  height: 28px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+.btn.md {
+  height: 34px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+.btn.lg {
+  height: 42px;
+  padding: 0 var(--space-6);
+  font-size: var(--text-lg);
+  border-radius: var(--radius-lg);
+}
+.btn.block {
+  width: 100%;
+}
+
+.primary {
+  background: var(--brand-500);
   color: #fff;
 }
-.btn.primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+.primary:hover:not(:disabled) {
+  background: var(--brand-600);
 }
-.btn.ghost {
-  background: transparent;
+
+.secondary {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-color: var(--brand-200);
+}
+.secondary:hover:not(:disabled) {
+  background: var(--brand-100);
+  border-color: var(--brand-300);
+}
+
+.ghost {
+  background: var(--bg-surface);
+  color: var(--text-2);
+  border-color: var(--border-2);
+}
+.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
   color: var(--text-1);
-  border: 1px solid var(--color-border);
+  border-color: var(--border-3);
 }
+
+.danger {
+  background: var(--danger);
+  color: #fff;
+}
+.danger:hover:not(:disabled) {
+  background: #e04d4d;
+}
+
+.text {
+  background: transparent;
+  color: var(--text-2);
+  padding: 0 var(--space-1);
+}
+.text:hover:not(:disabled) {
+  color: var(--brand-600);
+  background: var(--bg-hover);
+}
+
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+.btn.loading .label {
+  opacity: 0.8;
+}
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

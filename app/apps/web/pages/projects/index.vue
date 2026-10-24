@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProjectDto } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const list = ref<ProjectDto[]>([]);
@@ -143,9 +143,9 @@ h1 {
   align-items: start;
 }
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 20px;
 }
 h2 {
@@ -163,9 +163,9 @@ h2 {
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 8px 10px;
   font-size: 13px;
@@ -189,8 +189,8 @@ h2 {
   gap: 8px;
 }
 .item {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .item-main {

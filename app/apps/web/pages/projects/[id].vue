@@ -12,7 +12,7 @@ import type {
 } from "~/types/api";
 import { statusLabel } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 interface BatchItem {
   shot_id: string;
@@ -698,8 +698,8 @@ h1 {
   margin-bottom: 12px;
 }
 .tabs button {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
   color: var(--text-2);
   border-radius: 999px;
   padding: 6px 14px;
@@ -707,7 +707,7 @@ h1 {
   cursor: pointer;
 }
 .tabs button.active {
-  border-color: var(--color-primary);
+  border-color: var(--brand-500);
   color: var(--text-1);
 }
 .body {
@@ -717,9 +717,9 @@ h1 {
   align-items: start;
 }
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 16px;
 }
 h2 {
@@ -736,13 +736,13 @@ h2 {
   flex-direction: column;
   gap: 2px;
   padding: 8px;
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 13px;
 }
 .ep:hover,
 .ep.active {
-  background: var(--color-bg);
+  background: var(--bg-surface);
 }
 .content {
   min-height: 420px;
@@ -761,8 +761,8 @@ h2 {
   gap: 10px;
 }
 .box {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -781,7 +781,7 @@ h2 {
 .badge {
   font-size: 11px;
   color: var(--text-2);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-1);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -791,9 +791,9 @@ h2 {
   border-color: #4ade80;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 6px 8px;
   font-size: 12px;
@@ -806,8 +806,8 @@ h2 {
 }
 .character .portrait {
   height: 160px;
-  border-radius: var(--radius-m);
-  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -832,8 +832,8 @@ h2 {
   width: 90px !important;
 }
 .script {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 10px;
   margin-bottom: 12px;
 }
@@ -850,8 +850,8 @@ h2 {
   overflow: auto;
 }
 .shots {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .shot {
@@ -859,7 +859,7 @@ h2 {
   grid-template-columns: 28px 1.4fr 1.4fr 60px 60px 60px;
   gap: 6px;
   padding: 8px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   align-items: center;
   font-size: 12px;
 }
@@ -867,7 +867,7 @@ h2 {
   border-bottom: 0;
 }
 .head-row {
-  background: var(--color-bg);
+  background: var(--bg-surface);
   color: var(--text-3);
 }
 .mini-area {
@@ -878,7 +878,7 @@ h2 {
   width: 56px !important;
 }
 .download {
-  color: var(--color-primary);
+  color: var(--brand-500);
   font-size: 12px;
 }
 .materials {
@@ -901,12 +901,12 @@ h2 {
   width: 100px;
   height: 70px;
   object-fit: cover;
-  border-radius: var(--radius-s);
-  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
 }
 .matrix {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 10px;
   margin-bottom: 12px;
   display: flex;
@@ -928,8 +928,8 @@ h2 {
   width: 26px;
   height: 26px;
   border-radius: 4px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  border: 1px solid var(--border-1);
+  background: var(--bg-surface);
   color: var(--text-2);
   font-size: 11px;
   cursor: pointer;
@@ -975,8 +975,8 @@ h2 {
   gap: 8px;
 }
 .candidate {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   background: none;
   padding: 6px;
   cursor: pointer;
@@ -990,15 +990,15 @@ h2 {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-sm);
 }
 .candidate:hover {
-  border-color: var(--color-primary);
+  border-color: var(--brand-500);
 }
 .mini {
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   font-size: 11px;
   padding: 2px 8px;
@@ -1013,8 +1013,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
 }

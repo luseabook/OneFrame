@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AssetDto } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const list = ref<AssetDto[]>([]);
@@ -176,10 +176,10 @@ h1 {
   gap: 12px;
 }
 .card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--color-surface);
+  background: var(--bg-raised);
 }
 .card img {
   width: 100%;
@@ -203,8 +203,8 @@ h1 {
 }
 .mini {
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   font-size: 11px;
   padding: 2px 8px;

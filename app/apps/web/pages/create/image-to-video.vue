@@ -2,7 +2,7 @@
 import type { AssetDto, ModelDto, QuoteResponse, TaskDto } from "~/types/api";
 import { statusLabel, TaskStatus } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const auth = useAuth();
@@ -258,9 +258,9 @@ onUnmounted(() => {
   align-items: start;
 }
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 20px;
 }
 h2 {
@@ -278,9 +278,9 @@ h2 {
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 8px 10px;
   font-size: 13px;
@@ -304,7 +304,7 @@ h2 {
 }
 .asset {
   border: 2px solid transparent;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-sm);
   padding: 0;
   background: none;
   cursor: pointer;
@@ -312,7 +312,7 @@ h2 {
   overflow: hidden;
 }
 .asset.active {
-  border-color: var(--color-primary);
+  border-color: var(--brand-500);
 }
 .asset img {
   width: 100%;
@@ -330,7 +330,7 @@ h2 {
   gap: 8px;
 }
 .badge {
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-1);
   border-radius: 999px;
   padding: 1px 8px;
   font-size: 12px;
@@ -352,7 +352,7 @@ h2 {
 }
 .ref {
   width: 120px;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-sm);
   margin: 10px 0;
 }
 .list {
@@ -379,14 +379,14 @@ h2 {
   font-size: 12px;
 }
 .quote b {
-  color: var(--color-primary);
+  color: var(--brand-500);
 }
 .error {
   color: #ff6b6b;
   font-size: 12px;
 }
 .link {
-  color: var(--color-primary);
+  color: var(--brand-500);
 }
 @media (max-width: 1080px) {
   .workspace {

@@ -101,14 +101,14 @@ h1 {
   gap: 4px;
 }
 .label {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
-  color: var(--text-1);
+  background: var(--dark-container);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-md);
+  color: var(--text-inverse);
   padding: 8px 10px;
   font-size: 13px;
 }
@@ -118,20 +118,20 @@ h1 {
 }
 .btn {
   align-self: flex-start;
-  background: var(--color-primary);
+  background: var(--brand-500);
   border: none;
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-md);
   color: #fff;
   padding: 8px 18px;
   font-size: 13px;
   cursor: pointer;
 }
 .msg {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
 }
 .muted {
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -141,7 +141,7 @@ h1 {
 .home {
   display: inline-block;
   margin-top: 16px;
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 12px;
 }
 </style>

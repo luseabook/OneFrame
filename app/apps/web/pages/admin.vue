@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false });
+definePageMeta({ ssr: false, layout: "app" });
 
 interface Envelope<T> {
   code: number;
@@ -321,9 +321,9 @@ h1 {
   gap: 12px;
 }
 .card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 18px;
 }
 .cards {
@@ -349,9 +349,9 @@ h1 {
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 8px 10px;
   font-size: 13px;
@@ -362,8 +362,8 @@ h1 {
   margin-bottom: 12px;
 }
 .tabs button {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
   color: var(--text-2);
   border-radius: 999px;
   padding: 6px 14px;
@@ -371,7 +371,7 @@ h1 {
   cursor: pointer;
 }
 .tabs button.active {
-  border-color: var(--color-primary);
+  border-color: var(--brand-500);
   color: var(--text-1);
 }
 .tabs .logout {
@@ -387,8 +387,8 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .row {
@@ -396,7 +396,7 @@ h1 {
   grid-template-columns: 1.4fr 0.7fr 1fr 0.6fr 0.6fr;
   gap: 8px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   align-items: center;
   font-size: 12px;
 }
@@ -421,8 +421,8 @@ h1 {
 .csv {
   align-self: center;
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   cursor: pointer;
   font-size: 12px;
@@ -436,8 +436,8 @@ h1 {
 .funnel-stage {
   flex: 1;
   min-width: 110px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -451,7 +451,7 @@ h1 {
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   font-size: 12px;
 }
 .report-detail {
@@ -478,7 +478,7 @@ h1 {
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   font-size: 12px;
 }
 .mono {
@@ -486,8 +486,8 @@ h1 {
 }
 .mini {
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   font-size: 11px;
   padding: 2px 8px;

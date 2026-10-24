@@ -1,145 +1,45 @@
 <script setup lang="ts">
-const auth = useAuth();
+// 根布局：按路由切换「深色营销布局」与「浅色工作台布局」
 const route = useRoute();
 
-onMounted(async () => {
-  await auth.bootstrap();
-  if (auth.state.value.accessToken) await auth.me().catch(() => undefined);
-});
+const workspacePaths = [
+  "/projects",
+  "/create",
+  "/assets",
+  "/tasks",
+  "/credits",
+  "/settings",
+  "/pricing",
+  "/admin",
+];
 
-const balance = computed(() => auth.state.value.credits?.balance ?? 0);
-const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
-const user = computed(() => auth.state.value.user);
-const authReady = computed(() => auth.ready.value);
-const isWorkspace = computed(() => route.path.startsWith("/create") || route.path.startsWith("/tasks"));
-
-async function logout(): Promise<void> {
-  await auth.logout();
-  await navigateTo("/");
-}
+const isWorkspace = computed(() =>
+  workspacePaths.some((p) => route.path === p || route.path.startsWith(`${p}/`)),
+);
 </script>
 
 <template>
-  <div class="app">
-    <header class="header">
-      <NuxtLink to="/" class="logo">AI 漫剧工作台</NuxtLink>
-      <nav class="nav">
-        <!--
-          认证状态确定前（SSR 与客户端首次渲染一致）不渲染登录态分支，
-          避免 hydrate 前后结构不同导致 hydration mismatch。
-        -->
-        <template v-if="authReady && user">
-          <NuxtLink to="/projects" class="nav-link">项目</NuxtLink>
-          <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">文生视频</NuxtLink>
-          <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
-          <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
-          <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
-          <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
-          <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
-          <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
-          <span class="nickname">{{ user.nickname }}</span>
-          <NuxtLink to="/settings" class="link-btn">设置</NuxtLink>
-          <button class="link-btn" @click="logout">退出</button>
-        </template>
-        <template v-else-if="authReady">
-          <NuxtLink to="/login" class="login-btn">登录 / 注册</NuxtLink>
-        </template>
-      </nav>
-    </header>
-    <NuxtPage />
-    <footer class="footer">
-      <span>内容由 AI 生成，请仔细甄别</span>
-      <span class="sep">·</span>
-      <NuxtLink to="/report" class="report-link">举报 / 投诉</NuxtLink>
-      <span class="sep">·</span>
-      <NuxtLink to="/terms" class="report-link">用户协议</NuxtLink>
-      <span class="sep">·</span>
-      <NuxtLink to="/privacy" class="report-link">隐私政策</NuxtLink>
-      <span class="sep">·</span>
-      <span>京 ICP 备 00000000 号（上线前替换）</span>
-    </footer>
+  <div :class="isWorkspace ? 'theme-light' : 'theme-dark'">
+    <NuxtLayout :name="isWorkspace ? 'app' : 'default'">
+      <NuxtPage />
+    </NuxtLayout>
   </div>
 </template>
 
-<style scoped>
-.app {
+<style>
+html,
+body {
+  background: var(--bg-app);
+}
+.theme-dark,
+.theme-dark body {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  background: var(--dark-base);
+  color: var(--text-inverse);
 }
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 32px;
-  border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 0;
-  background: rgba(11, 11, 16, 0.9);
-  backdrop-filter: blur(8px);
-  z-index: 10;
-  flex-wrap: wrap;
-}
-.logo {
-  font-size: 16px;
-  font-weight: 600;
-}
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 13px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.nav::-webkit-scrollbar {
-  display: none;
-}
-.nav-link {
-  color: var(--text-2);
-}
-.nav-link.active,
-.nav-link:hover {
-  color: var(--text-1);
-}
-.balance {
-  color: var(--text-2);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: 4px 10px;
-}
-.nickname {
-  color: var(--text-2);
-}
-.link-btn {
-  background: none;
-  border: 0;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 13px;
-}
-.login-btn {
-  background: var(--color-primary);
-  color: #fff;
-  border-radius: var(--radius-m);
-  padding: 8px 16px;
-}
-.footer {
-  margin-top: auto;
-  padding: 20px 32px;
-  color: var(--text-3);
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-}
-.sep {
-  color: var(--color-border);
-}
-.report-link {
-  color: var(--text-2);
-  text-decoration: underline;
+.theme-light,
+.theme-light body {
+  min-height: 100vh;
+  background: var(--bg-app);
 }
 </style>

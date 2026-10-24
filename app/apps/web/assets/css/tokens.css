@@ -1,16 +1,144 @@
-/* 设计令牌最小集（docs/03-frontend/conventions.md §4）——品牌定稿后仅改此处 */
+/* ============================================================
+   万帧设计系统 · 令牌层
+   基线来源：竞品 ReelMate 实测 CSS（2026-10-24 抓取 2412 个 CSS 变量解析）
+   品牌色/背景层/圆角/阴影/字号/动效均按竞品实测值 1:1 对齐；
+   工作台为浅色（产品决策），营销页为深色（与竞品一致）。
+   ============================================================ */
+
 :root {
-  --color-primary: #6c5ce7;
-  --color-primary-hover: #7d6ff0;
-  --color-bg: #0b0b10;
-  --color-surface: #15151c;
-  --color-border: #26262f;
-  --text-1: #f5f5f7;
-  --text-2: #a8a8b3;
-  --text-3: #6e6e7a;
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 16px;
+  /* ── 品牌紫（竞品 tech-purple / pink-purple 实测值）── */
+  --brand-50: #f2f0ff;
+  --brand-100: #e6e2ff;
+  --brand-200: #d3ccff;
+  --brand-300: #b8afff;
+  --brand-400: #9185ff;
+  --brand-500: #7e70ff; /* 竞品 --color-brand-solid-primary */
+  --brand-600: #6b5cff; /* 竞品 tech-purple-60 */
+  --brand-700: #5748e0;
+  --brand-800: #4133b8;
+  --brand-900: #33288f;
+  --brand-950: #1a1452;
+  --accent-400: #cf9fff;
+  --accent-500: #af5fff; /* 竞品 pink-purple-60 */
+  --accent-600: #8c4ccc;
+
+  /* ── 语义色（竞品 dark-* 调色板）── */
+  --success: #5fd08a;
+  --success-bg: #0f2a1c;
+  --warning: #f5b544;
+  --warning-bg: #2e2210;
+  --danger: #f56767;
+  --danger-bg: #2e1414;
+  --info: #63b3ff;
+  --info-bg: #10243a;
+
+  /* ── 深色表面（营销页/播放区，竞品背景层）── */
+  --dark-base: #000000;
+  --dark-layout: #141414;
+  --dark-container: #1f1f1f;
+  --dark-elevated: #333333;
+  --dark-overlay: #292929;
+  --dark-spotlight: #3d3d3d;
+  --dark-brand-bg: #33288f;
+
+  /* ── 浅色表面（工作台）── */
+  --bg-app: #f6f7f9;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f0f1f4;
+  --bg-hover: #f2f3f6;
+  --bg-active: #e9eaf0;
+  --bg-inverse: #1a1b1f;
+
+  /* ── 文本 ── */
+  --text-1: #16171a; /* 标题 */
+  --text-2: #4a4d55; /* 正文 */
+  --text-3: #7c8089; /* 次要 */
+  --text-4: #a3a7b0; /* 占位/禁用 */
+  --text-inverse: #ffffff;
+  --text-inverse-2: #ffffffb8;
+  --text-inverse-3: #ffffff8f;
+
+  /* ── 边框/分隔 ── */
+  --border-1: #e6e8ec;
+  --border-2: #d8dbe1;
+  --border-3: #c2c6ce;
+  --border-inverse: #ffffff1a;
+  --border-inverse-strong: #ffffff29;
+
+  /* ── 圆角（竞品 7 级）── */
+  --radius-xs: 0.125rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-full: 9999px;
+
+  /* ── 阴影（竞品 4 级）── */
+  --shadow-sm: 0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;
+  --shadow-md: 0 4px 6px -1px #0000001a, 0 2px 4px -2px #0000001a;
+  --shadow-lg: 0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a;
+  --shadow-xl: 0 20px 25px -5px #0000001a, 0 8px 10px -6px #0000001a;
+  --shadow-brand: 0 6px 20px -6px #6b5cff66;
+
+  /* ── 字号（竞品 type scale，含行高）── */
+  --text-xs: 0.75rem;
+  --text-xs-lh: 1.333;
+  --text-sm: 0.875rem;
+  --text-sm-lh: 1.429;
+  --text-base: 1rem;
+  --text-base-lh: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg-lh: 1.556;
+  --text-xl: 1.25rem;
+  --text-xl-lh: 1.4;
+  --text-2xl: 1.5rem;
+  --text-2xl-lh: 1.333;
+  --text-3xl: 1.875rem;
+  --text-3xl-lh: 1.2;
+  --text-4xl: 2.25rem;
+  --text-4xl-lh: 1.111;
+  --text-5xl: 3rem;
+  --text-5xl-lh: 1;
+
+  /* ── 间距（4px 基准）── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+
+  /* ── 字体 ── */
+  --font-sans: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* ── 动效 ── */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* ── 层级 ── */
+  --z-header: 100;
+  --z-dropdown: 200;
+  --z-drawer: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* ── 布局 ── */
+  --header-h: 56px;
+  --sidebar-w: 216px;
+  --content-max: 1440px;
 }
 
 * {
@@ -21,16 +149,13 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--color-bg);
+  background: var(--bg-app);
   color: var(--text-1);
-  font-family:
-    system-ui,
-    -apple-system,
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -38,31 +163,42 @@ a {
   text-decoration: none;
 }
 
-/* ── 移动端基线：避免窄视口横向溢出 ─────────────────── */
-@media (max-width: 768px) {
-  html,
-  body {
-    overflow-x: hidden;
-  }
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
 
-  /* 页面容器：收窄内边距 */
-  main.page,
-  .page {
-    padding-left: 16px;
-    padding-right: 16px;
-    max-width: 100%;
-  }
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--text-1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
 
-  /* 表格/行列表：容器内横向滚动而不是撑破页面 */
-  .table,
-  .batch-list,
-  .rows,
-  .list {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 
-  .table .row {
-    min-width: 560px;
-  }
+::selection {
+  background: var(--brand-200);
+  color: var(--text-1);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
 }

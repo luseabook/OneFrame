@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Credits, FlowDto } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const flows = ref<FlowDto[]>([]);
@@ -94,8 +94,8 @@ h1 {
   font-size: 18px;
 }
 .table {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   overflow: hidden;
   margin-top: 16px;
 }
@@ -104,7 +104,7 @@ h1 {
   grid-template-columns: 80px 80px 80px 80px 1fr 170px;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   align-items: center;
   font-size: 12px;
 }
@@ -112,7 +112,7 @@ h1 {
   border-bottom: 0;
 }
 .head-row {
-  background: var(--color-surface);
+  background: var(--bg-raised);
   color: var(--text-3);
 }
 .plus {

@@ -122,9 +122,9 @@ onMounted(async () => {
 }
 .card {
   width: min(640px, 100%);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--dark-container);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-xl);
   padding: 28px;
   display: flex;
   flex-direction: column;
@@ -140,27 +140,27 @@ h1 {
   gap: 12px;
 }
 .result {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .result pre {
   margin: 0;
   white-space: pre-wrap;
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--text-inverse-2);
 }
 .download {
-  color: var(--color-primary);
+  color: var(--brand-500);
   font-size: 13px;
 }
 .home {
   margin-top: 8px;
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 12px;
 }
 .report {
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--border-inverse);
   padding-top: 12px;
   display: flex;
   flex-direction: column;
@@ -169,15 +169,15 @@ h1 {
 .report-btn {
   align-self: flex-start;
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
-  color: var(--text-2);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-sm);
+  color: var(--text-inverse-2);
   font-size: 12px;
   padding: 4px 12px;
   cursor: pointer;
 }
 .report-btn.ghost {
-  color: var(--text-3);
+  color: var(--text-inverse-3);
 }
 .report-form {
   display: flex;
@@ -194,14 +194,14 @@ h1 {
   gap: 4px;
 }
 .label {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
-  color: var(--text-1);
+  background: var(--dark-container);
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-md);
+  color: var(--text-inverse);
   padding: 6px 8px;
   font-size: 12px;
   outline: none;
@@ -211,11 +211,11 @@ h1 {
   resize: vertical;
 }
 .info {
-  color: var(--text-2);
+  color: var(--text-inverse-2);
   font-size: 12px;
 }
 .muted {
-  color: var(--text-3);
+  color: var(--text-inverse-3);
   font-size: 12px;
 }
 .small {

@@ -2,7 +2,7 @@
 import type { TaskDto } from "~/types/api";
 import { statusLabel } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const auth = useAuth();
@@ -264,16 +264,16 @@ h1 {
   gap: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 8px 10px;
   font-size: 13px;
 }
 .table {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   overflow: hidden;
 }
 .row {
@@ -281,7 +281,7 @@ h1 {
   grid-template-columns: 120px 90px 1fr 70px 170px 200px;
   gap: 8px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-1);
   align-items: center;
   font-size: 13px;
 }
@@ -289,7 +289,7 @@ h1 {
   border-bottom: 0;
 }
 .head-row {
-  background: var(--color-surface);
+  background: var(--bg-raised);
   color: var(--text-3);
   font-size: 12px;
 }
@@ -311,7 +311,7 @@ h1 {
 .link {
   background: none;
   border: 0;
-  color: var(--color-primary);
+  color: var(--brand-500);
   cursor: pointer;
   padding: 0;
   text-align: left;
@@ -323,8 +323,8 @@ h1 {
 }
 .mini {
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   font-size: 11px;
   padding: 2px 8px;
@@ -362,7 +362,7 @@ h1 {
   border: 1px solid #f59e0b;
   color: #fde68a;
   padding: 8px 12px;
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-md);
   font-size: 12px;
 }
 .expiring a {
@@ -391,7 +391,7 @@ code {
   margin-top: 8px;
 }
 .share-link {
-  color: var(--color-primary);
+  color: var(--brand-500);
   font-size: 12px;
 }
 </style>

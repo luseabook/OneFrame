@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 定价页需登录：未登录时导航不暴露该入口，Alpha 期额度来自邀请码
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 
@@ -81,9 +81,9 @@ h1 {
   gap: 12px;
 }
 .card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 20px;
   display: flex;
   flex-direction: column;

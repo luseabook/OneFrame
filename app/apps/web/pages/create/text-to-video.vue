@@ -2,7 +2,7 @@
 import type { ModelDto, QuoteResponse, TaskDto } from "~/types/api";
 import { statusLabel, TaskStatus } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 const api = useApi();
 const auth = useAuth();
@@ -272,9 +272,9 @@ onUnmounted(() => {
   align-items: start;
 }
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-l);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
   padding: 20px;
 }
 h2 {
@@ -292,9 +292,9 @@ h2 {
   font-size: 12px;
 }
 .input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   color: var(--text-1);
   padding: 8px 10px;
   font-size: 13px;
@@ -324,7 +324,7 @@ h2 {
   font-size: 12px;
 }
 .quote b {
-  color: var(--color-primary);
+  color: var(--brand-500);
 }
 .preview {
   min-height: 320px;
@@ -336,7 +336,7 @@ h2 {
 }
 .badge {
   border-radius: 999px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-1);
   padding: 2px 8px;
   font-size: 12px;
   color: var(--text-2);
@@ -378,8 +378,8 @@ h2 {
   gap: 8px;
 }
 .item {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-m);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
   padding: 10px;
   cursor: pointer;
 }
@@ -395,8 +395,8 @@ h2 {
 }
 .mini {
   background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-s);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
   color: var(--text-2);
   font-size: 11px;
   padding: 2px 8px;

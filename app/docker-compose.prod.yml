@@ -132,10 +132,14 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # SSR 内部代理 /v1 的目标（容器内用服务名）
+        NUXT_API_PROXY: http://api:3000
     environment:
       NODE_ENV: production
       PORT: "3001"
       NITRO_PORT: "3001"
+      NUXT_API_PROXY: http://api:3000
     expose:
       - "3001"
     depends_on:
