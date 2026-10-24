@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  GenerationMode,
-  LIMITS,
-  Ratio,
-  Resolution,
-} from "../constants";
+import { GenerationMode, LIMITS, SceneKey } from "../constants";
 
 // api-spec §5 POST /generations 请求体（服务端校验顺序：幂等→身份→枚举→内容→计费→入队）
 export const generationInputSchema = z.object({
@@ -15,14 +10,10 @@ export const generationInputSchema = z.object({
 });
 
 export const generationOptionsSchema = z.object({
-  ratio: z.enum(Ratio).default("9:16"),
-  resolution: z.enum(Resolution).default("720p"),
-  duration: z
-    .number()
-    .int()
-    .min(LIMITS.DURATION_MIN)
-    .max(LIMITS.DURATION_MAX)
-    .default(5),
+  // 仅兜底默认；合法枚举由模型目录 modes/scene 决定（不得假设模型共享同一组）
+  ratio: z.string().min(1).default("9:16"),
+  resolution: z.string().min(1).default("720p"),
+  duration: z.number().int().min(LIMITS.DURATION_MIN).max(LIMITS.DURATION_MAX).default(5),
   count: z.number().int().min(1).max(LIMITS.COUNT_MAX).default(1),
   enable_audio: z.boolean().default(true),
   mouth_drive: z.boolean().default(false),
@@ -32,9 +23,12 @@ export const generationOptionsSchema = z.object({
 export const generationRequestSchema = z.object({
   mode: z.enum(GenerationMode),
   model: z.string().min(1),
+  // 流水线分镜任务用 scene；资产生图不填 scene（用 mode=studio_asset_image）
+  scene: z.enum(SceneKey).nullish(),
   input: generationInputSchema,
-  // 整个 options 缺省时走全默认值（720p/5s/16:9…），与前端"选完模型即报价"交互对齐
+  // 整个 options 缺省时走全默认值，与前端"选完模型即报价"交互对齐
   options: generationOptionsSchema.default({}),
+  quote_id: z.string().min(1).nullish(), // 提交时校验报价未变（745702）
 });
 
 export type GenerationInput = z.infer<typeof generationInputSchema>;

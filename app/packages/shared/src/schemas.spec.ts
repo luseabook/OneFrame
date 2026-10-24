@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "./errors";
 import { generationRequestSchema } from "./schemas/generation";
-import { createProjectSchema, storyboardSchema } from "./schemas/project";
+import { characterSchema, createProjectSchema, storyboardSchema } from "./schemas/project";
 import { loginRequestSchema, refreshRequestSchema } from "./schemas/auth";
 
 describe("generationRequestSchema", () => {
@@ -14,22 +14,44 @@ describe("generationRequestSchema", () => {
     expect(r.options).toMatchObject({ ratio: "9:16", resolution: "720p", duration: 5, count: 1 });
   });
 
-  it("rejects out-of-range duration and unknown mode", () => {
+  it("accepts 1..30s outer bounds and rejects 0/31 or unknown mode", () => {
+    const base = { mode: "text2video", model: "m", input: {} };
+    expect(generationRequestSchema.safeParse({ ...base, options: { duration: 1 } }).success).toBe(true);
+    expect(generationRequestSchema.safeParse({ ...base, options: { duration: 30 } }).success).toBe(true);
+    expect(generationRequestSchema.safeParse({ ...base, options: { duration: 0 } }).success).toBe(false);
+    expect(generationRequestSchema.safeParse({ ...base, options: { duration: 31 } }).success).toBe(false);
+    expect(generationRequestSchema.safeParse({ ...base, mode: "time_travel" }).success).toBe(false);
+  });
+
+  it("accepts pipeline scene keys and rejects mode-as-scene", () => {
     const base = { model: "m", input: {} };
     expect(
-      generationRequestSchema.safeParse({ ...base, mode: "text2video", options: { duration: 3 } }).success,
+      generationRequestSchema.safeParse({ ...base, mode: "text2video", scene: "storyboard_reference_video" })
+        .success,
+    ).toBe(true);
+    expect(
+      generationRequestSchema.safeParse({ ...base, mode: "image2video", scene: "studio_asset_image" }).success,
     ).toBe(false);
-    expect(generationRequestSchema.safeParse({ ...base, mode: "time_travel" }).success).toBe(false);
   });
 });
 
 describe("createProjectSchema", () => {
-  it("accepts a novel source within limit and rejects overflow", () => {
+  it("accepts novel/idea/script sources within 5万字 and rejects overflow or reserved fission", () => {
     const base = { title: "测试项目", source_text: "x".repeat(1000) };
     expect(createProjectSchema.safeParse(base).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, source_type: 2 }).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, source_type: 3 }).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, source_type: 4 }).success).toBe(false); // fission 预留
     expect(
       createProjectSchema.safeParse({ ...base, source_text: "x".repeat(50001) }).success,
     ).toBe(false);
+  });
+});
+
+describe("characterSchema", () => {
+  it("defaults to draft and accepts finalized status", () => {
+    expect(characterSchema.parse({ id: "c1", name: "阿凯" }).status).toBe(1);
+    expect(characterSchema.safeParse({ id: "c1", name: "阿凯", status: 2 }).success).toBe(true);
   });
 });
 
@@ -51,12 +73,12 @@ describe("refreshRequestSchema", () => {
 
 describe("storyboardSchema duration_s", () => {
   const base = { id: "s1", shot_no: 1 };
-  it("only accepts model duration tiers (4/5/6/8/10) and defaults to 5", () => {
+  it("stores 1..30 with default 5; model enum is validated at dispatch", () => {
     expect(storyboardSchema.parse(base).duration_s).toBe(5);
-    for (const d of [4, 5, 6, 8, 10]) {
+    for (const d of [1, 5, 10, 30]) {
       expect(storyboardSchema.safeParse({ ...base, duration_s: d }).success).toBe(true);
     }
-    for (const d of [2, 3, 7, 15]) {
+    for (const d of [0, 31]) {
       expect(storyboardSchema.safeParse({ ...base, duration_s: d }).success).toBe(false);
     }
   });
@@ -69,5 +91,9 @@ describe("error codes", () => {
     expect(ErrorCode.INPUT_REJECTED).toBe(745801);
     expect(ErrorCode.CAPTCHA_REQUIRED).toBe(429101);
     expect(ErrorCode.CANCEL_NOT_ALLOWED).toBe(400103);
+    expect(ErrorCode.SOURCE_TOO_LONG).toBe(400104);
+    expect(ErrorCode.ASSET_NOT_READY).toBe(400105);
+    expect(ErrorCode.EXPORT_INCOMPLETE).toBe(400106);
+    expect(ErrorCode.QUOTE_REQUIRED).toBe(400107);
   });
 });

@@ -31,7 +31,8 @@ export const Capability = {
 } as const;
 export type Capability = (typeof Capability)[keyof typeof Capability];
 
-// v1 mode 全集（api-spec §5；ADR-003：差异在参数不在端点）
+// v1 generation mode 全集（api-spec §5；ADR-003：差异在参数不在端点）
+// 覆盖 RE 的 11 个 generation mode；后处理类（video_upscale 等）不进生成枚举（Ph2 独立能力）
 export const VideoMode = [
   "text2video",
   "image2video",
@@ -40,12 +41,12 @@ export const VideoMode = [
   "universal_reference",
   "video_extend",
   "video_edit",
-  "video_upscale",
 ] as const;
 export const ImageMode = [
   "text2image",
   "image2image",
   "multi_reference",
+  "studio_asset_image", // 资产生图（角色/场景/道具）；RE 中仅部分模型支持
   "upscale",
   "outpaint",
   "inpaint",
@@ -56,29 +57,42 @@ export const SpeechMode = ["tts", "voice_clone"] as const;
 export const GenerationMode = [...VideoMode, ...ImageMode, ...SpeechMode] as const;
 export type GenerationMode = (typeof GenerationMode)[number];
 
+// 流水线 scene 键（api-spec §5）：仅两个；studio_asset_image 是 mode，不是 scene 键
+export const SceneKey = ["script_to_scene_refer", "storyboard_reference_video"] as const;
+export type SceneKey = (typeof SceneKey)[number];
+
+// 常用展示值；实际合法性一律以模型目录 modes/scene 枚举为准（不得假设所有模型共享）
 export const Ratio = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 export type Ratio = (typeof Ratio)[number];
 
 export const Resolution = ["480p", "720p", "1080p", "2K", "4K"] as const;
 export type Resolution = (typeof Resolution)[number];
 
+// 不写 expire：Alpha/Beta 积分不设有效期（database §4；若引入有效期再新增 kind 并同步不变式）
 export const CreditFlowKind = [
   "recharge",
   "gift",
   "freeze",
   "settle",
   "unfreeze",
-  "expire",
   "adjust",
 ] as const;
 export type CreditFlowKind = (typeof CreditFlowKind)[number];
 
 export const DramaType = { LIVE: 1, ANIME: 2 } as const; // 真人 / 动漫（PRD F2）
-export const ProjectSourceType = { NOVEL: 1, IDEA: 2 } as const;
+// PRD F2①：1 粘贴小说 / 2 一句话想法 / 3 导入剧本拆集 / 4 二创裂变（Ph3 预留）
+export const ProjectSourceType = { NOVEL: 1, IDEA: 2, SCRIPT: 3, FISSION: 4 } as const;
+export type ProjectSourceType = (typeof ProjectSourceType)[keyof typeof ProjectSourceType];
 
-// 分镜时长枚举档位（对齐视频生成模型时长档位，生成下限 4s；api-spec §8 / database.md）
-export const STORYBOARD_DURATIONS = [4, 5, 6, 8, 10] as const;
-export type StoryboardDuration = (typeof STORYBOARD_DURATIONS)[number];
+// 资产状态（database §3）：1 草稿 / 2 已定稿（可被分镜引用）
+export const ProjectAssetStatus = { DRAFT: 1, FINALIZED: 2 } as const;
+export type ProjectAssetStatus = (typeof ProjectAssetStatus)[keyof typeof ProjectAssetStatus];
+
+// 分镜时长：仅存储；投递时按所选模型 scene.storyboard_reference_video.durations
+// 校验并就近取合法低档（RE：各模型时长集合不同）
+export const STORYBOARD_DURATION_DEFAULT = 5;
+export const STORYBOARD_DURATION_MIN = 1;
+export const STORYBOARD_DURATION_MAX = 30;
 
 export const LIMITS = {
   PROMPT_MAX: 2000,
@@ -86,7 +100,7 @@ export const LIMITS = {
   REFERENCE_URIS_MAX: 3,
   SHOT_COUNT_MAX: 30,
   COUNT_MAX: 4,
-  DURATION_MIN: 4,
+  DURATION_MIN: 1, // 模型侧外边界；具体枚举由模型目录给出
   DURATION_MAX: 30,
   EPISODE_MAX: 20,
   CHARACTER_MAX: 10, // 角色卡上限（PRD F2 ≤10 张）
