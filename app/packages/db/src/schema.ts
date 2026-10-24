@@ -33,6 +33,8 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   /** 注销时间；保留 30 天后由维护任务物理清理（PRD F1） */
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  /** 新手引导是否已看过（PRD 增补 §3，用于回流引导条与激活口径） */
+  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -366,6 +368,10 @@ export const scriptProjects = pgTable(
     sourceType: smallint("source_type").notNull().default(1), // 1novel 2idea 3script 4fission
     sourceText: text("source_text"),
     status: smallint("status").notNull().default(1),
+    /** 作品归档时间（PRD 增补 §1.2：作品=项目，归档为软标记） */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /** 是否为示例作品（只读模板，可复制为我的项目） */
+    isSample: smallint("is_sample").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

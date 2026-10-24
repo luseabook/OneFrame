@@ -52,6 +52,8 @@ function projectDto(row: ProjectRow) {
     source_type: row.sourceType,
     source_text: row.sourceText,
     status: row.status,
+    archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
+    is_sample: row.isSample === 1,
     created_at: row.createdAt.toISOString(),
   };
 }
@@ -147,6 +149,186 @@ export class ScriptService {
       .from(scriptProjects)
       .where(where);
     return { list: rows.map(projectDto), total: countRow?.count ?? 0, page: p, page_size: ps };
+  }
+
+  /**
+   * 作品库（PRD 增补 §1.3）：以「剧」为单位的成果视图。
+   * 作品 = 项目；聚合集数、已成功出片镜头数、封面与状态，供作品墙直接渲染。
+   */
+  async listWorks(spaceId: string, opts: { status?: string; page?: number; pageSize?: number } = {}) {
+    const p = Math.max(1, opts.page ?? 1);
+    const ps = Math.min(60, Math.max(1, opts.pageSize ?? 24));
+    const conditions = [eq(scriptProjects.spaceId, BigInt(spaceId))];
+    if (opts.status === "archived") {
+      conditions.push(sql`${scriptProjects.archivedAt} is not null`);
+    } else {
+      conditions.push(sql`${scriptProjects.archivedAt} is null`);
+    }
+    const rows = await db
+      .select()
+      .from(scriptProjects)
+      .where(and(...conditions))
+      .orderBy(desc(scriptProjects.updatedAt))
+      .limit(ps)
+      .offset((p - 1) * ps);
+
+    const [countRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(scriptProjects)
+      .where(and(...conditions));
+
+    const ids = rows.map((r) => r.id);
+    // 聚合：集数、分镜数、成功镜头数、封面（首个成功结果的 asset uri）
+    const stats = ids.length
+      ? await db.execute(sql`
+          select p.id as project_id,
+                 (select count(*)::int from episodes e where e.project_id = p.id) as episode_count,
+                 (select count(*)::int
+                    from storyboards s
+                    join episodes e2 on e2.id = s.episode_id
+                   where e2.project_id = p.id) as shot_count,
+                 (select count(*)::int
+                    from tasks t
+                    join storyboards s2 on s2.id = t.shot_id
+                    join episodes e3 on e3.id = s2.episode_id
+                   where e3.project_id = p.id and t.status = 3) as done_count,
+                 (select t2.results->0->>'uri'
+                    from tasks t2
+                    join storyboards s3 on s3.id = t2.shot_id
+                    join episodes e4 on e4.id = s3.episode_id
+                   where e4.project_id = p.id and t2.status = 3
+                     and jsonb_array_length(coalesce(t2.results, '[]'::jsonb)) > 0
+                   order by t2.id desc limit 1) as cover_uri
+            from script_projects p
+           where p.id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+        `)
+      : { rows: [] };
+
+    const statMap = new Map<string, Record<string, unknown>>();
+    for (const r of (stats as { rows?: Record<string, unknown>[] }).rows ?? []) {
+      statMap.set(String(r.project_id), r);
+    }
+
+    const list = rows.map((row) => {
+      const s = statMap.get(String(row.id)) ?? {};
+      const episodeCount = Number(s.episode_count ?? 0);
+      const shotCount = Number(s.shot_count ?? 0);
+      const doneCount = Number(s.done_count ?? 0);
+      return {
+        ...projectDto(row),
+        episode_count: episodeCount,
+        shot_count: shotCount,
+        done_count: doneCount,
+        cover_uri: (s.cover_uri as string | null) ?? null,
+        // 用户可理解的四态（PRD 增补 §1.2）
+        work_state:
+          row.archivedAt !== null
+            ? "archived"
+            : shotCount === 0
+              ? "draft"
+              : doneCount > 0 && doneCount >= shotCount
+                ? "ready"
+                : "producing",
+      };
+    });
+
+    return { list, total: countRow?.count ?? 0, page: p, page_size: ps };
+  }
+
+  /** 归档 / 恢复作品（软标记） */
+  async setArchived(spaceId: string, projectId: string, archived: boolean) {
+    const project = await this.findProject(spaceId, projectId);
+    await db
+      .update(scriptProjects)
+      .set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
+      .where(eq(scriptProjects.id, project.id));
+    return { id: String(project.id), archived };
+  }
+
+  /**
+   * 二次创作（PRD 增补 §2）：新增空集。
+   * 复用已有角色的定妆图绑定关系，不复制分镜内容；一次最多 10 集。
+   */
+  async addEpisodes(spaceId: string, projectId: string, count: number) {
+    const project = await this.findProject(spaceId, projectId);
+    const n = Math.min(10, Math.max(1, Math.trunc(count)));
+    const existing = await db
+      .select({ epNo: episodes.epNo })
+      .from(episodes)
+      .where(eq(episodes.projectId, project.id));
+    let maxNo = existing.reduce((m, r) => Math.max(m, r.epNo), 0);
+    const created: { id: string; ep_no: number }[] = [];
+    for (let i = 0; i < n; i += 1) {
+      maxNo += 1;
+      const idBig = newId();
+      await db.insert(episodes).values({
+        id: idBig,
+        projectId: project.id,
+        epNo: maxNo,
+        title: `第${maxNo}集`,
+        status: 1,
+      });
+      created.push({ id: String(idBig), ep_no: maxNo });
+    }
+    await db
+      .update(scriptProjects)
+      .set({ updatedAt: new Date() })
+      .where(eq(scriptProjects.id, project.id));
+    return { created };
+  }
+
+  /**
+   * 复制为我的项目（PRD 增补 §3.2 示例作品体验）。
+   * 复制项目骨架 + 角色（含定妆图绑定），不复制分镜与任务，避免费用与状态串扰。
+   */
+  async duplicateProject(spaceId: string, projectId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const newProjectId = newId();
+    await db.insert(scriptProjects).values({
+      id: BigInt(newProjectId),
+      spaceId: BigInt(spaceId),
+      title: `${project.title}（副本）`,
+      genre: project.genre,
+      dramaType: project.dramaType,
+      ratio: project.ratio,
+      sourceType: project.sourceType,
+      sourceText: project.sourceText,
+      status: 1,
+      isSample: 0,
+    });
+
+    const eps = await db.select().from(episodes).where(eq(episodes.projectId, project.id));
+    for (const ep of eps) {
+      await db.insert(episodes).values({
+        id: BigInt(newId()),
+        projectId: BigInt(newProjectId),
+        epNo: ep.epNo,
+        title: ep.title,
+        synopsis: ep.synopsis,
+        scriptText: ep.scriptText,
+        status: ep.status,
+      });
+    }
+
+    const chars = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character")));
+    for (const c of chars) {
+      await db.insert(projectAssets).values({
+        id: BigInt(newId()),
+        projectId: BigInt(newProjectId),
+        kind: c.kind,
+        name: c.name,
+        description: c.description,
+        prompt: c.prompt,
+        refImageUri: c.refImageUri,
+        portraitAssetId: c.portraitAssetId,
+        status: c.status,
+      });
+    }
+
+    return { id: newProjectId, episodes: eps.length, characters: chars.length };
   }
 
   async getProject(spaceId: string, projectId: string) {

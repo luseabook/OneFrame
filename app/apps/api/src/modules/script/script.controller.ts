@@ -34,6 +34,41 @@ export class ScriptController {
     return this.script.listProjects(req.auth?.spaceId ?? "", Number(page ?? 1), Number(pageSize ?? 20));
   }
 
+  /** 作品库（PRD 增补 §1.3）：以「剧」为单位聚合成果 */
+  @Get("works")
+  async works(
+    @Req() req: AuthedRequest,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
+  ) {
+    return this.script.listWorks(req.auth?.spaceId ?? "", {
+      status,
+      page: Number(page ?? 1),
+      pageSize: Number(pageSize ?? 24),
+    });
+  }
+
+  /** 归档 / 恢复作品 */
+  @Post("projects/:id/archive")
+  async setArchived(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const archived = Boolean((body as { archived?: boolean } | null)?.archived ?? true);
+    return this.script.setArchived(req.auth?.spaceId ?? "", id, archived);
+  }
+
+  /** 二次创作：新增空集（复用已定稿角色） */
+  @Post("projects/:id/episodes")
+  async createEpisodes(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const count = Number((body as { count?: number } | null)?.count ?? 1);
+    return this.script.addEpisodes(req.auth?.spaceId ?? "", id, count);
+  }
+
+  /** 复制为我的项目（示例作品体验，PRD 增补 §3.2） */
+  @Post("projects/:id/duplicate")
+  async duplicate(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.script.duplicateProject(req.auth?.spaceId ?? "", id);
+  }
+
   @Get("projects/:id")
   async detail(@Req() req: AuthedRequest, @Param("id") id: string) {
     return this.script.getProject(req.auth?.spaceId ?? "", id);
@@ -49,6 +84,7 @@ export class ScriptController {
   async archive(@Req() req: AuthedRequest, @Param("id") id: string) {
     return this.script.archiveProject(req.auth?.spaceId ?? "", id);
   }
+
 
   @Post("projects/:id/episodes/split")
   async split(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {

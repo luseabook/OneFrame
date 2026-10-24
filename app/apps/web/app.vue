@@ -5,6 +5,7 @@ const route = useRoute();
 
 const workspacePaths = [
   "/home",
+  "/works",
   "/projects",
   "/assets",
   "/tasks",

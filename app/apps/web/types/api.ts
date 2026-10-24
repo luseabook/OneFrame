@@ -105,7 +105,18 @@ export interface ProjectDto {
   source_type: number;
   source_text: string | null;
   status: number;
+  archived_at?: string | null;
+  is_sample?: boolean;
   created_at: string;
+}
+
+/** 作品（作品=项目，PRD 增补 §1.3）：带成果聚合 */
+export interface WorkDto extends ProjectDto {
+  episode_count: number;
+  shot_count: number;
+  done_count: number;
+  cover_uri: string | null;
+  work_state: "draft" | "producing" | "ready" | "archived";
 }
 
 export interface EpisodeDto {

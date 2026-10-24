@@ -7,7 +7,8 @@ const router = useRouter();
 
 const mainNav = [
   { to: "/home", label: "首页", icon: "home" },
-  { to: "/projects", label: "全部项目", icon: "film" },
+  { to: "/works", label: "我的作品", icon: "film" },
+  { to: "/projects", label: "全部项目", icon: "folder" },
   { to: "/tools", label: "工具箱", icon: "wand" },
 ];
 const teamNav = [
