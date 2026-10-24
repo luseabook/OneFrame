@@ -30,6 +30,11 @@ const envSchema = z.object({
   DEEPSEEK_BASE_URL: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default("deepseek-chat"),
 
+  // 运营后台（独立 admin_users；生产必须显式配置）
+  ADMIN_USERNAME: z.string().optional(),
+  ADMIN_PASSWORD: z.string().min(8).optional(),
+  ADMIN_JWT_TTL_S: z.coerce.number().int().min(300).default(7200),
+
   // 结果存储（ADR-005：生产替换为 OSS/S3 driver）
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
   STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),
