@@ -284,9 +284,14 @@ export class TasksService {
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
 
     const rawResults = Array.isArray(row.results)
-      ? (row.results as Array<{ uri?: string; preview_uri?: string; text?: string }>)
+      ? (row.results as Array<{
+          uri?: string;
+          preview_uri?: string;
+          text?: string;
+          meta?: { ai_label?: unknown };
+        }>)
       : [];
-    const results: Array<{ url: string; preview_url?: string; text?: string }> = [];
+    const results: Array<{ url: string; preview_url?: string; text?: string; ai_label?: unknown }> = [];
     for (const item of rawResults) {
       if (!item.uri && !item.text) continue;
       const isStorageKey = item.uri && !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
@@ -299,6 +304,7 @@ export class TasksService {
         url,
         ...(item.text ? { text: item.text } : {}),
         ...(item.preview_uri ? { preview_url: item.preview_uri } : {}),
+        ...(item.meta?.ai_label ? { ai_label: item.meta.ai_label } : {}),
       });
     }
 

@@ -5,6 +5,7 @@ import type { GenResult, AdapterRuntimeOptions } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
 import type { StorageDriver } from "@app/storage";
 import { newId, TaskStatus, type GenerationRequest } from "@app/shared";
+import { labelResults, type AiLabelConfig } from "./label";
 
 export type TaskRow = typeof tasks.$inferSelect;
 
@@ -13,6 +14,7 @@ export interface ExecutorDeps {
   storage: StorageDriver;
   adapterOptions: AdapterRuntimeOptions;
   log?: (obj: Record<string, unknown>, msg: string) => void;
+  aiLabel?: AiLabelConfig;
   pollIntervalMs?: number;
   maxPollMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -71,6 +73,15 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
   for (let i = 0; i < results.length; i += 1) {
     transferred.push(await transferResult(deps, task, i, results[i]!, contentType));
   }
+  const labeled = deps.aiLabel
+    ? await labelResults(
+        deps.storage,
+        { id: String(task.id), capability: task.capability },
+        transferred,
+        deps.aiLabel,
+        deps.log,
+      )
+    : transferred;
 
   await deps.db.transaction(async (tx) => {
     const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for("update");
@@ -87,7 +98,7 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
       .set({
         status: TaskStatus.SUCCEEDED,
         progress: 100,
-        results: transferred,
+        results: labeled,
         creditsSettled: fresh.creditsFrozen,
         finishedAt: new Date(),
         expireAt: new Date(Date.now() + 90 * 24 * 3600 * 1000),
@@ -103,7 +114,7 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
       });
     }
     // 定妆图任务：成功结果自动资产化并置角色定稿（未定稿角色不得被分镜引用）
-    if (fresh.capability === "image" && transferred[0]?.uri) {
+    if (fresh.capability === "image" && labeled[0]?.uri) {
       const [portrait] = await tx
         .select()
         .from(projectAssets)
@@ -114,8 +125,8 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
           id: assetId,
           spaceId: fresh.spaceId,
           kind: "image",
-          uri: transferred[0].uri,
-          previewUri: transferred[0].preview_uri ?? null,
+          uri: labeled[0].uri,
+          previewUri: labeled[0].preview_uri ?? null,
           sourceTaskId: fresh.id,
           name: portrait.name,
           tags: ["portrait"],
@@ -125,7 +136,7 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
           .update(projectAssets)
           .set({
             portraitAssetId: assetId,
-            refImageUri: transferred[0].uri,
+            refImageUri: labeled[0].uri,
             status: 2,
             finalizedAt: new Date(),
             updatedAt: new Date(),
@@ -154,7 +165,7 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
       id: newId(),
       taskId: fresh.id,
       type: "task.succeeded",
-      payload: { results: transferred.length },
+      payload: { results: labeled.length },
     });
   });
 }

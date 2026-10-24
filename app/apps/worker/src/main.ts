@@ -48,11 +48,19 @@ const adapterOptions: AdapterRuntimeOptions = {
     : {}),
 };
 
+const aiLabel = {
+  enabled: process.env.AI_LABEL_ENABLED !== "false",
+  text: process.env.AI_LABEL_TEXT ?? "AI生成",
+  fontPath: process.env.AI_LABEL_FONT_PATH,
+  ffmpegPath: process.env.FFMPEG_PATH,
+};
+
 const { db } = createDb(databaseUrl);
 const deps: ExecutorDeps = {
   db,
   storage,
   adapterOptions,
+  aiLabel,
   log: (obj, msg) => log.info(obj, msg),
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 1000),
   maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),

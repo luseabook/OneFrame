@@ -24,6 +24,15 @@
 | B4 | 模型供应商资质核查 | — | 合同确认其模型已备案（火山/百炼/可灵主模型均已完成，留存证明） | 签约时 |
 | B5 | 训练数据声明 | 暂办法 | 我们不训练模型（纯调用），用户协议声明"基于第三方已备案模型" | Alpha |
 
+## B3 实现状态（2026-10-24，MVP）
+
+- worker `apps/worker/src/label.ts`：任务成功后统一加标——
+  - 显式：ffmpeg `drawtext` 水印（默认「AI生成」）+ 容器 metadata（artist/comment/ai_generated）；
+  - 隐式：结果旁车 `<key>.ai.json` + task result `meta.ai_label`；导出 manifest 汇总 `ai_label`；
+  - 无 ffmpeg/媒体不可解码：降级为仅隐式并写入 `explicit_reason`，不阻断出片；
+- 开关：`AI_LABEL_ENABLED`（上线必须 true）、`AI_LABEL_TEXT`、`AI_LABEL_FONT_PATH`、`FFMPEG_PATH`；
+- 待办：真实供应商结果/图片显式抽验、运营后台标识审计导出。
+
 ## C. 内容安全义务
 
 | # | 事项 | 说明 |

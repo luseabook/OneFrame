@@ -57,6 +57,7 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] F3 分享：7 天 token、公开只读页 `/share/:token`、撤销
 - [x] 资产库：图片上传/压缩/列表/软删 + 预签名缩略图
 - [x] F3 图生视频工具：资产参考图 → image2video 报价/任务/轮询
+- [x] AI 双标识最小闭环：显式 ffmpeg 水印 + 隐式元数据/旁车清单（失败降级仅隐式，记录原因）
 - [ ] P1' 剩余：候选定妆图选择、导出失败重试
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）

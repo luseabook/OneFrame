@@ -54,6 +54,7 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
       export_id: exportId,
       episode: { ep_no: episode.epNo, title: episode.title, synopsis: episode.synopsis },
       generated_at: new Date().toISOString(),
+      ai_label: { ai_generated: true, standard: "GB 45438 / 生成合成内容标识办法", explicit: false, implicit: true },
       shots: [] as Array<Record<string, unknown>>,
     };
 
@@ -64,6 +65,9 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
       const fileName = `shot-${String(shot.shotNo).padStart(2, "0")}.mp4`;
       try {
         zip.file(fileName, await readResult(deps.storage, uri));
+        const resultMeta = (task?.results as Array<{ meta?: { ai_label?: { explicit?: boolean } } }> | null)?.[0]?.meta;
+        const aiLabel = resultMeta?.ai_label;
+        if (aiLabel?.explicit) manifest.ai_label.explicit = true;
         manifest.shots.push({
           shot_no: shot.shotNo,
           shot_desc: shot.shotDesc,
@@ -72,6 +76,7 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
           resolution: shot.resolution,
           task_id: shot.videoTaskId ? String(shot.videoTaskId) : null,
           file: fileName,
+          ai_label: aiLabel ?? null,
         });
       } catch (error) {
         deps.log?.(
