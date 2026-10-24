@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, exportJobs, projectAssets, storyboards, tasks } from "@app/db";
+import { createDb, exportJobs, assets, projectAssets, storyboards, tasks } from "@app/db";
 import { newId } from "@app/shared";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
@@ -170,6 +170,45 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(res.data.items).toHaveLength(shotIds.length);
     expect(res.data.items.every((item: { code?: number }) => item.code === 400105)).toBe(true);
     expect(res.data.budget_exceeded).toBe(false);
+  });
+
+  it("promotes a finalized portrait to a general asset with a #role tag", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    const me = await inject("GET", "/me");
+    const spaceId = String(me.data.space.id);
+    try {
+      // 直接构造一个已定稿角色 + 对应资产
+      const assetId = newId();
+      const uri = `u/test/portrait-${Date.now()}.png`;
+      const storage = app.get(StorageService);
+      await storage.put(uri, Buffer.from("portrait"), "image/png");
+      const [character] = await db
+        .select()
+        .from(projectAssets)
+        .where(eq(projectAssets.id, BigInt(characterId)));
+      await db.insert(assets).values({
+        id: assetId,
+        spaceId: BigInt(spaceId),
+        kind: "image",
+        uri,
+        name: character!.name,
+        tags: ["portrait"],
+      });
+      await db
+        .update(projectAssets)
+        .set({ status: 2, refImageUri: uri, portraitAssetId: assetId })
+        .where(eq(projectAssets.id, BigInt(characterId)));
+    } finally {
+      await pool.end();
+    }
+    const res = await inject("POST", `/projects/${projectId}/characters/${characterId}/to-asset`, {});
+    expect(res.code).toBe(0);
+    expect(res.data.tags).toContain(`#${res.data.name}`);
+
+    // 资产库可用 #角色 标签检索到
+    const list = await inject("GET", `/assets?tag=${encodeURIComponent(`#${res.data.name}`)}`);
+    expect(list.code).toBe(0);
+    expect(list.data.list.length).toBeGreaterThan(0);
   });
 
   it("reuses an in-flight shot task on re-submission without double charging", async () => {

@@ -219,6 +219,16 @@ async function prefillBudget(): Promise<void> {
   });
 }
 
+async function promoteCharacter(character: CharacterDto): Promise<void> {
+  await run("转存通用资产", async () => {
+    const res = await api.post<{ asset_id: string; tags: string[] }>(
+      `/projects/${projectId.value}/characters/${character.id}/to-asset`,
+      {},
+    );
+    info.value = `已转存为通用资产（${res.tags.join("、")}），可在资产库跨项目复用`;
+  });
+}
+
 async function generateCharacters(): Promise<void> {
   await run("生成角色", async () => {
     await api.post(`/projects/${projectId.value}/characters/generate`, { count: 5 });
@@ -521,6 +531,13 @@ onUnmounted(() => {
                   定稿
                 </Button>
                 <button v-if="c.source_task_id && c.status === 2" class="mini" @click="loadCandidates(c)">候选图</button>
+                <button
+                  v-if="c.portrait_asset_id && c.status === 2"
+                  class="mini"
+                  @click="promoteCharacter(c)"
+                >
+                  转通用资产
+                </button>
                 <NuxtLink v-if="c.source_task_id" class="mini" to="/tasks">任务详情</NuxtLink>
               </div>
             </article>

@@ -606,6 +606,43 @@ export class ScriptService {
     return assetDto(updated, await this.storage.signDownload(picked.uri!, 3600));
   }
 
+  // 定妆图转存为通用资产（跨项目复用，自动打 #角色 标签）
+  async characterToAsset(spaceId: string, projectId: string, characterId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+    if (!character.portraitAssetId || !character.refImageUri) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "character portrait not finalized");
+    }
+    const tag = `#${character.name}`;
+    const [current] = await db
+      .select()
+      .from(assets)
+      .where(and(eq(assets.id, character.portraitAssetId), eq(assets.spaceId, BigInt(spaceId))));
+    if (!current) throw new AppError(ErrorCode.NOT_FOUND, "portrait asset not found");
+    const mergedTags = Array.from(new Set([...(current.tags ?? []), tag])).slice(0, 20);
+    const [asset] = await db
+      .update(assets)
+      .set({
+        name: character.name,
+        tags: mergedTags,
+        meta: {
+          ...(typeof current.meta === "object" && current.meta ? current.meta : {}),
+          promoted_to_general_asset: true,
+          project_id: String(project.id),
+          project_asset_id: String(character.id),
+        },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(assets.id, character.portraitAssetId), eq(assets.spaceId, BigInt(spaceId))))
+      .returning();
+    if (!asset) throw new AppError(ErrorCode.NOT_FOUND, "portrait asset not found");
+    return {
+      ...assetDto(character, await this.storage.signDownload(character.refImageUri, 3600)),
+      asset_id: String(asset.id),
+      tags: asset.tags,
+    };
+  }
+
   async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);

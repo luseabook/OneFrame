@@ -95,6 +95,15 @@ export class ScriptController {
     return this.script.generateStoryboards(req.auth?.spaceId ?? "", id, eid, input);
   }
 
+  @Post("projects/:id/characters/:cid/to-asset")
+  async characterToAsset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("cid") cid: string,
+  ) {
+    return this.script.characterToAsset(req.auth?.spaceId ?? "", id, cid);
+  }
+
   @Get("projects/:id/shot-materials")
   async shotMaterials(@Req() req: AuthedRequest, @Param("id") id: string) {
     return this.script.listShotMaterials(req.auth?.spaceId ?? "", id);

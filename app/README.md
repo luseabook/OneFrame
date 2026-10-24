@@ -73,7 +73,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] 资产目录/标签筛选、回收站 7 天清理、90 天到期提醒与结果清理
 - [x] 任务结果「加入项目当分镜素材」；运营后台流水线漏斗看板（转化率）
 - [x] 失败率/adapter 延迟/失败清单 CSV 导出；分镜失败重投幂等（不重复扣费）；续投预算预填；价格表未覆盖时长时就近低档计费
-- [ ] PRD 验收剩余：定妆图转公共资产专用入口、供应商审核、支付 Beta、真实 Key/备案（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
+- [x] 定妆图转通用资产（自动打 `#角色` 标签，跨项目复用）
+- [ ] PRD 验收剩余：供应商审核（输出 745802）、支付 Beta、真实 Key/备案（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 
