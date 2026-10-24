@@ -13,9 +13,10 @@ coverage/
 !.env.example
 !**/.env.example
 
-# Local tool state (agent hooks / memory)
+# Local tool state (agent hooks / memory) / local object storage
 .mimosa/
 .workbuddy/
+data/
 
 # Reverse-engineering raw captures are intentionally NOT versioned (large / privacy).
 # Only curated evidence is tracked: report, model catalog, routes, CLI skill/contracts, screenshots.

@@ -10,7 +10,7 @@
 
 ```
 .
-├─ app/                     # P0 monorepo（pnpm + turbo）：api / worker / web / shared / model-adapters
+├─ app/                     # monorepo（pnpm + turbo）：api / worker / web / shared / db / storage / model-adapters
 │  └─ README.md             # 代码结构、快速开始、P0 状态
 ├─ docs/                    # 文档体系（唯一事实来源）
 │  ├─ README.md             # 文档地图与变更登记（v1.3）

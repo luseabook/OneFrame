@@ -16,6 +16,8 @@ export interface NormalizedGenRequest {
 
 export interface GenResult {
   uri: string;
+  /** 同步文本结果（LLM 步骤）；媒体结果用 uri */
+  text?: string;
   preview_uri?: string;
   duration_s?: number;
   width?: number;
@@ -45,16 +47,3 @@ export class NotImplementedError extends Error {
     this.name = "NotImplementedError";
   }
 }
-
-export const makeStubAdapter = (vendor: string): ModelAdapter => ({
-  vendor,
-  submit: async () => {
-    throw new NotImplementedError(vendor);
-  },
-  poll: async () => {
-    throw new NotImplementedError(vendor);
-  },
-  cancel: async () => {
-    throw new NotImplementedError(vendor);
-  },
-});

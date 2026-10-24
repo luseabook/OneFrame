@@ -19,6 +19,7 @@ import {
 } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
+import { StorageService } from "../../storage/storage.service";
 import { CreditsService } from "../credits/credits.service";
 import { ModelsService } from "../models/models.service";
 
@@ -46,6 +47,7 @@ export class TasksService {
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(ModelsService) private readonly models: ModelsService,
     @Inject(QueueService) private readonly queue: QueueService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   toDto(row: TaskRow): TaskDto {
@@ -236,7 +238,12 @@ export class TasksService {
       : [];
     const item = results[index - 1];
     if (!item?.uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
-    return { url: item.uri, filename: `task-${row.id}-${index}.mp4` };
+
+    // 存储 key（无协议前缀）→ 预签名；mock/外部 URL 原样返回
+    const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
+    const url = isStorageKey ? await this.storage.signDownload(item.uri, 86_400) : item.uri;
+    const ext = item.uri.split(".").pop()?.toLowerCase() || "bin";
+    return { url, filename: `task-${row.id}-${index}.${ext}`, expires_in: 86_400 };
   }
 
   private async findTask(spaceId: string, id: string): Promise<TaskRow> {

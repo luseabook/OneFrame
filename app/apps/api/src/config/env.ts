@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { z } from "zod";
 
 // 配置层：启动即校验，缺失/非法直接崩（docs/04-engineering/dev-workflow.md §5）
@@ -22,6 +23,12 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
   QUOTE_TTL_S: z.coerce.number().int().min(30).default(300),
+
+  // 结果存储（ADR-005：生产替换为 OSS/S3 driver）
+  STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),
+  STORAGE_PUBLIC_BASE: z.string().default("http://127.0.0.1:3000/v1"),
+  STORAGE_SIGN_SECRET: z.string().min(8).default("dev-only-storage-sign-secret"),
 });
 
 export const env = envSchema.parse(process.env);

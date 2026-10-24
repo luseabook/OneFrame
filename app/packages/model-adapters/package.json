@@ -8,12 +8,14 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src",
-    "test": "echo 'adapters: contract tests land in P1 (docs/04-engineering/testing.md §4)' && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@app/shared": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

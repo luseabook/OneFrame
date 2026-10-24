@@ -10,12 +10,14 @@ import { ModelsModule } from "./modules/models/models.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
+import { StorageModule } from "./storage/storage.module";
 
 // 模块化单体入口（docs/02-architecture/system-design.md §2）
 @Module({
   imports: [
     RedisModule,
     QueueModule,
+    StorageModule,
     AuthModule,
     ModelsModule,
     CreditsModule,
