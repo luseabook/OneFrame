@@ -15,6 +15,7 @@ const detail = ref<TaskDto | null>(null);
 const shareInfo = ref<{ share_path: string; expires_at: string } | null>(null);
 const error = ref("");
 const info = ref("");
+const expiring = ref<Array<{ task_id: string; days_left: number }>>([]);
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function load(): Promise<void> {
@@ -23,6 +24,11 @@ async function load(): Promise<void> {
   const data = await api.get<{ list: TaskDto[]; total: number }>(`/tasks?${query.toString()}`);
   list.value = data.list;
   total.value = data.total;
+  try {
+    expiring.value = await api.get<Array<{ task_id: string; days_left: number }>>("/assets/expiring-tasks");
+  } catch {
+    expiring.value = [];
+  }
 }
 
 async function openDetail(item: TaskDto): Promise<void> {
@@ -157,6 +163,10 @@ onUnmounted(() => {
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="info" class="info">{{ info }}</p>
+    <p v-if="expiring.length > 0" class="expiring">
+      有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
+      <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
+    </p>
 
     <div class="table">
       <div class="row head-row">
@@ -322,6 +332,18 @@ h1 {
 .info {
   color: var(--text-2);
   font-size: 13px;
+}
+.expiring {
+  background: #78350f;
+  border: 1px solid #f59e0b;
+  color: #fde68a;
+  padding: 8px 12px;
+  border-radius: var(--radius-m);
+  font-size: 12px;
+}
+.expiring a {
+  color: #fff;
+  text-decoration: underline;
 }
 .kv {
   display: flex;

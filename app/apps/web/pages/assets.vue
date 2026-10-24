@@ -11,12 +11,15 @@ const uploading = ref(false);
 const error = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
 const showDeleted = ref(false);
+const folders = ref<Array<{ id: string; name: string }>>([]);
+const folderFilter = ref("");
 
 async function load(): Promise<void> {
   loading.value = true;
   try {
+    const suffix = folderFilter.value ? `&folder_id=${folderFilter.value}` : "";
     const data = await api.get<{ list: AssetDto[]; total: number }>(
-      `/assets?page=1&page_size=60&deleted=${showDeleted.value}`,
+      `/assets?page=1&page_size=60&deleted=${showDeleted.value}${suffix}`,
     );
     list.value = data.list;
     total.value = data.total;
@@ -88,7 +91,28 @@ async function remove(asset: AssetDto): Promise<void> {
   }
 }
 
-onMounted(load);
+async function loadFolders(): Promise<void> {
+  try {
+    folders.value = await api.get<Array<{ id: string; name: string }>>("/asset-folders");
+  } catch {
+    folders.value = [];
+  }
+}
+
+async function createFolder(): Promise<void> {
+  const name = prompt("新目录名称");
+  if (!name) return;
+  try {
+    await api.post("/asset-folders", { name });
+    await loadFolders();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "创建目录失败";
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([load(), loadFolders()]);
+});
 </script>
 
 <template>
@@ -97,6 +121,11 @@ onMounted(load);
       <h1>资产库</h1>
       <div class="actions">
         <span class="muted">共 {{ total }} 个 · 图片会自动压缩到 ≤1600px</span>
+        <select v-model="folderFilter" class="input" @change="load">
+          <option value="">全部目录</option>
+          <option v-for="folder in folders" :key="folder.id" :value="folder.id">{{ folder.name }}</option>
+        </select>
+        <Button variant="ghost" @click="createFolder">新建目录</Button>
         <Button variant="ghost" @click="switchDeleted">{{ showDeleted ? "返回资产库" : "回收站" }}</Button>
         <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onFile" />
         <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">{{ uploading ? "上传中…" : "上传图片" }}</Button>

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { z } from "zod";
 import { assetUploadSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
@@ -15,13 +15,49 @@ export class AssetsController {
     @Query("page") page?: string,
     @Query("page_size") pageSize?: string,
     @Query("deleted") deleted?: string,
+    @Query("folder_id") folderId?: string,
+    @Query("tag") tag?: string,
   ) {
     return this.assets.list(
       req.auth?.spaceId ?? "",
       Number(page ?? 1),
       Number(pageSize ?? 20),
       deleted === "true",
+      folderId,
+      tag,
     );
+  }
+
+  @Get("assets/expiring-tasks")
+  async expiring(@Req() req: AuthedRequest) {
+    return this.assets.expiringTasks(req.auth?.spaceId ?? "");
+  }
+
+  @Get("asset-folders")
+  async folders(@Req() req: AuthedRequest) {
+    return this.assets.listFolders(req.auth?.spaceId ?? "");
+  }
+
+  @Post("asset-folders")
+  async createFolder(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(
+      z.object({ name: z.string().min(1).max(80), parent_id: z.string().optional() }),
+      body,
+    );
+    return this.assets.createFolder(req.auth?.spaceId ?? "", input.name, input.parent_id);
+  }
+
+  @Patch("assets/:id")
+  async patchAsset(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(
+      z.object({
+        folder_id: z.string().nullable().optional(),
+        tags: z.array(z.string().max(30)).max(20).optional(),
+        name: z.string().min(1).max(200).optional(),
+      }),
+      body,
+    );
+    return this.assets.updateAsset(req.auth?.spaceId ?? "", id, input);
   }
 
   @Post("assets/from-task")

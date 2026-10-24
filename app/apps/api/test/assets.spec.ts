@@ -88,6 +88,53 @@ describe("assets upload/list/delete", () => {
     expect(quote.data.sufficient).toBe(true);
   });
 
+  it("creates a folder and tags an asset", async () => {
+    const folder = await inject("POST", "/asset-folders", { name: "角色参考" });
+    expect(folder.code).toBe(0);
+    const folderId = folder.data.id as string;
+
+    const patched = await inject("PATCH", `/assets/${assetId}`, {
+      folder_id: folderId,
+      tags: ["#角色A", "参考"],
+    });
+    expect(patched.code).toBe(0);
+    expect(patched.data.tags).toContain("#角色A");
+
+    const filtered = await inject("GET", `/assets?folder_id=${folderId}`);
+    expect(filtered.code).toBe(0);
+    expect(filtered.data.list.some((item: { id: string }) => item.id === assetId)).toBe(true);
+  });
+
+  it("returns tasks whose results expire within 7 days", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      const key = `u/${spaceId}/tasks/expiring-${Date.now()}.mp4`;
+      const taskId = newId();
+      const old = new Date(Date.now() - 85 * 86_400_000);
+      await db.insert(tasks).values({
+        id: taskId,
+        spaceId: BigInt(spaceId),
+        userId: BigInt(userId),
+        capability: "video",
+        mode: "text2video",
+        modelId: 1001n,
+        input: { prompt: "expiring" },
+        options: {},
+        status: 3,
+        results: [{ uri: key }],
+        createdAt: old,
+        updatedAt: old,
+      });
+      const res = await inject("GET", "/assets/expiring-tasks");
+      expect(res.code).toBe(0);
+      const row = res.data.find((item: { task_id: string }) => item.task_id === String(taskId));
+      expect(row).toBeTruthy();
+      expect(row.days_left).toBeLessThanOrEqual(7);
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("transfers a succeeded task result and restores it from recycle bin", async () => {
     const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
     try {

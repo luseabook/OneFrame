@@ -70,7 +70,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] F2 大纲防抖自动保存、按批量报价预填预算、duration_adjusted 回写；F6 积分流水页
 - [x] F7 敏感词输入审核（745801，生成/项目/大纲/角色/分镜入口）+ 全站页脚举报入口
 - [x] 任务结果转存资产 + 资产回收站恢复；普通用户访问 admin 返回 403
-- [ ] PRD 验收剩余：资产目录/标签/90 天提醒、加入项目当分镜、供应商审核/漏斗看板、续投预填（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
+- [x] 资产目录/标签筛选、回收站 7 天清理、90 天到期提醒与结果清理
+- [ ] PRD 验收剩余：加入项目当分镜、定妆图转公共资产、供应商审核/漏斗看板、续投预填（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

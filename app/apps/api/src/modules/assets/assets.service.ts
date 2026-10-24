@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { assets, tasks } from "@app/db";
+import { and, desc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { assetFolders, assets, tasks } from "@app/db";
 import { AppError, ErrorCode, TaskStatus, newId, type AssetUploadRequest } from "@app/shared";
 import { db } from "../../db/database";
 import { StorageService } from "../../storage/storage.service";
@@ -86,12 +86,97 @@ export class AssetsService {
     return this.toDto(row);
   }
 
-  async list(spaceId: string, page = 1, pageSize = 20, deleted = false) {
+  async listFolders(spaceId: string) {
+    const rows = await db
+      .select()
+      .from(assetFolders)
+      .where(eq(assetFolders.spaceId, BigInt(spaceId)))
+      .orderBy(assetFolders.name);
+    return rows.map((row) => ({
+      id: String(row.id),
+      parent_id: row.parentId ? String(row.parentId) : null,
+      name: row.name,
+      created_at: row.createdAt.toISOString(),
+    }));
+  }
+
+  async createFolder(spaceId: string, name: string, parentId?: string) {
+    const [row] = await db
+      .insert(assetFolders)
+      .values({
+        id: newId(),
+        spaceId: BigInt(spaceId),
+        name: name.slice(0, 80),
+        parentId: parentId ? BigInt(parentId) : null,
+      })
+      .returning();
+    if (!row) throw new AppError(ErrorCode.INTERNAL, "folder create failed");
+    return { id: String(row.id), name: row.name, parent_id: row.parentId ? String(row.parentId) : null };
+  }
+
+  async updateAsset(
+    spaceId: string,
+    id: string,
+    input: { folder_id?: string | null; tags?: string[]; name?: string },
+  ) {
+    const bigId = this.parseId(id);
+    const [row] = await db
+      .update(assets)
+      .set({
+        ...(input.folder_id !== undefined
+          ? { folderId: input.folder_id === null ? null : BigInt(input.folder_id) }
+          : {}),
+        ...(input.tags !== undefined ? { tags: input.tags.slice(0, 20) } : {}),
+        ...(input.name !== undefined ? { name: input.name.slice(0, 200) } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(assets.id, bigId), eq(assets.spaceId, BigInt(spaceId)), isNull(assets.deletedAt)))
+      .returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    return this.toDto(row);
+  }
+
+  // 结果 90 天到期：返回未来 7 天内到期且未转存资产的任务结果
+  async expiringTasks(spaceId: string) {
+    const now = Date.now();
+    const cutoff = new Date(now - 83 * 86_400_000);
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.spaceId, BigInt(spaceId)),
+          eq(tasks.status, TaskStatus.SUCCEEDED),
+          lt(tasks.updatedAt, cutoff),
+          sql`jsonb_array_length(${tasks.results}) > 0`,
+        ),
+      )
+      .limit(50);
+    const transferred = await db
+      .select({ taskId: assets.sourceTaskId })
+      .from(assets)
+      .where(and(eq(assets.spaceId, BigInt(spaceId)), isNotNull(assets.sourceTaskId)));
+    const transferredIds = new Set(transferred.map((row) => String(row.taskId)));
+    return rows
+      .filter((row) => !transferredIds.has(String(row.id)))
+      .map((row) => {
+        const expiresAt = new Date(row.updatedAt.getTime() + 90 * 86_400_000);
+        return {
+          task_id: String(row.id),
+          expires_at: expiresAt.toISOString(),
+          days_left: Math.max(0, Math.ceil((expiresAt.getTime() - now) / 86_400_000)),
+        };
+      });
+  }
+
+  async list(spaceId: string, page = 1, pageSize = 20, deleted = false, folderId?: string, tag?: string) {
     const p = Math.max(1, page);
     const ps = Math.min(100, Math.max(1, pageSize));
     const where = and(
       eq(assets.spaceId, BigInt(spaceId)),
       deleted ? isNotNull(assets.deletedAt) : isNull(assets.deletedAt),
+      folderId ? eq(assets.folderId, BigInt(folderId)) : undefined,
+      tag ? sql`${tag} = ANY(${assets.tags})` : undefined,
     );
     const rows = await db
       .select()

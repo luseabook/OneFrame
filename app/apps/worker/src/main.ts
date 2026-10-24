@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
 import { Worker } from "bullmq";
+import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import pino from "pino";
-import { createDb } from "@app/db";
+import { assets, createDb, tasks } from "@app/db";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
@@ -103,6 +104,30 @@ const deps: ExecutorDeps = {
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 1000),
   maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),
 };
+
+// 定期维护：任务结果 90 天清理、回收站资产 7 天物理删除（PRD F5）
+async function runMaintenance(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 90 * 86_400_000);
+    await db
+      .update(tasks)
+      .set({ results: [], updatedAt: new Date() })
+      .where(and(eq(tasks.status, 3), lt(tasks.updatedAt, cutoff), sql`jsonb_array_length(${tasks.results}) > 0`));
+    const deleted = await db
+      .delete(assets)
+      .where(and(isNotNull(assets.deletedAt), lt(assets.deletedAt, new Date(Date.now() - 7 * 86_400_000))))
+      .returning({ id: assets.id });
+    log.info({ purged_assets: deleted.length }, "maintenance done");
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : String(err) }, "maintenance failed");
+  }
+}
+void runMaintenance();
+const maintenanceTimer = setInterval(
+  () => void runMaintenance(),
+  Number(process.env.MAINTENANCE_INTERVAL_MS ?? 6 * 3_600_000),
+);
+maintenanceTimer.unref();
 
 const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
   new Worker(
