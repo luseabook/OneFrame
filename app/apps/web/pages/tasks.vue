@@ -21,15 +21,20 @@ const projectTarget = ref("");
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function load(): Promise<void> {
+  loading.value = true;
   const query = new URLSearchParams({ page: String(page.value), page_size: String(pageSize) });
   if (statusFilter.value) query.set("status", statusFilter.value);
-  const data = await api.get<{ list: TaskDto[]; total: number }>(`/tasks?${query.toString()}`);
-  list.value = data.list;
-  total.value = data.total;
   try {
-    expiring.value = await api.get<Array<{ task_id: string; days_left: number }>>("/assets/expiring-tasks");
-  } catch {
-    expiring.value = [];
+    const data = await api.get<{ list: TaskDto[]; total: number }>(`/tasks?${query.toString()}`);
+    list.value = data.list;
+    total.value = data.total;
+    try {
+      expiring.value = await api.get<Array<{ task_id: string; days_left: number }>>("/assets/expiring-tasks");
+    } catch {
+      expiring.value = [];
+    }
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -158,240 +163,380 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
+// 状态筛选页签与颜色映射（UI 层，不改业务逻辑）
+const statusTabs = [
+  { value: "", label: "全部" },
+  { value: "1", label: "排队中" },
+  { value: "2", label: "生成中" },
+  { value: "3", label: "已完成" },
+  { value: "4", label: "失败" },
+  { value: "5", label: "已取消" },
+];
+function statusTone(status: number): "neutral" | "info" | "success" | "danger" | "warning" {
+  if (status === 3) return "success";
+  if (status === 4) return "danger";
+  if (status === 5) return "neutral";
+  if (status === 2) return "warning";
+  return "info";
+}
+const loading = ref(true);
 </script>
 
 <template>
-  <main class="page">
-    <div class="head">
-      <h1>任务中心</h1>
-      <div class="filters">
-        <select v-model="statusFilter" class="input" @change="page = 1; load()">
-          <option value="">全部状态</option>
-          <option value="1">排队中</option>
-          <option value="2">生成中</option>
-          <option value="3">已完成</option>
-          <option value="4">失败</option>
-          <option value="5">已取消</option>
-        </select>
-        <span class="muted">共 {{ total }} 条</span>
-        <Button variant="ghost" @click="batchDownload">批量下载 zip</Button>
+  <div class="tasks">
+    <header class="head">
+      <div>
+        <h1>任务中心</h1>
+        <p class="sub">按「次」查看执行状态；成果请到作品库按剧查看。</p>
       </div>
-    </div>
+      <div class="actions">
+        <Button variant="ghost" size="sm" @click="batchDownload">批量下载 zip</Button>
+      </div>
+    </header>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="info" class="info">{{ info }}</p>
-    <p v-if="expiring.length > 0" class="expiring">
-      有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
+    <!-- 状态筛选 -->
+    <nav class="status-tabs">
+      <button
+        v-for="s in statusTabs"
+        :key="s.value"
+        class="s-tab"
+        :class="{ on: statusFilter === s.value }"
+        @click="statusFilter = s.value; page = 1; load()"
+      >
+        {{ s.label }}
+      </button>
+      <span class="total">共 {{ total }} 条</span>
+    </nav>
+
+    <p v-if="error" class="err">{{ error }}</p>
+    <p v-if="info" class="ok">{{ info }}</p>
+
+    <p v-if="expiring.length > 0" class="warn">
+      <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
       <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
     </p>
 
-    <div class="table">
-      <div class="row head-row">
-        <span>任务</span><span>状态</span><span>模式</span><span>积分</span><span>创建时间</span><span>操作</span>
-      </div>
-      <div v-for="item in list" :key="item.task_id" class="row">
-        <button class="link" @click="openDetail(item)">{{ item.task_id.slice(-8) }}</button>
-        <span class="badge" :data-status="item.status">{{ statusLabel(item.status) }}</span>
-        <span>{{ item.mode }}</span>
-        <span>{{ item.credits_frozen }}</span>
-        <span class="muted">{{ new Date(item.created_at).toLocaleString() }}</span>
-        <span class="ops">
-          <button class="mini" :disabled="item.status !== 3" @click="download(item)">下载</button>
-          <button class="mini" :disabled="!canCancel(item)" @click="cancel(item)">取消</button>
-          <button class="mini" :disabled="item.status !== 4" @click="retry(item)">重试</button>
-        </span>
-      </div>
-      <p v-if="list.length === 0" class="muted empty">暂无任务</p>
-    </div>
+    <Skeleton v-if="loading" :rows="4" />
 
-    <div class="pager">
-      <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
-      <span class="muted">第 {{ page }} 页</span>
-      <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
-    </div>
+    <template v-else>
+      <div v-if="list.length" class="task-table">
+        <div class="t-row t-head">
+          <span class="c-id">任务</span>
+          <span class="c-status">状态</span>
+          <span class="c-mode">模式</span>
+          <span class="c-credits">积分</span>
+          <span class="c-time">创建时间</span>
+          <span class="c-ops">操作</span>
+        </div>
+        <div v-for="item in list" :key="item.task_id" class="t-row">
+          <button class="id-link" @click="openDetail(item)">{{ item.task_id.slice(-8) }}</button>
+          <span class="c-status">
+            <Tag :tone="statusTone(item.status)" size="sm" dot>{{ statusLabel(item.status) }}</Tag>
+          </span>
+          <span class="c-mode mono">{{ item.mode }}</span>
+          <span class="c-credits mono">{{ item.credits_frozen }}</span>
+          <span class="c-time muted">{{ new Date(item.created_at).toLocaleString("zh-CN") }}</span>
+          <span class="c-ops ops">
+            <Button size="sm" variant="ghost" :disabled="item.status !== 3" @click="download(item)">下载</Button>
+            <Button size="sm" variant="text" :disabled="!canCancel(item)" @click="cancel(item)">取消</Button>
+            <Button size="sm" variant="text" :disabled="item.status !== 4" @click="retry(item)">重试</Button>
+          </span>
+        </div>
+      </div>
 
-    <Modal :open="!!detail" title="任务详情" @close="detail = null">
+      <EmptyState
+        v-else
+        icon="◷"
+        title="暂无任务"
+        description="在工具箱或流水线投递后会出现在这里；可用顶部状态筛选查看。"
+      >
+        <Button @click="$router.push('/create/text-to-video')">去生成</Button>
+      </EmptyState>
+
+      <div v-if="total > pageSize" class="pager">
+        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
+        <span class="muted">第 {{ page }} 页</span>
+        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
+      </div>
+    </template>
+
+    <Modal :open="!!detail" title="任务详情" width="560px" @close="detail = null">
       <template v-if="detail">
-        <p class="kv"><span>任务 ID</span><code>{{ detail.task_id }}</code></p>
-        <p class="kv"><span>状态</span><span>{{ statusLabel(detail.status) }}</span></p>
-        <p class="kv"><span>模式</span><span>{{ detail.mode }}</span></p>
-        <p class="kv"><span>提示词</span><span>{{ detail.input?.prompt }}</span></p>
-        <p class="kv"><span>比例/分辨率</span><span>{{ detail.options?.ratio }} / {{ detail.options?.resolution }}</span></p>
-        <p class="kv"><span>结果</span><span>{{ detail.results?.[0]?.uri ?? "-" }}</span></p>
-        <p v-if="detail.error" class="error">{{ detail.error.message }}</p>
-        <div class="share">
-          <Button v-if="detail.status === 3" variant="ghost" @click="transferAsset">转存资产</Button>
-          <template v-if="detail.status === 3">
-            <select v-model="projectTarget" class="input">
+        <dl class="kv-list">
+          <div class="kv"><dt>任务 ID</dt><dd class="mono">{{ detail.task_id }}</dd></div>
+          <div class="kv">
+            <dt>状态</dt>
+            <dd><Tag :tone="statusTone(detail.status)" size="sm" dot>{{ statusLabel(detail.status) }}</Tag></dd>
+          </div>
+          <div class="kv"><dt>模式</dt><dd class="mono">{{ detail.mode }}</dd></div>
+          <div class="kv"><dt>提示词</dt><dd>{{ detail.input?.prompt || "—" }}</dd></div>
+          <div class="kv">
+            <dt>比例 / 分辨率</dt>
+            <dd>{{ detail.options?.ratio }} / {{ detail.options?.resolution }}</dd>
+          </div>
+          <div class="kv"><dt>结果</dt><dd class="mono break">{{ detail.results?.[0]?.uri ?? "—" }}</dd></div>
+        </dl>
+        <p v-if="detail.error" class="err">{{ detail.error.message }}</p>
+
+        <div v-if="detail.status === 3" class="detail-ops">
+          <p class="block-label">成果处理</p>
+          <div class="op-row">
+            <Button size="sm" variant="ghost" @click="transferAsset">转存资产</Button>
+            <Button size="sm" variant="ghost" @click="createShare">生成分享链接</Button>
+            <Button v-if="shareInfo" size="sm" variant="text" @click="revokeShare">取消分享</Button>
+            <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">
+              打开分享页 →
+            </NuxtLink>
+          </div>
+          <div class="op-row">
+            <select v-model="projectTarget" class="mini-select">
               <option value="">选择项目…</option>
               <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option>
             </select>
-            <Button variant="ghost" @click="addToProject">加入项目</Button>
-          </template>
-          <Button variant="ghost" @click="createShare">生成分享链接</Button>
-          <Button v-if="shareInfo" variant="ghost" @click="revokeShare">取消分享</Button>
-          <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">
-            打开分享页
-          </NuxtLink>
+            <Button size="sm" variant="ghost" @click="addToProject">加入项目当分镜</Button>
+          </div>
+          <p v-if="shareInfo" class="muted small">
+            分享有效期至 {{ new Date(shareInfo.expires_at).toLocaleString("zh-CN") }}
+          </p>
         </div>
-        <p v-if="shareInfo" class="muted">有效期至 {{ new Date(shareInfo.expires_at).toLocaleString() }}</p>
       </template>
     </Modal>
-  </main>
+  </div>
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  padding: 24px 32px;
-  max-width: 1080px;
-  width: 100%;
+.tasks {
+  max-width: 1180px;
   margin: 0 auto;
 }
 .head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
-h1 {
-  margin: 0;
-  font-size: 22px;
+.head h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
 }
-.filters {
+.sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.status-tabs {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-1);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-4);
 }
-.input {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-1);
+.s-tab {
+  background: none;
+  border: 0;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  color: var(--text-1);
-  padding: 8px 10px;
-  font-size: 13px;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
 }
-.table {
+.s-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.s-tab.on {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-weight: 600;
+}
+.total {
+  margin-left: auto;
+  color: var(--text-4);
+  font-size: var(--text-xs);
+}
+
+.err {
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+.ok {
+  padding: var(--space-3) var(--space-4);
+  background: var(--info-bg);
+  color: var(--info);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+.warn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #6b4d12;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+}
+.warn a {
+  color: var(--warning);
+  text-decoration: underline;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  flex-shrink: 0;
+}
+
+.task-table {
   border: 1px solid var(--border-1);
   border-radius: var(--radius-xl);
   overflow: hidden;
+  background: var(--bg-surface);
 }
-.row {
+.t-row {
   display: grid;
-  grid-template-columns: 120px 90px 1fr 70px 170px 200px;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-1);
+  grid-template-columns: 96px 96px minmax(0, 1fr) 72px 176px 208px;
+  gap: var(--space-3);
   align-items: center;
-  font-size: 13px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-1);
+  font-size: var(--text-sm);
 }
-.row:last-child {
+.t-row:last-child {
   border-bottom: 0;
 }
-.head-row {
-  background: var(--bg-raised);
+.t-row:not(.t-head):hover {
+  background: var(--bg-hover);
+}
+.t-head {
+  background: var(--bg-sunken);
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
-.badge {
-  font-size: 12px;
-  color: var(--text-2);
-}
-.badge[data-status="3"] {
-  color: #4ade80;
-}
-.badge[data-status="4"],
-.badge[data-status="7"] {
-  color: #ff6b6b;
-}
-.badge[data-status="2"],
-.badge[data-status="6"] {
-  color: #fbbf24;
-}
-.link {
+.id-link {
   background: none;
   border: 0;
-  color: var(--brand-500);
-  cursor: pointer;
   padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--brand-600);
+  cursor: pointer;
   text-align: left;
-  font-size: 12px;
+}
+.id-link:hover {
+  text-decoration: underline;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.muted {
+  color: var(--text-3);
 }
 .ops {
   display: flex;
-  gap: 6px;
-}
-.mini {
-  background: none;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.mini:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  gap: var(--space-1);
+  justify-content: flex-end;
 }
 .pager {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
 }
-.muted {
-  color: var(--text-3);
-  font-size: 12px;
-}
-.empty {
-  padding: 24px;
-  text-align: center;
-}
-.error {
-  color: #ff6b6b;
-  font-size: 13px;
-}
-.info {
-  color: var(--text-2);
-  font-size: 13px;
-}
-.expiring {
-  background: #78350f;
-  border: 1px solid #f59e0b;
-  color: #fde68a;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  font-size: 12px;
-}
-.expiring a {
-  color: #fff;
-  text-decoration: underline;
+
+.kv-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 .kv {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--text-2);
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
 }
-.kv span:first-child {
-  width: 84px;
+.kv dt {
   color: var(--text-3);
-  flex: none;
+  font-size: var(--text-xs);
 }
-code {
-  font-size: 11px;
+.kv dd {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+.break {
   word-break: break-all;
 }
-.share {
+.detail-ops {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-1);
+}
+.block-label {
+  margin: 0 0 var(--space-2);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.op-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.mini-select {
+  height: 28px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  padding: 0 var(--space-2);
+  outline: none;
 }
 .share-link {
-  color: var(--brand-500);
-  font-size: 12px;
+  color: var(--brand-600);
+  font-size: var(--text-sm);
+}
+.small {
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 1000px) {
+  .t-row {
+    grid-template-columns: 88px 92px minmax(0, 1fr) 176px;
+  }
+  .c-credits,
+  .c-mode {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .t-row {
+    grid-template-columns: 84px 88px 1fr;
+  }
+  .c-time {
+    display: none;
+  }
+  .ops .btn:not(:last-child) {
+    display: none;
+  }
 }
 </style>

@@ -5,6 +5,8 @@ interface AuthState {
   user: AuthUser | null;
   spaceId: string | null;
   credits: Credits | null;
+  /** 新手引导是否已关闭（PRD 增补 §3） */
+  onboarded: boolean;
 }
 
 // 访问 token 仅内存态；refresh 走 HttpOnly Cookie（ADR-008）
@@ -14,6 +16,7 @@ export const useAuth = () => {
     user: null,
     spaceId: null,
     credits: null,
+    onboarded: true,
   }));
   // 认证状态是否已确定：SSR 与客户端首次渲染时均为 false，
   // 用于避免登录态分支在 hydrate 前后渲染不一致（hydration mismatch）
@@ -91,14 +94,25 @@ export const useAuth = () => {
       user: data.user,
       spaceId: data.space.id,
       credits: data.credits,
+      onboarded: data.onboarded ?? true,
     };
+  }
+
+  /** 关闭新手引导条（持久化到服务端） */
+  async function dismissOnboarding(): Promise<void> {
+    state.value = { ...state.value, onboarded: true };
+    try {
+      await call("/me/onboarded", { method: "POST" });
+    } catch {
+      // 失败不阻断 UI；下次进入会再次提示
+    }
   }
 
   async function logout(): Promise<void> {
     try {
       if (state.value.accessToken) await call("/auth/logout", { method: "POST" });
     } finally {
-      state.value = { accessToken: "", user: null, spaceId: null, credits: null };
+      state.value = { accessToken: "", user: null, spaceId: null, credits: null, onboarded: true };
       ready.value = true;
     }
   }
@@ -116,5 +130,5 @@ export const useAuth = () => {
     }
   }
 
-  return { state, ready, login, refresh, me, logout, bootstrap };
+  return { state, ready, login, refresh, me, logout, bootstrap, dismissOnboarding };
 };

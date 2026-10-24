@@ -179,7 +179,18 @@ export class AuthService {
       space: { id: String(space.id), name: space.name },
       credits: { balance: account.balance, frozen: account.frozen },
       vip: null,
+      /** 新手引导是否已关闭（PRD 增补 §3）：false 时工作台展示引导条 */
+      onboarded: user.onboardedAt !== null,
     };
+  }
+
+  /** 标记新手引导已读（关闭引导条时调用，幂等） */
+  async markOnboarded(userId: string): Promise<{ onboarded: boolean }> {
+    await db
+      .update(users)
+      .set({ onboardedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, BigInt(userId)));
+    return { onboarded: true };
   }
 
   async refresh(refreshToken: string | undefined): Promise<Omit<LoginResult, "refresh_token"> & { refresh_token: string }> {

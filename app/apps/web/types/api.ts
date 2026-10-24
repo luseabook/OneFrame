@@ -21,6 +21,8 @@ export interface MeResponse {
   space: { id: string; name: string };
   credits: Credits;
   vip: null;
+  /** 新手引导是否已关闭（PRD 增补 §3） */
+  onboarded?: boolean;
 }
 
 export interface ResolutionOption {
@@ -147,7 +149,9 @@ export interface AssetDto {
   name: string;
   uri: string;
   url: string;
-  meta: { content_type?: string; size?: number };
+  meta: { content_type?: string; size?: number; tags?: string[]; folder_id?: string | null };
+  tags?: string[];
+  folder_id?: string | null;
   created_at: string;
 }
 

@@ -36,10 +36,19 @@ const cases = [
   { title: "长安食单", tag: "国风短篇", from: "#4a2a1a", to: "#20120c" },
   { title: "午夜电台", tag: "悬疑连载", from: "#26313f", to: "#10151c" },
 ];
+
+// 新手引导（PRD 增补 §3.2）：服务端记录是否已关闭，避免反复打扰
+const auth = useAuth();
+const showOnboarding = computed(() => auth.state.value.onboarded === false);
+async function dismissOnboarding(): Promise<void> {
+  await auth.dismissOnboarding();
+}
 </script>
 
 <template>
   <main class="page">
+    <OnboardingBar v-if="showOnboarding" @dismiss="dismissOnboarding" />
+
     <h1 class="hero-title">您的专属AI漫剧工作室</h1>
 
     <section class="hero-cards">

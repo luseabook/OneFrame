@@ -66,6 +66,14 @@ export class AuthController {
     return this.auth.me(auth.userId, auth.spaceId);
   }
 
+  /** 标记新手引导已读（PRD 增补 §3.2） */
+  @Post("me/onboarded")
+  async onboarded(@Req() req: AuthedRequest) {
+    const auth = req.auth;
+    if (!auth) return null;
+    return this.auth.markOnboarded(auth.userId);
+  }
+
   // 账号注销（PRD F1）
   @Post("me/delete")
   async deleteAccount(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: FastifyReply) {
