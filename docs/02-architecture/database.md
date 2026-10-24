@@ -4,6 +4,7 @@
 > 命名：表/字段 snake_case 复数；枚举用 smallint+应用层常量（避免 PG enum 迁移痛）
 > v1.1 · 2026-10-24 · 按启动前审查报告修订（P0-02/03/04/05/07/09、P1-11/22、P2-01/02/14/19）
 > v1.2 · 2026-10-24 · 按《逆向一致性审查》修订：模型目录字段对齐 46 模型（mode_order/两 scene 键/价格三通道）、资产定稿状态、任务分享表、时长改为模型目录校验、credit_flows 去 expire、data_center 取值对齐 domainMap、补迁移执行顺序与外键 ALTER（RE-01~RE-20）
+> v1.3 · 2026-10-24 · 与 P1.2 实现同步：models 补展示字段（description/logo/tags/promotions/audio_video_support）；P1 初始迁移覆盖 16 表（drizzle schema 为结构源）
 >
 > **迁移执行顺序（本文件 DDL 按依赖而非章节顺序执行）**：§1 users/identities/spaces → §4 credit_accounts/credit_flows → §8 admin_users → §1.5 invite_* → §2 models/model_prices → §5 assets → §6 script_projects/episodes/storyboards/project_assets → §3 tasks/task_events/idempotency_records/exports/task_shares → §7 canvas_* → §8 configs。跨节前向外键（tasks.episode_id/shot_id、exports.episode_id、invite_redemptions.flow_id、invite_codes.created_by）在目标表建好后用文件内标注的 `ALTER TABLE` 补加，禁止直接按本文件从上到下执行。
 
@@ -119,11 +120,16 @@ CREATE TABLE models (
   vendor       TEXT NOT NULL,                      -- volcengine|aliyun|kling|vidu|minimax|deepseek|self
   name         TEXT NOT NULL UNIQUE,               -- 协议层标识 seedance-2.0-pro
   display_name TEXT NOT NULL,                      -- "Seedance 2.0 Pro"
+  description  TEXT NOT NULL DEFAULT '',           -- 模型说明（RE description）
+  logo         TEXT NOT NULL DEFAULT '',           -- 展示资源键（RE logo）
   capability   TEXT NOT NULL,                      -- video|image|text|speech|music(主能力)
   types        TEXT[] NOT NULL DEFAULT '{}',       -- 多能力标记(RE：type/types；如 video+audio)
+  tags         JSONB NOT NULL DEFAULT '[]',        -- 展示标签(RE tags)
+  promotions   JSONB NOT NULL DEFAULT '[]',        -- 运营标记(RE promotions)
   adapter_code TEXT NOT NULL,                      -- worker 路由 'volcengine:video-v3'
   visible      BOOLEAN NOT NULL DEFAULT TRUE,
   need_vip     BOOLEAN NOT NULL DEFAULT FALSE,
+  audio_video_support BOOLEAN NOT NULL DEFAULT FALSE, -- 音画同出(RE audio_video_support)
   sort         INT NOT NULL DEFAULT 100,
   mode_order   JSONB NOT NULL DEFAULT '{}',        -- 同模式内排序 {"image2video":1,...}
   modes        JSONB NOT NULL DEFAULT '{}',        -- 见下 §modes 结构

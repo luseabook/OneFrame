@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ErrorCode } from "./errors";
 import { generationRequestSchema } from "./schemas/generation";
-import { characterSchema, createProjectSchema, storyboardSchema } from "./schemas/project";
+import { characterSchema, createProjectSchema, generateVideosSchema, storyboardSchema } from "./schemas/project";
 import { loginRequestSchema, refreshRequestSchema } from "./schemas/auth";
 
 describe("generationRequestSchema", () => {
@@ -45,6 +45,17 @@ describe("createProjectSchema", () => {
     expect(
       createProjectSchema.safeParse({ ...base, source_text: "x".repeat(50001) }).success,
     ).toBe(false);
+  });
+});
+
+describe("generateVideosSchema", () => {
+  it("requires model + budget and accepts optional model enum overrides", () => {
+    const base = { shot_ids: ["s1"], budget_credits_max: 100, model: "seedance-2.5" };
+    expect(generateVideosSchema.safeParse(base).success).toBe(true);
+    expect(generateVideosSchema.safeParse({ ...base, ratio: "9:16", resolution: "720p" }).success).toBe(true);
+    expect(generateVideosSchema.safeParse({ ...base, model: "" }).success).toBe(false);
+    expect(generateVideosSchema.safeParse({ ...base, budget_credits_max: 0 }).success).toBe(false);
+    expect(generateVideosSchema.safeParse({ ...base, shot_ids: [] }).success).toBe(false);
   });
 });
 

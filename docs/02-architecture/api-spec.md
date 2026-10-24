@@ -4,6 +4,7 @@
 > 本文件是契约的唯一事实来源；实现用 OpenAPI 生成（drizzle/nest 自动 + 本文件人工对账）
 > v1.1 · 2026-10-24 · 按启动前审查报告修订（P0-04/05/10、P1-03/05/08/10/11/12/22/24、P2-03/08/21/23）
 > v1.2 · 2026-10-24 · 按《逆向一致性审查》修订：模型目录字段对齐 46 模型目录（mode_order/endpoint/default_*/resolution label）、批量报价与折扣字段、mode/scene 键补 `studio_asset_image` 等、预算触顶改逐镜 200 部分成功、新增 share/split/导出部分成功规则、错误码来源标注与 400104/400105/400106、任务与资产定稿门槛（RE-01~RE-20）
+> v1.3 · 2026-10-24 · 与实现同步：`/models` 增 `audio_video_support`；错误码 400104~400107 已落 `packages/shared`；P1 数据层 16 表见 database v1.3
 
 ## 1. 通用约定
 
@@ -107,7 +108,7 @@ GET /me/settings · PUT /me/settings {nickname, avatar_object_key}
 GET /models?capability=video&mode=image2video&visible=true
   ← data:[{
       name, display_name, vendor, types[], need_vip, sort, visible,
-      description, logo, tags[], promotions[],       // 目录展示字段（对齐 46 模型目录）
+      description, logo, tags[], promotions[], audio_video_support, // 目录展示字段（对齐 46 模型目录）
       mode_order:{"image2video":1,…},                // 同模式内升序；缺键排在后
       modes:{"image2video":{
         endpoint:"/vendor/…",                        // adapter 路由用，不向前端暴露

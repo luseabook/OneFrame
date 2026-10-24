@@ -39,6 +39,7 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] P0.2 容器环境 + zod 配置层（启动即校验）
 - [x] P0.3 packages/shared + 单测
 - [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
+- [x] P1.2 数据层：drizzle schema（16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

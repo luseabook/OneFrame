@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { env } from "../config/env";
+import * as schema from "./schema";
 
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
@@ -8,8 +9,9 @@ export const pool = new Pool({
   idleTimeoutMillis: 30_000,
 });
 
-// P1 建迁移后此处挂 schema（docs/02-architecture/database.md §11，drizzle-kit）
-export const db = drizzle(pool);
+// schema 挂载后，所有查询走 drizzle（database.md §11）
+export const db = drizzle(pool, { schema });
+export { schema };
 
 export async function pingDb(): Promise<boolean> {
   try {

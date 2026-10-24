@@ -36,7 +36,9 @@ cd app
 pnpm install
 docker compose -f docker-compose.dev.yml up -d
 cp .env.example apps/api/.env
-pnpm dev            # api:3000 · web:3001 · worker
+pnpm --filter @app/api db:migrate   # 初始 schema（16 表）
+pnpm --filter @app/api db:seed      # 首批 10 个模型（占位价）
+pnpm dev                            # api:3000 · web:3001 · worker
 pnpm test && pnpm build
 ```
 
