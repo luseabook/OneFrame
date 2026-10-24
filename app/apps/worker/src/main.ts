@@ -165,8 +165,27 @@ const heartbeat = setInterval(() => log.info({ running: workers.length }, "worke
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "shutting down");
   clearInterval(heartbeat);
-  await Promise.all(workers.map((w) => w.close()));
-  process.exit(0);
+
+  // 停机上限：BullMQ close() 会等当前 job 处理完；超时则强制退出，
+  // 避免容器停不下来（未完成的 job 会被 BullMQ 重新投递，不会丢失）
+  const timeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 25_000);
+  const force = setTimeout(() => {
+    log.error({ timeoutMs }, "shutdown timeout, forcing exit");
+    process.exit(1);
+  }, timeoutMs);
+  force.unref();
+
+  try {
+    // close() 停止拉取新 job 并等待在途 job 完成
+    await Promise.all(workers.map((w) => w.close()));
+    clearTimeout(force);
+    log.info("closed cleanly");
+    process.exit(0);
+  } catch (err) {
+    clearTimeout(force);
+    log.error({ err }, "shutdown error");
+    process.exit(1);
+  }
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));

@@ -3,6 +3,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { AppController } from "./app.controller";
 import { AuthGuard } from "./common/auth.guard";
 import { HealthController } from "./health/health.controller";
+import { MetricsController } from "./health/metrics.controller";
 import { AdminModule } from "./modules/admin/admin.module";
 import { AssetsModule } from "./modules/assets/assets.module";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -36,7 +37,7 @@ import { StorageModule } from "./storage/storage.module";
     ScriptModule,
     ReportsModule,
   ],
-  controllers: [AppController, HealthController],
+  controllers: [AppController, HealthController, MetricsController],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}

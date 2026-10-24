@@ -84,10 +84,52 @@ ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
 | OSS | 版本控制开启 + 跨区复制(Ph2) | 误删可恢复 30 天 |
 | 配置 | 全部在 git（密钥除外，放 CI Secrets + 服务器 env 双份） | — |
 
-## 6. 发布与回滚
+### 5.1 可用脚本（`app/deploy/`）
+
+| 脚本 | 用途 |
+|---|---|
+| `backup-db.sh` / `backup-db.ps1` | 全量备份（custom 格式 + 压缩 + `pg_restore --list` 校验 + 14 天保留清理） |
+| `restore-db.sh` | 恢复（`--clean --if-exists`，需输入 `yes` 二次确认） |
+| `verify-backup.ps1` | **备份可用性验证**：恢复到临时库、比对表数与关键数据、自动删临时库 |
+| `rollback.sh` | 代码回滚到指定 tag（不改数据库，提示不可逆迁移需走恢复） |
+
+> **运维铁律**：备份不等于可用。每次备份后跑 `verify-backup.ps1`，只有能恢复的备份才算备份。
+> 已验证：27 张表全量恢复、关键表数据完整。
+
+## 6. 健康检查与指标（`/v1`）
+
+| 端点 | 语义 | 行为 |
+|---|---|---|
+| `GET /healthz/live` | **liveness** | 进程活着就 200，**不查依赖**（依赖抖动时不该重启容器） |
+| `GET /healthz/ready` | **readiness** | db+redis 都可用才 200；否则 **503**；停机中返回 503（`shutting_down`） |
+| `GET /healthz` | 聚合详情 | 依赖不可用时同样 503，供人工排查 |
+| `GET /metrics` | Prometheus 文本 | 任务状态分布 / 15min 失败率 / 待支付超时 / **已支付未入账**（应恒为 0）/ 进程指标 |
+
+**探针配置建议**：
+```yaml
+livenessProbe:  { httpGet: { path: /v1/healthz/live,  port: 3000 }, periodSeconds: 10, failureThreshold: 3 }
+readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSeconds: 5,  failureThreshold: 2 }
+```
+**关键告警**（基于 `/metrics`）：
+- `oneframe_orders_paid_without_credit > 0` → 资金链路异常，立即排查（用户付了钱没到账）
+- `oneframe_failure_ratio_15m > 0.3` → 供应商异常，考虑熔断
+- `oneframe_orders_stale_pending > 10` → 回调/轮询异常
+
+## 6.1 优雅停机
+
+`SIGTERM` 处理链路（api 与 worker 一致）：
+1. 标记 `shutting_down` → **readiness 立即 503**（LB 摘流）；
+2. 停止接收新请求/新 job，等待在途完成；
+3. 超过 `SHUTDOWN_TIMEOUT_MS`（默认 25s）强制退出，避免容器停不下来；
+4. worker 的未完成 job 由 BullMQ 重新投递，不丢失。
+
+> 已验证：停机中 readiness 返回 503，进程退出码 0，日志含 `draining` / `closed cleanly`。
+
+## 7. 发布与回滚
 
 - 流程见 dev-workflow §4：staging 冒烟 → 手动批准 → 蓝绿切流（nginx upstream 切换）；
-- 回滚：`./deploy rollback <上一tag>` ≤2min；DB 迁移必须向后兼容（先加后用），禁止发布依赖不可回滚迁移；
+- 回滚：`./deploy/rollback.sh <上一tag>` ≤2min；DB 迁移必须向后兼容（先加后用），禁止发布依赖不可回滚迁移；
+  脚本会提示：若含不可逆迁移（drop/rename），改用备份恢复而非代码回滚；
 - 灰度：新版本先 10% 流量（nginx weight）观察错误率 10min。
 
 ## 7. 定时任务（worker 机）
