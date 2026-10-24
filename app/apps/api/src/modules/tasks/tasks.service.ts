@@ -233,6 +233,66 @@ export class TasksService {
     return this.toDto(row);
   }
 
+  async batchDownload(spaceId: string, taskIds: string[]) {
+    if (taskIds.length === 0 || taskIds.length > 50) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task_ids must be 1..50", { field: "task_ids" });
+    }
+    const ids = taskIds.map((id) => {
+      try {
+        return BigInt(id);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid task id", { field: "task_ids" });
+      }
+    });
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.spaceId, BigInt(spaceId)),
+          inArray(tasks.id, ids),
+          eq(tasks.status, TaskStatus.SUCCEEDED),
+        ),
+      );
+    if (rows.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no succeeded tasks to download");
+
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const manifest: Array<{ task_id: string; files: string[] }> = [];
+    let count = 0;
+    for (const row of rows) {
+      const results = Array.isArray(row.results) ? (row.results as Array<{ uri?: string }>) : [];
+      const files: string[] = [];
+      for (let i = 0; i < results.length; i += 1) {
+        const uri = results[i]?.uri;
+        if (!uri) continue;
+        try {
+          const data = /^https?:\/\//.test(uri)
+            ? Buffer.from(await (await fetch(uri)).arrayBuffer())
+            : /^[a-z][a-z0-9+.-]*:\/\//i.test(uri)
+              ? null
+              : await this.storage.read(uri);
+          if (!data) continue;
+          const ext = uri.split(".").pop()?.toLowerCase() || "bin";
+          const name = `task-${row.id}-${i + 1}.${ext}`;
+          zip.file(name, data);
+          files.push(name);
+          count += 1;
+        } catch {
+          // 单个结果失败不阻断整包
+        }
+      }
+      manifest.push({ task_id: String(row.id), files });
+    }
+    if (count === 0) throw new AppError(ErrorCode.NOT_FOUND, "no downloadable results");
+    zip.file("manifest.json", JSON.stringify({ generated_at: new Date().toISOString(), tasks: manifest }, null, 2));
+    const buffer = await zip.generateAsync({ type: "nodebuffer" });
+    const key = `u/${spaceId}/downloads/${newId()}.zip`;
+    await this.storage.put(key, buffer, "application/zip");
+    const url = await this.storage.signDownload(key, 3600);
+    return { url, filename: `tasks-${rows.length}-${count}.zip`, count, expires_in: 3600 };
+  }
+
   async downloadUrl(spaceId: string, id: string, index: number) {
     const row = await this.findTask(spaceId, id);
     const results = Array.isArray(row.results)

@@ -137,6 +137,14 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(detail.data.storyboards[0].character_ids.length).toBeGreaterThan(0);
   });
 
+  it("returns the project storyboard matrix", async () => {
+    const matrix = await inject("GET", `/projects/${projectId}/matrix`);
+    expect(matrix.code).toBe(0);
+    expect(matrix.data.episodes).toHaveLength(3);
+    expect(matrix.data.episodes[0].shots).toHaveLength(10);
+    expect(matrix.data.episodes[0].shots[0]).toHaveProperty("task_status");
+  });
+
   it("blocks batch generation until referenced assets are finalized", async () => {
     const res = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/storyboards/generate-videos`, {
       shot_ids: shotIds,

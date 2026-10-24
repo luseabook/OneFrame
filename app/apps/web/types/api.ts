@@ -150,6 +150,25 @@ export interface ShareView {
   error: { message?: string } | null;
 }
 
+export interface MatrixShot {
+  id: string;
+  shot_no: number;
+  status: number;
+  task_status: number | null;
+}
+
+export interface MatrixEpisode {
+  id: string;
+  ep_no: number;
+  title: string | null;
+  shots: MatrixShot[];
+}
+
+export interface MatrixDto {
+  project: { id: string; title: string };
+  episodes: MatrixEpisode[];
+}
+
 export interface ExportDto {
   export_id: string;
   status: number;

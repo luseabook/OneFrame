@@ -102,6 +102,24 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect(me.body.data.credits).toEqual({ balance: 72, frozen: 8 });
   });
 
+  it("supports ETag/304 for batch id polling", async () => {
+    const first = await app.inject({
+      method: "GET",
+      url: `/v1/tasks?ids=${taskId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(first.statusCode).toBe(200);
+    const etag = first.headers.etag as string;
+    expect(etag).toBeTruthy();
+
+    const second = await app.inject({
+      method: "GET",
+      url: `/v1/tasks?ids=${taskId}`,
+      headers: { authorization: `Bearer ${token}`, "if-none-match": etag },
+    });
+    expect(second.statusCode).toBe(304);
+  });
+
   it("shares a task publicly and revokes it", async () => {
     const created = await inject("POST", `/tasks/${taskId}/share`, { expires_in_days: 7 }, {
       authorization: `Bearer ${token}`,

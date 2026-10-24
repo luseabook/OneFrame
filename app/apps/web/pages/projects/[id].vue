@@ -3,6 +3,8 @@ import type {
   CharacterDto,
   EpisodeDto,
   ExportDto,
+  MatrixDto,
+  MatrixShot,
   ModelDto,
   ProjectDto,
   StoryboardDto,
@@ -45,6 +47,7 @@ const exportJob = ref<ExportDto | null>(null);
 const exporting = ref(false);
 const portraitCount = ref(1);
 const candidates = ref<{ charId: string; task_id: string; list: Array<{ index: number; url: string }> } | null>(null);
+const matrix = ref<MatrixDto | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let exportTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -89,6 +92,27 @@ async function loadEpisode(): Promise<void> {
   );
   episode.value = data.episode;
   shots.value = data.storyboards;
+}
+
+async function loadMatrix(): Promise<void> {
+  try {
+    matrix.value = await api.get<MatrixDto>(`/projects/${projectId.value}/matrix`);
+  } catch {
+    /* ignore */
+  }
+}
+
+function matrixClass(shot: MatrixShot): string {
+  if (shot.task_status === 3 || shot.status === 5) return "success";
+  if (shot.task_status === 4 || shot.task_status === 7) return "failed";
+  if (shot.task_status === 1 || shot.task_status === 2 || shot.status === 3) return "running";
+  return "idle";
+}
+
+async function openMatrixShot(episodeId: string): Promise<void> {
+  selectedEpisodeId.value = episodeId;
+  tab.value = "storyboards";
+  await loadEpisode();
 }
 
 async function loadModels(): Promise<void> {
@@ -319,6 +343,7 @@ onMounted(async () => {
   await run("加载项目", async () => {
     await loadProject();
     await loadModels();
+    await loadMatrix();
   });
 });
 
@@ -485,6 +510,25 @@ onUnmounted(() => {
             <Button v-if="exportJob?.status === 4" variant="ghost" @click="retryExportJob">重试导出</Button>
           </div>
           <p v-if="budgetExceeded" class="error">预算不足，部分镜头未投递（745703）。</p>
+          <div v-if="matrix" class="matrix">
+            <div v-for="ep in matrix.episodes" :key="ep.id" class="matrix-row">
+              <span class="matrix-label">第{{ ep.ep_no }}集</span>
+              <button
+                v-for="shot in ep.shots"
+                :key="shot.id"
+                class="cell"
+                :class="matrixClass(shot)"
+                :title="`镜${shot.shot_no} · 状态${shot.status}${shot.task_status ? ' · 任务' + shot.task_status : ''}`"
+                @click="openMatrixShot(ep.id)"
+              >
+                {{ shot.shot_no }}
+              </button>
+              <span v-if="ep.shots.length === 0" class="muted">无分镜</span>
+            </div>
+            <div class="legend muted">
+              <span><i class="dot success" />成功</span><span><i class="dot running" />在途</span><span><i class="dot failed" />失败</span><span><i class="dot idle" />未投递</span>
+            </div>
+          </div>
           <div class="batch-list">
             <div v-for="item in batchItems" :key="item.shot_id" class="batch-item">
               <span class="muted">镜头 {{ shots.find((s) => s.id === item.shot_id)?.shot_no ?? "-" }}</span>
@@ -733,6 +777,71 @@ h2 {
   color: var(--color-primary);
   font-size: 12px;
 }
+.matrix {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  padding: 10px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.matrix-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.matrix-label {
+  width: 60px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cell {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cell.success {
+  background: #14532d;
+  border-color: #4ade80;
+  color: #bbf7d0;
+}
+.cell.running {
+  background: #713f12;
+  border-color: #fbbf24;
+  color: #fde68a;
+}
+.cell.failed {
+  background: #7f1d1d;
+  border-color: #ef4444;
+  color: #fecaca;
+}
+.cell.idle {
+  background: #1f2937;
+  color: #9ca3af;
+}
+.legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+.dot.success { background: #4ade80; }
+.dot.running { background: #fbbf24; }
+.dot.failed { background: #ef4444; }
+.dot.idle { background: #4b5563; }
 .candidate-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

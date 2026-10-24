@@ -93,6 +93,11 @@ export class ScriptController {
     return this.script.generateStoryboards(req.auth?.spaceId ?? "", id, eid, input);
   }
 
+  @Get("projects/:id/matrix")
+  async matrix(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.script.projectMatrix(req.auth?.spaceId ?? "", id);
+  }
+
   @Get("projects/:id/episodes/:eid")
   async episode(@Req() req: AuthedRequest, @Param("id") id: string, @Param("eid") eid: string) {
     return this.script.episodeDetail(req.auth?.spaceId ?? "", id, eid);

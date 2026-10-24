@@ -853,6 +853,62 @@ export class ScriptService {
     return { export_id: String(id), status: 1 };
   }
 
+  async projectMatrix(spaceId: string, projectId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const eps = await db
+      .select()
+      .from(episodes)
+      .where(eq(episodes.projectId, project.id))
+      .orderBy(episodes.epNo);
+    if (eps.length === 0) return { project: projectDto(project), episodes: [] };
+    const shots = await db
+      .select()
+      .from(storyboards)
+      .where(
+        inArray(
+          storyboards.episodeId,
+          eps.map((ep) => ep.id),
+        ),
+      )
+      .orderBy(storyboards.shotNo);
+    const taskIds = shots
+      .flatMap((shot) => [shot.videoTaskId, shot.imageTaskId])
+      .filter((id): id is bigint => id !== null);
+    const taskRows =
+      taskIds.length > 0
+        ? await db
+            .select({ id: tasks.id, status: tasks.status })
+            .from(tasks)
+            .where(inArray(tasks.id, taskIds))
+        : [];
+    const taskStatus = new Map(taskRows.map((row) => [String(row.id), row.status]));
+    const byEpisode = new Map<string, typeof shots>();
+    for (const shot of shots) {
+      const key = String(shot.episodeId);
+      const list = byEpisode.get(key) ?? [];
+      list.push(shot);
+      byEpisode.set(key, list);
+    }
+    return {
+      project: projectDto(project),
+      episodes: eps.map((ep) => ({
+        id: String(ep.id),
+        ep_no: ep.epNo,
+        title: ep.title,
+        shots: (byEpisode.get(String(ep.id)) ?? []).map((shot) => ({
+          id: String(shot.id),
+          shot_no: shot.shotNo,
+          status: shot.status,
+          task_status: shot.videoTaskId
+            ? (taskStatus.get(String(shot.videoTaskId)) ?? null)
+            : shot.imageTaskId
+              ? (taskStatus.get(String(shot.imageTaskId)) ?? null)
+              : null,
+        })),
+      })),
+    };
+  }
+
   async getExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);

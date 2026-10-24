@@ -91,6 +91,24 @@ async function download(item: TaskDto): Promise<void> {
   }
 }
 
+async function batchDownload(): Promise<void> {
+  const ids = list.value
+    .filter((item) => item.status === 3)
+    .slice(0, 50)
+    .map((item) => item.task_id);
+  if (ids.length === 0) {
+    info.value = "当前页没有已完成任务可打包";
+    return;
+  }
+  try {
+    const data = await api.post<{ url: string }>("/tasks/batch-download", { task_ids: ids });
+    window.open(data.url, "_blank");
+    info.value = `已打包 ${ids.length} 个任务`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "批量下载失败";
+  }
+}
+
 function canCancel(item: TaskDto): boolean {
   return item.status === 1 || item.status === 2;
 }
@@ -123,6 +141,7 @@ onUnmounted(() => {
           <option value="5">已取消</option>
         </select>
         <span class="muted">共 {{ total }} 条</span>
+        <Button variant="ghost" @click="batchDownload">批量下载 zip</Button>
       </div>
     </div>
 

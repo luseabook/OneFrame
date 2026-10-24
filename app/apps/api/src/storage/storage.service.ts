@@ -36,6 +36,10 @@ export class StorageService {
     return this.driver.put(key, data, contentType);
   }
 
+  async read(key: string): Promise<Buffer> {
+    return this.driver.read(key);
+  }
+
   get local(): LocalStorage | null {
     return this.driver instanceof LocalStorage ? this.driver : null;
   }

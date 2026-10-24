@@ -66,7 +66,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] 生产部署：api/worker/web 多阶段 Dockerfile + `docker-compose.prod.yml`（PG/Redis/MinIO/迁移/nginx）；compose 全链路冒烟通过
 - [x] 火山方舟 Ark 视频适配器：内容生成任务 submit/query、文本+图片 content 映射、状态/结果归一化（fixture 测试）
 - [x] F1 年龄门禁 + 发码 IP 频控；F2 导出成功镜 <80% 拒绝（400106）
-- [ ] PRD 验收剩余：分镜矩阵/批量下载/ETag、资产转存/回收站/90 天提醒、敏感词审核/流水页/漏斗看板（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
+- [x] F4 项目分镜矩阵 + 批量下载 zip（≤50）+ 任务轮询 ETag/304
+- [ ] PRD 验收剩余：资产转存/回收站/90 天提醒、敏感词审核/流水页/漏斗看板、大纲自动保存/预算预填（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 
