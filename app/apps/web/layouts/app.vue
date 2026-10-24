@@ -18,6 +18,8 @@ const teamNav = [
 
 const collapsed = ref(false);
 const menuOpen = ref(false);
+// 认证状态确定后再渲染登录态相关 UI：SSR 与客户端首帧都渲染同一占位，避免 hydration 不一致
+const authReady = computed(() => auth.ready.value);
 
 const balance = computed(() => auth.state.value.credits?.balance ?? 0);
 const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
@@ -140,8 +142,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       <header class="topbar">
         <div class="crumb"><slot name="crumb" /></div>
         <div class="right">
-          <!-- 登录态内容客户端渲染，避免 hydration 前后结构不一致 -->
-          <ClientOnly>
+
             <NuxtLink to="/tasks" class="icon-btn" title="任务中心">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
@@ -169,11 +170,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               <svg class="spark" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5-4.6.6-6.9 2.9-7.5 7.5-.6-4.6-2.9-6.9-7.5-7.5 4.6-.6 6.9-2.9 7.5-7.5Z" />
               </svg>
-              <b>{{ balance }}</b>
-              <span v-if="frozen" class="frozen">冻 {{ frozen }}</span>
+              <b>{{ authReady ? balance : "—" }}</b>
+              <span v-if="authReady && frozen" class="frozen">冻 {{ frozen }}</span>
             </NuxtLink>
 
-            <template v-if="user">
+            <template v-if="!authReady">
+              <span class="login-btn" aria-hidden="true">…</span>
+            </template>
+            <template v-else-if="user">
               <div class="avatar-wrap">
                 <button class="avatar" :title="user.nickname" @click="menuOpen = !menuOpen">
                   {{ avatarChar }}
@@ -186,7 +190,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               </div>
             </template>
             <NuxtLink v-else to="/login" class="login-btn">立即登录</NuxtLink>
-          </ClientOnly>
+
         </div>
       </header>
 

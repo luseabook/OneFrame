@@ -23,6 +23,18 @@ export default defineNuxtConfig({
         "x-real-ip": "{clientIp}",
       },
     },
+    // 工作台页面完全依赖客户端数据（登录态 / 分页 / 轮询），
+    // 关闭 SSR 以消除服务端与客户端首帧数据不一致导致的 hydration 警告。
+    "/home": { ssr: false },
+    "/projects": { ssr: false },
+    "/projects/**": { ssr: false },
+    "/works": { ssr: false },
+    "/tasks": { ssr: false },
+    "/assets": { ssr: false },
+    "/credits": { ssr: false },
+    "/settings": { ssr: false },
+    "/tools": { ssr: false },
+    "/admin": { ssr: false },
   },
   app: {
     head: {

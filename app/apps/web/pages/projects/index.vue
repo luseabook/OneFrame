@@ -2,18 +2,34 @@
 import type { ProjectDto } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
+useHead({ title: "全部项目 · 一帧" });
 
 const api = useApi();
+const toast = useToast();
+const router = useRouter();
+
 const list = ref<ProjectDto[]>([]);
 const total = ref(0);
-const loading = ref(false);
+// 初始为 true：SSR 与客户端首帧都渲染骨架屏，避免结构差异（与作品库一致）
+const loading = ref(true);
 const creating = ref(false);
 const error = ref("");
+const showCreate = ref(false);
 const form = reactive({
   title: "",
   source_type: 1,
   ratio: "9:16",
   source_text: "",
+});
+
+const SOURCE_LABEL: Record<number, string> = { 1: "小说", 2: "一句话想法", 3: "导入剧本", 4: "裂变" };
+
+// SelectField 以字符串 v-model 工作，这里与数字型 source_type 双向桥接
+const sourceTypeStr = computed({
+  get: () => String(form.source_type),
+  set: (v: string) => {
+    form.source_type = Number(v) || 1;
+  },
 });
 
 async function load(): Promise<void> {
@@ -43,175 +59,223 @@ async function create(): Promise<void> {
       ratio: form.ratio,
       source_text: form.source_text,
     });
+    toast.success("项目已创建");
     await navigateTo(`/projects/${project.id}`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "创建失败";
+    const msg = e instanceof Error ? e.message : "创建失败";
+    error.value = msg;
+    toast.error(msg);
   } finally {
     creating.value = false;
   }
+}
+
+function resetAndClose(): void {
+  showCreate.value = false;
+  form.title = "";
+  form.source_text = "";
+  form.source_type = 1;
+  form.ratio = "9:16";
+  error.value = "";
 }
 
 onMounted(load);
 </script>
 
 <template>
-  <main class="page">
-    <div class="head">
-      <h1>剧本项目</h1>
-      <span class="muted">共 {{ total }} 个</span>
-    </div>
+  <div class="projects">
+    <header class="head">
+      <div>
+        <h1>全部项目</h1>
+        <p class="sub">
+          <template v-if="!loading">共 {{ total }} 个项目 · </template>从一句话或一部小说开始
+        </p>
+      </div>
+      <div class="actions">
+        <Button variant="ghost" size="sm" @click="router.push('/works')">按作品查看</Button>
+        <Button size="sm" @click="showCreate = true">+ 新建项目</Button>
+      </div>
+    </header>
 
-    <div class="layout">
-      <section class="panel create">
-        <h2>新建项目</h2>
-        <label class="field">
-          <span class="label">项目名称</span>
-          <input v-model="form.title" class="input" maxlength="100" placeholder="例如：雨夜来信" />
-        </label>
-        <div class="grid">
-          <label class="field">
-            <span class="label">来源</span>
-            <select v-model.number="form.source_type" class="input">
-              <option :value="1">小说</option>
-              <option :value="2">一句话想法</option>
-              <option :value="3">导入剧本（拆集）</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">画幅</span>
-            <select v-model="form.ratio" class="input">
-              <option value="9:16">9:16 竖屏</option>
-              <option value="16:9">16:9 横屏</option>
-            </select>
-          </label>
-        </div>
-        <label class="field">
-          <span class="label">素材 / 简介</span>
-          <textarea
-            v-model="form.source_text"
-            class="input textarea"
-            maxlength="50000"
-            placeholder="粘贴小说章节、故事梗概或已有剧本"
+    <p v-if="error" class="err">{{ error }}</p>
+
+    <Skeleton v-if="loading" :rows="4" />
+
+      <template v-else>
+        <div v-if="list.length" class="grid">
+          <NuxtLink v-for="item in list" :key="item.id" :to="`/projects/${item.id}`" class="proj-card">
+            <div class="cover">
+              <span class="ratio">{{ item.ratio }}</span>
+            <Tag v-if="item.is_sample" class="sample-tag" tone="brand" size="sm">示例</Tag>
+            <Tag v-else-if="item.archived_at" class="sample-tag" tone="neutral" size="sm">已归档</Tag>
+          </div>
+          <div class="body">
+            <p class="title" :title="item.title">{{ item.title }}</p>
+            <p class="meta">
+              {{ SOURCE_LABEL[item.source_type] ?? "其他" }}
+              <span class="sep">·</span>
+              {{ new Date(item.created_at).toLocaleDateString("zh-CN") }}
+            </p>
+          </div>
+        </NuxtLink>
+      </div>
+
+      <EmptyState
+        v-else
+        icon="▤"
+        title="还没有项目"
+        description="粘贴一部小说或写一句话想法，AI 会拆成 3~6 集并生成分镜。"
+      >
+        <Button @click="showCreate = true">新建第一个项目</Button>
+      </EmptyState>
+    </template>
+
+    <Modal :open="showCreate" title="新建项目" width="560px" @close="resetAndClose">
+      <div class="form">
+        <TextField v-model="form.title" label="项目名称" placeholder="例如：雨夜来信" :maxlength="100" required />
+        <div class="row-2">
+          <SelectField
+            v-model="sourceTypeStr"
+            label="来源"
+            :options="[
+              { value: '1', label: '小说' },
+              { value: '2', label: '一句话想法' },
+              { value: '3', label: '导入剧本（拆集）' },
+            ]"
           />
-        </label>
-        <p v-if="error" class="error">{{ error }}</p>
-        <Button :disabled="creating" @click="create">{{ creating ? "创建中…" : "创建并进入流水线" }}</Button>
-      </section>
-
-      <section class="panel">
-        <h2>我的项目</h2>
-        <p v-if="loading" class="muted">加载中…</p>
-        <ul class="list">
-          <li v-for="item in list" :key="item.id" class="item">
-            <NuxtLink :to="`/projects/${item.id}`" class="item-main">
-              <span class="title">{{ item.title }}</span>
-              <span class="muted">
-                {{ item.source_type === 1 ? "小说" : item.source_type === 2 ? "想法" : "剧本" }}
-                · {{ item.ratio }} · {{ new Date(item.created_at).toLocaleDateString() }}
-              </span>
-            </NuxtLink>
-          </li>
-        </ul>
-        <p v-if="!loading && list.length === 0" class="muted">还没有项目，先创建一个。</p>
-      </section>
-    </div>
-  </main>
+          <SelectField
+            v-model="form.ratio"
+            label="画幅"
+            :options="[
+              { value: '9:16', label: '9:16 竖屏' },
+              { value: '16:9', label: '16:9 横屏' },
+            ]"
+          />
+        </div>
+        <TextAreaField
+          v-model="form.source_text"
+          label="素材 / 简介"
+          placeholder="粘贴小说章节、故事梗概或已有剧本（≤5 万字）"
+          :maxlength="50000"
+          :rows="6"
+          hint="可留空，稍后在流水线中补充"
+        />
+      </div>
+      <template #footer>
+        <Button variant="ghost" @click="resetAndClose">取消</Button>
+        <Button :disabled="creating" :loading="creating" @click="create">
+          {{ creating ? "创建中" : "创建并进入流水线" }}
+        </Button>
+      </template>
+    </Modal>
+  </div>
 </template>
 
 <style scoped>
-.page {
-  flex: 1;
-  max-width: 1080px;
-  width: 100%;
+.projects {
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 24px 32px;
 }
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
-h1 {
-  margin: 0;
-  font-size: 22px;
+.head h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
 }
-.layout {
-  display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+.sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
 }
-.panel {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
-  padding: 20px;
-}
-h2 {
-  margin: 0 0 12px;
-  font-size: 16px;
-}
-.field {
+.actions {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
-.label {
-  color: var(--text-2);
-  font-size: 12px;
-}
-.input {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-1);
+
+.err {
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-bg);
+  color: var(--danger);
   border-radius: var(--radius-md);
-  color: var(--text-1);
-  padding: 8px 10px;
-  font-size: 13px;
-  outline: none;
+  font-size: var(--text-sm);
 }
-.textarea {
-  min-height: 140px;
-  resize: vertical;
-}
+
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4);
 }
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.item {
+.proj-card {
+  background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  padding: 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
 }
-.item-main {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.proj-card:hover {
+  border-color: var(--border-3);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.cover {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: linear-gradient(135deg, var(--bg-sunken), var(--bg-hover));
+  display: grid;
+  place-items: center;
+}
+.ratio {
+  color: var(--text-4);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.sample-tag {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+}
+.body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
 }
 .title {
-  font-size: 14px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.muted {
+.proj-card:hover .title {
+  color: var(--brand-600);
+}
+.meta {
+  margin: 0;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
-.error {
-  color: #ff6b6b;
-  font-size: 12px;
+.sep {
+  color: var(--border-3);
+  margin: 0 3px;
 }
-@media (max-width: 800px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
 }
 </style>
