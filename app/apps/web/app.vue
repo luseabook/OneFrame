@@ -24,7 +24,9 @@ async function logout(): Promise<void> {
       <NuxtLink to="/" class="logo">AI 漫剧工作台</NuxtLink>
       <nav class="nav">
         <NuxtLink to="/projects" class="nav-link">项目</NuxtLink>
-        <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">创作</NuxtLink>
+        <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">文生视频</NuxtLink>
+        <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
+        <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
         <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
         <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
         <ClientOnly>

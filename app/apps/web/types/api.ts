@@ -130,6 +130,16 @@ export interface CharacterDto {
   status: number;
 }
 
+export interface AssetDto {
+  id: string;
+  kind: string;
+  name: string;
+  uri: string;
+  url: string;
+  meta: { content_type?: string; size?: number };
+  created_at: string;
+}
+
 export interface ShareView {
   task_id: string;
   mode: string;

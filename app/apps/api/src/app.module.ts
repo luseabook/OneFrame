@@ -3,6 +3,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { AppController } from "./app.controller";
 import { AuthGuard } from "./common/auth.guard";
 import { HealthController } from "./health/health.controller";
+import { AssetsModule } from "./modules/assets/assets.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { CreditsModule } from "./modules/credits/credits.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
@@ -19,6 +20,7 @@ import { StorageModule } from "./storage/storage.module";
     RedisModule,
     QueueModule,
     StorageModule,
+    AssetsModule,
     AuthModule,
     ModelsModule,
     CreditsModule,

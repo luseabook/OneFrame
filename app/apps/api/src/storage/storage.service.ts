@@ -31,6 +31,10 @@ export class StorageService {
     return this.driver.signDownload(key, ttlSeconds);
   }
 
+  async put(key: string, data: Buffer, contentType: string) {
+    return this.driver.put(key, data, contentType);
+  }
+
   get local(): LocalStorage | null {
     return this.driver instanceof LocalStorage ? this.driver : null;
   }

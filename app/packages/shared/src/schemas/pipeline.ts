@@ -98,6 +98,14 @@ export const portraitRebindSchema = z.object({
 });
 export type PortraitRebindRequest = z.infer<typeof portraitRebindSchema>;
 
+export const assetUploadSchema = z.object({
+  filename: z.string().min(1).max(200),
+  content_type: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  // MVP 走 base64（前端压缩到 ≤1600px/1MB）；后续换 multipart 直传 OSS
+  data_base64: z.string().min(16).max(12_000_000),
+});
+export type AssetUploadRequest = z.infer<typeof assetUploadSchema>;
+
 export const shareCreateSchema = z.object({
   expires_in_days: z.number().int().min(1).max(30).default(7),
 });
