@@ -1,0 +1,13 @@
+# 统一换行与二进制识别，避免 Windows/macOS/Linux 混用产生噪声 diff
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.pdf binary

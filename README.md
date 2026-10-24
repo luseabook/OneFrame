@@ -1,5 +1,7 @@
 # OneFrame · 万星 AI 漫剧/短剧生产 SaaS
 
+[![ci](https://github.com/luseabook/OneFrame/actions/workflows/ci.yml/badge.svg)](https://github.com/luseabook/OneFrame/actions/workflows/ci.yml)
+
 > 远程仓库：<https://github.com/luseabook/OneFrame>（`main`）
 > 文档体系 **v1.3**（2026-10-24，路线 A：剧本流水线首发）
 > 本仓库为**工作区根**：`app/` 是 P0 代码脚手架，`docs/` 是唯一事实来源，`deliverables/` 是审查交付物，`rea-reelmate/` 是竞品逆向证据（仅收录报告/模型目录/CLI 契约/截图，原始抓包与 Chrome profile 不入库，见 `.gitignore`）。
