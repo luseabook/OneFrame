@@ -9,6 +9,31 @@ const api = useApi();
 const share = ref<ShareView | null>(null);
 const error = ref("");
 const loading = ref(true);
+const reportOpen = ref(false);
+const reportReason = ref("illegal");
+const reportDetail = ref("");
+const reportContact = ref("");
+const reportMsg = ref("");
+const reporting = ref(false);
+
+async function submitReport(): Promise<void> {
+  reporting.value = true;
+  reportMsg.value = "";
+  try {
+    await api.post(`/share/${String(route.params.token)}/report`, {
+      reason: reportReason.value,
+      detail: reportDetail.value || undefined,
+      contact: reportContact.value || undefined,
+    });
+    reportMsg.value = "举报已提交，我们会尽快处理。";
+    reportOpen.value = false;
+    reportDetail.value = "";
+  } catch (e) {
+    reportMsg.value = e instanceof Error ? e.message : "举报提交失败";
+  } finally {
+    reporting.value = false;
+  }
+}
 
 onMounted(async () => {
   try {
@@ -50,6 +75,39 @@ onMounted(async () => {
 
       <p v-if="share.error?.message" class="error">{{ share.error.message }}</p>
       <p class="muted small">链接有效期至 {{ new Date(share.expires_at).toLocaleString() }} · 内容由 AI 生成，请仔细甄别</p>
+
+      <div class="report">
+        <button v-if="!reportOpen" class="report-btn" @click="reportOpen = true">举报内容</button>
+        <div v-else class="report-form">
+          <label class="field">
+            <span class="label">举报类型</span>
+            <select v-model="reportReason" class="input">
+              <option value="illegal">违法违规</option>
+              <option value="porn">色情低俗</option>
+              <option value="violence">暴力血腥</option>
+              <option value="infringement">侵权盗用</option>
+              <option value="spam">垃圾广告</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">补充说明（可选）</span>
+            <textarea v-model="reportDetail" class="input textarea" maxlength="500" />
+          </label>
+          <label class="field">
+            <span class="label">联系方式（可选）</span>
+            <input v-model="reportContact" class="input" maxlength="100" />
+          </label>
+          <div class="report-actions">
+            <button class="report-btn" :disabled="reporting" @click="submitReport">
+              {{ reporting ? "提交中…" : "提交举报" }}
+            </button>
+            <button class="report-btn ghost" @click="reportOpen = false">取消</button>
+          </div>
+        </div>
+        <p v-if="reportMsg" class="info">{{ reportMsg }}</p>
+      </div>
+
       <NuxtLink to="/" class="home">AI 漫剧工作台</NuxtLink>
     </section>
   </main>
@@ -99,6 +157,61 @@ h1 {
 .home {
   margin-top: 8px;
   color: var(--text-3);
+  font-size: 12px;
+}
+.report {
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.report-btn {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.report-btn.ghost {
+  color: var(--text-3);
+}
+.report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.report-actions {
+  display: flex;
+  gap: 8px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.label {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.input {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  color: var(--text-1);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+.info {
+  color: var(--text-2);
   font-size: 12px;
 }
 .muted {

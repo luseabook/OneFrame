@@ -8,11 +8,12 @@ const cols = (table: PgTable): string[] => getTableConfig(table).columns.map((c)
 const indexes = (table: PgTable) => getTableConfig(table).indexes.map((i) => i.config);
 
 describe("db schema contract (database.md P1)", () => {
-  it("contains the 25 P1/P1' tables", () => {
+  it("contains the 26 P1/P1' tables", () => {
     const names = [
       schema.adminUsers,
       schema.assetFolders,
       schema.assets,
+      schema.contentReports,
       schema.creditAccounts,
       schema.creditFlows,
       schema.episodes,
@@ -37,7 +38,7 @@ describe("db schema contract (database.md P1)", () => {
       schema.waitlistEntries,
     ].map((t) => getTableConfig(t).name);
 
-    expect(names).toHaveLength(25);
+    expect(names).toHaveLength(26);
     expect(names).toEqual(
       expect.arrayContaining([
         "script_projects",
@@ -49,6 +50,7 @@ describe("db schema contract (database.md P1)", () => {
         "asset_folders",
         "exports",
         "task_shares",
+        "content_reports",
       ]),
     );
     expect(names).toEqual(
@@ -111,6 +113,12 @@ describe("db schema contract (database.md P1)", () => {
     );
     const storyboardUnique = indexes(schema.storyboards).find((i) => i.name === "uq_storyboards_episode_shot");
     expect(storyboardUnique?.unique).toBe(true);
+  });
+
+  it("content_reports keeps reason/status/handling columns", () => {
+    expect(cols(schema.contentReports)).toEqual(
+      expect.arrayContaining(["task_id", "share_id", "reason", "detail", "status", "handled_by", "handled_at"]),
+    );
   });
 
   it("task_shares keeps token/expiry/revocation columns", () => {

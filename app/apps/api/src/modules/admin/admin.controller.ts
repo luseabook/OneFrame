@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import type { FastifyRequest } from "fastify";
 import { z } from "zod";
+import { reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
 import { parseOrThrow } from "../../common/zod";
 import { AdminAuthService } from "./admin-auth.service";
@@ -50,6 +52,25 @@ export class AdminController {
   @Get("queues")
   queues() {
     return this.admin.queues();
+  }
+
+  @Get("reports")
+  reports(
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
+  ) {
+    return this.admin.listReports(Number(page ?? 1), Number(pageSize ?? 20), status ? Number(status) : undefined);
+  }
+
+  @Post("reports/:id/resolve")
+  resolveReport(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest & { adminAuth?: { adminId: string } },
+  ) {
+    const input = parseOrThrow(reportResolveSchema, body);
+    return this.admin.resolveReport(id, req.adminAuth?.adminId ?? "", input.action, input.note);
   }
 
   @Get("models")

@@ -124,6 +124,49 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect((afterRevoke.json() as { code: number }).code).toBe(400102);
   });
 
+  it("accepts a public report and lets admin take the share down", async () => {
+    const created = await inject("POST", `/tasks/${taskId}/share`, { expires_in_days: 7 }, {
+      authorization: `Bearer ${token}`,
+    });
+    const tokenValue = created.body.data.token as string;
+
+    const report = await app.inject({
+      method: "POST",
+      url: `/v1/share/${tokenValue}/report`,
+      payload: { reason: "illegal", detail: "test report" },
+    });
+    expect((report.json() as { code: number }).code).toBe(0);
+
+    const adminLogin = await app.inject({
+      method: "POST",
+      url: "/v1/ops/admin/login",
+      payload: { username: "admin", password: "admin12345" },
+    });
+    const adminToken = (adminLogin.json() as { data: { token: string } }).data.token;
+    const list = await app.inject({
+      method: "GET",
+      url: "/v1/ops/admin/reports",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const rows = (list.json() as { data: { list: Array<{ id: string; task_id: string; status: number }> } }).data.list;
+    const row = rows.find((item) => item.task_id === taskId);
+    expect(row).toBeTruthy();
+    expect(row!.status).toBe(1);
+
+    const resolved = await app.inject({
+      method: "POST",
+      url: `/v1/ops/admin/reports/${row!.id}/resolve`,
+      payload: { action: "takedown", note: "违规下线" },
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const resolvedBody = resolved.json() as { code: number; data: { status: number } };
+    expect(resolvedBody.code).toBe(0);
+    expect(resolvedBody.data.status).toBe(2);
+
+    const publicView = await app.inject({ method: "GET", url: `/v1/share/${tokenValue}` });
+    expect((publicView.json() as { code: number }).code).toBe(400102);
+  });
+
   it("cancels a pending task and unfreezes credits", async () => {
     const canceled = await inject("POST", `/tasks/${taskId}/cancel`, {}, {
       authorization: `Bearer ${token}`,

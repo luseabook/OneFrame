@@ -29,6 +29,13 @@
       "when": 1792820030380,
       "tag": "0003_steady_cardiac",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792823508418,
+      "tag": "0004_orange_spot",
+      "breakpoints": true
     }
   ]
 }

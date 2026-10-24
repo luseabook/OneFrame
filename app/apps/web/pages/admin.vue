@@ -13,6 +13,7 @@ interface Dashboard {
   tasks: { total: number; by_status: Record<string, number> };
   exports: number;
   active_shares: number;
+  pending_reports?: number;
   queues?: Record<string, Record<string, number>>;
 }
 
@@ -21,11 +22,12 @@ const username = ref("admin");
 const password = ref("");
 const error = ref("");
 const loading = ref(false);
-const tab = ref<"dashboard" | "models" | "tasks" | "shares">("dashboard");
+const tab = ref<"dashboard" | "models" | "tasks" | "shares" | "reports">("dashboard");
 const dashboard = ref<Dashboard | null>(null);
 const models = ref<Array<Record<string, unknown>>>([]);
 const tasks = ref<Array<Record<string, unknown>>>([]);
 const shares = ref<Array<Record<string, unknown>>>([]);
+const reports = ref<Array<Record<string, unknown>>>([]);
 
 async function api<T>(path: string, options: Record<string, unknown> = {}): Promise<T> {
   const res = await $fetch<Envelope<T>>(`/v1${path}`, {
@@ -58,16 +60,18 @@ async function login(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [d, m, t, s] = await Promise.all([
+  const [d, m, t, s, r] = await Promise.all([
     api<Dashboard>("/ops/admin/dashboard"),
     api<Array<Record<string, unknown>>>("/ops/admin/models"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/tasks"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/shares"),
+    api<{ list: Array<Record<string, unknown>> }>("/ops/admin/reports"),
   ]);
   dashboard.value = d;
   models.value = m;
   tasks.value = t.list;
   shares.value = s.list;
+  reports.value = r.list;
 }
 
 async function toggleModel(model: Record<string, unknown>): Promise<void> {
@@ -77,6 +81,14 @@ async function toggleModel(model: Record<string, unknown>): Promise<void> {
 
 async function revokeShare(share: Record<string, unknown>): Promise<void> {
   await api(`/ops/admin/shares/${share.id}/revoke`, { method: "POST" });
+  await loadAll();
+}
+
+async function resolveReport(report: Record<string, unknown>, action: "takedown" | "dismiss"): Promise<void> {
+  await api(`/ops/admin/reports/${report.id}/resolve`, {
+    method: "POST",
+    body: { action, note: action === "takedown" ? "举报成立，内容已下线" : "举报不成立" },
+  });
   await loadAll();
 }
 
@@ -120,6 +132,7 @@ onMounted(async () => {
         <button :class="{ active: tab === 'models' }" @click="tab = 'models'">模型/价格</button>
         <button :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">任务审计</button>
         <button :class="{ active: tab === 'shares' }" @click="tab = 'shares'">分享管理</button>
+        <button :class="{ active: tab === 'reports' }" @click="tab = 'reports'">举报处置</button>
         <button class="logout" @click="logout">退出</button>
       </div>
 
@@ -129,6 +142,7 @@ onMounted(async () => {
         <div class="card"><span class="muted">导出</span><b>{{ dashboard.exports }}</b></div>
         <div class="card"><span class="muted">有效分享</span><b>{{ dashboard.active_shares }}</b></div>
         <div class="card"><span class="muted">管理员</span><b>{{ dashboard.admins }}</b></div>
+        <div class="card"><span class="muted">待处理举报</span><b>{{ dashboard.pending_reports ?? 0 }}</b></div>
       </section>
       <section v-if="tab === 'dashboard' && dashboard?.queues" class="queues">
         <div v-for="(counts, queue) in dashboard.queues" :key="queue" class="queue-card">
@@ -171,6 +185,22 @@ onMounted(async () => {
           <button v-if="!s.revoked_at" class="mini" @click="revokeShare(s)">下线</button>
         </div>
         <p v-if="shares.length === 0" class="muted">暂无分享。</p>
+      </section>
+
+      <section v-if="tab === 'reports'" class="card">
+        <h2>举报处置</h2>
+        <div v-for="r in reports" :key="String(r.id)" class="report-row">
+          <span class="badge" :data-status="r.status">{{ r.status === 1 ? "待处理" : r.status === 2 ? "已下线" : "已驳回" }}</span>
+          <span class="muted">{{ r.reason }}</span>
+          <span class="report-detail">{{ r.detail || "-" }}</span>
+          <span class="muted">task {{ String(r.task_id).slice(-8) }}</span>
+          <template v-if="r.status === 1">
+            <button class="mini danger" @click="resolveReport(r, 'takedown')">下线</button>
+            <button class="mini" @click="resolveReport(r, 'dismiss')">驳回</button>
+          </template>
+          <span v-else class="muted">{{ r.resolution }}</span>
+        </div>
+        <p v-if="reports.length === 0" class="muted">暂无举报。</p>
       </section>
     </template>
   </main>
@@ -285,6 +315,33 @@ h1 {
 }
 .head-row {
   color: var(--text-3);
+}
+.report-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.report-detail {
+  flex: 1;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini.danger {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+.badge[data-status="1"] {
+  color: #fbbf24;
+  border-color: #fbbf24;
+}
+.badge[data-status="2"] {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
 }
 .share-row {
   display: flex;

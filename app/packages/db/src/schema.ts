@@ -464,6 +464,34 @@ export const taskShares = pgTable(
   (t) => [index("idx_task_shares_task").on(t.taskId), uniqueIndex("uq_task_shares_token").on(t.token)],
 );
 
+// ── 内容举报（合规 C2；公开分享页入口 + 运营处置）──────────
+export const contentReports = pgTable(
+  "content_reports",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => tasks.id),
+    shareId: bigint("share_id", { mode: "bigint" }).references(() => taskShares.id),
+    reason: text("reason").notNull(), // porn|violence|illegal|infringement|spam|other
+    detail: text("detail"),
+    contact: text("contact"),
+    status: smallint("status").notNull().default(1), // 1 PENDING 2 TAKEDOWN 3 DISMISSED
+    handledBy: bigint("handled_by", { mode: "bigint" }).references(() => adminUsers.id),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_content_reports_status").on(t.status, t.createdAt.desc()),
+    index("idx_content_reports_task").on(t.taskId),
+  ],
+);
+
 // ── 导出（P1'：整集 zip 异步打包；database §7）────────────
 export const exportJobs = pgTable(
   "exports",

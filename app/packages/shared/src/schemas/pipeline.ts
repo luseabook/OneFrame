@@ -112,6 +112,19 @@ export const assetUploadSchema = z.object({
 });
 export type AssetUploadRequest = z.infer<typeof assetUploadSchema>;
 
+export const reportCreateSchema = z.object({
+  reason: z.enum(["porn", "violence", "illegal", "infringement", "spam", "other"]),
+  detail: z.string().max(500).optional(),
+  contact: z.string().max(100).optional(),
+});
+export type ReportCreateRequest = z.infer<typeof reportCreateSchema>;
+
+export const reportResolveSchema = z.object({
+  action: z.enum(["takedown", "dismiss"]),
+  note: z.string().max(500).optional(),
+});
+export type ReportResolveRequest = z.infer<typeof reportResolveSchema>;
+
 export const shareCreateSchema = z.object({
   expires_in_days: z.number().int().min(1).max(30).default(7),
 });

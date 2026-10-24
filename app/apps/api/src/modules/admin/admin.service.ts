@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { desc, eq, sql } from "drizzle-orm";
-import { adminUsers, exportJobs, modelPrices, models, taskShares, tasks, users } from "@app/db";
+import { adminUsers, contentReports, exportJobs, modelPrices, models, taskShares, tasks, users } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
@@ -36,6 +36,10 @@ export class AdminService {
       .from(taskShares)
       .where(sql`${taskShares.revokedAt} is null and ${taskShares.expiresAt} > now()`);
     const [adminCount] = await db.select({ count: sql<number>`count(*)::int` }).from(adminUsers);
+    const [pendingReports] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(contentReports)
+      .where(eq(contentReports.status, 1));
 
     return {
       users: userCount?.count ?? 0,
@@ -46,6 +50,7 @@ export class AdminService {
       },
       exports: exportCount?.count ?? 0,
       active_shares: activeShares?.count ?? 0,
+      pending_reports: pendingReports?.count ?? 0,
       queues: await this.queues(),
     };
   }
@@ -212,5 +217,83 @@ export class AdminService {
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "share not found");
     return { ok: true };
+  }
+
+  async listReports(page?: number, pageSize?: number, status?: number) {
+    const { page: p, pageSize: ps, offset } = pageArgs(page, pageSize);
+    const where = status !== undefined ? eq(contentReports.status, status) : undefined;
+    const rows = await db
+      .select({
+        id: contentReports.id,
+        task_id: contentReports.taskId,
+        share_id: contentReports.shareId,
+        space_id: contentReports.spaceId,
+        reason: contentReports.reason,
+        detail: contentReports.detail,
+        contact: contentReports.contact,
+        status: contentReports.status,
+        resolution: contentReports.resolution,
+        handled_at: contentReports.handledAt,
+        created_at: contentReports.createdAt,
+      })
+      .from(contentReports)
+      .where(where)
+      .orderBy(desc(contentReports.createdAt))
+      .limit(ps)
+      .offset(offset);
+    const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(contentReports).where(where);
+    return {
+      list: rows.map((row) => ({
+        id: String(row.id),
+        task_id: String(row.task_id),
+        share_id: row.share_id ? String(row.share_id) : null,
+        space_id: String(row.space_id),
+        reason: row.reason,
+        detail: row.detail,
+        contact: row.contact,
+        status: row.status,
+        resolution: row.resolution,
+        handled_at: row.handled_at?.toISOString() ?? null,
+        created_at: row.created_at.toISOString(),
+      })),
+      total: countRow?.count ?? 0,
+      page: p,
+      page_size: ps,
+    };
+  }
+
+  async resolveReport(id: string, adminId: string, action: "takedown" | "dismiss", note?: string) {
+    let reportId: bigint;
+    try {
+      reportId = BigInt(id);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid report id", { field: "id" });
+    }
+    const [report] = await db.select().from(contentReports).where(eq(contentReports.id, reportId));
+    if (!report) throw new AppError(ErrorCode.NOT_FOUND, "report not found");
+    let handledBy: bigint | null = null;
+    try {
+      if (adminId) handledBy = BigInt(adminId);
+    } catch {
+      handledBy = null;
+    }
+    await db
+      .update(contentReports)
+      .set({
+        status: action === "takedown" ? 2 : 3,
+        handledBy,
+        handledAt: new Date(),
+        resolution: note ?? (action === "takedown" ? "内容已下线" : "举报不成立"),
+        updatedAt: new Date(),
+      })
+      .where(eq(contentReports.id, reportId));
+
+    if (action === "takedown" && report.shareId) {
+      await db
+        .update(taskShares)
+        .set({ revokedAt: new Date() })
+        .where(eq(taskShares.id, report.shareId));
+    }
+    return { ok: true, status: action === "takedown" ? 2 : 3 };
   }
 }
