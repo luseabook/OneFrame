@@ -445,6 +445,27 @@ export const storyboardAssets = pgTable(
   (t) => [primaryKey({ columns: [t.storyboardId, t.projectAssetId] })],
 );
 
+// ── 导出（P1'：整集 zip 异步打包；database §7）────────────
+export const exportJobs = pgTable(
+  "exports",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => episodes.id),
+    status: smallint("status").notNull().default(1), // 1PENDING 2PACKAGING 3SUCCEEDED 4FAILED
+    fileUri: text("file_uri"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    error: jsonb("error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_exports_space").on(t.spaceId, t.createdAt.desc())],
+);
+
 // ── 商业化（Beta 支付；P2' 使用，先建表保持契约）───────────
 export const skus = pgTable("skus", {
   id: pk(),

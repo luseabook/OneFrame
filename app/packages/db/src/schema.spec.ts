@@ -8,7 +8,7 @@ const cols = (table: PgTable): string[] => getTableConfig(table).columns.map((c)
 const indexes = (table: PgTable) => getTableConfig(table).indexes.map((i) => i.config);
 
 describe("db schema contract (database.md P1)", () => {
-  it("contains the 23 P1/P1' tables", () => {
+  it("contains the 24 P1/P1' tables", () => {
     const names = [
       schema.adminUsers,
       schema.assetFolders,
@@ -16,6 +16,7 @@ describe("db schema contract (database.md P1)", () => {
       schema.creditAccounts,
       schema.creditFlows,
       schema.episodes,
+      schema.exportJobs,
       schema.idempotencyRecords,
       schema.identities,
       schema.inviteCodes,
@@ -35,7 +36,7 @@ describe("db schema contract (database.md P1)", () => {
       schema.waitlistEntries,
     ].map((t) => getTableConfig(t).name);
 
-    expect(names).toHaveLength(23);
+    expect(names).toHaveLength(24);
     expect(names).toEqual(
       expect.arrayContaining([
         "script_projects",
@@ -45,6 +46,7 @@ describe("db schema contract (database.md P1)", () => {
         "storyboard_assets",
         "assets",
         "asset_folders",
+        "exports",
       ]),
     );
     expect(names).toEqual(
@@ -107,6 +109,12 @@ describe("db schema contract (database.md P1)", () => {
     );
     const storyboardUnique = indexes(schema.storyboards).find((i) => i.name === "uq_storyboards_episode_shot");
     expect(storyboardUnique?.unique).toBe(true);
+  });
+
+  it("exports keeps async packaging columns", () => {
+    expect(cols(schema.exportJobs)).toEqual(
+      expect.arrayContaining(["space_id", "episode_id", "status", "file_uri", "expires_at", "error"]),
+    );
   });
 
   it("tasks.dedupe_key has a partial unique index", () => {

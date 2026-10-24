@@ -6,6 +6,7 @@ import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
 import { runGenerationTask, type ExecutorDeps } from "./executor";
+import { runExport } from "./export";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -53,6 +54,12 @@ const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
         if (!taskId) throw new Error("missing taskId");
         await runGenerationTask(taskId, deps);
         return { ok: true, taskId };
+      }
+      if (name === QUEUES.EXPORT) {
+        const exportId = (job.data as { exportId?: string }).exportId;
+        if (!exportId) throw new Error("missing exportId");
+        await runExport(exportId, { db, storage, log: (obj, msg) => log.info(obj, msg) });
+        return { ok: true, exportId };
       }
       log.info({ queue: name, job_id: job.id }, "job received (no-op)");
       return { ok: true };

@@ -6,6 +6,7 @@
 > v1.2 · 2026-10-24 · 按《逆向一致性审查》修订：模型目录字段对齐 46 模型（mode_order/两 scene 键/价格三通道）、资产定稿状态、任务分享表、时长改为模型目录校验、credit_flows 去 expire、data_center 取值对齐 domainMap、补迁移执行顺序与外键 ALTER（RE-01~RE-20）
 > v1.3 · 2026-10-24 · 与 P1.2 实现同步：models 补展示字段（description/logo/tags/promotions/audio_video_support）；P1 初始迁移覆盖 16 表（drizzle schema 为结构源）
 > v1.4 · 2026-10-24 · P1' 流水线表落地（asset_folders/assets/script_projects/episodes/project_assets/storyboards/storyboard_assets，迁移 0001）；episodes 补 `synopsis`（大纲梗概，PRD F2②）
+> v1.5 · 2026-10-24 · 导出表落地（exports，迁移 0002）：异步 zip 打包、file_uri/expires_at/error；分镜状态回写 4/5
 >
 > **迁移执行顺序（本文件 DDL 按依赖而非章节顺序执行）**：§1 users/identities/spaces → §4 credit_accounts/credit_flows → §8 admin_users → §1.5 invite_* → §2 models/model_prices → §5 assets → §6 script_projects/episodes/storyboards/project_assets → §3 tasks/task_events/idempotency_records/exports/task_shares → §7 canvas_* → §8 configs。跨节前向外键（tasks.episode_id/shot_id、exports.episode_id、invite_redemptions.flow_id、invite_codes.created_by）在目标表建好后用文件内标注的 `ALTER TABLE` 补加，禁止直接按本文件从上到下执行。
 

@@ -142,6 +142,21 @@ export class ScriptController {
     return this.script.finalizeCharacter(req.auth?.spaceId ?? "", id, cid);
   }
 
+  @Post("projects/:id/episodes/:eid/exports")
+  async createExport(@Req() req: AuthedRequest, @Param("id") id: string, @Param("eid") eid: string) {
+    return this.script.createExport(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  @Get("projects/:id/episodes/:eid/exports/:xid")
+  async getExport(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("xid") xid: string,
+  ) {
+    return this.script.getExport(req.auth?.spaceId ?? "", id, eid, xid);
+  }
+
   @Post("projects/:id/episodes/:eid/storyboards/generate-videos")
   async generateVideos(
     @Req() req: AuthedRequest,

@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import type { CharacterDto, EpisodeDto, ModelDto, ProjectDto, StoryboardDto, TaskDto } from "~/types/api";
+import type {
+  CharacterDto,
+  EpisodeDto,
+  ExportDto,
+  ModelDto,
+  ProjectDto,
+  StoryboardDto,
+  TaskDto,
+} from "~/types/api";
 import { statusLabel } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true });
@@ -33,7 +41,10 @@ const info = ref("");
 const batchItems = ref<BatchItem[]>([]);
 const budgetExceeded = ref(false);
 const taskMap = ref<Record<string, TaskDto>>({});
+const exportJob = ref<ExportDto | null>(null);
+const exporting = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | undefined;
+let exportTimer: ReturnType<typeof setInterval> | undefined;
 
 const selectedEpisode = computed(() => episodes.value.find((ep) => ep.id === selectedEpisodeId.value) ?? null);
 const allShotsSelected = computed(() => shots.value.length > 0);
@@ -228,6 +239,46 @@ function startTaskPoll(): void {
   }, 2000);
 }
 
+async function submitExport(): Promise<void> {
+  if (!selectedEpisodeId.value) return;
+  exporting.value = true;
+  error.value = "";
+  info.value = "";
+  try {
+    const created = await api.post<ExportDto>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/exports`,
+    );
+    exportJob.value = created;
+    info.value = "导出任务已提交，正在打包…";
+    startExportPoll();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "导出失败";
+  } finally {
+    exporting.value = false;
+  }
+}
+
+function startExportPoll(): void {
+  if (exportTimer) clearInterval(exportTimer);
+  let tries = 0;
+  exportTimer = setInterval(async () => {
+    tries += 1;
+    try {
+      const data = await api.get<ExportDto>(
+        `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/exports/${exportJob.value!.export_id}`,
+      );
+      exportJob.value = data;
+      if (data.status === 3 || data.status === 4) {
+        if (exportTimer) clearInterval(exportTimer);
+        info.value = data.status === 3 ? "导出完成，可下载 zip" : "导出失败：没有可用视频";
+      }
+    } catch {
+      /* ignore */
+    }
+    if (tries > 30 && exportTimer) clearInterval(exportTimer);
+  }, 1500);
+}
+
 onMounted(async () => {
   await run("加载项目", async () => {
     await loadProject();
@@ -237,6 +288,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
+  if (exportTimer) clearInterval(exportTimer);
 });
 </script>
 
@@ -378,6 +430,15 @@ onUnmounted(() => {
             <Button :disabled="!!busy || shots.length === 0 || !allShotsSelected" @click="submitBatch">
               批量投递（{{ shots.length }} 镜）
             </Button>
+            <Button variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
+              {{ exporting ? "提交中…" : "导出本集 zip" }}
+            </Button>
+            <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="download" target="_blank" rel="noreferrer">
+              下载 zip
+            </a>
+            <span v-else-if="exportJob" class="muted">
+              导出：{{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : exportJob.status === 4 ? "失败" : "" }}
+            </span>
           </div>
           <p v-if="budgetExceeded" class="error">预算不足，部分镜头未投递（745703）。</p>
           <div class="batch-list">
@@ -609,6 +670,10 @@ h2 {
 }
 .tiny {
   width: 56px !important;
+}
+.download {
+  color: var(--color-primary);
+  font-size: 12px;
 }
 .mini {
   background: none;

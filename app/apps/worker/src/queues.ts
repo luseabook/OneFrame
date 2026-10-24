@@ -8,6 +8,7 @@ export const QUEUES = {
   GEN_POLL: "gen.poll",
   RESULT_TRANSFER: "result.transfer",
   NOTIFY: "notify",
+  EXPORT: "export.zip",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

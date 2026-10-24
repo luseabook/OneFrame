@@ -130,6 +130,14 @@ export interface CharacterDto {
   status: number;
 }
 
+export interface ExportDto {
+  export_id: string;
+  status: number;
+  download_url: string | null;
+  error: { code?: number; message?: string } | null;
+  expires_at: string | null;
+}
+
 export interface StoryboardDto {
   id: string;
   shot_no: number;

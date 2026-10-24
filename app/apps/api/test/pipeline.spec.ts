@@ -146,6 +146,18 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(res.data.budget_exceeded).toBe(false);
   });
 
+  it("creates an async export job for the episode", async () => {
+    const created = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/exports`);
+    expect(created.code).toBe(0);
+    expect(created.data.status).toBe(1);
+
+    const status = await inject(
+      "GET",
+      `/projects/${projectId}/episodes/${episodeId}/exports/${created.data.export_id}`,
+    );
+    expect(status.code).toBe(0);
+    expect(status.data.export_id).toBe(created.data.export_id);
+  });
   it("splits an imported script into episodes", async () => {
     const project = await inject("POST", "/projects", {
       title: "导入剧本",

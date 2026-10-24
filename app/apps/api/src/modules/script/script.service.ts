@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   assets,
   episodes,
+  exportJobs,
   freezeCredits,
   models,
   projectAssets,
@@ -734,6 +735,51 @@ export class ScriptService {
     return {
       budget_exceeded: items.some((item) => item.code === ErrorCode.BUDGET_EXCEEDED),
       items,
+    };
+  }
+
+  async createExport(spaceId: string, projectId: string, episodeId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const id = newId();
+    await db.insert(exportJobs).values({
+      id,
+      spaceId: BigInt(spaceId),
+      episodeId: episode.id,
+      status: 1,
+    });
+    await this.queue.enqueueExport(String(id));
+    return { export_id: String(id), status: 1 };
+  }
+
+  async getExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    let id: bigint;
+    try {
+      id = BigInt(exportId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid export id", { field: "xid" });
+    }
+    const [row] = await db
+      .select()
+      .from(exportJobs)
+      .where(
+        and(
+          eq(exportJobs.id, id),
+          eq(exportJobs.episodeId, episode.id),
+          eq(exportJobs.spaceId, BigInt(spaceId)),
+        ),
+      );
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
+    const downloadUrl =
+      row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null;
+    return {
+      export_id: String(row.id),
+      status: row.status,
+      download_url: downloadUrl,
+      error: row.error,
+      expires_at: row.expiresAt?.toISOString() ?? null,
     };
   }
 

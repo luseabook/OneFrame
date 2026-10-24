@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { assets, models, projectAssets, settleCredits, taskEvents, tasks, unfreezeCredits } from "@app/db";
+import { assets, models, projectAssets, settleCredits, storyboards, taskEvents, tasks, unfreezeCredits } from "@app/db";
 import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
@@ -140,6 +140,16 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
       }
     }
 
+    // 分镜任务回写：视频成功 → status=5（出片）；出图成功 → status=4（出图）
+    await tx
+      .update(storyboards)
+      .set({ status: 5, updatedAt: new Date() })
+      .where(eq(storyboards.videoTaskId, fresh.id));
+    await tx
+      .update(storyboards)
+      .set({ status: 4, updatedAt: new Date() })
+      .where(eq(storyboards.imageTaskId, fresh.id));
+
     await tx.insert(taskEvents).values({
       id: newId(),
       taskId: fresh.id,
@@ -171,6 +181,11 @@ async function fail(
       .update(tasks)
       .set({ status, error, finishedAt: new Date(), updatedAt: new Date() })
       .where(eq(tasks.id, task.id));
+    // 视频失败/审核拒绝：分镜退回“确认”，允许重新投递
+    await tx
+      .update(storyboards)
+      .set({ status: 2, updatedAt: new Date() })
+      .where(eq(storyboards.videoTaskId, task.id));
     await tx.insert(taskEvents).values({
       id: newId(),
       taskId: fresh.id,

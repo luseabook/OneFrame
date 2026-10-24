@@ -7,6 +7,7 @@ export const QUEUES = {
   GEN_POLL: "gen.poll",
   RESULT_TRANSFER: "result.transfer",
   NOTIFY: "notify",
+  EXPORT: "export.zip",
 } as const;
 
 function connectionOptions(): { host: string; port: number; password?: string } {
@@ -21,9 +22,11 @@ function connectionOptions(): { host: string; port: number; password?: string } 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   readonly submitQueue: Queue;
+  readonly exportQueue: Queue;
 
   constructor() {
     this.submitQueue = new Queue(QUEUES.GEN_SUBMIT, { connection: connectionOptions() });
+    this.exportQueue = new Queue(QUEUES.EXPORT, { connection: connectionOptions() });
   }
 
   async enqueueTask(taskId: string): Promise<void> {
@@ -40,7 +43,21 @@ export class QueueService implements OnModuleDestroy {
     );
   }
 
+  async enqueueExport(exportId: string): Promise<void> {
+    await this.exportQueue.add(
+      "export",
+      { exportId },
+      {
+        jobId: `export-${exportId}`,
+        attempts: 1,
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    );
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.submitQueue.close();
+    await this.exportQueue.close();
   }
 }
