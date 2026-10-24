@@ -30,8 +30,8 @@ async function logout(): Promise<void> {
           <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
           <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
           <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
+          <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
         </template>
-        <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
         <ClientOnly>
           <template v-if="user">
             <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
