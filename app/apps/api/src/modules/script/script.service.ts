@@ -735,6 +735,8 @@ export class ScriptService {
       request: GenerationRequest;
       cost: number;
       dedupeKey: string;
+      attemptNo: number;
+      reusableTaskId: bigint | null;
       durationAdjusted?: { from: number; to: number };
     };
     const candidates: Candidate[] = [];
@@ -780,9 +782,8 @@ export class ScriptService {
           .sort((a, b) => b - a)[0];
         duration = lower ?? Math.min(...allowedDurations);
       }
-      const durationAdjusted =
-        duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;
-      const request: GenerationRequest = {
+      let durationAdjusted =
+        duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;      const request: GenerationRequest = {
         mode: "universal_reference",
         model: model.name,
         scene: "storyboard_reference_video",
@@ -798,12 +799,35 @@ export class ScriptService {
       };
       const priced = await this.credits.price(request, spaceId);
       balance = priced.balance;
+      // PRD F2：价格表未覆盖该时长 → 就近低档计费并回写 duration_s
+      if (priced.effectiveDurationS != null && priced.effectiveDurationS !== duration) {
+        request.options.duration = priced.effectiveDurationS;
+        duration = priced.effectiveDurationS;
+        durationAdjusted = { from: requestedDuration, to: duration };
+      }
+      // 幂等：按 shot 维度取该镜最近一次任务
+      // - 成功/在途 → 复用原任务（不重复扣费）
+      // - 失败/取消 → 新一轮 attempt（dedupe 带 attempt 号）
+      const [latestForShot] = await db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.spaceId, BigInt(spaceId)), eq(tasks.shotId, shot.id)))
+        .orderBy(desc(tasks.attemptNo))
+        .limit(1);
+      const reusable =
+        latestForShot &&
+        (latestForShot.status === TaskStatus.SUCCEEDED ||
+          latestForShot.status === TaskStatus.PENDING ||
+          latestForShot.status === TaskStatus.RUNNING);
+      const attemptNo = reusable ? (latestForShot?.attemptNo ?? 1) : (latestForShot?.attemptNo ?? 0) + 1;
       candidates.push({
         shotId,
         shot,
         request,
         cost: priced.credits,
-        dedupeKey: `shot:${shot.id}:v1`,
+        dedupeKey: `shot:${shot.id}:a${attemptNo}`,
+        attemptNo,
+        reusableTaskId: reusable ? latestForShot.id : null,
         ...(durationAdjusted ? { durationAdjusted } : {}),
       });
     }
@@ -812,12 +836,22 @@ export class ScriptService {
     let spent = 0;
     const submittable: Candidate[] = [];
     for (const candidate of candidates) {
+      // 幂等命中（同 attempt 已存在任务）→ 直接复用，不扣费
       const [existing] = await db
         .select()
         .from(tasks)
         .where(and(eq(tasks.spaceId, BigInt(spaceId)), eq(tasks.dedupeKey, candidate.dedupeKey)));
       if (existing) {
         items.push({ shot_id: candidate.shotId, task_id: String(existing.id), submitted: true });
+        continue;
+      }
+      // 上一轮已成功/在途 → 复用原任务（断点续跑不重复扣费）
+      if (candidate.reusableTaskId) {
+        items.push({
+          shot_id: candidate.shotId,
+          task_id: String(candidate.reusableTaskId),
+          submitted: true,
+        });
         continue;
       }
       if (spent + candidate.cost > input.budget_credits_max) {
@@ -855,6 +889,7 @@ export class ScriptService {
           status: TaskStatus.PENDING,
           creditsFrozen: candidate.cost,
           dedupeKey: candidate.dedupeKey,
+          attemptNo: candidate.attemptNo,
         });
         await freezeCredits(tx, {
           spaceId: BigInt(spaceId),

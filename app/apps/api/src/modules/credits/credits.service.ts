@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { creditAccounts, creditFlows, modelPrices } from "@app/db";
 import type { GenerationRequest } from "@app/shared";
 import { AppError, ErrorCode } from "@app/shared";
@@ -15,6 +15,8 @@ export interface PriceResult {
   scene: string | null;
   credits: number;
   strikeCredits: number;
+  /** 实际计费时长档（就近低档回写后可能与请求不同） */
+  effectiveDurationS?: number | null;
   discount: number;
   pointsCode: string;
   balance: number;
@@ -101,7 +103,44 @@ export class CreditsService {
           eq(modelPrices.active, true),
         );
 
-    const [priceRow] = await db.select().from(modelPrices).where(priceWhere);
+    const [exactPrice] = await db.select().from(modelPrices).where(priceWhere);
+    let priceRow = exactPrice;
+    let effectiveDurationS = duration;
+    if (!priceRow && duration !== null) {
+      // PRD F2：模型/价格表只覆盖部分时长档 → 就近取低档（最大的 ≤ 请求时长）
+      const tiers = await db
+        .select({ durationS: modelPrices.durationS, credits: modelPrices.credits, strike: modelPrices.strikeCredits })
+        .from(modelPrices)
+        .where(
+          and(
+            eq(modelPrices.modelId, model.id),
+            eq(modelPrices.mode, body.mode),
+            eq(modelPrices.resolution, resolution),
+            isNotNull(modelPrices.durationS),
+            eq(modelPrices.active, true),
+          ),
+        )
+        .orderBy(modelPrices.durationS);
+      const lower = tiers.filter((t) => t.durationS !== null && t.durationS <= duration);
+      const picked = lower.length > 0 ? lower[lower.length - 1] : tiers[0];
+      if (picked?.durationS != null) {
+        effectiveDurationS = picked.durationS;
+        priceRow = {
+          id: 0n,
+          modelId: model.id,
+          mode: body.mode,
+          resolution,
+          durationS: picked.durationS,
+          credits: picked.credits,
+          strikeCredits: picked.strike ?? picked.credits,
+          memberCredits: null,
+          timeLimitedCredits: null,
+          active: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      }
+    }
     if (!priceRow) {
       throw new AppError(ErrorCode.INVALID_PARAM, "no price for requested model/mode/options", {
         field: "model",
@@ -121,6 +160,7 @@ export class CreditsService {
       scene: body.scene ?? null,
       credits: priceRow.credits,
       strikeCredits: strike,
+      effectiveDurationS,
       discount: strike > 0 ? Math.round((priceRow.credits / strike) * 100) / 100 : 1,
       pointsCode: `v_${body.mode}_${duration ?? 0}s_${resolution}`,
       balance,

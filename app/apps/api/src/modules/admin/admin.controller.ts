@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
-import type { FastifyRequest } from "fastify";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
@@ -52,6 +52,20 @@ export class AdminController {
   @Get("queues")
   queues() {
     return this.admin.queues();
+  }
+
+  @Get("task-metrics")
+  taskMetrics() {
+    return this.admin.taskMetrics();
+  }
+
+  @Get("failed-tasks.csv")
+  async failedTasksCsv(@Res() res: FastifyReply): Promise<void> {
+    const csv = await this.admin.failedTasksCsv();
+    res
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", 'attachment; filename="failed-tasks.csv"')
+      .send(csv);
   }
 
   @Get("funnel")

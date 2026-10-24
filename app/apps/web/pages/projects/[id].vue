@@ -177,7 +177,10 @@ async function prefillBudget(): Promise<void> {
   if (!selectedEpisodeId.value || shots.value.length === 0) return;
   await run("批量报价", async () => {
     const byId = new Map(characters.value.map((c) => [c.id, c]));
-    const items = shots.value.map((shot) => ({
+    // 续投场景：已投递/成功的镜头不再重复报价，只算「已消耗 + 剩余镜头报价」
+    const spentShots = shots.value.filter((shot) => shot.video_task_id !== null);
+    const pendingShots = shots.value.filter((shot) => shot.video_task_id === null);
+    const buildItem = (shot: (typeof shots.value)[number]) => ({
       mode: "universal_reference",
       model: modelName.value,
       scene: "storyboard_reference_video",
@@ -193,14 +196,26 @@ async function prefillBudget(): Promise<void> {
         duration: shot.duration_s ?? 5,
         count: 1,
       },
-    }));
-    const quote = await api.post<{ total_credits: number; balance_after_estimate: number; sufficient: boolean }>(
-      "/credits/quote/batch",
-      { items },
-    );
-    budget.value = Math.max(1, quote.total_credits);
+    });
+    const items = pendingShots.map(buildItem);
+    const quote = items.length
+      ? await api.post<{ total_credits: number; balance_after_estimate: number; sufficient: boolean }>(
+          "/credits/quote/batch",
+          { items },
+        )
+      : { total_credits: 0, balance_after_estimate: 0, sufficient: true };
+    // 已消耗：本集已投递镜头的冻结/结算积分
+    const spent = spentShots.reduce((sum, shot) => {
+      const task = taskMap.value[shot.video_task_id ?? ""];
+      return sum + (task?.credits_settled ?? task?.credits_frozen ?? 0);
+    }, 0);
+    const suggested = spent + quote.total_credits;
+    budget.value = Math.max(1, suggested);
     budgetTouched.value = false;
-    info.value = `批量报价 ${quote.total_credits} 积分；预算已预填`;
+    info.value =
+      spent > 0
+        ? `续投预算预填：已消耗 ${spent} + 剩余 ${pendingShots.length} 镜报价 ${quote.total_credits} = ${suggested} 积分`
+        : `批量报价 ${quote.total_credits} 积分；预算已预填`;
   });
 }
 

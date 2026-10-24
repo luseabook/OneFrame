@@ -68,6 +68,89 @@ export class AdminService {
     };
   }
 
+  // 任务指标（PRD F8）：失败率 + adapter 延迟（task.running → task.succeeded/failed）
+  async taskMetrics() {
+    const [total] = await db.select({ count: sql<number>`count(*)::int` }).from(tasks);
+    const [succeeded] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(eq(tasks.status, 3));
+    const [failed] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(sql`${tasks.status} in (4, 7)`);
+    const [canceled] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(eq(tasks.status, 5));
+    const finished = (succeeded?.count ?? 0) + (failed?.count ?? 0);
+
+    // adapter 延迟：按 adapter_code 聚合 created_at→finished_at 的平均耗时
+    const latencyResult = await db.execute(sql`
+      select m.adapter_code as adapter,
+             count(*)::int as samples,
+             round(avg(extract(epoch from (t.finished_at - t.created_at))) * 1000)::int as avg_ms,
+             round(percentile_cont(0.95) within group (order by extract(epoch from (t.finished_at - t.created_at))) * 1000)::int as p95_ms
+      from tasks t
+      join models m on m.id = t.model_id
+      where t.finished_at is not null
+      group by m.adapter_code
+      order by avg_ms desc
+    `);
+    const latencyRows = (latencyResult as unknown as { rows?: Array<Record<string, unknown>> }).rows ?? [];
+
+    const errorByCode = await db
+      .select({ code: sql<string>`coalesce(${tasks.error}->>'code','unknown')`, count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(sql`${tasks.status} in (4, 7)`)
+      .groupBy(sql`coalesce(${tasks.error}->>'code','unknown')`)
+      .orderBy(desc(sql`count(*)`));
+
+    return {
+      total: total?.count ?? 0,
+      succeeded: succeeded?.count ?? 0,
+      failed: failed?.count ?? 0,
+      canceled: canceled?.count ?? 0,
+      failure_rate: finished > 0 ? Math.round((failed!.count / finished) * 1000) / 10 : 0,
+      adapter_latency: latencyRows.map((row) => ({
+        adapter: String(row.adapter ?? ""),
+        samples: Number(row.samples ?? 0),
+        avg_ms: Number(row.avg_ms ?? 0),
+        p95_ms: Number(row.p95_ms ?? 0),
+      })),
+      errors_by_code: errorByCode.map((row) => ({ code: row.code, count: row.count })),
+    };
+  }
+
+  // 失败任务清单导出（CSV）
+  async failedTasksCsv() {
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(sql`${tasks.status} in (4, 7)`)
+      .orderBy(desc(tasks.updatedAt))
+      .limit(1000);
+    const header = "task_id,space_id,model,mode,status,error_code,error_message,created_at,finished_at";
+    const escape = (value: unknown): string => {
+      const text = value === null || value === undefined ? "" : String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const lines = rows.map((row) =>
+      [
+        String(row.id),
+        String(row.spaceId),
+        String(row.modelId),
+        row.mode,
+        row.status,
+        escape((row.error as { code?: unknown } | null)?.code ?? ""),
+        escape((row.error as { message?: unknown } | null)?.message ?? ""),
+        row.createdAt.toISOString(),
+        row.finishedAt ? row.finishedAt.toISOString() : "",
+      ].join(","),
+    );
+    return `${header}\n${lines.join("\n")}\n`;
+  }
+
   async listModels() {
     const rows = await db.select().from(models).orderBy(models.sort);
     return rows.map((row) => ({

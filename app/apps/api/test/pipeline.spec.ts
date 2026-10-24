@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, exportJobs, tasks } from "@app/db";
+import { createDb, exportJobs, projectAssets, storyboards, tasks } from "@app/db";
 import { newId } from "@app/shared";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
@@ -170,6 +170,63 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(res.data.items).toHaveLength(shotIds.length);
     expect(res.data.items.every((item: { code?: number }) => item.code === 400105)).toBe(true);
     expect(res.data.budget_exceeded).toBe(false);
+  });
+
+  it("reuses an in-flight shot task on re-submission without double charging", async () => {
+    // 让角色定稿（写 ref_image_uri + status=2），使分镜可投递
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      await db
+        .update(projectAssets)
+        .set({ status: 2, refImageUri: `u/test/ref-${Date.now()}.png` })
+        .where(eq(projectAssets.id, BigInt(characterId)));
+    } finally {
+      await pool.end();
+    }
+    const me = await inject("GET", "/me");
+    const spaceId = String(me.data.space.id);
+    const userId = String(me.data.user.id);
+    const storage = app.get(StorageService);
+    const key = `u/${spaceId}/tasks/batch-${Date.now()}.mp4`;
+    await storage.put(key, Buffer.from("batch"), "video/mp4");
+
+    // 直接落一条 shot 的 PENDING 任务，模拟“上一轮已投递、仍在途”
+    const { db: db2, pool: pool2 } = createDb(process.env.DATABASE_URL ?? "");
+    let taskId = newId();
+    try {
+      const [shot] = await db2
+        .select()
+        .from(storyboards)
+        .where(eq(storyboards.id, BigInt(shotIds[0]!)));
+      await db2.insert(tasks).values({
+        id: taskId,
+        spaceId: BigInt(spaceId),
+        userId: BigInt(userId),
+        episodeId: shot!.episodeId,
+        shotId: shot!.id,
+        capability: "video",
+        mode: "universal_reference",
+        scene: "storyboard_reference_video",
+        modelId: 1001n,
+        input: { prompt: "x", reference_uris: [] },
+        options: { duration: 5 },
+        status: 1,
+        creditsFrozen: 10,
+        dedupeKey: `shot:${shot!.id}:a1`,
+      });
+    } finally {
+      await pool2.end();
+    }
+
+    const res = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/storyboards/generate-videos`, {
+      shot_ids: [shotIds[0]],
+      budget_credits_max: 1000,
+      model: "wan-3.0",
+    });
+    expect(res.code).toBe(0);
+    const item = res.data.items.find((i: { shot_id: string }) => i.shot_id === shotIds[0]);
+    expect(item.submitted).toBe(true);
+    expect(String(item.task_id)).toBe(String(taskId));
   });
 
   it("creates an async export job for the episode", async () => {

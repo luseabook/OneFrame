@@ -74,6 +74,25 @@ describe("ops admin", () => {
     }
   });
 
+  it("returns task metrics with failure rate and adapter latency", async () => {
+    const res = await adminInject("GET", "/ops/admin/task-metrics");
+    expect(res.code).toBe(0);
+    expect(typeof res.data.failure_rate).toBe("number");
+    expect(Array.isArray(res.data.adapter_latency)).toBe(true);
+    expect(Array.isArray(res.data.errors_by_code)).toBe(true);
+  });
+
+  it("exports failed tasks as CSV", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/ops/admin/failed-tasks.csv",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/csv");
+    expect(res.body).toContain("task_id,space_id,model,mode,status");
+  });
+
   it("returns the pipeline funnel with conversion rates", async () => {
     const res = await adminInject("GET", "/ops/admin/funnel");
     expect(res.code).toBe(0);

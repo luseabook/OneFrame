@@ -31,6 +31,23 @@ const reports = ref<Array<Record<string, unknown>>>([]);
 const funnel = ref<
   Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>
 >([]);
+const metrics = ref<{
+  total: number;
+  succeeded: number;
+  failed: number;
+  canceled: number;
+  failure_rate: number;
+  adapter_latency: Array<{ adapter: string; samples: number; avg_ms: number; p95_ms: number }>;
+  errors_by_code: Array<{ code: string; count: number }>;
+}>({
+  total: 0,
+  succeeded: 0,
+  failed: 0,
+  canceled: 0,
+  failure_rate: 0,
+  adapter_latency: [],
+  errors_by_code: [],
+});
 
 async function api<T>(path: string, options: Record<string, unknown> = {}): Promise<T> {
   const res = await $fetch<Envelope<T>>(`/v1${path}`, {
@@ -63,7 +80,7 @@ async function login(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [d, m, t, s, r, f] = await Promise.all([
+  const [d, m, t, s, r, f, tm] = await Promise.all([
     api<Dashboard>("/ops/admin/dashboard"),
     api<Array<Record<string, unknown>>>("/ops/admin/models"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/tasks"),
@@ -72,6 +89,15 @@ async function loadAll(): Promise<void> {
     api<Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>>(
       "/ops/admin/funnel",
     ),
+    api<{
+      total: number;
+      succeeded: number;
+      failed: number;
+      canceled: number;
+      failure_rate: number;
+      adapter_latency: Array<{ adapter: string; samples: number; avg_ms: number; p95_ms: number }>;
+      errors_by_code: Array<{ code: string; count: number }>;
+    }>("/ops/admin/task-metrics"),
   ]);
   dashboard.value = d;
   models.value = m;
@@ -79,6 +105,25 @@ async function loadAll(): Promise<void> {
   shares.value = s.list;
   reports.value = r.list;
   funnel.value = f;
+  metrics.value = tm;
+}
+
+async function downloadFailedCsv(): Promise<void> {
+  try {
+    const res = await fetch("/v1/ops/admin/failed-tasks.csv", {
+      headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
+    });
+    if (!res.ok) throw new Error(`导出失败(${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "failed-tasks.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "导出失败";
+  }
 }
 
 async function toggleModel(model: Record<string, unknown>): Promise<void> {
@@ -168,6 +213,29 @@ onMounted(async () => {
           <span class="muted">{{ m.adapter_code }}</span>
           <span class="muted">{{ m.sort }}</span>
           <button class="mini" @click="toggleModel(m)">{{ m.visible ? "下架" : "上架" }}</button>
+        </div>
+      </section>
+
+      <section v-if="tab === 'tasks' && metrics" class="card">
+        <h2>任务指标</h2>
+        <div class="cards">
+          <div class="card"><span class="muted">失败率</span><b>{{ metrics.failure_rate }}%</b></div>
+          <div class="card"><span class="muted">成功 / 失败 / 取消</span><b>{{ metrics.succeeded }} / {{ metrics.failed }} / {{ metrics.canceled }}</b></div>
+          <button class="mini csv" @click="downloadFailedCsv">下载失败任务 CSV</button>
+        </div>
+        <div v-if="metrics.adapter_latency.length > 0" class="latency">
+          <div v-for="row in metrics.adapter_latency" :key="row.adapter" class="latency-row">
+            <span class="mono">{{ row.adapter }}</span>
+            <span class="muted">{{ row.samples }} 样本</span>
+            <span>avg {{ row.avg_ms }}ms</span>
+            <span>p95 {{ row.p95_ms }}ms</span>
+          </div>
+        </div>
+        <div v-if="metrics.errors_by_code.length > 0" class="latency">
+          <div v-for="row in metrics.errors_by_code" :key="row.code" class="latency-row">
+            <span class="mono">{{ row.code }}</span>
+            <span class="muted">{{ row.count }} 次</span>
+          </div>
         </div>
       </section>
 
@@ -337,6 +405,28 @@ h1 {
 }
 .head-row {
   color: var(--text-3);
+}
+.latency {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.latency-row {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  align-items: center;
+}
+.csv {
+  align-self: center;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 .funnel {
   display: flex;
