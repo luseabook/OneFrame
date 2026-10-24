@@ -91,6 +91,16 @@ async function download(item: TaskDto): Promise<void> {
   }
 }
 
+async function transferAsset(): Promise<void> {
+  if (!detail.value) return;
+  try {
+    await api.post("/assets/from-task", { task_id: detail.value.task_id, index: 0 });
+    info.value = "已转存资产库";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "转存失败";
+  }
+}
+
 async function batchDownload(): Promise<void> {
   const ids = list.value
     .filter((item) => item.status === 3)
@@ -183,6 +193,7 @@ onUnmounted(() => {
         <p class="kv"><span>结果</span><span>{{ detail.results?.[0]?.uri ?? "-" }}</span></p>
         <p v-if="detail.error" class="error">{{ detail.error.message }}</p>
         <div class="share">
+          <Button v-if="detail.status === 3" variant="ghost" @click="transferAsset">转存资产</Button>
           <Button variant="ghost" @click="createShare">生成分享链接</Button>
           <Button v-if="shareInfo" variant="ghost" @click="revokeShare">取消分享</Button>
           <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">

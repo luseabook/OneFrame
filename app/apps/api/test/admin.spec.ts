@@ -74,6 +74,26 @@ describe("ops admin", () => {
     }
   });
 
+  it("returns 403 when a normal user token is used", async () => {
+    const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
+    const sms = (await app.inject({ method: "POST", url: "/v1/auth/sms-code", payload: { phone } })).json() as {
+      data: { debug_code: string };
+    };
+    const login = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/login",
+        payload: { phone, code: sms.data.debug_code, age_confirmed: true },
+      })
+    ).json() as { data: { access_token: string } };
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/ops/admin/dashboard",
+      headers: { authorization: `Bearer ${login.data.access_token}` },
+    });
+    expect((res.json() as { code: number }).code).toBe(403101);
+  });
+
   it("rejects requests without admin token", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/ops/admin/dashboard" });
     const body = res.json() as { code: number };

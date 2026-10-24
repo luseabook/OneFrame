@@ -13,7 +13,12 @@ export class AdminGuard implements CanActivate {
     if (!header?.startsWith("Bearer ")) {
       throw new AppError(ErrorCode.UNAUTHORIZED, "admin auth required");
     }
-    req.adminAuth = this.auth.verify(header.slice(7));
+    try {
+      req.adminAuth = this.auth.verify(header.slice(7));
+    } catch {
+      // 已携带凭证但不是管理员（普通用户 token）→ 403；无凭证仍 401
+      throw new AppError(ErrorCode.FORBIDDEN, "admin only");
+    }
     return true;
   }
 }

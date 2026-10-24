@@ -2,9 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
+import { createDb, tasks } from "@app/db";
+import { newId } from "@app/shared";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
+import { StorageService } from "../src/storage/storage.service";
 
 const PNG_1PX =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -13,6 +16,8 @@ let app: NestFastifyApplication;
 const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
 let token = "";
 let assetId = "";
+let userId = "";
+let spaceId = "";
 
 async function inject(method: "GET" | "POST" | "DELETE", url: string, payload?: Record<string, unknown>) {
   const res = await app.inject({
@@ -42,8 +47,10 @@ beforeAll(async () => {
       url: "/v1/auth/login",
       payload: { phone, code: smsBody.data!.debug_code, age_confirmed: true },
     })
-  ).json() as { data: { access_token: string } | null };
+  ).json() as { data: { access_token: string; user: { id: string }; space_id: string } | null };
   token = loginBody.data!.access_token;
+  userId = loginBody.data!.user.id;
+  spaceId = loginBody.data!.space_id;
 });
 
 afterAll(async () => {
@@ -79,6 +86,46 @@ describe("assets upload/list/delete", () => {
     expect(quote.code).toBe(0);
     expect(quote.data.credits).toBeGreaterThan(0);
     expect(quote.data.sufficient).toBe(true);
+  });
+
+  it("transfers a succeeded task result and restores it from recycle bin", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      const storage = app.get(StorageService);
+      const key = `u/${spaceId}/tasks/test-${Date.now()}.mp4`;
+      await storage.put(key, Buffer.from("result-bytes"), "video/mp4");
+      const taskId = newId();
+      await db.insert(tasks).values({
+        id: taskId,
+        spaceId: BigInt(spaceId),
+        userId: BigInt(userId),
+        capability: "video",
+        mode: "text2video",
+        modelId: 1001n,
+        input: { prompt: "test" },
+        options: {},
+        status: 3,
+        results: [{ uri: key }],
+      });
+
+      const transferred = await inject("POST", "/assets/from-task", { task_id: String(taskId), index: 0 });
+      expect(transferred.code).toBe(0);
+      expect(transferred.data.kind).toBe("video");
+      expect(transferred.data.tags).toContain("from-task");
+      const id = transferred.data.id as string;
+
+      const removed = await inject("DELETE", `/assets/${id}`);
+      expect(removed.code).toBe(0);
+      const bin = await inject("GET", "/assets?deleted=true");
+      expect(bin.data.list.some((item: { id: string }) => item.id === id)).toBe(true);
+
+      const restored = await inject("POST", `/assets/${id}/restore`);
+      expect(restored.code).toBe(0);
+      const normal = await inject("GET", "/assets");
+      expect(normal.data.list.some((item: { id: string }) => item.id === id)).toBe(true);
+    } finally {
+      await pool.end();
+    }
   });
 
   it("soft-deletes the asset", async () => {

@@ -10,11 +10,14 @@ const loading = ref(false);
 const uploading = ref(false);
 const error = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
+const showDeleted = ref(false);
 
 async function load(): Promise<void> {
   loading.value = true;
   try {
-    const data = await api.get<{ list: AssetDto[]; total: number }>("/assets?page=1&page_size=60");
+    const data = await api.get<{ list: AssetDto[]; total: number }>(
+      `/assets?page=1&page_size=60&deleted=${showDeleted.value}`,
+    );
     list.value = data.list;
     total.value = data.total;
   } catch (e) {
@@ -61,6 +64,20 @@ async function onFile(event: Event): Promise<void> {
   }
 }
 
+async function restore(asset: AssetDto): Promise<void> {
+  try {
+    await api.post(`/assets/${asset.id}/restore`);
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "恢复失败";
+  }
+}
+
+async function switchDeleted(): Promise<void> {
+  showDeleted.value = !showDeleted.value;
+  await load();
+}
+
 async function remove(asset: AssetDto): Promise<void> {
   if (!confirm(`删除资产 ${asset.name}？`)) return;
   try {
@@ -80,8 +97,9 @@ onMounted(load);
       <h1>资产库</h1>
       <div class="actions">
         <span class="muted">共 {{ total }} 个 · 图片会自动压缩到 ≤1600px</span>
+        <Button variant="ghost" @click="switchDeleted">{{ showDeleted ? "返回资产库" : "回收站" }}</Button>
         <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onFile" />
-        <Button :disabled="uploading" @click="fileInput?.click()">{{ uploading ? "上传中…" : "上传图片" }}</Button>
+        <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">{{ uploading ? "上传中…" : "上传图片" }}</Button>
       </div>
     </div>
 
@@ -91,7 +109,8 @@ onMounted(load);
         <img :src="asset.url" :alt="asset.name" loading="lazy" />
         <div class="meta">
           <span class="name">{{ asset.name }}</span>
-          <button class="mini" @click="remove(asset)">删除</button>
+          <button v-if="showDeleted" class="mini" @click="restore(asset)">恢复</button>
+          <button v-else class="mini" @click="remove(asset)">删除</button>
         </div>
       </article>
     </div>
