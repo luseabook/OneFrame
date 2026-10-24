@@ -52,5 +52,7 @@ export const useApi = () => {
       request<T>(path, { method: "PUT", body, ...options }),
     patch: <T>(path: string, body?: unknown, options: Record<string, unknown> = {}) =>
       request<T>(path, { method: "PATCH", body, ...options }),
+    delete: <T>(path: string, options: Record<string, unknown> = {}) =>
+      request<T>(path, { method: "DELETE", ...options }),
   };
 };

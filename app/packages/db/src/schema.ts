@@ -445,6 +445,25 @@ export const storyboardAssets = pgTable(
   (t) => [primaryKey({ columns: [t.storyboardId, t.projectAssetId] })],
 );
 
+// ── 结果分享（PRD F3；database §7）─────────────────────────
+export const taskShares = pgTable(
+  "task_shares",
+  {
+    id: pk(),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => tasks.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("idx_task_shares_task").on(t.taskId), uniqueIndex("uq_task_shares_token").on(t.token)],
+);
+
 // ── 导出（P1'：整集 zip 异步打包；database §7）────────────
 export const exportJobs = pgTable(
   "exports",

@@ -98,6 +98,11 @@ export const portraitRebindSchema = z.object({
 });
 export type PortraitRebindRequest = z.infer<typeof portraitRebindSchema>;
 
+export const shareCreateSchema = z.object({
+  expires_in_days: z.number().int().min(1).max(30).default(7),
+});
+export type ShareCreateRequest = z.infer<typeof shareCreateSchema>;
+
 export const projectPatchSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   genre: z.string().max(50).optional(),

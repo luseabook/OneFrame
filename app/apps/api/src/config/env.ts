@@ -35,6 +35,16 @@ const envSchema = z.object({
   STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),
   STORAGE_PUBLIC_BASE: z.string().default("http://127.0.0.1:3000/v1"),
   STORAGE_SIGN_SECRET: z.string().min(8).default("dev-only-storage-sign-secret"),
+  // S3/OSS（STORAGE_DRIVER=s3 时必填）
+  STORAGE_S3_BUCKET: z.string().optional(),
+  STORAGE_S3_REGION: z.string().default("cn-hangzhou"),
+  STORAGE_S3_ENDPOINT: z.string().optional(),
+  STORAGE_S3_ACCESS_KEY_ID: z.string().optional(),
+  STORAGE_S3_SECRET_ACCESS_KEY: z.string().optional(),
+  STORAGE_S3_FORCE_PATH_STYLE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 });
 
 export const env = envSchema.parse(process.env);

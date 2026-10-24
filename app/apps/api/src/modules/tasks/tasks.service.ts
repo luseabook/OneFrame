@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   freezeCredits,
   taskEvents,
+  taskShares,
   tasks,
   unfreezeCredits,
 } from "@app/db";
@@ -244,6 +246,71 @@ export class TasksService {
     const url = isStorageKey ? await this.storage.signDownload(item.uri, 86_400) : item.uri;
     const ext = item.uri.split(".").pop()?.toLowerCase() || "bin";
     return { url, filename: `task-${row.id}-${index}.${ext}`, expires_in: 86_400 };
+  }
+
+  async createShare(spaceId: string, taskId: string, expiresDays: number) {
+    const row = await this.findTask(spaceId, taskId);
+    const token = randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + expiresDays * 24 * 3600 * 1000);
+    await db.insert(taskShares).values({
+      id: newId(),
+      taskId: row.id,
+      spaceId: row.spaceId,
+      token,
+      expiresAt,
+    });
+    return { token, share_path: `/share/${token}`, expires_at: expiresAt.toISOString() };
+  }
+
+  async revokeShare(spaceId: string, taskId: string) {
+    const row = await this.findTask(spaceId, taskId);
+    await db
+      .update(taskShares)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(taskShares.taskId, row.id), isNull(taskShares.revokedAt)));
+    return { ok: true };
+  }
+
+  // 公开只读预览：不暴露 space/user/credits（PRD F3）
+  async publicShare(token: string) {
+    const [share] = await db.select().from(taskShares).where(eq(taskShares.token, token));
+    if (!share || share.revokedAt || share.expiresAt.getTime() <= Date.now()) {
+      throw new AppError(ErrorCode.NOT_FOUND, "share not found or expired");
+    }
+    const [row] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
+
+    const rawResults = Array.isArray(row.results)
+      ? (row.results as Array<{ uri?: string; preview_uri?: string; text?: string }>)
+      : [];
+    const results: Array<{ url: string; preview_url?: string; text?: string }> = [];
+    for (const item of rawResults) {
+      if (!item.uri && !item.text) continue;
+      const isStorageKey = item.uri && !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
+      const url = item.uri
+        ? isStorageKey
+          ? await this.storage.signDownload(item.uri, 3600)
+          : item.uri
+        : "";
+      results.push({
+        url,
+        ...(item.text ? { text: item.text } : {}),
+        ...(item.preview_uri ? { preview_url: item.preview_uri } : {}),
+      });
+    }
+
+    return {
+      task_id: String(row.id),
+      mode: row.mode,
+      status: row.status,
+      created_at: row.createdAt.toISOString(),
+      expires_at: share.expiresAt.toISOString(),
+      results,
+      error: row.error as { message?: string } | null,
+    };
   }
 
   private async findTask(spaceId: string, id: string): Promise<TaskRow> {

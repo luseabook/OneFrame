@@ -102,6 +102,28 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect(me.body.data.credits).toEqual({ balance: 72, frozen: 8 });
   });
 
+  it("shares a task publicly and revokes it", async () => {
+    const created = await inject("POST", `/tasks/${taskId}/share`, { expires_in_days: 7 }, {
+      authorization: `Bearer ${token}`,
+    });
+    expect(created.body.code).toBe(0);
+    const tokenValue = created.body.data.token as string;
+    expect(tokenValue.length).toBeGreaterThan(20);
+
+    const publicView = await app.inject({ method: "GET", url: `/v1/share/${tokenValue}` });
+    const publicBody = publicView.json() as { code: number; data: { task_id: string } };
+    expect(publicBody.code).toBe(0);
+    expect(publicBody.data.task_id).toBe(taskId);
+
+    const revoked = await inject("DELETE", `/tasks/${taskId}/share`, undefined, {
+      authorization: `Bearer ${token}`,
+    });
+    expect(revoked.body.code).toBe(0);
+
+    const afterRevoke = await app.inject({ method: "GET", url: `/v1/share/${tokenValue}` });
+    expect((afterRevoke.json() as { code: number }).code).toBe(400102);
+  });
+
   it("cancels a pending task and unfreezes credits", async () => {
     const canceled = await inject("POST", `/tasks/${taskId}/cancel`, {}, {
       authorization: `Bearer ${token}`,

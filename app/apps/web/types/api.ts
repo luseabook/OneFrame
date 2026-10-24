@@ -130,6 +130,16 @@ export interface CharacterDto {
   status: number;
 }
 
+export interface ShareView {
+  task_id: string;
+  mode: string;
+  status: number;
+  created_at: string;
+  expires_at: string;
+  results: Array<{ url: string; preview_url?: string; text?: string }>;
+  error: { message?: string } | null;
+}
+
 export interface ExportDto {
   export_id: string;
   status: number;

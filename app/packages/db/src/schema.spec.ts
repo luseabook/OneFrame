@@ -8,7 +8,7 @@ const cols = (table: PgTable): string[] => getTableConfig(table).columns.map((c)
 const indexes = (table: PgTable) => getTableConfig(table).indexes.map((i) => i.config);
 
 describe("db schema contract (database.md P1)", () => {
-  it("contains the 24 P1/P1' tables", () => {
+  it("contains the 25 P1/P1' tables", () => {
     const names = [
       schema.adminUsers,
       schema.assetFolders,
@@ -31,12 +31,13 @@ describe("db schema contract (database.md P1)", () => {
       schema.storyboardAssets,
       schema.storyboards,
       schema.taskEvents,
+      schema.taskShares,
       schema.tasks,
       schema.users,
       schema.waitlistEntries,
     ].map((t) => getTableConfig(t).name);
 
-    expect(names).toHaveLength(24);
+    expect(names).toHaveLength(25);
     expect(names).toEqual(
       expect.arrayContaining([
         "script_projects",
@@ -47,6 +48,7 @@ describe("db schema contract (database.md P1)", () => {
         "assets",
         "asset_folders",
         "exports",
+        "task_shares",
       ]),
     );
     expect(names).toEqual(
@@ -109,6 +111,12 @@ describe("db schema contract (database.md P1)", () => {
     );
     const storyboardUnique = indexes(schema.storyboards).find((i) => i.name === "uq_storyboards_episode_shot");
     expect(storyboardUnique?.unique).toBe(true);
+  });
+
+  it("task_shares keeps token/expiry/revocation columns", () => {
+    expect(cols(schema.taskShares)).toEqual(
+      expect.arrayContaining(["task_id", "space_id", "token", "expires_at", "revoked_at"]),
+    );
   });
 
   it("exports keeps async packaging columns", () => {

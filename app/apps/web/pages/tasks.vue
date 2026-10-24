@@ -12,6 +12,7 @@ const page = ref(1);
 const pageSize = 20;
 const statusFilter = ref<string>("");
 const detail = ref<TaskDto | null>(null);
+const shareInfo = ref<{ share_path: string; expires_at: string } | null>(null);
 const error = ref("");
 const info = ref("");
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -26,6 +27,33 @@ async function load(): Promise<void> {
 
 async function openDetail(item: TaskDto): Promise<void> {
   detail.value = await api.get<TaskDto>(`/tasks/${item.task_id}`);
+  shareInfo.value = null;
+}
+
+async function createShare(): Promise<void> {
+  if (!detail.value) return;
+  try {
+    shareInfo.value = await api.post<{ share_path: string; expires_at: string }>(
+      `/tasks/${detail.value.task_id}/share`,
+      { expires_in_days: 7 },
+    );
+    const url = `${window.location.origin}${shareInfo.value.share_path}`;
+    await navigator.clipboard?.writeText(url).catch(() => undefined);
+    info.value = `分享链接已生成并复制：${url}`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "分享失败";
+  }
+}
+
+async function revokeShare(): Promise<void> {
+  if (!detail.value) return;
+  try {
+    await api.delete(`/tasks/${detail.value.task_id}/share`);
+    shareInfo.value = null;
+    info.value = "已取消分享";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "取消失败";
+  }
 }
 
 async function cancel(item: TaskDto): Promise<void> {
@@ -135,6 +163,14 @@ onUnmounted(() => {
         <p class="kv"><span>比例/分辨率</span><span>{{ detail.options?.ratio }} / {{ detail.options?.resolution }}</span></p>
         <p class="kv"><span>结果</span><span>{{ detail.results?.[0]?.uri ?? "-" }}</span></p>
         <p v-if="detail.error" class="error">{{ detail.error.message }}</p>
+        <div class="share">
+          <Button variant="ghost" @click="createShare">生成分享链接</Button>
+          <Button v-if="shareInfo" variant="ghost" @click="revokeShare">取消分享</Button>
+          <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">
+            打开分享页
+          </NuxtLink>
+        </div>
+        <p v-if="shareInfo" class="muted">有效期至 {{ new Date(shareInfo.expires_at).toLocaleString() }}</p>
       </template>
     </Modal>
   </main>
@@ -271,5 +307,15 @@ h1 {
 code {
   font-size: 11px;
   word-break: break-all;
+}
+.share {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.share-link {
+  color: var(--color-primary);
+  font-size: 12px;
 }
 </style>

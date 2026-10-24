@@ -1,20 +1,34 @@
 import { LocalStorage } from "./local";
+import { S3Storage, type S3Config } from "./s3";
 import type { StorageDriver } from "./types";
 
 export * from "./local";
+export * from "./s3";
 export * from "./types";
 
 export interface StorageOptions {
   driver: "local" | "s3";
-  rootDir: string;
-  publicBaseUrl: string;
-  signSecret: string;
+  /** local driver 使用 */
+  rootDir?: string;
+  publicBaseUrl?: string;
+  signSecret?: string;
+  /** s3/OSS driver 使用 */
+  s3?: S3Config;
 }
 
 export function createStorage(options: StorageOptions): StorageDriver {
   if (options.driver === "local") {
-    return new LocalStorage(options);
+    if (!options.rootDir || !options.publicBaseUrl || !options.signSecret) {
+      throw new Error("local storage requires rootDir/publicBaseUrl/signSecret");
+    }
+    return new LocalStorage({
+      rootDir: options.rootDir,
+      publicBaseUrl: options.publicBaseUrl,
+      signSecret: options.signSecret,
+    });
   }
-  // S3/OSS 驱动在 P1.5 接入（ADR-005）；当前显式失败，避免静默降级
-  throw new Error("s3 storage driver not implemented yet (set STORAGE_DRIVER=local for dev)");
+  if (!options.s3) {
+    throw new Error("s3 storage requires s3 config (bucket/region/access keys)");
+  }
+  return new S3Storage(options.s3);
 }

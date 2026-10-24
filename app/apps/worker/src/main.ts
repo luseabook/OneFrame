@@ -15,11 +15,24 @@ const log = pino({
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://app:app@localhost:5432/app";
 const storageDir = process.env.STORAGE_DIR ?? resolve(process.cwd(), "../../data/storage");
+const storageDriver = (process.env.STORAGE_DRIVER as "local" | "s3" | undefined) ?? "local";
 const storage = createStorage({
-  driver: (process.env.STORAGE_DRIVER as "local" | "s3" | undefined) ?? "local",
+  driver: storageDriver,
   rootDir: storageDir,
   publicBaseUrl: process.env.STORAGE_PUBLIC_BASE ?? "http://127.0.0.1:3000/v1",
   signSecret: process.env.STORAGE_SIGN_SECRET ?? "dev-only-storage-sign-secret",
+  ...(storageDriver === "s3" && process.env.STORAGE_S3_BUCKET
+    ? {
+        s3: {
+          bucket: process.env.STORAGE_S3_BUCKET,
+          region: process.env.STORAGE_S3_REGION ?? "cn-hangzhou",
+          endpoint: process.env.STORAGE_S3_ENDPOINT,
+          forcePathStyle: process.env.STORAGE_S3_FORCE_PATH_STYLE === "true",
+          accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID ?? "",
+          secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY ?? "",
+        },
+      }
+    : {}),
 });
 
 const adapterOptions: AdapterRuntimeOptions = {

@@ -53,7 +53,9 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] P1' 出片链路：定妆图任务→自动资产化/定稿、分镜角色绑定、批量投递（预算上限/资产门槛/dedupe）
 - [x] P1' 流水线前端：项目列表/建项、大纲编辑确认、角色与定妆图预览、分镜编辑、批量投递结果
 - [x] 导出 zip（异步队列 + manifest）+ 分镜状态回写（出片=5，失败退回确认=2）
-- [ ] P1' 剩余：候选定妆图选择/资产库、导出失败重试、分享
+- [x] 存储双驱动：local + S3/OSS 兼容（预签名 URL；MinIO/OSS endpoint 可配置）
+- [x] F3 分享：7 天 token、公开只读页 `/share/:token`、撤销
+- [ ] P1' 剩余：候选定妆图选择/资产库、导出失败重试
 - [ ] 工具页补齐图生视频/分享（P2）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
