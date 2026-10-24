@@ -23,4 +23,18 @@ describe("S3Storage signing", () => {
     const url = await storage.signDownload("u/1/file.png", 60);
     expect(url.startsWith("http://127.0.0.1:9000/app-results/")).toBe(true);
   });
+
+  it("signs with public endpoint while SDK uses internal endpoint", async () => {
+    const split = new S3Storage({
+      bucket: "app-results",
+      region: "us-east-1",
+      accessKeyId: "ak",
+      secretAccessKey: "sk",
+      endpoint: "http://minio:9000",
+      publicEndpoint: "https://files.example.com",
+      forcePathStyle: true,
+    });
+    const url = await split.signDownload("u/1/file.png", 60);
+    expect(url.startsWith("https://files.example.com/app-results/u/1/file.png")).toBe(true);
+  });
 });

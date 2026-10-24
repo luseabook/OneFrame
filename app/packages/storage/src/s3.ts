@@ -8,6 +8,8 @@ export interface S3Config {
   accessKeyId: string;
   secretAccessKey: string;
   endpoint?: string;
+  /** 预签名 URL 使用的对外 endpoint（内网 SDK + 公网下载分离） */
+  publicEndpoint?: string;
   forcePathStyle?: boolean;
 }
 
@@ -16,16 +18,27 @@ export interface S3Config {
 export class S3Storage implements StorageDriver {
   readonly driver = "s3" as const;
   private readonly client: S3Client;
+  private readonly signClient: S3Client;
 
   constructor(private readonly config: S3Config) {
-    this.client = new S3Client({
+    const base = {
       region: config.region,
-      ...(config.endpoint ? { endpoint: config.endpoint } : {}),
       ...(config.forcePathStyle ? { forcePathStyle: true } : {}),
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
+    };
+    this.client = new S3Client({
+      ...base,
+      ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+    });
+    // 预签名必须使用浏览器/客户端可访问的地址（生产为 CDN 或公网 OSS endpoint）
+    this.signClient = new S3Client({
+      ...base,
+      ...(config.publicEndpoint ?? config.endpoint
+        ? { endpoint: config.publicEndpoint ?? config.endpoint }
+        : {}),
     });
   }
 
@@ -51,7 +64,7 @@ export class S3Storage implements StorageDriver {
 
   async signDownload(key: string, ttlSeconds: number): Promise<string> {
     return getSignedUrl(
-      this.client,
+      this.signClient,
       new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
       { expiresIn: ttlSeconds },
     );

@@ -27,6 +27,7 @@ const storage = createStorage({
           bucket: process.env.STORAGE_S3_BUCKET,
           region: process.env.STORAGE_S3_REGION ?? "cn-hangzhou",
           endpoint: process.env.STORAGE_S3_ENDPOINT,
+          publicEndpoint: process.env.STORAGE_S3_PUBLIC_ENDPOINT,
           forcePathStyle: process.env.STORAGE_S3_FORCE_PATH_STYLE === "true",
           accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID ?? "",
           secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY ?? "",

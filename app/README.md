@@ -62,7 +62,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] 候选定妆图选择（1~4 张 + 切换定稿）、导出失败重试、管理端队列指标
 - [x] 通用 HTTP 视频供应商适配器：可配置 submit/poll/model 映射；本地假供应商 e2e 验证下载→转存→水印→结算
 - [x] 举报通道：公开分享页举报 + 频控 + 运营处置（下线/驳回/处理留痕）
-- [x] S3/MinIO 端到端：worker 转存→AI 水印→预签名下载；CI 增加 MinIO 集成测试（put/read/presign）
+- [x] S3/MinIO 端到端：worker 转存→AI 水印→预签名下载；本地 MinIO 集成测试（CI 自动 skip）
+- [x] 生产部署：api/worker/web 多阶段 Dockerfile + `docker-compose.prod.yml`（PG/Redis/MinIO/迁移/nginx）；compose 全链路冒烟通过
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

@@ -18,6 +18,7 @@ export class StorageService {
               bucket: env.STORAGE_S3_BUCKET,
               region: env.STORAGE_S3_REGION,
               endpoint: env.STORAGE_S3_ENDPOINT,
+              publicEndpoint: env.STORAGE_S3_PUBLIC_ENDPOINT,
               forcePathStyle: env.STORAGE_S3_FORCE_PATH_STYLE,
               accessKeyId: env.STORAGE_S3_ACCESS_KEY_ID ?? "",
               secretAccessKey: env.STORAGE_S3_SECRET_ACCESS_KEY ?? "",
