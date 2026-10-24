@@ -33,10 +33,20 @@ beforeAll(async () => {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
 
-  const sms = await app.inject({ method: "POST", url: "/v1/auth/sms-code", payload: { phone } });
-  const code = (sms.json() as { data: { debug_code: string } }).data.debug_code;
-  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { phone, code } });
-  token = (login.json() as { data: { access_token: string } }).data.access_token;
+  const smsBody = (await app.inject({ method: "POST", url: "/v1/auth/sms-code", payload: { phone } })).json() as {
+    code: number;
+    msg: string;
+    data: { debug_code: string } | null;
+  };
+  expect({ code: smsBody.code, msg: smsBody.msg }).toEqual({ code: 0, msg: "" });
+  const code = smsBody.data!.debug_code;
+  const loginBody = (await app.inject({ method: "POST", url: "/v1/auth/login", payload: { phone, code } })).json() as {
+    code: number;
+    msg: string;
+    data: { access_token: string } | null;
+  };
+  expect({ code: loginBody.code, msg: loginBody.msg }).toEqual({ code: 0, msg: "" });
+  token = loginBody.data!.access_token;
 });
 
 afterAll(async () => {

@@ -43,7 +43,9 @@ const globalForSnowflake = globalThis as unknown as {
 export const snowflake: Snowflake =
   globalForSnowflake.__appSnowflake ??
   (globalForSnowflake.__appSnowflake = new Snowflake(
-    process.env.WORKER_ID ? BigInt(process.env.WORKER_ID) : 1n,
+    // 多进程（API 副本/worker/测试 worker）必须用不同 worker id，否则同毫秒会撞主键。
+    // 显式 WORKER_ID 优先；否则用 pid 取模，避免所有进程默认 1。
+    process.env.WORKER_ID ? BigInt(process.env.WORKER_ID) : BigInt(process.pid % 1024),
   ));
 
 export const newId = (): bigint => snowflake.nextId();
