@@ -1,0 +1,30 @@
+{
+  "name": "app-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "turbo": "^2.3.3",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "turbo",
+      "@parcel/watcher",
+      "unrs-resolver"
+    ]
+  }
+}
