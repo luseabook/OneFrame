@@ -33,11 +33,11 @@ export class AuthService {
     @Inject(TokenService) private readonly tokens: TokenService,
   ) {}
 
-  sendCode(phone: string): Promise<{ debug_code?: string }> {
-    return this.sms.send(phone);
+  sendCode(phone: string, ip?: string): Promise<{ debug_code?: string }> {
+    return this.sms.send(phone, ip);
   }
 
-  async login(phone: string, code: string, inviteCode?: string): Promise<LoginResult> {
+  async login(phone: string, code: string, inviteCode?: string, ageConfirmed?: boolean): Promise<LoginResult> {
     await this.sms.verify(phone, code);
 
     const hash = hashPhone(phone);
@@ -54,6 +54,9 @@ export class AuthService {
       if (!space) throw new AppError(ErrorCode.INTERNAL, "user space missing");
       spaceId = space.id;
     } else {
+      if (ageConfirmed !== true) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "请确认已满 18 周岁", { field: "age_confirmed" });
+      }
       const created = await db.transaction(async (tx) => {
         const uid = newId();
         const sid = newId();

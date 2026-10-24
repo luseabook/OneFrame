@@ -40,7 +40,7 @@ beforeAll(async () => {
     await app.inject({
       method: "POST",
       url: "/v1/auth/login",
-      payload: { phone, code: smsBody.data!.debug_code },
+      payload: { phone, code: smsBody.data!.debug_code, age_confirmed: true },
     })
   ).json() as { data: { access_token: string } | null };
   token = loginBody.data!.access_token;

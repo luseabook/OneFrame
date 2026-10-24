@@ -50,7 +50,7 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     const code = sms.body.data.debug_code as string;
     expect(code).toMatch(/^\d{6}$/);
 
-    const login = await inject("POST", "/auth/login", { phone, code });
+    const login = await inject("POST", "/auth/login", { phone, code, age_confirmed: true });
     expect(login.body.code).toBe(0);
     token = login.body.data.access_token as string;
     spaceId = login.body.data.space_id as string;

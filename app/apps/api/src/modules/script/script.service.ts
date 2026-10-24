@@ -76,6 +76,8 @@ function storyboardDto(row: StoryboardRow, characterIds: string[] = []) {
     ratio: row.ratio,
     resolution: row.resolution,
     status: row.status,
+    image_task_id: row.imageTaskId ? String(row.imageTaskId) : null,
+    video_task_id: row.videoTaskId ? String(row.videoTaskId) : null,
     character_ids: characterIds,
   };
 }

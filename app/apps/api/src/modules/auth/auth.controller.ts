@@ -9,7 +9,10 @@ import type { AuthedRequest } from "../../common/auth.types";
 import { AuthService } from "./auth.service";
 
 const smsBody = smsCodeRequestSchema.extend({ invite_code: z.string().min(1).optional() });
-const loginBody = loginRequestSchema.extend({ invite_code: z.string().min(1).optional() });
+const loginBody = loginRequestSchema.extend({
+  invite_code: z.string().min(1).optional(),
+  age_confirmed: z.boolean().optional(),
+});
 const waitlistBody = z.object({
   phone: z.string().regex(/^1\d{10}$/),
   source: z.string().max(50).optional(),
@@ -21,16 +24,16 @@ export class AuthController {
 
   @Public()
   @Post("auth/sms-code")
-  async sms(@Body() body: unknown): Promise<{ debug_code?: string }> {
+  async sms(@Body() body: unknown, @Req() req: FastifyRequest): Promise<{ debug_code?: string }> {
     const input = parseOrThrow(smsBody, body);
-    return this.auth.sendCode(input.phone);
+    return this.auth.sendCode(input.phone, req.ip);
   }
 
   @Public()
   @Post("auth/login")
   async login(@Body() body: unknown, @Res({ passthrough: true }) res: FastifyReply) {
     const input = parseOrThrow(loginBody, body);
-    const result = await this.auth.login(input.phone, input.code, input.invite_code);
+    const result = await this.auth.login(input.phone, input.code, input.invite_code, input.age_confirmed);
     this.setRefreshCookie(res, result.refresh_token);
     const { refresh_token: _ignored, ...payload } = result;
     return payload;

@@ -167,6 +167,8 @@ export interface StoryboardDto {
   ratio: string | null;
   resolution: string | null;
   status: number;
+  image_task_id: string | null;
+  video_task_id: string | null;
   character_ids: string[];
 }
 

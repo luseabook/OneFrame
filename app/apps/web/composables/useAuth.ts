@@ -32,7 +32,12 @@ export const useAuth = () => {
     return res.data as T;
   }
 
-  async function login(phone: string, code: string, inviteCode?: string): Promise<void> {
+  async function login(
+    phone: string,
+    code: string,
+    inviteCode?: string,
+    ageConfirmed = false,
+  ): Promise<void> {
     const data = await call<{
       access_token: string;
       expires_in: number;
@@ -40,7 +45,12 @@ export const useAuth = () => {
       space_id: string;
     }>("/auth/login", {
       method: "POST",
-      body: { phone, code, ...(inviteCode ? { invite_code: inviteCode } : {}) },
+      body: {
+        phone,
+        code,
+        ...(inviteCode ? { invite_code: inviteCode } : {}),
+        age_confirmed: ageConfirmed,
+      },
     });
     state.value = {
       accessToken: data.access_token,

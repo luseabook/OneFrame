@@ -6,6 +6,7 @@ const route = useRoute();
 const phone = ref("");
 const code = ref("");
 const inviteCode = ref("");
+const ageConfirmed = ref(false);
 const error = ref("");
 const hint = ref("");
 const countdown = ref(0);
@@ -50,9 +51,13 @@ async function login(): Promise<void> {
     error.value = "请输入 6 位验证码";
     return;
   }
+  if (!ageConfirmed.value) {
+    error.value = "请确认已满 18 周岁";
+    return;
+  }
   submitting.value = true;
   try {
-    await auth.login(phone.value, code.value, inviteCode.value || undefined);
+    await auth.login(phone.value, code.value, inviteCode.value || undefined, true);
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/create/text-to-video";
     await navigateTo(redirect);
   } catch (e) {
@@ -82,6 +87,10 @@ onUnmounted(() => {
           </Button>
         </div>
         <TextField v-model="inviteCode" label="邀请码（Alpha 期需要）" placeholder="可选" />
+        <label class="age">
+          <input v-model="ageConfirmed" type="checkbox" />
+          我已满 18 周岁，并同意《用户协议》《隐私政策》
+        </label>
         <p v-if="hint" class="hint">{{ hint }}</p>
         <p v-if="error" class="error">{{ error }}</p>
         <Button :disabled="submitting" @click="login">{{ submitting ? "登录中…" : "登录" }}</Button>
@@ -124,6 +133,14 @@ h1 {
 }
 .code-row :deep(.field) {
   flex: 1;
+}
+.age {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
 }
 .hint {
   margin: 0;

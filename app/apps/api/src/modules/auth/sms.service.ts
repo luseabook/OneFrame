@@ -11,11 +11,15 @@ const MAX_TRIES = 5;
 export class SmsService {
   constructor(@Inject(RedisService) private readonly redis: RedisService) {}
 
-  async send(phone: string): Promise<{ debug_code?: string }> {
+  async send(phone: string, ip?: string): Promise<{ debug_code?: string }> {
     const perMinute = await this.redis.incrWithTtl(`sms:60:${phone}`, 60);
     if (perMinute > 1) throw new AppError(ErrorCode.RATE_LIMITED, "发送过于频繁，请稍后重试");
     const perDay = await this.redis.incrWithTtl(`sms:day:${phone}`, 86_400);
     if (perDay > 5) throw new AppError(ErrorCode.RATE_LIMITED, "今日发送次数已达上限");
+    if (ip) {
+      const perIp = await this.redis.incrWithTtl(`sms:ip:${ip}`, 3600);
+      if (perIp > 20) throw new AppError(ErrorCode.RATE_LIMITED, "当前网络发码次数已达上限");
+    }
 
     const code = String(randomInt(100_000, 1_000_000));
     await this.redis.set(`sms:code:${phone}`, JSON.stringify({ code, tries: 0 }), CODE_TTL_S);

@@ -42,7 +42,7 @@ beforeAll(async () => {
   };
   expect({ code: smsBody.code, msg: smsBody.msg }).toEqual({ code: 0, msg: "" });
   const code = smsBody.data!.debug_code;
-  const loginBody = (await app.inject({ method: "POST", url: "/v1/auth/login", payload: { phone, code } })).json() as {
+  const loginBody = (await app.inject({ method: "POST", url: "/v1/auth/login", payload: { phone, code, age_confirmed: true } })).json() as {
     code: number;
     msg: string;
     data: { access_token: string } | null;

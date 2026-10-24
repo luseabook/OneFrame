@@ -86,12 +86,20 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
       }
     }
 
-    if (manifest.shots.length === 0) {
+    // PRD F2⑦：成功镜 <80% 拒绝导出（400106）
+    const successRate = shots.length > 0 ? manifest.shots.length / shots.length : 0;
+    if (manifest.shots.length === 0 || successRate < 0.8) {
       await deps.db
         .update(exportJobs)
         .set({
           status: 4,
-          error: { code: 400106, message: "no video results to export" },
+          error: {
+            code: 400106,
+            message:
+              manifest.shots.length === 0
+                ? "no video results to export"
+                : `only ${Math.round(successRate * 100)}% shots succeeded (min 80%)`,
+          },
           updatedAt: new Date(),
         })
         .where(eq(exportJobs.id, id));
