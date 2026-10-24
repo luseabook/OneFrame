@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { createDb, exportJobs } from "@app/db";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -59,6 +61,7 @@ describe("script pipeline (PRD F2 backend)", () => {
   let characterId = "";
   let shotIds: string[] = [];
   let storyboardId = "";
+  let exportJobId = "";
 
   it("creates a novel project", async () => {
     const res = await inject("POST", "/projects", {
@@ -150,6 +153,7 @@ describe("script pipeline (PRD F2 backend)", () => {
     const created = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/exports`);
     expect(created.code).toBe(0);
     expect(created.data.status).toBe(1);
+    exportJobId = created.data.export_id;
 
     const status = await inject(
       "GET",
@@ -158,6 +162,24 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(status.code).toBe(0);
     expect(status.data.export_id).toBe(created.data.export_id);
   });
+  it("retries a failed export job", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      await db
+        .update(exportJobs)
+        .set({ status: 4, error: { code: 400106, message: "test failure" } })
+        .where(eq(exportJobs.id, BigInt(exportJobId)));
+    } finally {
+      await pool.end();
+    }
+    const retried = await inject(
+      "POST",
+      `/projects/${projectId}/episodes/${episodeId}/exports/${exportJobId}/retry`,
+    );
+    expect(retried.code).toBe(0);
+    expect(retried.data.status).toBe(1);
+  });
+
   it("splits an imported script into episodes", async () => {
     const project = await inject("POST", "/projects", {
       title: "导入剧本",

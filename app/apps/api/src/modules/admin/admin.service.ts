@@ -1,8 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { desc, eq, sql } from "drizzle-orm";
 import { adminUsers, exportJobs, modelPrices, models, taskShares, tasks, users } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
+import { QueueService } from "../../queue/queue.service";
 
 function pageArgs(page?: number, pageSize?: number) {
   const p = Math.max(1, page ?? 1);
@@ -12,6 +13,16 @@ function pageArgs(page?: number, pageSize?: number) {
 
 @Injectable()
 export class AdminService {
+  constructor(@Inject(QueueService) private readonly queue: QueueService) {}
+
+  async queues() {
+    const [submit, exportJobsQueue] = await Promise.all([
+      this.queue.submitQueue.getJobCounts("wait", "active", "failed", "completed", "delayed"),
+      this.queue.exportQueue.getJobCounts("wait", "active", "failed", "completed", "delayed"),
+    ]);
+    return { "gen.submit": submit, "export.zip": exportJobsQueue };
+  }
+
   async dashboard() {
     const [userCount] = await db.select({ count: sql<number>`count(*)::int` }).from(users);
     const [taskCount] = await db.select({ count: sql<number>`count(*)::int` }).from(tasks);
@@ -35,6 +46,7 @@ export class AdminService {
       },
       exports: exportCount?.count ?? 0,
       active_shares: activeShares?.count ?? 0,
+      queues: await this.queues(),
     };
   }
 

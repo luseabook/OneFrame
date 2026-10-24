@@ -59,6 +59,13 @@ describe("ops admin", () => {
     await adminInject("PATCH", `/ops/admin/models/${first.id}`, { visible: first.visible });
   });
 
+  it("returns queue metrics", async () => {
+    const res = await adminInject("GET", "/ops/admin/queues");
+    expect(res.code).toBe(0);
+    expect(typeof res.data["gen.submit"].wait).toBe("number");
+    expect(typeof res.data["export.zip"].active).toBe("number");
+  });
+
   it("lists tasks/exports/shares for audit", async () => {
     for (const path of ["/ops/admin/tasks", "/ops/admin/exports", "/ops/admin/shares"]) {
       const res = await adminInject("GET", path);

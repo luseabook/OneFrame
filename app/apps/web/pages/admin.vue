@@ -13,6 +13,7 @@ interface Dashboard {
   tasks: { total: number; by_status: Record<string, number> };
   exports: number;
   active_shares: number;
+  queues?: Record<string, Record<string, number>>;
 }
 
 const token = ref("");
@@ -128,6 +129,12 @@ onMounted(async () => {
         <div class="card"><span class="muted">导出</span><b>{{ dashboard.exports }}</b></div>
         <div class="card"><span class="muted">有效分享</span><b>{{ dashboard.active_shares }}</b></div>
         <div class="card"><span class="muted">管理员</span><b>{{ dashboard.admins }}</b></div>
+      </section>
+      <section v-if="tab === 'dashboard' && dashboard?.queues" class="queues">
+        <div v-for="(counts, queue) in dashboard.queues" :key="queue" class="queue-card">
+          <b>{{ queue }}</b>
+          <span class="muted">wait {{ counts.wait ?? 0 }} · active {{ counts.active ?? 0 }} · failed {{ counts.failed ?? 0 }}</span>
+        </div>
       </section>
 
       <section v-if="tab === 'models'" class="card">
@@ -249,6 +256,20 @@ h1 {
 }
 .tabs .logout {
   margin-left: auto;
+}
+.queues {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.queue-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  padding: 12px;
 }
 .row {
   display: grid;

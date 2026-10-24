@@ -6,6 +6,7 @@ import {
   outlineConfirmSchema,
   portraitGenerateSchema,
   portraitRebindSchema,
+  portraitSelectSchema,
   projectPatchSchema,
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
@@ -137,6 +138,22 @@ export class ScriptController {
     return this.script.rebindCharacter(req.auth?.spaceId ?? "", id, cid, input.asset_id);
   }
 
+  @Get("projects/:id/characters/:cid/portrait/candidates")
+  async candidates(@Req() req: AuthedRequest, @Param("id") id: string, @Param("cid") cid: string) {
+    return this.script.portraitCandidates(req.auth?.spaceId ?? "", id, cid);
+  }
+
+  @Post("projects/:id/characters/:cid/portrait/select")
+  async selectPortrait(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("cid") cid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(portraitSelectSchema, body);
+    return this.script.selectPortrait(req.auth?.spaceId ?? "", id, cid, input.task_id, input.index);
+  }
+
   @Post("projects/:id/characters/:cid/finalize")
   async finalize(@Req() req: AuthedRequest, @Param("id") id: string, @Param("cid") cid: string) {
     return this.script.finalizeCharacter(req.auth?.spaceId ?? "", id, cid);
@@ -155,6 +172,16 @@ export class ScriptController {
     @Param("xid") xid: string,
   ) {
     return this.script.getExport(req.auth?.spaceId ?? "", id, eid, xid);
+  }
+
+  @Post("projects/:id/episodes/:eid/exports/:xid/retry")
+  async retryExport(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("xid") xid: string,
+  ) {
+    return this.script.retryExport(req.auth?.spaceId ?? "", id, eid, xid);
   }
 
   @Post("projects/:id/episodes/:eid/storyboards/generate-videos")

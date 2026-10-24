@@ -506,6 +506,105 @@ export class ScriptService {
     return { ...created, character_id: String(character.id), model: model.name };
   }
 
+  async portraitCandidates(spaceId: string, projectId: string, characterId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+    if (!character.sourceTaskId) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "portrait not generated yet");
+    }
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, character.sourceTaskId), eq(tasks.spaceId, BigInt(spaceId))));
+    if (!task || task.status !== TaskStatus.SUCCEEDED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "portrait task not succeeded");
+    }
+    const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
+    const candidates = await Promise.all(
+      results
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => Boolean(item.uri))
+        .map(async ({ item, index }) => ({ index, url: await this.storage.signDownload(item.uri!, 3600) })),
+    );
+    return { task_id: String(task.id), candidates };
+  }
+
+  async selectPortrait(spaceId: string, projectId: string, characterId: string, taskId: string, index: number) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+    let bigTaskId: bigint;
+    try {
+      bigTaskId = BigInt(taskId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid task_id", { field: "task_id" });
+    }
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, bigTaskId), eq(tasks.spaceId, BigInt(spaceId))));
+    if (!task || task.status !== TaskStatus.SUCCEEDED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "portrait task not succeeded");
+    }
+    const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
+    const picked = results[index];
+    if (!picked?.uri) throw new AppError(ErrorCode.NOT_FOUND, "candidate not found");
+
+    const assetId = newId();
+    await db.transaction(async (tx) => {
+      await tx.insert(assets).values({
+        id: assetId,
+        spaceId: BigInt(spaceId),
+        kind: "image",
+        uri: picked.uri!,
+        sourceTaskId: task.id,
+        name: character.name,
+        tags: ["portrait"],
+        meta: { project_id: String(project.id), project_asset_id: String(character.id), candidate_index: index },
+      });
+      await tx
+        .update(projectAssets)
+        .set({
+          portraitAssetId: assetId,
+          refImageUri: picked.uri!,
+          status: 2,
+          finalizedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(projectAssets.id, character.id));
+    });
+    const [updated] = await db.select().from(projectAssets).where(eq(projectAssets.id, character.id));
+    return assetDto(updated, await this.storage.signDownload(picked.uri!, 3600));
+  }
+
+  async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    let id: bigint;
+    try {
+      id = BigInt(exportId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid export id", { field: "xid" });
+    }
+    const [row] = await db
+      .select()
+      .from(exportJobs)
+      .where(
+        and(
+          eq(exportJobs.id, id),
+          eq(exportJobs.episodeId, episode.id),
+          eq(exportJobs.spaceId, BigInt(spaceId)),
+        ),
+      );
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
+    if (row.status !== 4) throw new AppError(ErrorCode.INVALID_PARAM, "only failed exports can retry");
+    await db
+      .update(exportJobs)
+      .set({ status: 1, error: null, fileUri: null, expiresAt: null, updatedAt: new Date() })
+      .where(eq(exportJobs.id, id));
+    await this.queue.enqueueExport(String(id));
+    return { export_id: String(id), status: 1 };
+  }
+
   async finalizeCharacter(spaceId: string, projectId: string, characterId: string) {
     const project = await this.findProject(spaceId, projectId);
     const character = await this.findCharacter(project.id, characterId);

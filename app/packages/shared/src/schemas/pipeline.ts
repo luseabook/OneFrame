@@ -98,6 +98,12 @@ export const portraitRebindSchema = z.object({
 });
 export type PortraitRebindRequest = z.infer<typeof portraitRebindSchema>;
 
+export const portraitSelectSchema = z.object({
+  task_id: z.string().min(1),
+  index: z.number().int().min(0).max(3),
+});
+export type PortraitSelectRequest = z.infer<typeof portraitSelectSchema>;
+
 export const assetUploadSchema = z.object({
   filename: z.string().min(1).max(200),
   content_type: z.enum(["image/jpeg", "image/png", "image/webp"]),

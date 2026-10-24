@@ -47,6 +47,11 @@ export class AdminController {
     return this.admin.dashboard();
   }
 
+  @Get("queues")
+  queues() {
+    return this.admin.queues();
+  }
+
   @Get("models")
   models() {
     return this.admin.listModels();

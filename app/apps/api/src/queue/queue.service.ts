@@ -48,7 +48,8 @@ export class QueueService implements OnModuleDestroy {
       "export",
       { exportId },
       {
-        jobId: `export-${exportId}`,
+        // 同一导出可重试：jobId 带时间戳，避免被已完成的同名 job 去重
+        jobId: `export-${exportId}-${Date.now()}`,
         attempts: 1,
         removeOnComplete: 100,
         removeOnFail: 100,

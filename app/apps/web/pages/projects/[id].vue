@@ -43,6 +43,8 @@ const budgetExceeded = ref(false);
 const taskMap = ref<Record<string, TaskDto>>({});
 const exportJob = ref<ExportDto | null>(null);
 const exporting = ref(false);
+const portraitCount = ref(1);
+const candidates = ref<{ charId: string; task_id: string; list: Array<{ index: number; url: string }> } | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let exportTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -129,10 +131,44 @@ async function generatePortrait(character: CharacterDto): Promise<void> {
   await run("生成定妆图", async () => {
     const res = await api.post<{ task_id: string }>(
       `/projects/${projectId.value}/characters/${character.id}/portrait`,
-      { count: 1 },
+      { count: portraitCount.value },
     );
     info.value = `定妆图任务已提交（${res.task_id}），完成后自动定稿`;
     startPortraitPoll();
+  });
+}
+
+async function loadCandidates(character: CharacterDto): Promise<void> {
+  await run("加载候选图", async () => {
+    const data = await api.get<{ task_id: string; candidates: Array<{ index: number; url: string }> }>(
+      `/projects/${projectId.value}/characters/${character.id}/portrait/candidates`,
+    );
+    candidates.value = { charId: character.id, task_id: data.task_id, list: data.candidates };
+  });
+}
+
+async function chooseCandidate(item: { index: number }): Promise<void> {
+  if (!candidates.value) return;
+  await run("选择定妆图", async () => {
+    await api.post(
+      `/projects/${projectId.value}/characters/${candidates.value!.charId}/portrait/select`,
+      { task_id: candidates.value!.task_id, index: item.index },
+    );
+    candidates.value = null;
+    await loadProject();
+    info.value = "已切换定妆图并定稿";
+  });
+}
+
+async function retryExportJob(): Promise<void> {
+  if (!exportJob.value || !selectedEpisodeId.value) return;
+  await run("重试导出", async () => {
+    await api.post(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/exports/${exportJob.value!.export_id}/retry`,
+    );
+    exportJob.value = { ...exportJob.value!, status: 1, error: null, download_url: null };
+    info.value = "导出已重新排队";
+    startExportPoll();
   });
 }
 
@@ -352,6 +388,12 @@ onUnmounted(() => {
         <template v-else-if="tab === 'characters'">
           <div class="actions">
             <Button :disabled="!!busy" @click="generateCharacters">生成角色</Button>
+            <label class="inline">
+              定妆图数量
+              <select v-model.number="portraitCount" class="input small">
+                <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </label>
             <span class="muted">定妆图完成后自动定稿；未定稿角色不能进入批量投递。</span>
           </div>
           <div class="character-grid">
@@ -376,6 +418,7 @@ onUnmounted(() => {
                 >
                   定稿
                 </Button>
+                <button v-if="c.source_task_id && c.status === 2" class="mini" @click="loadCandidates(c)">候选图</button>
                 <NuxtLink v-if="c.source_task_id" class="mini" to="/tasks">任务详情</NuxtLink>
               </div>
             </article>
@@ -439,6 +482,7 @@ onUnmounted(() => {
             <span v-else-if="exportJob" class="muted">
               导出：{{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : exportJob.status === 4 ? "失败" : "" }}
             </span>
+            <Button v-if="exportJob?.status === 4" variant="ghost" @click="retryExportJob">重试导出</Button>
           </div>
           <p v-if="budgetExceeded" class="error">预算不足，部分镜头未投递（745703）。</p>
           <div class="batch-list">
@@ -456,6 +500,20 @@ onUnmounted(() => {
         </template>
       </section>
     </div>
+    <Modal :open="!!candidates" title="选择定妆图" @close="candidates = null">
+      <div class="candidate-grid">
+        <button
+          v-for="item in candidates?.list ?? []"
+          :key="item.index"
+          class="candidate"
+          @click="chooseCandidate(item)"
+        >
+          <img :src="item.url" :alt="`候选 ${item.index + 1}`" />
+          <span>候选 {{ item.index + 1 }}</span>
+        </button>
+      </div>
+      <p v-if="!candidates?.list.length" class="muted">没有可用候选图。</p>
+    </Modal>
   </main>
 </template>
 
@@ -674,6 +732,32 @@ h2 {
 .download {
   color: var(--color-primary);
   font-size: 12px;
+}
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.candidate {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  background: none;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.candidate img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+}
+.candidate:hover {
+  border-color: var(--color-primary);
 }
 .mini {
   background: none;

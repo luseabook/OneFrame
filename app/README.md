@@ -59,7 +59,7 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] F3 图生视频工具：资产参考图 → image2video 报价/任务/轮询
 - [x] AI 双标识最小闭环：显式 ffmpeg 水印 + 隐式元数据/旁车清单（失败降级仅隐式，记录原因）
 - [x] 运营后台最小版：独立 admin JWT、概览、模型上下架、任务/导出审计、分享下线；Web `/admin`
-- [ ] P1' 剩余：候选定妆图选择、导出失败重试
+- [x] 候选定妆图选择（1~4 张 + 切换定稿）、导出失败重试、管理端队列指标
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 
