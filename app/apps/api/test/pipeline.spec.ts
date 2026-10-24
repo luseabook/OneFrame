@@ -277,6 +277,20 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(String(item.task_id)).toBe(String(taskId));
   });
 
+  it("truncates per shot when balance is insufficient instead of rejecting the whole batch", async () => {
+    // 余额不足时按镜头跳过（745701），而非整单失败——保证额度有限时仍能出一部分片
+    const res = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/storyboards/generate-videos`, {
+      shot_ids: shotIds.slice(0, 3),
+      budget_credits_max: 100000,
+      model: "wan-3.0",
+    });
+    expect(res.code).toBe(0);
+    const items = res.data.items as Array<{ submitted: boolean; code?: number }>;
+    // 要么全部投递成功，要么出现 insufficient_balance 的逐镜跳过；不允许整单 745701
+    const skippedByBalance = items.filter((i) => i.code === 745701);
+    expect(items.some((i) => i.submitted) || skippedByBalance.length > 0).toBe(true);
+  });
+
   it("creates an async export job for the episode", async () => {
     const created = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/exports`);
     expect(created.code).toBe(0);

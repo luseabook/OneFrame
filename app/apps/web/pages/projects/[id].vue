@@ -358,9 +358,27 @@ async function submitBatch(): Promise<void> {
     );
     batchItems.value = res.items;
     budgetExceeded.value = res.budget_exceeded;
-    info.value = `已提交 ${res.items.filter((i) => i.submitted).length} 个镜头`;
+    const okCount = res.items.filter((i) => i.submitted).length;
+    const notReady = res.items.filter((i) => i.code === 400105).length;
+    const overBudget = res.items.filter((i) => i.code === 745703).length;
+    // 全部失败时给出可行动的原因，而不是只报「已提交 0 个镜头」
+    if (okCount === 0 && notReady > 0) {
+      error.value = `全部镜头未投递：${notReady} 个镜头的绑定角色未定稿。请先到「角色」步骤生成定妆图并定稿，再回来投递。`;
+      info.value = "";
+    } else if (okCount === 0 && overBudget > 0) {
+      error.value = `全部镜头未投递：预算上限不足以覆盖 ${overBudget} 个镜头，请提高预算后再试。`;
+      info.value = "";
+    } else {
+      const parts = [`已提交 ${okCount} 个镜头`];
+      if (notReady > 0) parts.push(`${notReady} 个因角色未定稿跳过`);
+      if (overBudget > 0) parts.push(`${overBudget} 个因超预算跳过`);
+      info.value = parts.join("，");
+      error.value = "";
+    }
     startTaskPoll();
     await loadEpisode();
+    // 投递后刷新矩阵，让用户立刻看到每个镜头的投递/出片状态
+    await loadMatrix();
   });
 }
 
@@ -746,6 +764,16 @@ async function selectEpisode(id: string): Promise<void> {
           </div>
 
           <p v-if="budgetExceeded" class="banner warning">部分镜头因预算触顶未投递（745703）。提高预算后可继续投递。</p>
+          <p v-if="batchItems.some((i) => i.code === 745701)" class="banner warning">
+
+            余额不足，部分镜头未投递（745701）。充值后可继续投递剩余镜头。
+
+          </p>
+
+          <p v-if="characters.some((c) => c.status !== 2)" class="banner warning">
+            有 {{ characters.filter((c) => c.status !== 2).length }} 个角色未定稿，其绑定镜头会被拒绝（400105）。
+            <button class="banner-link" @click="tab = 'characters'">去完成角色定稿 →</button>
+          </p>
 
           <div v-if="materials.length" class="materials">
             <p class="block-label">分镜素材</p>
@@ -788,7 +816,15 @@ async function selectEpisode(id: string): Promise<void> {
               <span class="b-no">镜 {{ shots.find((s) => s.id === item.shot_id)?.shot_no ?? "-" }}</span>
               <Tag v-if="item.submitted" tone="success" size="sm" dot>已提交</Tag>
               <Tag v-else tone="danger" size="sm" dot>
-                {{ item.code === 400105 ? "资产未定稿" : item.code === 745703 ? "超预算" : "未提交" }}
+                {{
+                  item.code === 400105
+                    ? "资产未定稿"
+                    : item.code === 745703
+                      ? "超预算"
+                      : item.code === 745701
+                        ? "余额不足"
+                        : "未提交"
+                }}
               </Tag>
               <span v-if="item.task_id" class="mono">{{ item.task_id.slice(-8) }}</span>
               <Tag v-if="item.task_id && taskMap[item.task_id]" tone="info" size="sm">
@@ -964,6 +1000,15 @@ async function selectEpisode(id: string): Promise<void> {
   background: var(--brand-50);
   color: var(--brand-700);
   border: 1px solid var(--brand-200);
+}
+.banner-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .pulse {
   width: 7px;

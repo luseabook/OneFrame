@@ -192,13 +192,19 @@ export class ScriptService {
                     join storyboards s2 on s2.id = t.shot_id
                     join episodes e3 on e3.id = s2.episode_id
                    where e3.project_id = p.id and t.status = 3) as done_count,
-                 (select t2.results->0->>'uri'
-                    from tasks t2
-                    join storyboards s3 on s3.id = t2.shot_id
-                    join episodes e4 on e4.id = s3.episode_id
-                   where e4.project_id = p.id and t2.status = 3
-                     and jsonb_array_length(coalesce(t2.results, '[]'::jsonb)) > 0
-                   order by t2.id desc limit 1) as cover_uri
+                 (select a.uri
+                    from assets a
+                    join tasks t3 on t3.id::text = (a.meta->>'task_id')
+                    join storyboards s4 on s4.id = t3.shot_id
+                    join episodes e5 on e5.id = s4.episode_id
+                   where e5.project_id = p.id and a.deleted_at is null
+                     and coalesce(a.meta->>'content_type', '') like 'image/%'
+                   order by a.id desc limit 1) as cover_uri,
+                 (select ast.uri
+                    from assets ast
+                    join project_assets pa on pa.portrait_asset_id = ast.id
+                   where pa.project_id = p.id and ast.deleted_at is null
+                   order by ast.id desc limit 1) as portrait_uri
             from script_projects p
            where p.id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
         `)
@@ -209,28 +215,40 @@ export class ScriptService {
       statMap.set(String(r.project_id), r);
     }
 
-    const list = rows.map((row) => {
-      const s = statMap.get(String(row.id)) ?? {};
-      const episodeCount = Number(s.episode_count ?? 0);
-      const shotCount = Number(s.shot_count ?? 0);
-      const doneCount = Number(s.done_count ?? 0);
-      return {
-        ...projectDto(row),
-        episode_count: episodeCount,
-        shot_count: shotCount,
-        done_count: doneCount,
-        cover_uri: (s.cover_uri as string | null) ?? null,
-        // 用户可理解的四态（PRD 增补 §1.2）
-        work_state:
-          row.archivedAt !== null
-            ? "archived"
-            : shotCount === 0
-              ? "draft"
-              : doneCount > 0 && doneCount >= shotCount
-                ? "ready"
-                : "producing",
-      };
-    });
+    const list = await Promise.all(
+      rows.map(async (row) => {
+        const s = statMap.get(String(row.id)) ?? {};
+        const episodeCount = Number(s.episode_count ?? 0);
+        const shotCount = Number(s.shot_count ?? 0);
+        const doneCount = Number(s.done_count ?? 0);
+        // 封面优先用已转存的图片资产，退化为角色定妆图；都签名成可直接访问的 URL
+        const coverKey = (s.cover_uri as string | null) ?? (s.portrait_uri as string | null) ?? null;
+        let coverUrl: string | null = null;
+        if (coverKey) {
+          try {
+            coverUrl = await this.storage.signDownload(coverKey, 3600);
+          } catch {
+            coverUrl = null;
+          }
+        }
+        return {
+          ...projectDto(row),
+          episode_count: episodeCount,
+          shot_count: shotCount,
+          done_count: doneCount,
+          cover_uri: coverUrl,
+          // 用户可理解的四态（PRD 增补 §1.2）
+          work_state:
+            row.archivedAt !== null
+              ? "archived"
+              : shotCount === 0
+                ? "draft"
+                : doneCount > 0 && doneCount >= shotCount
+                  ? "ready"
+                  : "producing",
+        };
+      }),
+    );
 
     return { list, total: countRow?.count ?? 0, page: p, page_size: ps };
   }
@@ -328,7 +346,7 @@ export class ScriptService {
       });
     }
 
-    return { id: newProjectId, episodes: eps.length, characters: chars.length };
+    return { id: String(newProjectId), episodes: eps.length, characters: chars.length };
   }
 
   async getProject(spaceId: string, projectId: string) {
@@ -1073,6 +1091,7 @@ export class ScriptService {
         });
         continue;
       }
+      // 预算上限触顶 → 该镜跳过（逐镜部分成功，PRD F2）：先按预算再按可用余额判断
       if (spent + candidate.cost > input.budget_credits_max) {
         items.push({
           shot_id: candidate.shotId,
@@ -1083,11 +1102,26 @@ export class ScriptService {
         });
         continue;
       }
+      // 可用余额不足 → 同样逐镜跳过，避免整单失败（新用户额度有限时仍能出一部分片）
+      if (spent + candidate.cost > balance) {
+        items.push({
+          shot_id: candidate.shotId,
+          task_id: null,
+          submitted: false,
+          code: ErrorCode.INSUFFICIENT_BALANCE,
+          reason: "insufficient_balance",
+        });
+        continue;
+      }
       spent += candidate.cost;
       submittable.push(candidate);
     }
-    if (spent > balance) {
-      throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
+    // 只有一分钱都投不出去（余额连最便宜的一镜都不够）才整单拒绝
+    if (submittable.length === 0 && items.every((i) => !i.submitted)) {
+      const anyByBalance = items.some((i) => i.code === ErrorCode.INSUFFICIENT_BALANCE);
+      if (anyByBalance) {
+        throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
+      }
     }
 
     for (const candidate of submittable) {
