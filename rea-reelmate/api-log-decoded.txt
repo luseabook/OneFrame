@@ -1,0 +1,71 @@
+#### GET /web/v1/config
+
+#### GET /web/v1/cam/permission/user
+
+#### GET /web/v1/df/script_project/list
+
+#### GET /web/v1/renew
+
+#### GET /web/v1/user/ip
+
+#### GET /web/v1/user-info
+RES: {"code":0,"msg":"","data":{"uid":267379182,"email":"","mobile":"","avatar":"https://static-third-res.wondershare.cc/aicommunity/thumbs/file/s3/3cbd64e50ed652e382c3f7ba331317a6.png","nickname":"创作者267379182","vip_info":{"feature_code":"","credit_total":0,"expire":0,"team_credit_total":0},"invite_passed":true,"is_cn_user":true,"region":"CN","data_center":"sz","space_id":"1960443501771751438","watermark_cfg":0,"legal_notice":0}}
+
+
+#### GET /web/v1/user-settings
+RES: {"code":0,"msg":"","data":{}}
+
+
+#### GET /web/v1/func-whitelist
+RES: {"code":0,"msg":"","data":{"check":false}}
+
+
+#### GET /web/v1/msg/exist-unread
+RES: {"code":741001,"msg":"long polling timeout.","data":null}
+
+
+#### GET https://accounts.wondershare.cn/v3/user/oauth-client/authorize
+
+#### GET /web/v1/buy/df-vip
+RES: {"code":0,"msg":"","data":{"sku_list":[{"sku":26240001,"price":200,"original_price":200,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","sku_tag":"reelmate-premium","renew_price":200,"renew_original_price":200,"credits":2000,"is_renew":0,"wechat_sub_id":0,"has_first_discount":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26240001\u0026ver=v5\u0026verify=CD5AF9C65820A87D759FAFBC1C2C1370\u0026ws_utm=80F4F89DD0CF748BE6FEBD4D117452AB","is_default":false,"giveaway_credits":0,"activity_id":""},{"sku":26006016,"price":1000,"original_price":1000,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","sku_tag":"reelmate-premium","renew_price":1000,"renew_original_price":1000,"credits":10000,"is_renew":0,"wechat_sub_id":0,"has_first_discount":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26006016\u0026ver=v5\u0026verify=ED1E36199C4664FAFC3011D8421FF5A5","is_default":false,"giveaway_credits":0,"activity_id":""},{"sku":26226003,"price":5000,"original_price":5000,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","sku_tag":"reelmate-premium","renew_price":1000,"renew_original_price":5000,"credits":51000,"is_renew":0,"wechat_sub_id":0,"has_first_discount":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26226003\u0026ver=v5\u0026verify=9615BC1D72DF2EBFF35EB7B0B7B26AD5","is_default":false,"giveaway_credits":4555,"activity_id":""},{"sku":26226004,"price":10000,"original_price":10000,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","sku_tag":"reelmate-premium","renew_price":10000,"renew_original_price":10000,"credits":103000,"is_renew":0,"wechat_sub_id":0,"has_first_discount":0,"buy_url":"https://store.wondershare.com/index.php?sub
+
+#### GET /web/v1/buy/credits
+RES: {"code":0,"msg":"","data":{"sku_list":[{"sku":26229005,"price":50,"original_price":0,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","credits":500,"give_credits":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26229005\u0026ver=v5\u0026verify=D126774D5B46F6BB442CCC6A83C7F31D"},{"sku":26229004,"price":100,"original_price":0,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","credits":1000,"give_credits":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26229004\u0026ver=v5\u0026verify=B368E9FD11CFC31D8238C34C3F268109"},{"sku":26229003,"price":300,"original_price":0,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","credits":3000,"give_credits":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26229003\u0026ver=v5\u0026verify=9ED5EE3ED798B0810DA353828038A825"},{"sku":26229002,"price":600,"original_price":0,"recommend_price":0,"period_unit":"year","period_val":1,"currency":"CNY","currency_symbol":"￥","credits":6000,"give_credits":0,"buy_url":"https://store.wondershare.com/index.php?submod=checkout\u0026method=index\u0026currency=CNY\u0026feature_list=\u0026feature_qty=\u0026language=zh_cn\u0026sku_id=26229002\u0026ver=v5\u0026verify=A3EC983EAE8AB00124961E74144272D5"}]}}
+
+
+#### POST /web/v1/subject/resource/list
+REQ: {"page":1,"page_size":100}
+RES: {"code":0,"msg":"","data":{"list":[],"total":0,"user_total":0}}
+
+
+#### GET /web/v1/callback/login
+
+#### GET /web/v1/user-vip-info
+RES: {"code":0,"msg":"","data":{"uid":267379182,"vip_info":{"feature_code":"","credit_total":0,"expire":0,"team_credit_total":0}}}
+
+
+#### GET /web/v1/user/credits
+RES: {"code":0,"msg":"","data":{"total_val":0,"vip_val":0,"recharge_val":0,"give_val":0,"expire_soon_val":0,"team_credit_total":0,"team_assigned_val":0}}
+
+
+#### GET /web/v1/op/abtest/hit
+RES: {"code":0,"msg":"","data":{"hit":true,"benefits":{"BENEFIT_CREATE_EPISODE":1,"BENEFIT_EXTRACT_ASSET_LIST":1,"BENEFIT_GEN_ASSET_PROMPT":1,"BENEFIT_MATCH_SUBJECT":1,"BENEFIT_SPLIT_SHOT":1}}}
+
+
+#### GET /web/v1/cam/team/temp-info
+RES: {"code":0,"msg":"","data":{"api_key_white":false,"is_lingman_wsid":false,"is_sd_discount_black":false,"is_support":false,"name":"other","sd_480p_is_support":false,"sd_is_support":false,"seedance_is_support":true,"tsd_is_support":false}}
+
+
+#### GET /web/v1/op/register-questionnaire/check
+RES: {"code":0,"msg":"","data":{"is_complete":1}}
+
+
+#### GET /web/v1/task
+RES: {"code":0,"msg":"","data":{"count":0,"list":[]}}
+
+
+#### POST /web/v1/ai/point-calculate
+REQ: {"alg_code":"text_to_video","params":"{\"idle\":0,\"refreshId\":0,\"prompt\":\"\",\"referencePrompt\":\"\",\"mirror_control\":{\"mirror\":\"\"},\"resolution\":\"720p\",\"duration\":5,\"ratio\":\"16:9\",\"qty\":1,\"add_bgm\":false,\"currentTag\":\"ttv\",\"module\":\"itv\",\"ai_model_mark\":\"tomoviee_2.0\"}"}
+RES: {"code":0,"msg":"","data":{"use_type":2,"points_code":"tm_text2video_5s_720p","cost":8,"total":0,"credit":0,"label":2,"min":0,"max":0,"credit_original":8,"credit_discount":1,"strike_credits":0,"strike_min":0,"strike_max":0,"strike_start":"","strike_end":""}}
+
+

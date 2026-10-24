@@ -1,57 +1,56 @@
-# AI 漫剧工作台（Monorepo）
+# OneFrame · 万星 AI 漫剧/短剧生产 SaaS
 
-> 产品代号未定；目录名 `app` 为占位，定名后整体 rename 即可。
-> 远程仓库：<https://github.com/luseabook/OneFrame>（`main` 分支）
-> 文档唯一事实来源：[`../docs/`](../docs/README.md)（当前版本 v1.3，路线 A：剧本流水线首发；`docs/` 位于本仓库同级目录，暂不随本仓库发布）
+> 远程仓库：<https://github.com/luseabook/OneFrame>（`main`）
+> 文档体系 **v1.3**（2026-10-24，路线 A：剧本流水线首发）
+> 本仓库为**工作区根**：`app/` 是 P0 代码脚手架，`docs/` 是唯一事实来源，`deliverables/` 是审查交付物，`rea-reelmate/` 是竞品逆向证据（仅收录报告/模型目录/CLI 契约/截图，原始抓包与 Chrome profile 不入库，见 `.gitignore`）。
 
-## 结构
+## 目录结构
 
 ```
-apps/
-  api/             NestJS API（信封/错误码/健康检查，P0）
-  worker/          BullMQ Worker（三队列骨架，P0）
-  web/             Nuxt3 前端（落地页+设计令牌+基础组件，P0）
-packages/
-  shared/          信封/错误码/雪花ID/领域枚举/Zod schema（前后端共享）
-  model-adapters/  供应商适配器（火山/百炼/DeepSeek，P1 接入）
+.
+├─ app/                     # P0 monorepo（pnpm + turbo）：api / worker / web / shared / model-adapters
+│  └─ README.md             # 代码结构、快速开始、P0 状态
+├─ docs/                    # 文档体系（唯一事实来源）
+│  ├─ README.md             # 文档地图与变更登记（v1.3）
+│  ├─ 01-product/           # PRD / 用户旅程 / 指标
+│  ├─ 02-architecture/      # system-design / ADR / database / api-spec
+│  ├─ 03-frontend/          # 前端规范
+│  ├─ 04-engineering/       # 开发流程 / 测试
+│  ├─ 05-ops/               # 部署 / 可观测
+│  ├─ 06-security-compliance/  # 安全 / 合规
+│  └─ 07-plan/              # WBS
+├─ deliverables/
+│  └─ software-company/     # 文档审查报告（含逆向一致性审查 RE-01~RE-25）
+└─ rea-reelmate/            # 竞品逆向证据（curated）
+   ├─ REELMATE-逆向分析报告.md
+   ├─ model-catalog-summary.json · routes.txt
+   ├─ cli-skill/ · cli-out/ · *.png
 ```
 
-## 快速开始（WBS P0）
+## 快速开始
 
 ```bash
+cd app
 pnpm install
-docker compose -f docker-compose.dev.yml up -d   # PG/Redis/MinIO
-cp .env.example apps/api/.env                    # 本地默认值即可跑
-pnpm dev                                         # api:3000 · web:3001 · worker
+docker compose -f docker-compose.dev.yml up -d
+cp .env.example apps/api/.env
+pnpm dev            # api:3000 · web:3001 · worker
+pnpm test && pnpm build
 ```
 
-验证：
+## 关键文档
 
-```bash
-curl localhost:3000/v1/healthz    # {"code":0,...,"checks":{"db":"up","redis":"up"}}
-curl localhost:3000/v1/ping
-pnpm test && pnpm build           # CI 四件套本地预演
-```
+- 产品范围与验收：[PRD v1.3](docs/01-product/PRD.md)
+- 契约唯一来源：[api-spec v1.2](docs/02-architecture/api-spec.md)
+- 数据模型：[database v1.2](docs/02-architecture/database.md)
+- 计划与里程碑：[WBS v1.3](docs/07-plan/wbs.md)
+- 文档地图/变更登记：[docs/README.md](docs/README.md)
+- 逆向一致性审查（RE-01~RE-25）：[审查报告](deliverables/software-company/wanxing-reverse-consistency-review-2026-10-24.md)
+- 竞品逆向基线：[REELMATE-逆向分析报告](rea-reelmate/REELMATE-逆向分析报告.md)
 
-## 当前状态（对应 WBS）
+## 协作约定
 
-- [x] P0.1 Monorepo + CI（.github/workflows/ci.yml：lint/typecheck/test/build）
-- [x] P0.2 容器环境 + zod 配置层（启动即校验）
-- [x] P0.3 packages/shared + 单测
-- [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
-- [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
-- [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
-
-P1 起的任务与验收见 [`../docs/07-plan/wbs.md`](../docs/07-plan/wbs.md)。
-
-## 远程仓库与协作
-
-```bash
-git clone https://github.com/luseabook/OneFrame.git
-git remote -v          # 应显示 origin -> https://github.com/luseabook/OneFrame
-git push origin main   # 提交前确保 pnpm test/build 通过（CI 同口径）
-```
-
-- 分支模型与 PR 规范：`docs/04-engineering/dev-workflow.md`（trunk-based，main 始终可发布）；
-- 契约/表结构变更必须同 PR 更新 `docs/02-architecture/api-spec.md` / `database.md`；
-- 密钥只走 CI Secrets/服务器 env，`.env.example` 仅占位（见 `docs/06-security-compliance/security.md` §6）。
+- Trunk-based：`main` 始终可发布；PR 必须 CI 绿（lint/typecheck/test/build）；
+- **契约/表结构/模型目录变更必须同 PR 更新 `docs/02-architecture/`**（见 [dev-workflow](docs/04-engineering/dev-workflow.md)）；
+- 密钥只走 CI Secrets/服务器 env；`.env.example` 仅占位（见 [security](docs/06-security-compliance/security.md) §6）；
+- 原始抓包、Chrome profile、`node_modules`、agent hook 状态不入库。

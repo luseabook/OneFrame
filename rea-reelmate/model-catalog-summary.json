@@ -1,0 +1,2526 @@
+[
+ {
+  "name": "DeepSeek V4 Pro",
+  "need_vip": false,
+  "modes": {}
+ },
+ {
+  "name": "Gemini 3.1 Pro Preview",
+  "need_vip": false,
+  "modes": {}
+ },
+ {
+  "name": "TG Chat 5.5",
+  "need_vip": false,
+  "modes": {}
+ },
+ {
+  "name": "TGI 2",
+  "need_vip": false,
+  "description": "媲美GPT image 2超强真实感、精准文字、丰富世界知识生成，角色一致性、图像编辑能力卓越",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "multi_reference": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "悠船 V8.2",
+  "need_vip": false,
+  "description": "Midjourney影视质感进阶，光影、人物与材质细节精准还原",
+  "logo": "models/midjourney.svg",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "1K",
+     "2K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "1K",
+     "2K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "即梦5.0Pro",
+  "need_vip": false,
+  "description": "商业设计、影视、高密度图文等场景效果全面提升",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "1K",
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "1K",
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "即梦5.0",
+  "need_vip": false,
+  "description": "引入实时检索能力，指令响应更精准，理解与生成表现全面提升",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "3K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "3K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "即梦4.5",
+  "need_vip": false,
+  "description": "语义理解及融图一致性能力较4.0升级",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TNB 2",
+  "need_vip": false,
+  "description": "极速生成媲美全球顶尖水准的图像，细节精致、光影生动，精准支持多语言文字，实时联网让创意与现实互通",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "2:3",
+     "3:2",
+     "3:4",
+     "4:3",
+     "4:5",
+     "5:4",
+     "9:16",
+     "16:9",
+     "21:9"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TNB Pro",
+  "need_vip": false,
+  "description": "效果对齐全球头部最强生图模型，语义遵从及推理能力大升级，擅长复杂细节处理",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "multi_reference": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "1:1",
+     "2:3",
+     "3:2",
+     "3:4",
+     "4:3",
+     "4:5",
+     "5:4",
+     "9:16",
+     "16:9",
+     "21:9"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "2:3",
+     "3:2",
+     "3:4",
+     "4:3",
+     "4:5",
+     "5:4",
+     "9:16",
+     "16:9",
+     "21:9"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TNB Pro-Beta",
+  "need_vip": false,
+  "description": "效果对齐头部生图模型，测试版性价比之选",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "即梦4.0",
+  "need_vip": false,
+  "description": "擅长亚洲人像美学，画面质感高",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "image2image": {
+    "endpoint": "/web/v1/ai/refer-image-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TGI 2.5 Flare",
+  "need_vip": false,
+  "description": "媲美GPT image 2.5,极速高质量图像生成，兼顾效果与效率",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "studio_asset_image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TGI 2.5 Sunburst",
+  "need_vip": false,
+  "description": "媲美GPT image 2.5,精准生成与编辑，复杂指令稳定还原",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "studio_asset_image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "1:1",
+     "1:2",
+     "2:1",
+     "9:16",
+     "16:9",
+     "3:4",
+     "4:3",
+     "2:3",
+     "3:2",
+     "4:5",
+     "5:4",
+     "9:21",
+     "21:9"
+    ],
+    "resolutions": [
+     "1K",
+     "2K",
+     "4K"
+    ],
+    "default_resolution": "1K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "天幕写实版",
+  "need_vip": false,
+  "description": "极速出图，擅长写实风格",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "studio_asset_image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TNB",
+  "need_vip": false,
+  "description": "语义遵从和推理能力佳",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "studio_asset_image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2image": {
+    "endpoint": "/web/v1/ai/text-to-image",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "resolutions": [
+     "2K"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Seedance 2.5",
+  "need_vip": true,
+  "description": "全能模型、情绪演绎佳，更低抽卡率",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "21:9",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P优惠版",
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "resolutions": [
+     "1080P优惠版",
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "video_extend": {
+    "endpoint": "/web/v1/ai/video-to-video",
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P优惠版",
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "script_to_scene_refer": {},
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Seedance 2.0 VIP",
+  "need_vip": true,
+  "description": "全能模型，动作表现自然流畅、指令理解精准、情绪演绎佳",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "21:9",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P优惠版",
+     "720P",
+     "2K超清版",
+     "1080P",
+     "4K"
+    ],
+    "default_resolution": "720p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "resolutions": [
+     "720P",
+     "2K超清版",
+     "1080P",
+     "4K"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "script_to_scene_refer": {},
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Seedance 2.0 mini",
+  "need_vip": true,
+  "description": "超高性价比，比VIP版本更快的推理速度",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "21:9",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P全高清版"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "script_to_scene_refer": {},
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Wan 3.0",
+  "need_vip": true,
+  "description": "超高性价比，表演台词能力强",
+  "logo": "models/wan.png",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "script_to_scene_refer": {},
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Minimax H3 优惠版",
+  "need_vip": true,
+  "description": "与Minimax H3 能力一致，超高性价比",
+  "logo": "models/hailuo.png",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "21:9",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P",
+     "2K"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "MiniMax H3",
+  "need_vip": true,
+  "description": "海螺最新多模态智能模型",
+  "logo": "models/hailuo.png",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "21:9",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "2K",
+     "768P"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "resolutions": [
+     "2K",
+     "768P"
+    ],
+    "default_resolution": "2K",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Happy Horse 1.1",
+  "need_vip": false,
+  "description": "超强理解能力，角色一致性和口播能力升级",
+  "logo": "models/happyhorse.svg",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "durations": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Happy Horse 1.0",
+  "need_vip": false,
+  "description": "超强理解能力，出色的人物一致性和表情管理",
+  "logo": "models/happyhorse.svg",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "durations": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "可灵O3",
+  "need_vip": true,
+  "description": "影视级画质，情绪与质感叙事大升级，音画同出",
+  "logo": "models/kling.png",
+  "modes": {
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-media-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "4K",
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Vidu Q2",
+  "need_vip": false,
+  "description": "超强主体一致性控制，秒级叙事支持",
+  "logo": "models/vidu.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080p优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080p优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "universal_reference": {
+    "endpoint": "/web/v1/ai/refer-image-to-video",
+    "durations": [
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080p优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  "scene_modes": {
+   "storyboard_reference_video": {}
+  }
+ },
+ {
+  "name": "Vidu Q3-Pro",
+  "need_vip": false,
+  "description": "最长15s生成，打斗效果升级",
+  "logo": "models/vidu.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "即梦3.5 Pro",
+  "need_vip": true,
+  "description": "模型效果升级，支持音画同出",
+  "logo": "models/ic24_jimeng.svg",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     8,
+     10,
+     12
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     8,
+     10,
+     12
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Hailuo 2.3 - Fast",
+  "need_vip": true,
+  "description": "更高性价比，擅长打斗场景，动作及运镜表现力优秀",
+  "logo": "models/hailuo.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Hailuo 2.3",
+  "need_vip": true,
+  "description": "擅长打斗场景，动作及运镜表现力优秀",
+  "logo": "models/hailuo.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P优惠版",
+     "1080P"
+    ],
+    "default_resolution": "1080p_sale",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9"
+    ],
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P"
+    ],
+    "default_resolution": "768p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵3.0",
+  "need_vip": true,
+  "description": "影视级画质，情绪与质感叙事大升级，音画同出，多分镜叙事",
+  "logo": "models/kling.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "4K",
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "4K",
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     3,
+     5,
+     8,
+     10,
+     12,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "4K",
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵2.6",
+  "need_vip": true,
+  "description": "影视级画质，擅长情绪与质感叙事，支持音画同出",
+  "logo": "models/kling.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵 2.5 Turbo",
+  "need_vip": true,
+  "description": "影视级画质，擅长情绪与质感叙事，稳定性更高",
+  "logo": "models/kling.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 10,
+    "resolutions": [
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 10,
+    "resolutions": [
+     "1080P",
+     "720P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 10,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Wan 2.6",
+  "need_vip": true,
+  "description": "支持多镜头生成，音画同出",
+  "logo": "models/wan.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10,
+     15
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Wan 2.5",
+  "need_vip": true,
+  "description": "画面高清，支持音画同出",
+  "logo": "models/wan.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TS 2.0",
+  "need_vip": true,
+  "description": "支持上传多故事板进行多分镜叙事规划，音画直出。暂不支持驱动真实人像。",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     8,
+     12
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     8,
+     12
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TV 3.1",
+  "need_vip": true,
+  "description": "音画同出逼真性对齐行业头部模型，写实级视频质感，更遵循物理世界规则",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "TV 3.1 - Fast",
+  "need_vip": true,
+  "description": "较TV3.1更高性价比",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "default_duration": 8,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "天幕2.0",
+  "need_vip": false,
+  "description": "高效生成，稳定的运镜",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "first_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "image2video": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "天幕2.1",
+  "need_vip": false,
+  "description": "电影质感，真实细节",
+  "logo": "models/tomoviee.png",
+  "modes": {
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "4:3",
+     "3:4",
+     "1:1"
+    ],
+    "durations": [
+     5
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵 2.5 Turbo-Std",
+  "need_vip": true,
+  "description": "影视级画质，擅长情绪与质感叙事，稳定性更高",
+  "logo": "models/kling.png",
+  "modes": {
+   "text2video": {
+    "endpoint": "/web/v1/ai/text-to-video",
+    "ratios": [
+     "16:9",
+     "9:16",
+     "1:1"
+    ],
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 10,
+    "resolutions": [
+     "720P"
+    ],
+    "default_resolution": "720p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Happy Horse 1.0",
+  "need_vip": false,
+  "description": "超强理解能力，出色的人物一致性和表情管理",
+  "logo": "models/happyhorse.svg",
+  "modes": {
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵 O1",
+  "need_vip": false,
+  "description": "多模态全能模型。一句话指令改视频。",
+  "logo": "models/kling.png",
+  "modes": {
+   "video_edit": {
+    "endpoint": "/web/v1/ai/refer-video-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Vidu Q2",
+  "need_vip": false,
+  "description": "秒级叙事支持，擅长情绪表现及特效",
+  "logo": "models/vidu.png",
+  "modes": {
+   "video_extend": {
+    "endpoint": "/web/v1/ai/video-to-video",
+    "durations": [
+     3,
+     4,
+     5,
+     6,
+     7
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "720P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "Hailuo 2.0",
+  "need_vip": false,
+  "description": "擅长打斗场景，动作及运镜表现力优秀",
+  "logo": "models/hailuo.png",
+  "modes": {
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     6,
+     10
+    ],
+    "default_duration": 6,
+    "resolutions": [
+     "768P",
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ },
+ {
+  "name": "可灵 2.1",
+  "need_vip": true,
+  "description": "影视级画质，能力均衡，转场流畅",
+  "logo": "models/kling.png",
+  "modes": {
+   "first_last_frame": {
+    "endpoint": "/web/v1/ai/image-to-video",
+    "durations": [
+     5,
+     10
+    ],
+    "default_duration": 5,
+    "resolutions": [
+     "1080P"
+    ],
+    "default_resolution": "1080p",
+    "counts": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  }
+ }
+]

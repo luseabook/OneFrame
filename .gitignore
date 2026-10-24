@@ -1,13 +1,31 @@
+# Dependencies / build outputs
 node_modules/
 dist/
 .output/
 .nuxt/
 .turbo/
 coverage/
+*-out.txt
+
+# Env / secrets (examples only)
 .env
 .env.*
 !.env.example
-*.log
-.DS_Store
+!**/.env.example
+
+# Local tool state (agent hooks / memory)
 .mimosa/
-*-out.txt
+.workbuddy/
+
+# Reverse-engineering raw captures are intentionally NOT versioned (large / privacy).
+# Only curated evidence is tracked: report, model catalog, routes, CLI skill/contracts, screenshots.
+rea-reelmate/*
+!rea-reelmate/REELMATE-逆向分析报告.md
+!rea-reelmate/model-catalog-summary.json
+!rea-reelmate/routes.txt
+!rea-reelmate/modules.txt
+!rea-reelmate/tabids.txt
+!rea-reelmate/api-log-decoded.txt
+!rea-reelmate/cli-skill/
+!rea-reelmate/cli-out/
+!rea-reelmate/*.png
