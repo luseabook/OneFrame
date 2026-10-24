@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  DATABASE_URL: postgres://app:app@localhost:5432/app
+  REDIS_URL: redis://localhost:6379
+  NODE_ENV: test
+  JWT_SECRET: ci-test-jwt-secret-0123456789abcdef
+
 defaults:
   run:
     working-directory: app
@@ -11,6 +17,29 @@ defaults:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -22,6 +51,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @app/api db:migrate
+      - run: pnpm --filter @app/api db:seed
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

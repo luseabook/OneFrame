@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { db } from "./database";
-import { modelPrices, models } from "./schema";
+import { modelPrices, models } from "@app/db";
 
 // 种子数据：首批 10 个模型（从 RE 46 模型目录中选型，见 docs/02-architecture/database.md §2）
 // ⚠️ 价格均为 PLACEHOLDER（按 RE 实测锚点：文生视频 5s/720p = 8 积分；1080P≈×2）。

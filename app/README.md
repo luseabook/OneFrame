@@ -8,11 +8,12 @@
 
 ```
 apps/
-  api/             NestJS API（信封/错误码/健康检查，P0）
-  worker/          BullMQ Worker（三队列骨架，P0）
+  api/             NestJS API（auth/models/quote/generations/tasks + 冻结结算，P1）
+  worker/          BullMQ Worker（mock 执行器跑通状态机/结算；P1.4 换真实供应商）
   web/             Nuxt3 前端（落地页+设计令牌+基础组件，P0）
 packages/
   shared/          信封/错误码/雪花ID/领域枚举/Zod schema（前后端共享）
+  db/              drizzle schema + 迁移 + 记账 ledger（api/worker 共用）
   model-adapters/  供应商适配器（火山/百炼/DeepSeek，P1 接入）
 ```
 
@@ -40,6 +41,10 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] P0.3 packages/shared + 单测
 - [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
 - [x] P1.2 数据层：drizzle schema（16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）
+- [x] P1.1 鉴权（mock 短信）：sms-code/login/refresh/logout/me + 邀请码/等待名单 + JWT/HttpOnly Cookie
+- [x] P1.3 任务脊柱：models/quote(batch)/generations/tasks + 冻结-结算 ledger + BullMQ mock 执行器
+- [ ] P1.4/P1.5 真实供应商适配器（火山/百炼/DeepSeek，待 Key 与企业认证）
+- [ ] P1.6/P1.7 工具页/任务历史前端 + 下载/分享
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

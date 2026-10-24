@@ -1,10 +1,28 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import { AppController } from "./app.controller";
+import { AuthGuard } from "./common/auth.guard";
 import { HealthController } from "./health/health.controller";
+import { AuthModule } from "./modules/auth/auth.module";
+import { CreditsModule } from "./modules/credits/credits.module";
+import { GenerationsModule } from "./modules/generations/generations.module";
+import { ModelsModule } from "./modules/models/models.module";
+import { TasksModule } from "./modules/tasks/tasks.module";
+import { QueueModule } from "./queue/queue.module";
+import { RedisModule } from "./redis/redis.module";
 
-// P0 模块化单体入口。模块边界与依赖规则见 docs/02-architecture/system-design.md §2
-// P1 依次挂：AuthModule / ModelsModule / GenerationsModule / TasksModule / BillingModule / FilesModule / AssetsModule / ScriptModule
+// 模块化单体入口（docs/02-architecture/system-design.md §2）
 @Module({
+  imports: [
+    RedisModule,
+    QueueModule,
+    AuthModule,
+    ModelsModule,
+    CreditsModule,
+    GenerationsModule,
+    TasksModule,
+  ],
   controllers: [AppController, HealthController],
+  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}

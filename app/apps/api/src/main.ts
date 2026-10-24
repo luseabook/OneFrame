@@ -1,10 +1,8 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
+import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
-import {
-  FastifyAdapter,
-  type NestFastifyApplication,
-} from "@nestjs/platform-fastify";
+import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/http/exception.filter";
 import { EnvelopeInterceptor } from "./common/http/envelope.interceptor";
@@ -16,11 +14,11 @@ async function bootstrap(): Promise<void> {
     genReqId: () => randomUUID(), // request_id：日志/排障/响应头回传（observability §1）
   });
 
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    adapter,
-    { logger: ["log", "warn", "error"] },
-  );
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
+    logger: ["log", "warn", "error"],
+  });
+
+  await app.register(cookie as unknown as Parameters<typeof app.register>[0]);
 
   app.setGlobalPrefix("v1");
   app.useGlobalFilters(new AllExceptionsFilter());

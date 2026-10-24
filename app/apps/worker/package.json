@@ -11,9 +11,11 @@
     "test": "echo 'worker tests land in P1' && exit 0"
   },
   "dependencies": {
+    "@app/db": "workspace:*",
     "@app/shared": "workspace:*",
     "@app/model-adapters": "workspace:*",
     "bullmq": "^5.34.5",
+    "drizzle-orm": "^0.38.3",
     "ioredis": "^5.4.2",
     "pino": "^9.6.0"
   },

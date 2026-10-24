@@ -12,6 +12,11 @@ export const QUEUES = {
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+const url = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
+
 export const redisConnection = {
-  url: process.env.REDIS_URL ?? "redis://localhost:6379",
+  host: url.hostname,
+  port: Number(url.port || 6379),
+  ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+  maxRetriesPerRequest: null,
 };

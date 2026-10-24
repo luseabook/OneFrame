@@ -1,17 +1,8 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { createDb } from "@app/db";
 import { env } from "../config/env";
-import * as schema from "./schema";
 
-export const pool = new Pool({
-  connectionString: env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30_000,
-});
-
-// schema 挂载后，所有查询走 drizzle（database.md §11）
-export const db = drizzle(pool, { schema });
-export { schema };
+// 数据层（schema/ledger 在 @app/db，供 api 与 worker 共用）
+export const { db, pool } = createDb(env.DATABASE_URL);
 
 export async function pingDb(): Promise<boolean> {
   try {

@@ -1,0 +1,24 @@
+{
+  "name": "@app/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@app/shared": "workspace:*",
+    "drizzle-orm": "^0.38.3",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
