@@ -68,6 +68,7 @@ async function logout(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px 32px;
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -75,6 +76,7 @@ async function logout(): Promise<void> {
   background: rgba(11, 11, 16, 0.9);
   backdrop-filter: blur(8px);
   z-index: 10;
+  flex-wrap: wrap;
 }
 .logo {
   font-size: 16px;
@@ -85,6 +87,13 @@ async function logout(): Promise<void> {
   align-items: center;
   gap: 16px;
   font-size: 13px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.nav::-webkit-scrollbar {
+  display: none;
 }
 .nav-link {
   color: var(--text-2);

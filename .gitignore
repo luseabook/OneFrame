@@ -30,3 +30,6 @@ rea-reelmate/*
 !rea-reelmate/cli-skill/
 !rea-reelmate/cli-out/
 !rea-reelmate/*.png
+
+# 验收临时脚本与依赖（不入库）
+_acceptance/

@@ -37,3 +37,32 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/* ── 移动端基线：避免窄视口横向溢出 ─────────────────── */
+@media (max-width: 768px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  /* 页面容器：收窄内边距 */
+  main.page,
+  .page {
+    padding-left: 16px;
+    padding-right: 16px;
+    max-width: 100%;
+  }
+
+  /* 表格/行列表：容器内横向滚动而不是撑破页面 */
+  .table,
+  .batch-list,
+  .rows,
+  .list {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table .row {
+    min-width: 560px;
+  }
+}

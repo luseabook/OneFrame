@@ -8,6 +8,23 @@ const info = ref("");
 const busy = ref(false);
 const confirming = ref(false);
 
+// 账号信息在客户端挂载后读取：首屏 SSR 无登录态，直接渲染会与客户端 hydrate 结果不一致
+const user = ref<{ nickname?: string | null } | null>(null);
+const credits = ref<{ balance?: number; frozen?: number } | null>(null);
+
+onMounted(async () => {
+  try {
+    const me = await api.get<{
+      user: { nickname?: string | null };
+      credits: { balance?: number; frozen?: number };
+    }>("/me");
+    user.value = me.user;
+    credits.value = me.credits;
+  } catch {
+    // 未登录时由全局中间件跳转登录页
+  }
+});
+
 async function deleteAccount(): Promise<void> {
   if (!confirming.value) {
     confirming.value = true;
@@ -36,8 +53,8 @@ async function deleteAccount(): Promise<void> {
 
     <section class="card">
       <h2>账号信息</h2>
-      <p class="muted">昵称：{{ auth.state.value.user?.nickname ?? "-" }}</p>
-      <p class="muted">可用积分：{{ auth.state.value.credits?.balance ?? "-" }} · 冻结：{{ auth.state.value.credits?.frozen ?? "-" }}</p>
+      <p class="muted">昵称：{{ user?.nickname ?? "-" }}</p>
+      <p class="muted">可用积分：{{ credits?.balance ?? "-" }} · 冻结：{{ credits?.frozen ?? "-" }}</p>
     </section>
 
     <section class="card">

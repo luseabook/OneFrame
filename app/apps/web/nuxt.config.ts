@@ -13,7 +13,16 @@ export default defineNuxtConfig({
     },
   },
   routeRules: {
-    "/v1/**": { proxy: `${apiProxyTarget}/v1/**` },
+    // /v1 由 Nuxt 代理到 api（保持单一入口与同源 Cookie）。
+    // 代理时透传真实客户端 IP：否则 api 侧只能看到代理节点 IP，
+    // 全站用户会共用同一个发码/举报频控桶。
+    "/v1/**": {
+      proxy: `${apiProxyTarget}/v1/**`,
+      headers: {
+        "x-forwarded-for": "{clientIp}",
+        "x-real-ip": "{clientIp}",
+      },
+    },
   },
   app: {
     head: {

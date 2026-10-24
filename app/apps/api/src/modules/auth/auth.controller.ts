@@ -4,6 +4,7 @@ import { z } from "zod";
 import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode } from "@app/shared";
 import { env } from "../../config/env";
 import { Public } from "../../common/public.decorator";
+import { clientIp } from "../../common/client-ip";
 import { parseOrThrow } from "../../common/zod";
 import type { AuthedRequest } from "../../common/auth.types";
 import { AuthService } from "./auth.service";
@@ -26,7 +27,7 @@ export class AuthController {
   @Post("auth/sms-code")
   async sms(@Body() body: unknown, @Req() req: FastifyRequest): Promise<{ debug_code?: string }> {
     const input = parseOrThrow(smsBody, body);
-    return this.auth.sendCode(input.phone, req.ip);
+    return this.auth.sendCode(input.phone, clientIp(req));
   }
 
   @Public()
