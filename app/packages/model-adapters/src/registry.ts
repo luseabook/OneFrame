@@ -1,3 +1,4 @@
+import { ArkVideoAdapter, type ArkVideoConfig } from "./ark-video";
 import { DeepSeekChatAdapter, type DeepSeekConfig } from "./deepseek";
 import { HttpVideoAdapter, type HttpVideoConfig } from "./http-video";
 import { MockAdapter, type MockAdapterOptions } from "./mock";
@@ -11,6 +12,8 @@ export interface AdapterRuntimeOptions {
   deepseek?: DeepSeekConfig;
   /** 通用 HTTP 视频供应商（火山/百炼网关或自建代理） */
   httpVideo?: HttpVideoConfig;
+  /** 火山方舟（Ark）专用协议 */
+  ark?: ArkVideoConfig;
 }
 
 const sharedMock = new MockAdapter();
@@ -25,6 +28,10 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
       throw new Error("deepseek adapter requires DEEPSEEK_API_KEY");
     }
     return new DeepSeekChatAdapter(options.deepseek);
+  }
+  // 火山方舟专用协议（volcengine:*）；其余供应商可走通用 HTTP 网关
+  if (code.startsWith("volcengine:") && options.ark?.apiKey) {
+    return new ArkVideoAdapter(options.ark);
   }
   // 配置了 HTTP 视频网关时，所有视频/图像供应商 code 走通用适配器
   if (options.httpVideo?.baseUrl) {
@@ -42,4 +49,4 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
   throw new Error(`unknown adapter_code: ${code}`);
 }
 
-export { DeepSeekChatAdapter, HttpVideoAdapter, MockAdapter };
+export { ArkVideoAdapter, DeepSeekChatAdapter, HttpVideoAdapter, MockAdapter };

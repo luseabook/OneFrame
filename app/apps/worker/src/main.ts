@@ -47,6 +47,23 @@ const adapterOptions: AdapterRuntimeOptions = {
         },
       }
     : {}),
+  ...(process.env.ARK_API_KEY
+    ? {
+        ark: {
+          apiKey: process.env.ARK_API_KEY,
+          baseUrl: process.env.ARK_BASE_URL,
+          modelMap: (() => {
+            try {
+              return process.env.ARK_MODEL_MAP
+                ? (JSON.parse(process.env.ARK_MODEL_MAP) as Record<string, string>)
+                : undefined;
+            } catch {
+              return undefined;
+            }
+          })(),
+        },
+      }
+    : {}),
   ...(process.env.HTTP_VIDEO_BASE_URL
     ? {
         httpVideo: {
