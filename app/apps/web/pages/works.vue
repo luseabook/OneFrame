@@ -77,6 +77,27 @@ async function addEpisode(work: WorkDto): Promise<void> {
   }
 }
 
+/**
+ * 示例作品 → 复制为我的项目（PRD 增补 §3.2 首次体验）。
+ * 复制骨架+角色，不复制分镜，用户可直接在副本上动手而不影响示例。
+ */
+async function duplicateSample(work: WorkDto): Promise<void> {
+  busyId.value = work.id;
+  try {
+    const res = await api.post<{ id: string; episodes: number; characters: number }>(
+      `/projects/${work.id}/duplicate`,
+    );
+    toast.success(`已复制「${work.title}」：${res.episodes} 集 · ${res.characters} 个角色`);
+    await router.push(`/projects/${res.id}`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "复制失败";
+    error.value = msg;
+    toast.error(msg);
+  } finally {
+    busyId.value = "";
+  }
+}
+
 const tabs = [
   { key: "all" as const, label: "全部" },
   { key: "producing" as const, label: "制作中" },
@@ -128,8 +149,8 @@ onMounted(load);
             <div v-else class="cover-empty">
               <span>{{ w.ratio }}</span>
             </div>
-            <Tag class="state-tag" :tone="STATE_META[w.work_state]?.tone ?? 'neutral'" size="sm" dot>
-              {{ STATE_META[w.work_state]?.label ?? w.work_state }}
+            <Tag class="state-tag" :tone="w.is_sample ? 'brand' : (STATE_META[w.work_state]?.tone ?? 'neutral')" size="sm" dot>
+              {{ w.is_sample ? "示例模板" : (STATE_META[w.work_state]?.label ?? w.work_state) }}
             </Tag>
           </NuxtLink>
 
@@ -146,10 +167,24 @@ onMounted(load);
             <p class="time">{{ new Date(w.created_at).toLocaleDateString("zh-CN") }}</p>
 
             <div class="ops">
-              <Button size="sm" variant="ghost" :disabled="busyId === w.id" @click="addEpisode(w)">
+              <Button
+                v-if="w.is_sample"
+                size="sm"
+                :disabled="busyId === w.id"
+                @click="duplicateSample(w)"
+              >
+                复制为我的项目
+              </Button>
+              <Button v-else size="sm" variant="ghost" :disabled="busyId === w.id" @click="addEpisode(w)">
                 续做一集
               </Button>
-              <Button size="sm" variant="text" :disabled="busyId === w.id" @click="archive(w)">
+              <Button
+                v-if="!w.is_sample"
+                size="sm"
+                variant="text"
+                :disabled="busyId === w.id"
+                @click="archive(w)"
+              >
                 {{ w.work_state === "archived" ? "恢复" : "归档" }}
               </Button>
             </div>

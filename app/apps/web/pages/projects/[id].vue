@@ -450,6 +450,12 @@ onMounted(async () => {
     await loadMatrix();
     await loadMaterials();
   });
+  // 首次进入空项目时给一条可行动提示（PRD 增补 §3.2 空态引导）
+  if (!episodes.value.length) {
+    info.value = "这个项目还没有分集：先在第 ① 步点「生成大纲」，确认后进入角色与分镜。";
+  } else if (characters.value.length && shots.value.length === 0) {
+    info.value = "大纲与角色已就绪：切到第 ③ 步「生成分镜」，再批量投递即可出片。";
+  }
 });
 
 onUnmounted(() => {
