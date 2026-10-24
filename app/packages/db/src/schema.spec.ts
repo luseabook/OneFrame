@@ -8,27 +8,45 @@ const cols = (table: PgTable): string[] => getTableConfig(table).columns.map((c)
 const indexes = (table: PgTable) => getTableConfig(table).indexes.map((i) => i.config);
 
 describe("db schema contract (database.md P1)", () => {
-  it("contains the 16 P1 tables", () => {
+  it("contains the 23 P1/P1' tables", () => {
     const names = [
       schema.adminUsers,
+      schema.assetFolders,
+      schema.assets,
       schema.creditAccounts,
       schema.creditFlows,
+      schema.episodes,
       schema.idempotencyRecords,
       schema.identities,
       schema.inviteCodes,
       schema.inviteRedemptions,
       schema.modelPrices,
       schema.models,
+      schema.projectAssets,
+      schema.scriptProjects,
       schema.skus,
       schema.spaceMembers,
       schema.spaces,
+      schema.storyboardAssets,
+      schema.storyboards,
       schema.taskEvents,
       schema.tasks,
       schema.users,
       schema.waitlistEntries,
     ].map((t) => getTableConfig(t).name);
 
-    expect(names).toHaveLength(16);
+    expect(names).toHaveLength(23);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "script_projects",
+        "episodes",
+        "project_assets",
+        "storyboards",
+        "storyboard_assets",
+        "assets",
+        "asset_folders",
+      ]),
+    );
     expect(names).toEqual(
       expect.arrayContaining([
         "users",
@@ -77,6 +95,18 @@ describe("db schema contract (database.md P1)", () => {
 
   it("credit_flows uses the split delta/frozen_delta ledger", () => {
     expect(cols(schema.creditFlows)).toEqual(expect.arrayContaining(["delta", "frozen_delta", "kind", "balance_after"]));
+  });
+
+  it("pipeline tables keep outline/asset/finalize columns", () => {
+    expect(cols(schema.episodes)).toEqual(expect.arrayContaining(["ep_no", "synopsis", "script_text", "status"]));
+    expect(cols(schema.projectAssets)).toEqual(
+      expect.arrayContaining(["kind", "portrait_asset_id", "ref_image_uri", "status", "finalized_at"]),
+    );
+    expect(cols(schema.storyboards)).toEqual(
+      expect.arrayContaining(["shot_no", "video_prompt", "duration_s", "image_task_id", "video_task_id"]),
+    );
+    const storyboardUnique = indexes(schema.storyboards).find((i) => i.name === "uq_storyboards_episode_shot");
+    expect(storyboardUnique?.unique).toBe(true);
   });
 
   it("tasks.dedupe_key has a partial unique index", () => {

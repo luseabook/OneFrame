@@ -46,6 +46,8 @@ afterAll(async () => {
 describe("script pipeline (PRD F2 backend)", () => {
   let projectId = "";
   let episodeId = "";
+  let characterId = "";
+  let shotIds: string[] = [];
   let storyboardId = "";
 
   it("creates a novel project", async () => {
@@ -81,6 +83,14 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(res.code).toBe(0);
     expect(res.data).toHaveLength(3);
     expect(res.data[0].status).toBe(1);
+    characterId = res.data[0].id;
+  });
+
+  it("creates a portrait generation task for a character", async () => {
+    const res = await inject("POST", `/projects/${projectId}/characters/${characterId}/portrait`, { count: 1 });
+    expect(res.code).toBe(0);
+    expect(res.data.task_id).toBeTruthy();
+    expect(res.data.credits_estimate).toBeGreaterThan(0);
   });
 
   it("generates a script draft for episode 1", async () => {
@@ -98,6 +108,7 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(generated.code).toBe(0);
     expect(generated.data).toHaveLength(10);
     storyboardId = generated.data[0].id;
+    shotIds = generated.data.map((s: { id: string }) => s.id);
 
     const patched = await inject(
       "PATCH",
@@ -110,6 +121,19 @@ describe("script pipeline (PRD F2 backend)", () => {
     const detail = await inject("GET", `/projects/${projectId}/episodes/${episodeId}`);
     expect(detail.code).toBe(0);
     expect(detail.data.storyboards).toHaveLength(10);
+    expect(detail.data.storyboards[0].character_ids.length).toBeGreaterThan(0);
+  });
+
+  it("blocks batch generation until referenced assets are finalized", async () => {
+    const res = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/storyboards/generate-videos`, {
+      shot_ids: shotIds,
+      budget_credits_max: 1000,
+      model: "wan-3.0",
+    });
+    expect(res.code).toBe(0);
+    expect(res.data.items).toHaveLength(shotIds.length);
+    expect(res.data.items.every((item: { code?: number }) => item.code === 400105)).toBe(true);
+    expect(res.data.budget_exceeded).toBe(false);
   });
 
   it("splits an imported script into episodes", async () => {

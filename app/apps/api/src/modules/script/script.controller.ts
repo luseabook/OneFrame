@@ -2,7 +2,10 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, 
 import {
   charactersGenerateSchema,
   createProjectSchema,
+  generateVideosBatchSchema,
   outlineConfirmSchema,
+  portraitGenerateSchema,
+  portraitRebindSchema,
   projectPatchSchema,
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
@@ -104,5 +107,55 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(storyboardPatchSchema, body);
     return this.script.patchStoryboard(req.auth?.spaceId ?? "", id, eid, sid, input);
+  }
+
+  @Post("projects/:id/characters/:cid/portrait")
+  async portrait(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("cid") cid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(portraitGenerateSchema, body ?? {});
+    return this.script.generatePortrait(
+      req.auth?.spaceId ?? "",
+      req.auth?.userId ?? "",
+      id,
+      cid,
+      input,
+    );
+  }
+
+  @Post("projects/:id/characters/:cid/portrait/rebind")
+  async rebind(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("cid") cid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(portraitRebindSchema, body);
+    return this.script.rebindCharacter(req.auth?.spaceId ?? "", id, cid, input.asset_id);
+  }
+
+  @Post("projects/:id/characters/:cid/finalize")
+  async finalize(@Req() req: AuthedRequest, @Param("id") id: string, @Param("cid") cid: string) {
+    return this.script.finalizeCharacter(req.auth?.spaceId ?? "", id, cid);
+  }
+
+  @Post("projects/:id/episodes/:eid/storyboards/generate-videos")
+  async generateVideos(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(generateVideosBatchSchema, body);
+    return this.script.batchGenerateVideos(
+      req.auth?.spaceId ?? "",
+      req.auth?.userId ?? "",
+      id,
+      eid,
+      input,
+    );
   }
 }

@@ -90,7 +90,7 @@ export class LlmService {
     );
   }
 
-  async storyboards(input: { title: string; synopsis: string; scriptText: string; shotCount: number }): Promise<StoryboardsResult> {
+  async storyboards(input: { title: string; synopsis: string; scriptText: string; shotCount: number; characterNames?: string[] }): Promise<StoryboardsResult> {
     if (!this.deepseek) {
       const shots = Array.from({ length: input.shotCount }, (_, i) => ({
         shot_no: i + 1,
@@ -104,11 +104,12 @@ export class LlmService {
         duration_s: 5,
         ratio: "9:16",
         resolution: "720p",
+        character_names: input.characterNames?.length ? [input.characterNames[0]!] : [],
       }));
       return storyboardsSchema.parse({ storyboards: shots });
     }
     return this.complete<StoryboardsResult>(
-      `你是分镜师。把剧本拆成恰好 ${input.shotCount} 个镜头。只输出 JSON：{"storyboards":[{"shot_no":1,"shot_desc":"","video_prompt":"","duration_s":5,"ratio":"9:16","resolution":"720p"}]}。`,
+      `你是分镜师。把剧本拆成恰好 ${input.shotCount} 个镜头；角色名单：${(input.characterNames ?? []).join("、") || "无"}。只输出 JSON：{"storyboards":[{"shot_no":1,"shot_desc":"","video_prompt":"","duration_s":5,"ratio":"9:16","resolution":"720p","character_names":[]}]}。`,
       JSON.stringify(input).slice(0, 20_000),
       storyboardsSchema,
     );

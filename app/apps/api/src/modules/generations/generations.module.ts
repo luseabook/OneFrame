@@ -8,5 +8,6 @@ import { GenerationsService } from "./generations.service";
   imports: [CreditsModule, ModelsModule],
   controllers: [GenerationsController],
   providers: [GenerationsService],
+  exports: [GenerationsService],
 })
 export class GenerationsModule {}

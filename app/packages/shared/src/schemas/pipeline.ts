@@ -78,6 +78,26 @@ export const storyboardPatchSchema = z.object({
 });
 export type StoryboardPatchRequest = z.infer<typeof storyboardPatchSchema>;
 
+export const generateVideosBatchSchema = z.object({
+  shot_ids: z.array(z.string().min(1)).min(1).max(30),
+  budget_credits_max: z.number().int().min(1),
+  model: z.string().min(1),
+  ratio: z.string().min(1).optional(),
+  resolution: z.string().min(1).optional(),
+});
+export type GenerateVideosBatchRequest = z.infer<typeof generateVideosBatchSchema>;
+
+export const portraitGenerateSchema = z.object({
+  count: z.number().int().min(1).max(4).default(1),
+  prompt: z.string().max(1000).optional(),
+});
+export type PortraitGenerateRequest = z.infer<typeof portraitGenerateSchema>;
+
+export const portraitRebindSchema = z.object({
+  asset_id: z.string().min(1),
+});
+export type PortraitRebindRequest = z.infer<typeof portraitRebindSchema>;
+
 export const projectPatchSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   genre: z.string().max(50).optional(),

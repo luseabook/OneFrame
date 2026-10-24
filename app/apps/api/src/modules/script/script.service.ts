@@ -1,23 +1,37 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  assets,
   episodes,
+  freezeCredits,
+  models,
   projectAssets,
   scriptProjects,
+  storyboardAssets,
   storyboards,
+  taskEvents,
+  tasks,
 } from "@app/db";
 import {
   AppError,
   ErrorCode,
+  TaskStatus,
   newId,
   type CharactersGenerateRequest,
+  type GenerateVideosBatchRequest,
+  type GenerationRequest,
   type OutlineConfirmRequest,
+  type PortraitGenerateRequest,
   type ScriptDraftGenerateRequest,
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
   type StoryboardsGenerateRequest,
 } from "@app/shared";
 import { db } from "../../db/database";
+import { QueueService } from "../../queue/queue.service";
+import { CreditsService } from "../credits/credits.service";
+import { GenerationsService } from "../generations/generations.service";
+import { ModelsService } from "../models/models.service";
 import { LlmService } from "./llm.service";
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
@@ -50,7 +64,7 @@ function episodeDto(row: EpisodeRow) {
   };
 }
 
-function storyboardDto(row: StoryboardRow) {
+function storyboardDto(row: StoryboardRow, characterIds: string[] = []) {
   return {
     id: String(row.id),
     shot_no: row.shotNo,
@@ -60,7 +74,7 @@ function storyboardDto(row: StoryboardRow) {
     ratio: row.ratio,
     resolution: row.resolution,
     status: row.status,
-    character_ids: [] as string[],
+    character_ids: characterIds,
   };
 }
 
@@ -79,7 +93,13 @@ function assetDto(row: ProjectAssetRow) {
 
 @Injectable()
 export class ScriptService {
-  constructor(@Inject(LlmService) private readonly llm: LlmService) {}
+  constructor(
+    @Inject(LlmService) private readonly llm: LlmService,
+    @Inject(GenerationsService) private readonly generations: GenerationsService,
+    @Inject(CreditsService) private readonly credits: CreditsService,
+    @Inject(ModelsService) private readonly models: ModelsService,
+    @Inject(QueueService) private readonly queue: QueueService,
+  ) {}
 
   async createProject(
     spaceId: string,
@@ -130,7 +150,7 @@ export class ScriptService {
       .select()
       .from(projectAssets)
       .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character")))
-      .orderBy(projectAssets.createdAt);
+      .orderBy(projectAssets.createdAt, projectAssets.id);
     return { project: projectDto(project), episodes: eps.map(episodeDto), characters: chars.map(assetDto) };
   }
 
@@ -310,16 +330,23 @@ export class ScriptService {
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
+    const characters = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character"))).orderBy(projectAssets.createdAt, projectAssets.id);
     const result = await this.llm.storyboards({
       title: episode.title ?? `第${episode.epNo}集`,
       synopsis: episode.synopsis ?? "",
       scriptText: episode.scriptText ?? "",
       shotCount: input.shot_count,
+      characterNames: characters.map((c) => c.name),
     });
 
+    const byName = new Map(characters.map((c) => [c.name, c]));
+    const linkMap = new Map<string, string[]>();
     const rows = await db.transaction(async (tx) => {
       await tx.delete(storyboards).where(eq(storyboards.episodeId, episode.id));
-      return tx
+      const inserted = await tx
         .insert(storyboards)
         .values(
           result.storyboards.map((shot) => ({
@@ -335,8 +362,22 @@ export class ScriptService {
           })),
         )
         .returning();
+
+      for (let i = 0; i < inserted.length; i += 1) {
+        const row = inserted[i]!;
+        const names = result.storyboards[i]?.character_names ?? [];
+        const ids: string[] = [];
+        for (const name of names) {
+          const asset = byName.get(name);
+          if (!asset) continue;
+          ids.push(String(asset.id));
+          await tx.insert(storyboardAssets).values({ storyboardId: row.id, projectAssetId: asset.id });
+        }
+        linkMap.set(String(row.id), ids);
+      }
+      return inserted;
     });
-    return rows.map(storyboardDto);
+    return rows.map((row) => storyboardDto(row, linkMap.get(String(row.id)) ?? []));
   }
 
   async episodeDetail(spaceId: string, projectId: string, episodeId: string) {
@@ -347,7 +388,29 @@ export class ScriptService {
       .from(storyboards)
       .where(eq(storyboards.episodeId, episode.id))
       .orderBy(storyboards.shotNo);
-    return { episode: episodeDto(episode), storyboards: shots.map(storyboardDto) };
+    const links =
+      shots.length > 0
+        ? await db
+            .select()
+            .from(storyboardAssets)
+            .where(
+              inArray(
+                storyboardAssets.storyboardId,
+                shots.map((s) => s.id),
+              ),
+            )
+        : [];
+    const linkMap = new Map<string, string[]>();
+    for (const link of links) {
+      const key = String(link.storyboardId);
+      const list = linkMap.get(key) ?? [];
+      list.push(String(link.projectAssetId));
+      linkMap.set(key, list);
+    }
+    return {
+      episode: episodeDto(episode),
+      storyboards: shots.map((shot) => storyboardDto(shot, linkMap.get(String(shot.id)) ?? [])),
+    };
   }
 
   async patchStoryboard(
@@ -373,6 +436,317 @@ export class ScriptService {
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found");
     return storyboardDto(row);
+  }
+
+  async generatePortrait(
+    spaceId: string,
+    userId: string,
+    projectId: string,
+    characterId: string,
+    input: PortraitGenerateRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+
+    const [model] = await db
+      .select()
+      .from(models)
+      .where(and(eq(models.visible, true), sql`${models.modes} ? 'studio_asset_image'`))
+      .orderBy(models.sort)
+      .limit(1);
+    if (!model) throw new AppError(ErrorCode.INVALID_PARAM, "no model supports studio_asset_image");
+    const cfg = (model.modes as Record<string, {
+      ratios?: string[];
+      default_ratio?: string;
+      resolution_options?: Array<{ value: string }>;
+      default_resolution?: string;
+    }>).studio_asset_image;
+    const prompt = input.prompt ?? character.prompt ?? character.description ?? character.name;
+    const request: GenerationRequest = {
+      mode: "studio_asset_image",
+      model: model.name,
+      scene: null,
+      input: { prompt, reference_uris: [] },
+      options: {
+        ratio: cfg?.default_ratio ?? cfg?.ratios?.[0] ?? "1:1",
+        resolution: cfg?.default_resolution ?? cfg?.resolution_options?.[0]?.value ?? "1K",
+        duration: 5,
+        count: input.count,
+        enable_audio: false,
+        mouth_drive: false,
+      },
+    };
+    const created = await this.generations.create(
+      { userId, spaceId, jti: "script-portrait" },
+      request,
+      `portrait:${character.id}:${Date.now()}`,
+    );
+    await db
+      .update(projectAssets)
+      .set({
+        sourceTaskId: BigInt(created.task_id),
+        prompt,
+        status: 1,
+        portraitAssetId: null,
+        refImageUri: null,
+        finalizedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectAssets.id, character.id));
+    return { ...created, character_id: String(character.id), model: model.name };
+  }
+
+  async finalizeCharacter(spaceId: string, projectId: string, characterId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+    if (!character.portraitAssetId) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "portrait not generated or not bound yet");
+    }
+    const [updated] = await db
+      .update(projectAssets)
+      .set({ status: 2, finalizedAt: new Date(), updatedAt: new Date() })
+      .where(eq(projectAssets.id, character.id))
+      .returning();
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "character not found");
+    return assetDto(updated);
+  }
+
+  async rebindCharacter(spaceId: string, projectId: string, characterId: string, assetId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const character = await this.findCharacter(project.id, characterId);
+    let id: bigint;
+    try {
+      id = BigInt(assetId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid asset_id", { field: "asset_id" });
+    }
+    const [asset] = await db
+      .select()
+      .from(assets)
+      .where(and(eq(assets.id, id), eq(assets.spaceId, BigInt(spaceId))));
+    if (!asset) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    const [updated] = await db
+      .update(projectAssets)
+      .set({
+        portraitAssetId: asset.id,
+        refImageUri: asset.uri,
+        status: 2,
+        finalizedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(projectAssets.id, character.id))
+      .returning();
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "character not found");
+    return assetDto(updated);
+  }
+
+  async batchGenerateVideos(
+    spaceId: string,
+    userId: string,
+    projectId: string,
+    episodeId: string,
+    input: GenerateVideosBatchRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const model = await this.models.findByName(input.model);
+
+    const ids = input.shot_ids.map((id) => {
+      try {
+        return BigInt(id);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, `invalid shot id: ${id}`, { field: "shot_ids" });
+      }
+    });
+    const shots = await db
+      .select()
+      .from(storyboards)
+      .where(and(eq(storyboards.episodeId, episode.id), inArray(storyboards.id, ids)));
+    if (shots.length !== ids.length) throw new AppError(ErrorCode.NOT_FOUND, "some shots not found");
+    const shotById = new Map(shots.map((s) => [String(s.id), s]));
+
+    const characters = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character"))).orderBy(projectAssets.createdAt, projectAssets.id);
+    const charById = new Map(characters.map((c) => [String(c.id), c]));
+    const links =
+      shots.length > 0
+        ? await db
+            .select()
+            .from(storyboardAssets)
+            .where(
+              inArray(
+                storyboardAssets.storyboardId,
+                shots.map((s) => s.id),
+              ),
+            )
+        : [];
+    const linkMap = new Map<string, string[]>();
+    for (const link of links) {
+      const key = String(link.storyboardId);
+      const list = linkMap.get(key) ?? [];
+      list.push(String(link.projectAssetId));
+      linkMap.set(key, list);
+    }
+
+    type Candidate = {
+      shotId: string;
+      shot: (typeof shots)[number];
+      request: GenerationRequest;
+      cost: number;
+      dedupeKey: string;
+    };
+    const candidates: Candidate[] = [];
+    const items: Array<{
+      shot_id: string;
+      task_id: string | null;
+      submitted: boolean;
+      code?: number;
+      reason?: string;
+    }> = [];
+    let balance = 0;
+
+    for (const shotId of input.shot_ids) {
+      const shot = shotById.get(shotId);
+      if (!shot) {
+        items.push({ shot_id: shotId, task_id: null, submitted: false, code: ErrorCode.NOT_FOUND });
+        continue;
+      }
+      const linked = (linkMap.get(shotId) ?? []).map((id) => charById.get(id)).filter(Boolean);
+      const refs = linked
+        .filter((c) => c && c.status === 2 && c.refImageUri)
+        .map((c) => c!.refImageUri!)
+        .filter(Boolean);
+      if (refs.length === 0 || linked.some((c) => !c || c.status !== 2 || !c.refImageUri)) {
+        items.push({
+          shot_id: shotId,
+          task_id: null,
+          submitted: false,
+          code: ErrorCode.ASSET_NOT_READY,
+          reason: "asset_not_ready",
+        });
+        continue;
+      }
+      const request: GenerationRequest = {
+        mode: "universal_reference",
+        model: model.name,
+        scene: "storyboard_reference_video",
+        input: { prompt: shot.videoPrompt ?? shot.shotDesc ?? "", reference_uris: refs },
+        options: {
+          ratio: input.ratio ?? shot.ratio ?? project.ratio,
+          resolution: input.resolution ?? shot.resolution ?? "720p",
+          duration: shot.durationS ?? 5,
+          count: 1,
+          enable_audio: true,
+          mouth_drive: false,
+        },
+      };
+      const priced = await this.credits.price(request, spaceId);
+      balance = priced.balance;
+      candidates.push({
+        shotId,
+        shot,
+        request,
+        cost: priced.credits,
+        dedupeKey: `shot:${shot.id}:v1`,
+      });
+    }
+
+    // 预算：先确定本轮可投递集合；余额不足则整单拒绝
+    let spent = 0;
+    const submittable: Candidate[] = [];
+    for (const candidate of candidates) {
+      const [existing] = await db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.spaceId, BigInt(spaceId)), eq(tasks.dedupeKey, candidate.dedupeKey)));
+      if (existing) {
+        items.push({ shot_id: candidate.shotId, task_id: String(existing.id), submitted: true });
+        continue;
+      }
+      if (spent + candidate.cost > input.budget_credits_max) {
+        items.push({
+          shot_id: candidate.shotId,
+          task_id: null,
+          submitted: false,
+          code: ErrorCode.BUDGET_EXCEEDED,
+          reason: "budget_exceeded",
+        });
+        continue;
+      }
+      spent += candidate.cost;
+      submittable.push(candidate);
+    }
+    if (spent > balance) {
+      throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
+    }
+
+    for (const candidate of submittable) {
+      const taskId = newId();
+      await db.transaction(async (tx) => {
+        await tx.insert(tasks).values({
+          id: taskId,
+          spaceId: BigInt(spaceId),
+          userId: BigInt(userId),
+          episodeId: episode.id,
+          shotId: candidate.shot.id,
+          capability: "video",
+          mode: "universal_reference",
+          scene: "storyboard_reference_video",
+          modelId: model.id,
+          input: candidate.request.input,
+          options: candidate.request.options,
+          status: TaskStatus.PENDING,
+          creditsFrozen: candidate.cost,
+          dedupeKey: candidate.dedupeKey,
+        });
+        await freezeCredits(tx, {
+          spaceId: BigInt(spaceId),
+          cost: candidate.cost,
+          taskId,
+          memo: `freeze for shot ${candidate.shotId}`,
+        });
+        await tx.insert(taskEvents).values({
+          id: newId(),
+          taskId,
+          type: "task.created",
+          payload: { shot_id: candidate.shotId, batch: true },
+        });
+        await tx
+          .update(storyboards)
+          .set({ status: 3, videoTaskId: taskId, updatedAt: new Date() })
+          .where(eq(storyboards.id, candidate.shot.id));
+      });
+      await this.queue.enqueueTask(String(taskId));
+      items.push({ shot_id: candidate.shotId, task_id: String(taskId), submitted: true });
+    }
+
+    return {
+      budget_exceeded: items.some((item) => item.code === ErrorCode.BUDGET_EXCEEDED),
+      items,
+    };
+  }
+
+  private async findCharacter(projectId: bigint, characterId: string): Promise<ProjectAssetRow> {
+    let id: bigint;
+    try {
+      id = BigInt(characterId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid character id", { field: "cid" });
+    }
+    const [row] = await db
+      .select()
+      .from(projectAssets)
+      .where(
+        and(
+          eq(projectAssets.id, id),
+          eq(projectAssets.projectId, projectId),
+          eq(projectAssets.kind, "character"),
+        ),
+      );
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "character not found");
+    return row;
   }
 
   private async findProject(spaceId: string, projectId: string): Promise<ProjectRow> {

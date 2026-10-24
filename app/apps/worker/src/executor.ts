@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { models, settleCredits, taskEvents, tasks, unfreezeCredits } from "@app/db";
+import { and, eq } from "drizzle-orm";
+import { assets, models, projectAssets, settleCredits, taskEvents, tasks, unfreezeCredits } from "@app/db";
 import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
@@ -102,6 +102,44 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
         memo: "task succeeded settle",
       });
     }
+    // 定妆图任务：成功结果自动资产化并置角色定稿（未定稿角色不得被分镜引用）
+    if (fresh.capability === "image" && transferred[0]?.uri) {
+      const [portrait] = await tx
+        .select()
+        .from(projectAssets)
+        .where(eq(projectAssets.sourceTaskId, fresh.id));
+      if (portrait && !portrait.portraitAssetId) {
+        const assetId = newId();
+        await tx.insert(assets).values({
+          id: assetId,
+          spaceId: fresh.spaceId,
+          kind: "image",
+          uri: transferred[0].uri,
+          previewUri: transferred[0].preview_uri ?? null,
+          sourceTaskId: fresh.id,
+          name: portrait.name,
+          tags: ["portrait"],
+          meta: { project_id: String(portrait.projectId), project_asset_id: String(portrait.id) },
+        });
+        await tx
+          .update(projectAssets)
+          .set({
+            portraitAssetId: assetId,
+            refImageUri: transferred[0].uri,
+            status: 2,
+            finalizedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(projectAssets.id, portrait.id)));
+        await tx.insert(taskEvents).values({
+          id: newId(),
+          taskId: fresh.id,
+          type: "asset.finalized",
+          payload: { project_asset_id: String(portrait.id), asset_id: String(assetId) },
+        });
+      }
+    }
+
     await tx.insert(taskEvents).values({
       id: newId(),
       taskId: fresh.id,
