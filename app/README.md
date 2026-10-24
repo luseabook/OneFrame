@@ -2,7 +2,7 @@
 
 > 产品代号未定；目录名 `app` 为占位，定名后整体 rename 即可。
 > 远程仓库：<https://github.com/luseabook/OneFrame>（`main` 分支）
-> 文档唯一事实来源：[`../docs/`](../docs/README.md)（当前版本 v1.3，路线 A：剧本流水线首发；`docs/` 位于本仓库同级目录，暂不随本仓库发布）
+> 文档唯一事实来源：[`../docs/`](../docs/README.md)（当前版本 v1.3，路线 A：剧本流水线首发；`docs/` 已纳入本仓库根目录）
 
 ## 结构
 
