@@ -32,6 +32,7 @@ import { QueueService } from "../../queue/queue.service";
 import { CreditsService } from "../credits/credits.service";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
+import { StorageService } from "../../storage/storage.service";
 import { LlmService } from "./llm.service";
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
@@ -78,7 +79,7 @@ function storyboardDto(row: StoryboardRow, characterIds: string[] = []) {
   };
 }
 
-function assetDto(row: ProjectAssetRow) {
+function assetDto(row: ProjectAssetRow, portraitUrl: string | null = null) {
   return {
     id: String(row.id),
     kind: row.kind,
@@ -87,6 +88,8 @@ function assetDto(row: ProjectAssetRow) {
     prompt: row.prompt,
     ref_image_uri: row.refImageUri,
     portrait_asset_id: row.portraitAssetId ? String(row.portraitAssetId) : null,
+    portrait_url: portraitUrl,
+    source_task_id: row.sourceTaskId ? String(row.sourceTaskId) : null,
     status: row.status,
   };
 }
@@ -99,6 +102,7 @@ export class ScriptService {
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(ModelsService) private readonly models: ModelsService,
     @Inject(QueueService) private readonly queue: QueueService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   async createProject(
@@ -151,7 +155,12 @@ export class ScriptService {
       .from(projectAssets)
       .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character")))
       .orderBy(projectAssets.createdAt, projectAssets.id);
-    return { project: projectDto(project), episodes: eps.map(episodeDto), characters: chars.map(assetDto) };
+    const characters = await Promise.all(
+      chars.map(async (row) =>
+        assetDto(row, row.refImageUri ? await this.storage.signDownload(row.refImageUri, 3600) : null),
+      ),
+    );
+    return { project: projectDto(project), episodes: eps.map(episodeDto), characters };
   }
 
   async patchProject(spaceId: string, projectId: string, input: { title?: string; genre?: string }) {
@@ -296,7 +305,7 @@ export class ScriptService {
         )
         .returning();
     });
-    return rows.map(assetDto);
+    return rows.map((row) => assetDto(row));
   }
 
   async generateScriptDraft(

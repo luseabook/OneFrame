@@ -6,7 +6,7 @@
         粘贴小说，AI 生成分集大纲、角色定妆图、分镜与视频——角色全程一致，价格全程透明。
       </p>
       <div class="cta">
-        <NuxtLink to="/login" class="cta-btn primary">开始创作</NuxtLink>
+        <NuxtLink to="/projects" class="cta-btn primary">开始创作</NuxtLink>
         <NuxtLink to="/pricing" class="cta-btn ghost">查看定价</NuxtLink>
       </div>
     </section>

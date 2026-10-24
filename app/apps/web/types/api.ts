@@ -96,6 +96,52 @@ export interface Paginated<T> {
   page_size: number;
 }
 
+export interface ProjectDto {
+  id: string;
+  title: string;
+  genre: string | null;
+  drama_type: number;
+  ratio: string;
+  source_type: number;
+  source_text: string | null;
+  status: number;
+  created_at: string;
+}
+
+export interface EpisodeDto {
+  id: string;
+  ep_no: number;
+  title: string | null;
+  synopsis: string | null;
+  script_text: string | null;
+  status: number;
+}
+
+export interface CharacterDto {
+  id: string;
+  kind: string;
+  name: string;
+  description: string | null;
+  prompt: string | null;
+  ref_image_uri: string | null;
+  portrait_asset_id: string | null;
+  portrait_url: string | null;
+  source_task_id: string | null;
+  status: number;
+}
+
+export interface StoryboardDto {
+  id: string;
+  shot_no: number;
+  shot_desc: string | null;
+  video_prompt: string | null;
+  duration_s: number | null;
+  ratio: string | null;
+  resolution: string | null;
+  status: number;
+  character_ids: string[];
+}
+
 export const TaskStatus = {
   PENDING: 1,
   RUNNING: 2,
