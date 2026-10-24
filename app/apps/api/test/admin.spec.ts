@@ -74,6 +74,14 @@ describe("ops admin", () => {
     }
   });
 
+  it("returns the pipeline funnel with conversion rates", async () => {
+    const res = await adminInject("GET", "/ops/admin/funnel");
+    expect(res.code).toBe(0);
+    expect(res.data).toHaveLength(6);
+    expect(res.data[0].key).toBe("projects");
+    expect(typeof res.data[0].count).toBe("number");
+  });
+
   it("returns 403 when a normal user token is used", async () => {
     const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
     const sms = (await app.inject({ method: "POST", url: "/v1/auth/sms-code", payload: { phone } })).json() as {

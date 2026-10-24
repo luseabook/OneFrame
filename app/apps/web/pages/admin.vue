@@ -22,12 +22,15 @@ const username = ref("admin");
 const password = ref("");
 const error = ref("");
 const loading = ref(false);
-const tab = ref<"dashboard" | "models" | "tasks" | "shares" | "reports">("dashboard");
+const tab = ref<"dashboard" | "models" | "tasks" | "shares" | "reports" | "funnel">("dashboard");
 const dashboard = ref<Dashboard | null>(null);
 const models = ref<Array<Record<string, unknown>>>([]);
 const tasks = ref<Array<Record<string, unknown>>>([]);
 const shares = ref<Array<Record<string, unknown>>>([]);
 const reports = ref<Array<Record<string, unknown>>>([]);
+const funnel = ref<
+  Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>
+>([]);
 
 async function api<T>(path: string, options: Record<string, unknown> = {}): Promise<T> {
   const res = await $fetch<Envelope<T>>(`/v1${path}`, {
@@ -60,18 +63,22 @@ async function login(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [d, m, t, s, r] = await Promise.all([
+  const [d, m, t, s, r, f] = await Promise.all([
     api<Dashboard>("/ops/admin/dashboard"),
     api<Array<Record<string, unknown>>>("/ops/admin/models"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/tasks"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/shares"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/reports"),
+    api<Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>>(
+      "/ops/admin/funnel",
+    ),
   ]);
   dashboard.value = d;
   models.value = m;
   tasks.value = t.list;
   shares.value = s.list;
   reports.value = r.list;
+  funnel.value = f;
 }
 
 async function toggleModel(model: Record<string, unknown>): Promise<void> {
@@ -133,6 +140,7 @@ onMounted(async () => {
         <button :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">任务审计</button>
         <button :class="{ active: tab === 'shares' }" @click="tab = 'shares'">分享管理</button>
         <button :class="{ active: tab === 'reports' }" @click="tab = 'reports'">举报处置</button>
+        <button :class="{ active: tab === 'funnel' }" @click="tab = 'funnel'">流水线漏斗</button>
         <button class="logout" @click="logout">退出</button>
       </div>
 
@@ -185,6 +193,20 @@ onMounted(async () => {
           <button v-if="!s.revoked_at" class="mini" @click="revokeShare(s)">下线</button>
         </div>
         <p v-if="shares.length === 0" class="muted">暂无分享。</p>
+      </section>
+
+      <section v-if="tab === 'funnel'" class="card">
+        <h2>流水线漏斗</h2>
+        <div class="funnel">
+          <div v-for="stage in funnel" :key="stage.key" class="funnel-stage">
+            <span class="muted">{{ stage.label }}</span>
+            <b>{{ stage.count }}</b>
+            <span v-if="stage.conversion_from_previous !== null" class="muted">
+              转化 {{ stage.conversion_from_previous }}%
+            </span>
+          </div>
+        </div>
+        <p v-if="funnel.length === 0" class="muted">暂无漏斗数据。</p>
       </section>
 
       <section v-if="tab === 'reports'" class="card">
@@ -315,6 +337,24 @@ h1 {
 }
 .head-row {
   color: var(--text-3);
+}
+.funnel {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.funnel-stage {
+  flex: 1;
+  min-width: 110px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.funnel-stage b {
+  font-size: 20px;
 }
 .report-row {
   display: flex;

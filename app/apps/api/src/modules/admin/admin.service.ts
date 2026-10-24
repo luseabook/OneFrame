@@ -1,6 +1,19 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { desc, eq, sql } from "drizzle-orm";
-import { adminUsers, contentReports, exportJobs, modelPrices, models, taskShares, tasks, users } from "@app/db";
+import { and, desc, eq, sql } from "drizzle-orm";
+import {
+  adminUsers,
+  contentReports,
+  episodes,
+  exportJobs,
+  modelPrices,
+  models,
+  projectAssets,
+  scriptProjects,
+  storyboards,
+  taskShares,
+  tasks,
+  users,
+} from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
@@ -217,6 +230,45 @@ export class AdminService {
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "share not found");
     return { ok: true };
+  }
+
+  // 流水线漏斗（PRD F8）：建项→大纲→角色定稿→分镜→批量→成功
+  async funnel() {
+    const [projects] = await db.select({ count: sql<number>`count(*)::int` }).from(scriptProjects);
+    const [outlines] = await db
+      .select({ count: sql<number>`count(distinct ${episodes.projectId})::int` })
+      .from(episodes)
+      .where(eq(episodes.status, 2));
+    const [characters] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(projectAssets)
+      .where(and(eq(projectAssets.kind, "character"), eq(projectAssets.status, 2)));
+    const [shots] = await db.select({ count: sql<number>`count(*)::int` }).from(storyboards);
+    const [batch] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(eq(tasks.mode, "universal_reference"));
+    const [succeeded] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(eq(tasks.status, 3));
+    const stages = [
+      { key: "projects", label: "建项", count: projects?.count ?? 0 },
+      { key: "outlines", label: "大纲确认", count: outlines?.count ?? 0 },
+      { key: "characters", label: "角色定稿", count: characters?.count ?? 0 },
+      { key: "storyboards", label: "分镜生成", count: shots?.count ?? 0 },
+      { key: "batch", label: "批量投递", count: batch?.count ?? 0 },
+      { key: "succeeded", label: "镜头成功", count: succeeded?.count ?? 0 },
+    ];
+    return stages.map((stage, index) => ({
+      ...stage,
+      conversion_from_previous:
+        index === 0
+          ? null
+          : stages[index - 1]!.count > 0
+            ? Math.round((stage.count / stages[index - 1]!.count) * 1000) / 10
+            : 0,
+    }));
   }
 
   async listReports(page?: number, pageSize?: number, status?: number) {

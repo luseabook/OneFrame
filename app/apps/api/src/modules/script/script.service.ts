@@ -906,6 +906,71 @@ export class ScriptService {
     return { export_id: String(id), status: 1 };
   }
 
+  async addShotMaterial(spaceId: string, projectId: string, taskId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    let bigId: bigint;
+    try {
+      bigId = BigInt(taskId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid task id", { field: "task_id" });
+    }
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, bigId), eq(tasks.spaceId, BigInt(spaceId))));
+    if (!task) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
+    if (task.status !== TaskStatus.SUCCEEDED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "task not succeeded yet");
+    }
+    const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
+    const uri = results[0]?.uri;
+    if (!uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
+
+    const [existing] = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.sourceTaskId, bigId)));
+    if (existing) return assetDto(existing, await this.storage.signDownload(existing.refImageUri ?? "", 3600));
+
+    const assetId = newId();
+    await db.insert(assets).values({
+      id: assetId,
+      spaceId: BigInt(spaceId),
+      kind: task.capability === "image" ? "image" : "video",
+      uri,
+      sourceTaskId: task.id,
+      name: `material-${task.id}`,
+      tags: ["shot-material"],
+    });
+    const [row] = await db
+      .insert(projectAssets)
+      .values({
+        id: newId(),
+        projectId: project.id,
+        kind: "shot_material",
+        name: `素材-${String(task.id).slice(-6)}`,
+        refImageUri: uri,
+        sourceTaskId: task.id,
+        portraitAssetId: assetId,
+        status: 1,
+      })
+      .returning();
+    if (!row) throw new AppError(ErrorCode.INTERNAL, "add shot material failed");
+    return assetDto(row, await this.storage.signDownload(uri, 3600));
+  }
+
+  async listShotMaterials(spaceId: string, projectId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const rows = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "shot_material")))
+      .orderBy(desc(projectAssets.createdAt));
+    return Promise.all(
+      rows.map(async (row) => assetDto(row, row.refImageUri ? await this.storage.signDownload(row.refImageUri, 3600) : null)),
+    );
+  }
+
   async projectMatrix(spaceId: string, projectId: string) {
     const project = await this.findProject(spaceId, projectId);
     const eps = await db

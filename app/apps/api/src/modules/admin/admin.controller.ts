@@ -54,6 +54,11 @@ export class AdminController {
     return this.admin.queues();
   }
 
+  @Get("funnel")
+  funnel() {
+    return this.admin.funnel();
+  }
+
   @Get("reports")
   reports(
     @Query("status") status?: string,

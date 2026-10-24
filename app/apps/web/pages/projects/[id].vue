@@ -48,6 +48,7 @@ const exporting = ref(false);
 const portraitCount = ref(1);
 const candidates = ref<{ charId: string; task_id: string; list: Array<{ index: number; url: string }> } | null>(null);
 const matrix = ref<MatrixDto | null>(null);
+const materials = ref<Array<{ id: string; name: string; portrait_url: string | null }>>([]);
 const budgetTouched = ref(false);
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -94,6 +95,16 @@ async function loadEpisode(): Promise<void> {
   );
   episode.value = data.episode;
   shots.value = data.storyboards;
+}
+
+async function loadMaterials(): Promise<void> {
+  try {
+    materials.value = await api.get<Array<{ id: string; name: string; portrait_url: string | null }>>(
+      `/projects/${projectId.value}/shot-materials`,
+    );
+  } catch {
+    materials.value = [];
+  }
 }
 
 async function loadMatrix(): Promise<void> {
@@ -394,6 +405,7 @@ onMounted(async () => {
     await loadProject();
     await loadModels();
     await loadMatrix();
+    await loadMaterials();
   });
 });
 
@@ -561,6 +573,15 @@ onUnmounted(() => {
             <Button v-if="exportJob?.status === 4" variant="ghost" @click="retryExportJob">重试导出</Button>
           </div>
           <p v-if="budgetExceeded" class="error">预算不足，部分镜头未投递（745703）。</p>
+          <div v-if="materials.length > 0" class="materials">
+            <span class="muted">分镜素材</span>
+            <div class="material-grid">
+              <div v-for="material in materials" :key="material.id" class="material">
+                <img v-if="material.portrait_url" :src="material.portrait_url" :alt="material.name" />
+                <span>{{ material.name }}</span>
+              </div>
+            </div>
+          </div>
           <div v-if="matrix" class="matrix">
             <div v-for="ep in matrix.episodes" :key="ep.id" class="matrix-row">
               <span class="matrix-label">第{{ ep.ep_no }}集</span>
@@ -827,6 +848,29 @@ h2 {
 .download {
   color: var(--color-primary);
   font-size: 12px;
+}
+.materials {
+  margin-bottom: 12px;
+}
+.material-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.material {
+  width: 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.material img {
+  width: 100px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--color-border);
 }
 .matrix {
   border: 1px solid var(--color-border);

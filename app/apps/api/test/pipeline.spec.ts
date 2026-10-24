@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, exportJobs } from "@app/db";
+import { createDb, exportJobs, tasks } from "@app/db";
+import { newId } from "@app/shared";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
+import { StorageService } from "../src/storage/storage.service";
 
 let app: NestFastifyApplication;
 const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
@@ -199,6 +201,45 @@ describe("script pipeline (PRD F2 backend)", () => {
     );
     expect(retried.code).toBe(0);
     expect(retried.data.status).toBe(1);
+  });
+
+  it("adds a task result as project shot material", async () => {
+    const me = await inject("GET", "/me");
+    expect(me.code).toBe(0);
+    const spaceId = String(me.data.space.id);
+    const userId = String(me.data.user.id);
+    const storage = app.get(StorageService);
+    const key = `u/${spaceId}/tasks/material-${Date.now()}.mp4`;
+    await storage.put(key, Buffer.from("material"), "video/mp4");
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    let taskId = "";
+    try {
+      taskId = newId();
+      await db.insert(tasks).values({
+        id: taskId,
+        spaceId: BigInt(spaceId),
+        userId: BigInt(userId),
+        capability: "video",
+        mode: "text2video",
+        modelId: 1001n,
+        input: { prompt: "material" },
+        options: {},
+        status: 3,
+        results: [{ uri: key }],
+      });
+    } finally {
+      await pool.end();
+    }
+    const added = await inject("POST", `/projects/${projectId}/shot-materials`, {
+      task_id: String(taskId),
+    });
+    expect(added.code).toBe(0);
+    expect(added.data.kind).toBe("shot_material");
+
+    const list = await inject("GET", `/projects/${projectId}/shot-materials`);
+    expect(list.code).toBe(0);
+    expect(list.data.length).toBeGreaterThan(0);
+    expect(list.data[0].portrait_url).toBeTruthy();
   });
 
   it("splits an imported script into episodes", async () => {

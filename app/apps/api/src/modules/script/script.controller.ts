@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
+import { z } from "zod";
 import {
   charactersGenerateSchema,
   createProjectSchema,
@@ -92,6 +93,17 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(storyboardsGenerateSchema, body ?? {});
     return this.script.generateStoryboards(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  @Get("projects/:id/shot-materials")
+  async shotMaterials(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.script.listShotMaterials(req.auth?.spaceId ?? "", id);
+  }
+
+  @Post("projects/:id/shot-materials")
+  async addShotMaterial(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(z.object({ task_id: z.string().min(1) }), body);
+    return this.script.addShotMaterial(req.auth?.spaceId ?? "", id, input.task_id);
   }
 
   @Get("projects/:id/matrix")

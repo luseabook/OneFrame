@@ -16,6 +16,8 @@ const shareInfo = ref<{ share_path: string; expires_at: string } | null>(null);
 const error = ref("");
 const info = ref("");
 const expiring = ref<Array<{ task_id: string; days_left: number }>>([]);
+const projects = ref<Array<{ id: string; title: string }>>([]);
+const projectTarget = ref("");
 let timer: ReturnType<typeof setInterval> | undefined;
 
 async function load(): Promise<void> {
@@ -97,6 +99,19 @@ async function download(item: TaskDto): Promise<void> {
   }
 }
 
+async function addToProject(): Promise<void> {
+  if (!detail.value || !projectTarget.value) {
+    info.value = "请选择项目";
+    return;
+  }
+  try {
+    await api.post(`/projects/${projectTarget.value}/shot-materials`, { task_id: detail.value.task_id });
+    info.value = "已加入项目分镜素材";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "加入项目失败";
+  }
+}
+
 async function transferAsset(): Promise<void> {
   if (!detail.value) return;
   try {
@@ -132,6 +147,8 @@ function canCancel(item: TaskDto): boolean {
 onMounted(async () => {
   try {
     await load();
+    const data = await api.get<{ list: Array<{ id: string; title: string }> }>("/projects?page=1&page_size=50");
+    projects.value = data.list;
     timer = setInterval(() => void load().catch(() => undefined), 5000);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "加载失败";
@@ -204,6 +221,13 @@ onUnmounted(() => {
         <p v-if="detail.error" class="error">{{ detail.error.message }}</p>
         <div class="share">
           <Button v-if="detail.status === 3" variant="ghost" @click="transferAsset">转存资产</Button>
+          <template v-if="detail.status === 3">
+            <select v-model="projectTarget" class="input">
+              <option value="">选择项目…</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option>
+            </select>
+            <Button variant="ghost" @click="addToProject">加入项目</Button>
+          </template>
           <Button variant="ghost" @click="createShare">生成分享链接</Button>
           <Button v-if="shareInfo" variant="ghost" @click="revokeShare">取消分享</Button>
           <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">
