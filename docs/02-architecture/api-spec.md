@@ -62,7 +62,7 @@
 
 **批量接口幂等语义（P0-04）**：幂等分两层——
 1. **请求级**：`Idempotency-Key` 对应 `idempotency_records(key, space_id, request_hash, response_body, expire_at)`；5min 内同键同体重放返回原 `response_body`（原封不动，含全部 items）；同键不同体 → 400101；
-2. **任务级**：批量投递逐镜派生 `tasks.dedupe_key = f(request_key, shot_id)`（服务端派生，唯一索引兜底）；请求级记录若在响应写回前丢失（如进程崩溃），凭任务级 dedupe_key 防重复创建。`POST /tasks/{id}/retry` 的幂等键=(origin_task_id, attempt_no)，同为服务端派生，前端不参与。
+2. **任务级**：批量投递逐镜派生 `tasks.dedupe_key = shot:{shot_id}:a{attempt_no}`（服务端派生，唯一索引兜底）；同一镜头上一轮成功/在途 → 复用原任务（不重复扣费），失败/取消 → attempt_no+1 新建一轮。请求级记录若在响应写回前丢失（如进程崩溃），凭任务级 dedupe_key 防重复创建。`POST /tasks/{id}/retry` 的幂等键=(origin_task_id, attempt_no)，同为服务端派生，前端不参与。
 
 **分页**：`?page=1&page_size=20` → `data:{list,total,page,page_size}`。
 **时间**：ISO8601 UTC。**ID**：字符串化雪花（防 JS 精度丢失）。
@@ -73,10 +73,12 @@
 POST /auth/sms-code  {phone, invite_code?}         // Alpha 期 invite_code 必填(P1-06)，Beta 起可选
   → 发码。限频：号 1/60s·5/日；IP 20/时。429101 需先过行为验证码(ticket/randstr)
   → Alpha 期校验 invite_code 有效性(status=1 且未过期)，无效 → 400101(附 field:"invite_code")
-POST /auth/login     {phone, code, invite_code?}   // Alpha 期 invite_code 必填
+POST /auth/login     {phone, code, invite_code?, age_confirmed?}   // Alpha 期 invite_code 必填；age_confirmed 必须为 true(新号)
   → 新号自动注册：建 users(含 age_declared_at=勾选"已满18"时刻)+spaces+space_members(owner)
     +credit_accounts(0)+credit_flows(gift +80)[仅一次]
     +invite_redemptions(核销, 若 invite_code.credits>0 → credit_flows(gift +credits))[同码同空间仅一次]
+    // age_confirmed≠true 且为新号 → 400101(field:"age_confirmed")
+    // 无有效 invite_code → 不建号，转等待名单(400101/等待名单引导)
   ← {access_token, expires_in:7200, user:{id,nickname,avatar}, space_id}
     + Set-Cookie: refresh_token (HttpOnly; Secure; SameSite=Strict; Path=/v1/auth; Max-Age=14d)
   // 响应体不返回 refresh_token（P0-10：refresh 只经 HttpOnly Cookie 下发）
@@ -100,6 +102,8 @@ GET /me
   // 不再有 expire_soon/gift 字段。RE 的 credits balance 有 7 桶(expire_soon/give/recharge/team/vip…)，
   // 属团队+VIP 阶段形态；MVP 简化为可用/冻结两桶，Beta 再按需扩字段（不得静默返回假 0）。
 GET /me/settings · PUT /me/settings {nickname, avatar_object_key}
+POST /me/delete                 // 账号注销(PRD F1)：身份解绑、账号停用、任务脱敏、30 天物理清理
+  ← {ok:true, purge_after}       // 注销后既有 access token 立即失效(401101)
 ```
 
 ## 4. models 与计价
@@ -180,7 +184,8 @@ GET  /tasks/{id}/results/{n}/download-url   ← {url(预签名24h), filename}
 POST /tasks/batch-download      {task_ids:[]} → {download_url}  // 服务端打包 zip(≤50项)
 POST /tasks/{id}/share          {expires_in?:86400*7} → {share_url, token, expires_at}
 DELETE /tasks/{id}/share        // 撤销分享（token 立即失效）
-GET  /s/{token}                 // 公开只读预览：无需登录；仅结果元数据+预签名，不含 prompt/uid/空间
+GET  /share/{token}                 // 公开只读预览：无需登录；仅结果元数据+预签名，不含 prompt/uid/空间
+POST /share/{token}/report {reason,detail?,contact?}   // 公开举报(按 token+IP 频控)
 ```
 
 status 枚举即 database §3；轮询接口响应加 `ETag`，3s 内重复轮询 304（配合 Redis 缓存）。
@@ -262,12 +267,34 @@ GET  /exports/{id}                                      // 状态查询；轮询
 ## 9. assets
 
 ```
-GET    /assets?kind=&folder_id=&tag=&page=
+GET    /assets?kind=&folder_id=&tag=&page=&page_size=&deleted=true      // deleted=true 查回收站
 POST   /assets              {object_key, kind, name, tags[]}   // 也可从任务结果转存
+POST   /assets/from-task    {task_id, index?}   // 任务结果一键转存(幂等：同 task+uri 复用)
 PATCH  /assets/{id}         {name?, tags?, folder_id?}
-DELETE /assets/{id}         // 进回收站; ?purge=true 直接删
-POST   /assets/restore/{id}
-GET    /assets/folders · POST /assets/folders {name,parent_id} · DELETE …
+DELETE /assets/{id}         // 进回收站(软删)
+POST   /assets/{id}/restore // 回收站恢复
+GET    /asset-folders       // 目录列表
+POST   /asset-folders       {name, parent_id?}
+GET    /assets/expiring-tasks  // 7 天内到期且未转存的结果任务 → [{task_id, expires_at, days_left}]
+```
+
+> 说明：目录/标签/回收站/到期提醒在 v1.0 已落地（实现路径与本节一致）；
+> `kind` 过滤暂由 `folder_id`/`tag`/`deleted` 覆盖，UI 侧用目录+标签检索。
+
+## 9.1 project 素材与矩阵
+
+```
+GET  /projects/{id}/matrix                      // 分镜矩阵：每集镜头 status + task_status
+POST /projects/{id}/shot-materials {task_id}     // 任务结果加入项目当分镜素材(幂等)
+GET  /projects/{id}/shot-materials               // 项目分镜素材列表(含预签名 URL)
+POST /projects/{id}/characters/{cid}/to-asset    // 定妆图转通用资产(自动打 #角色 标签)
+PATCH /projects/{id}/episodes/{eid} {title?,synopsis?,script_text?}  // 大纲自动保存(防抖)
+```
+
+## 9.2 积分流水
+
+```
+GET /credits/flows?page=&page_size=&task_id   // {list:[{id,kind,delta,frozen_delta,balance_after,task_id,memo,created_at}], total, page, page_size}
 ```
 
 ## 10. billing（Beta 支付）
@@ -290,7 +317,13 @@ PUT  /ops/admin/config/{key}              // 管理端
 GET  /ops/admin/dashboard                 // 失败率/队列深度/adapter 延迟
 PUT  /ops/admin/models/{id}               // 上下架/排序
 PUT  /ops/admin/model-prices/{id}
+GET  /ops/admin/task-metrics              // 失败率 + 错误码分布 + adapter avg/p95 延迟
+GET  /ops/admin/failed-tasks.csv          // 失败任务清单导出(CSV, ≤1000 行)
+GET  /ops/admin/funnel                    // 流水线漏斗：建项→大纲→角色定稿→分镜→批量→成功(含转化率)
+GET  /ops/admin/reports · POST /ops/admin/reports/{id}/resolve {action:takedown|dismiss}
 ```
+
+> 鉴权：/ops/admin/* 需 admin_users 独立 JWT；无凭证 → 401101，携带普通用户 token → **403101**。
 
 ## 12. 版本与废弃策略
 

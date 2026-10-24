@@ -8,6 +8,7 @@
 > v1.4 · 2026-10-24 · P1' 流水线表落地（asset_folders/assets/script_projects/episodes/project_assets/storyboards/storyboard_assets，迁移 0001）；episodes 补 `synopsis`（大纲梗概，PRD F2②）
 > v1.5 · 2026-10-24 · 导出表落地（exports，迁移 0002）：异步 zip 打包、file_uri/expires_at/error；分镜状态回写 4/5
 > v1.6 · 2026-10-24 · 任务分享落地（task_shares，迁移 0003）：公开只读预览、token 过期/撤销；Web `/share/:token`
+> v1.7 · 2026-10-24 · 举报表落地（content_reports，迁移 0004）+ 账号注销（users.deleted_at，迁移 0005）；当前实现共 26 表
 >
 > **迁移执行顺序（本文件 DDL 按依赖而非章节顺序执行）**：§1 users/identities/spaces → §4 credit_accounts/credit_flows → §8 admin_users → §1.5 invite_* → §2 models/model_prices → §5 assets → §6 script_projects/episodes/storyboards/project_assets → §3 tasks/task_events/idempotency_records/exports/task_shares → §7 canvas_* → §8 configs。跨节前向外键（tasks.episode_id/shot_id、exports.episode_id、invite_redemptions.flow_id、invite_codes.created_by）在目标表建好后用文件内标注的 `ALTER TABLE` 补加，禁止直接按本文件从上到下执行。
 
@@ -250,7 +251,25 @@ CREATE TABLE task_shares (                          -- 结果分享(PRD F3)：�
   revoked_at TIMESTAMPTZ
 );
 CREATE INDEX idx_task_shares_expire ON task_shares(expires_at);
+
+CREATE TABLE content_reports (                       -- 内容举报(compliance C2)：公开举报 + 运营处置
+  id BIGINT PRIMARY KEY,
+  space_id BIGINT NOT NULL REFERENCES spaces(id),
+  task_id BIGINT NOT NULL REFERENCES tasks(id),
+  share_id BIGINT REFERENCES task_shares(id),      -- 可空：非分享来源的举报
+  reason TEXT NOT NULL,                            -- illegal|porn|violence|infringement|spam|other
+  detail TEXT,
+  contact TEXT,
+  status SMALLINT NOT NULL DEFAULT 1,              -- 1待处理 2已下线 3已驳回
+  handled_by BIGINT REFERENCES admin_users(id),
+  handled_at TIMESTAMPTZ,
+  resolution TEXT
+);
+CREATE INDEX idx_content_reports_status ON content_reports(status, created_at DESC);
 ```
+
+**users 注销字段（PRD F1）**：`users.deleted_at TIMESTAMPTZ`；注销时置位并停用账号（status=2），
+任务记录脱敏，30 天后由 worker 维护任务物理删除。
 
 **状态枚举（流水线各表 status，smallint+应用层常量，集中此处定义）**：
 

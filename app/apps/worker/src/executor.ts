@@ -188,11 +188,9 @@ async function fail(
         memo: "task failed refund",
       });
     }
-    // PRD F7：审核拒绝 → 输出审核错误码 745802；其余失败 → 供应商错误
+    // PRD F7：审核拒绝 → 输出审核错误码 745802；其余失败 → 供应商错误 745900
     const errorCode =
-      status === TaskStatus.REVIEW_REJECTED || error.kind === "output_rejected"
-        ? 745802
-        : 745901;
+      status === TaskStatus.REVIEW_REJECTED || error.kind === "output_rejected" ? 745802 : 745900;
     await tx
       .update(tasks)
       .set({ status, error: { ...error, code: errorCode }, finishedAt: new Date(), updatedAt: new Date() })
