@@ -29,6 +29,11 @@ const envSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
+  // 新用户是否自动获得示例作品（PRD 增补 §3.2 首次体验）
+  SEED_SAMPLE_PROJECT: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   QUOTE_TTL_S: z.coerce.number().int().min(30).default(300),
 
   // LLM 步骤（大纲/角色/剧本/分镜）：mock 用于本地/CI；real 需 DEEPSEEK_API_KEY

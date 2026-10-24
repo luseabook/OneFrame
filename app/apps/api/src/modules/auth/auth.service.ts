@@ -3,9 +3,12 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   creditAccounts,
   creditIn,
+  episodes,
   identities,
   inviteCodes,
   inviteRedemptions,
+  projectAssets,
+  scriptProjects,
   spaceMembers,
   spaces,
   tasks,
@@ -36,6 +39,54 @@ export class AuthService {
 
   sendCode(phone: string, ip?: string): Promise<{ debug_code?: string }> {
     return this.sms.send(phone, ip);
+  }
+
+  /**
+   * 新用户示例作品（PRD 增补 §3.2）：带 2 集大纲与 2 个角色，无分镜，
+   * 用户可直接体验「生成分镜 → 投递」而不必先写提示词。
+   */
+  private async createSampleProject(spaceId: bigint): Promise<void> {
+    const projectId = newId();
+    await db.insert(scriptProjects).values({
+      id: projectId,
+      spaceId,
+      title: "示例：雨夜来信",
+      genre: "悬疑",
+      dramaType: 2,
+      ratio: "9:16",
+      sourceType: 2,
+      sourceText: "林晚在雨夜收到一封来自失踪父亲的匿名信，循着地址走进老城区。",
+      status: 1,
+      isSample: 1,
+    });
+    const samples = [
+      { epNo: 1, title: "第1集 来信", synopsis: "雨夜，林晚在门缝里发现一封没有署名的信，字迹是父亲的。" },
+      { epNo: 2, title: "第2集 老城区", synopsis: "她按信中地址走进老城区，遇到守夜老人，得知父亲最后出现的时间。" },
+    ];
+    for (const s of samples) {
+      await db.insert(episodes).values({
+        id: newId(),
+        projectId,
+        epNo: s.epNo,
+        title: s.title,
+        synopsis: s.synopsis,
+        status: 2,
+      });
+    }
+    const chars = [
+      { name: "林晚", desc: "25 岁，短发，深色风衣，眼神倔强" },
+      { name: "守夜老人", desc: "60 岁，灰白胡须，旧棉袄，手持电筒" },
+    ];
+    for (const c of chars) {
+      await db.insert(projectAssets).values({
+        id: newId(),
+        projectId,
+        kind: "character",
+        name: c.name,
+        description: c.desc,
+        status: 1,
+      });
+    }
   }
 
   async login(phone: string, code: string, inviteCode?: string, ageConfirmed?: boolean): Promise<LoginResult> {
@@ -123,6 +174,11 @@ export class AuthService {
       });
       userId = created.uid;
       spaceId = created.sid;
+
+      // 新用户赠一个示例作品（PRD 增补 §3.2）：含大纲与角色，可直接体验投递
+      if (env.SEED_SAMPLE_PROJECT) {
+        await this.createSampleProject(spaceId).catch(() => undefined);
+      }
     }
 
     const [user] = await db.select().from(users).where(eq(users.id, userId));

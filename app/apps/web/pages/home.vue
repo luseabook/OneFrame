@@ -47,7 +47,10 @@ async function dismissOnboarding(): Promise<void> {
 
 <template>
   <main class="page">
-    <OnboardingBar v-if="showOnboarding" @dismiss="dismissOnboarding" />
+    <!-- 新手引导条：仅未关闭时展示（PRD 增补 §3.2）；ClientOnly 避免 SSR/客户端分支不一致 -->
+    <ClientOnly>
+      <OnboardingBar v-if="showOnboarding" @dismiss="dismissOnboarding" />
+    </ClientOnly>
 
     <h1 class="hero-title">您的专属AI漫剧工作室</h1>
 

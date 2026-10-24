@@ -37,7 +37,6 @@ async function load(): Promise<void> {
     loading.value = false;
   }
 }
-
 async function openDetail(item: TaskDto): Promise<void> {
   detail.value = await api.get<TaskDto>(`/tasks/${item.task_id}`);
   shareInfo.value = null;
@@ -150,6 +149,9 @@ function canCancel(item: TaskDto): boolean {
 }
 
 onMounted(async () => {
+  // 延后到浏览器完成首帧绘制后再拉取并启动轮询：
+  // 否则在 hydration 未完成时改数据会触发 hydration mismatch
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   try {
     await load();
     const data = await api.get<{ list: Array<{ id: string; title: string }> }>("/projects?page=1&page_size=50");
@@ -179,12 +181,21 @@ function statusTone(status: number): "neutral" | "info" | "success" | "danger" |
   if (status === 2) return "warning";
   return "info";
 }
-const loading = ref(true);
+const loading = ref(false);
+// 本页有 5s 轮询与本地数据，SSR 与客户端首帧必然不同：
+// 统一用 mounted 门控渲染，保证 hydrate 前后结构一致。
+const mounted = ref(false);
+onMounted(() => {
+  mounted.value = true;
+});
 </script>
 
 <template>
-  <div class="tasks">
-    <header class="head">
+  <!-- 整页 ClientOnly：本页数据完全依赖客户端（含 5s 轮询），
+       参与 SSR 会在 hydrate 期间因数据变化产生 mismatch -->
+  <ClientOnly>
+    <div class="tasks">
+      <header class="head">
       <div>
         <h1>任务中心</h1>
         <p class="sub">按「次」查看执行状态；成果请到作品库按剧查看。</p>
@@ -211,14 +222,17 @@ const loading = ref(true);
     <p v-if="error" class="err">{{ error }}</p>
     <p v-if="info" class="ok">{{ info }}</p>
 
-    <p v-if="expiring.length > 0" class="warn">
-      <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
-      <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
-    </p>
+    <!-- 动态区（到期提醒 / 列表 / 分页）用 mounted 门控：
+         本页有 5s 轮询，若参与 SSR 会与 hydration 时的数据不一致 -->
+    <template v-if="mounted">
+      <p v-if="expiring.length > 0" class="warn">
+        <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
+        <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
+      </p>
 
-    <Skeleton v-if="loading" :rows="4" />
+      <Skeleton v-if="loading" :rows="4" />
 
-    <template v-else>
+      <template v-else>
       <div v-if="list.length" class="task-table">
         <div class="t-row t-head">
           <span class="c-id">任务</span>
@@ -258,6 +272,7 @@ const loading = ref(true);
         <span class="muted">第 {{ page }} 页</span>
         <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
       </div>
+      </template>
     </template>
 
     <Modal :open="!!detail" title="任务详情" width="560px" @close="detail = null">
@@ -301,7 +316,8 @@ const loading = ref(true);
         </div>
       </template>
     </Modal>
-  </div>
+    </div>
+  </ClientOnly>
 </template>
 
 <style scoped>

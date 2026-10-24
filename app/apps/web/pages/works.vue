@@ -5,6 +5,7 @@ definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 useHead({ title: "我的作品 · 一帧" });
 
 const api = useApi();
+const toast = useToast();
 const router = useRouter();
 
 const list = ref<WorkDto[]>([]);
@@ -49,13 +50,16 @@ function progress(work: WorkDto): number {
 }
 
 async function archive(work: WorkDto): Promise<void> {
+  const next = work.work_state !== "archived";
   busyId.value = work.id;
   try {
-    const next = work.work_state !== "archived";
     await api.post(`/projects/${work.id}/archive`, { archived: next });
+    toast.success(next ? "已归档" : "已恢复");
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "操作失败";
+    const msg = e instanceof Error ? e.message : "操作失败";
+    error.value = msg;
+    toast.error(msg);
   } finally {
     busyId.value = "";
   }

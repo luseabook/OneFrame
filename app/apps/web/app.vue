@@ -32,6 +32,7 @@ const layoutName = computed(() => {
     <NuxtLayout :name="layoutName">
       <NuxtPage />
     </NuxtLayout>
+    <ToastHost />
   </div>
 </template>
 
