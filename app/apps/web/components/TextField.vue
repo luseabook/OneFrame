@@ -72,7 +72,7 @@ const id = useId();
 }
 .input:focus {
   border-color: var(--brand-500);
-  box-shadow: 0 0 0 3px var(--brand-100);
+  box-shadow: 0 0 0 3px #7e70ff2e;
 }
 .input:disabled {
   background: var(--bg-sunken);

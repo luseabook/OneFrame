@@ -72,7 +72,7 @@ const model = defineModel<string>({ default: "" });
   font-variant-numeric: tabular-nums;
 }
 .tab.active .badge {
-  background: var(--brand-100);
-  color: var(--brand-700);
+  background: #7e70ff1f;
+  color: var(--brand-300);
 }
 </style>

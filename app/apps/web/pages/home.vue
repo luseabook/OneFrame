@@ -1,0 +1,526 @@
+<script setup lang="ts">
+// 工作台首页：1:1 对齐竞品 ReelMate App 首页（home.png）
+// 结构：居中大标题 → 双工作流入口卡 → 工具矩阵 → 活动轮播 → 案例墙
+definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
+useHead({ title: "首页 · 万帧" });
+
+const tools = [
+  { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true },
+  { label: "文生视频", desc: "主流高质量模型，轻松出片", to: "/create/text-to-video", icon: "t2v", enabled: true },
+  { label: "图生视频", desc: "一键让静态图动出电影感", to: "/create/image-to-video", icon: "i2v", enabled: true },
+  { label: "剧本广场", desc: "海量剧本灵感与模板", to: null, icon: "plaza", enabled: false, tag: "即将上线" },
+  { label: "视频对口型", desc: "唇形贴合超自然", to: null, icon: "lips", enabled: false, tag: "即将上线" },
+  { label: "灵感成片", desc: "Agent 智能规划完整短片", to: null, icon: "spark", enabled: false, tag: "敬请期待" },
+  { label: "视频超清", desc: "重建高清细节，工业级画质", to: null, icon: "hd", enabled: false, tag: "敬请期待" },
+];
+
+const banners = [
+  { title: "剧本到成片，效率翻倍", sub: "AI 漫剧流水线全新升级", from: "#3b2f6e", via: "#1f1f2e" },
+  { title: "角色一致性", sub: "定妆图注入每一镜，人物不再变脸", from: "#5a3a1e", via: "#241a12" },
+  { title: "价格透明", sub: "生成前实时报价，失败自动退还积分", from: "#1e4a3a", via: "#12241c" },
+];
+const bannerIndex = ref(0);
+let bannerTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  bannerTimer = setInterval(() => {
+    bannerIndex.value = (bannerIndex.value + 1) % banners.length;
+  }, 5000);
+});
+onUnmounted(() => {
+  if (bannerTimer) clearInterval(bannerTimer);
+});
+
+const cases = [
+  { title: "雨夜来信 · EP01", tag: "精品漫剧", from: "#31244f", to: "#12101c" },
+  { title: "深海回声", tag: "热点二创", from: "#173a4a", to: "#0e1a20" },
+  { title: "长安食单", tag: "国风短篇", from: "#4a2a1a", to: "#20120c" },
+  { title: "午夜电台", tag: "悬疑连载", from: "#26313f", to: "#10151c" },
+];
+</script>
+
+<template>
+  <main class="page">
+    <h1 class="hero-title">您的专属AI漫剧工作室</h1>
+
+    <section class="hero-cards">
+      <NuxtLink to="/projects" class="flow-card">
+        <div class="flow-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m14.5 4.5 5 5L8 21H3v-5Z" />
+            <path d="M17 2.5 21.5 7M12.5 4l3.5-1.5L19 6l-1.5 3.5" />
+          </svg>
+        </div>
+        <div class="flow-text">
+          <h2>短剧工作流</h2>
+          <p>从剧本到成片，一站式创作爆款短剧</p>
+        </div>
+        <span class="plus" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        </span>
+      </NuxtLink>
+      <NuxtLink to="/tools" class="canvas-card">
+        <div class="flow-icon flat" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 4v16M16 4v16M4 8h16M4 16h16" />
+            <path d="m15.5 12.5 1 2 2 1-2 1-1 2-1-2-2-1 2-1Z" />
+          </svg>
+        </div>
+        <div class="flow-text">
+          <h2>工具箱</h2>
+          <p>文生视频 / 图生视频，一键创作</p>
+        </div>
+        <span class="plus" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        </span>
+      </NuxtLink>
+    </section>
+
+    <section class="tool-row">
+      <div v-for="t in tools" :key="t.label" class="tool-cell">
+        <component
+          :is="t.enabled ? 'NuxtLink' : 'div'"
+          :to="t.to ?? undefined"
+          class="tool-card"
+          :class="{ disabled: !t.enabled }"
+        >
+          <span v-if="t.tag" class="corner-tag" :data-kind="t.tag">{{ t.tag }}</span>
+          <span class="tool-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <template v-if="t.icon === 'script'">
+                <path d="M6 3.5h10.5A1.5 1.5 0 0 1 18 5v15.5H7.5A1.5 1.5 0 0 1 6 19Z" />
+                <path d="M9 7.5h6M9 11h6M9 14.5h3.5" />
+              </template>
+              <template v-else-if="t.icon === 't2v'">
+                <rect x="3" y="5" width="13" height="14" rx="2.5" />
+                <path d="m9.5 9 4 3-4 3ZM19 8.5v7M21.5 10v4" />
+              </template>
+              <template v-else-if="t.icon === 'i2v'">
+                <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                <circle cx="8.5" cy="10" r="1.5" />
+                <path d="m5 17 4.5-4 3 2.5L16 12l3 5" />
+              </template>
+              <template v-else-if="t.icon === 'plaza'">
+                <path d="M4.5 6A1.5 1.5 0 0 1 6 4.5h12A1.5 1.5 0 0 1 19.5 6v9a1.5 1.5 0 0 1-1.5 1.5h-4l3 3M7 19.5l3-3h-4" />
+                <path d="M8 8h8M8 11h5" />
+              </template>
+              <template v-else-if="t.icon === 'lips'">
+                <path d="M4 12c2.5-1 3.5-3.5 8-3.5S17.5 11 20 12c-2.5 3-5 4.5-8 4.5S6.5 15 4 12Z" />
+                <path d="M4 12h16" />
+              </template>
+              <template v-else-if="t.icon === 'spark'">
+                <path d="M12 3.5c.5 3.8 2.2 5.5 6 6-3.8.5-5.5 2.2-6 6-.5-3.8-2.2-5.5-6-6 3.8-.5 5.5-2.2 6-6Z" />
+                <path d="M18.5 15.5c.3 1.9 1 2.6 3 3-2 .4-2.7 1.1-3 3-.3-1.9-1-2.6-3-3 2-.4 2.7-1.1 3-3Z" />
+              </template>
+              <template v-else>
+                <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                <path d="M3 12h18M8 5v14M16 5v14" />
+              </template>
+            </svg>
+          </span>
+        </component>
+        <p class="tool-label" :class="{ dim: !t.enabled }">{{ t.label }}</p>
+      </div>
+    </section>
+
+    <section class="carousel">
+      <button class="arrow" aria-label="上一个" @click="bannerIndex = (bannerIndex + banners.length - 1) % banners.length">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 6-6 6 6 6" /></svg>
+      </button>
+      <div class="banner-clip">
+        <div
+          v-for="(b, i) in banners"
+          :key="b.title"
+          class="banner"
+          :class="{ on: i === bannerIndex }"
+          :style="{ background: `linear-gradient(120deg, ${b.from}, ${b.via} 70%)` }"
+        >
+          <div class="banner-text">
+            <h3>{{ b.title }}</h3>
+            <p>{{ b.sub }}</p>
+          </div>
+          <div class="banner-deco" aria-hidden="true" />
+        </div>
+      </div>
+      <button class="arrow" aria-label="下一个" @click="bannerIndex = (bannerIndex + 1) % banners.length">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6 6 6-6 6" /></svg>
+      </button>
+    </section>
+    <div class="dots">
+      <button
+        v-for="(b, i) in banners"
+        :key="i"
+        class="dot"
+        :class="{ on: i === bannerIndex }"
+        :aria-label="`第 ${i + 1} 张`"
+        @click="bannerIndex = i"
+      />
+    </div>
+
+    <section class="cases">
+      <div class="cases-head">
+        <h3>爆款案例</h3>
+        <NuxtLink to="/tools" class="more">上划查看更多
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+        </NuxtLink>
+      </div>
+      <div class="case-grid">
+        <div v-for="c in cases" :key="c.title" class="case-card" :style="{ background: `linear-gradient(150deg, ${c.from}, ${c.to})` }">
+          <span class="case-tag">{{ c.tag }}</span>
+          <p class="case-title">{{ c.title }}</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</template>
+
+<style scoped>
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 32px 64px;
+}
+.hero-title {
+  margin: 24px 0 36px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* ── 双工作流入口卡 ── */
+.hero-cards {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 24px;
+}
+.flow-card,
+.canvas-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 150px;
+  padding: 28px 32px;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+.flow-card {
+  background:
+    radial-gradient(120% 160% at 8% 110%, #7e70ff2e 0%, transparent 46%),
+    linear-gradient(#191922, #16161c) padding-box,
+    linear-gradient(135deg, #9185ff59, #ffffff0f 42%, #ffffff14 70%) border-box;
+  border: 1px solid transparent;
+}
+.flow-card::before {
+  content: "";
+  position: absolute;
+  right: 90px;
+  top: 18px;
+  bottom: 18px;
+  width: 42%;
+  background-image: radial-gradient(#ffffff1a 1px, transparent 1px);
+  background-size: 14px 14px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%);
+  mask-image: linear-gradient(90deg, transparent, #000 30%);
+  pointer-events: none;
+}
+.canvas-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+}
+.flow-card:hover,
+.canvas-card:hover {
+  border-color: var(--border-3);
+}
+.flow-icon {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-lg);
+  background: #ffffff0d;
+  border: 1px solid var(--border-1);
+  color: var(--text-1);
+}
+.flow-icon svg {
+  width: 26px;
+  height: 26px;
+}
+.flow-text h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.flow-text p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.plus {
+  margin-left: auto;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-3);
+  background: var(--bg-hover);
+  color: var(--text-1);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.plus svg {
+  width: 16px;
+  height: 16px;
+}
+.flow-card:hover .plus,
+.canvas-card:hover .plus {
+  transform: rotate(90deg);
+}
+
+/* ── 工具矩阵 ── */
+.tool-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 18px;
+  margin-top: 44px;
+}
+.tool-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 92px;
+  border-radius: var(--radius-2xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  color: var(--text-1);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+.tool-card:hover {
+  background: var(--bg-raised);
+  transform: translateY(-2px);
+}
+.tool-card.disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.tool-card.disabled:hover {
+  transform: none;
+  background: var(--bg-surface);
+}
+.tool-icon svg {
+  width: 28px;
+  height: 28px;
+}
+.corner-tag {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.corner-tag[data-kind="即将上线"] {
+  background: #d3f36b;
+  color: #1c2405;
+  font-weight: 600;
+}
+.corner-tag[data-kind="一键出片"] {
+  background: linear-gradient(90deg, #ff7a45, #ff4d6a);
+  color: #fff;
+  font-weight: 600;
+}
+.corner-tag[data-kind="敬请期待"] {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-2);
+  color: var(--text-3);
+}
+.tool-label {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+.tool-label.dim {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* ── 活动轮播 ── */
+.carousel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 56px;
+}
+.arrow {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.arrow svg {
+  width: 16px;
+  height: 16px;
+}
+.arrow:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.banner-clip {
+  position: relative;
+  flex: 1;
+  height: 190px;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+.banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 56px;
+  opacity: 0;
+  transition: opacity var(--duration-slow) var(--ease-in-out);
+}
+.banner.on {
+  opacity: 1;
+}
+.banner-text h3 {
+  margin: 0 0 10px;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.banner-text p {
+  margin: 0;
+  color: #ffffffb8;
+  font-size: 14px;
+}
+.banner-deco {
+  position: absolute;
+  right: 48px;
+  top: 24px;
+  bottom: 24px;
+  width: 260px;
+  background-image: radial-gradient(#ffffff26 1px, transparent 1px);
+  background-size: 16px 16px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 40%);
+  mask-image: linear-gradient(90deg, transparent, #000 40%);
+}
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.dot {
+  width: 16px;
+  height: 4px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--dark-elevated);
+  cursor: pointer;
+  padding: 0;
+}
+.dot.on {
+  background: var(--text-1);
+}
+
+/* ── 案例墙 ── */
+.cases {
+  margin-top: 56px;
+}
+.cases-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.cases-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.more svg {
+  width: 14px;
+  height: 14px;
+}
+.more:hover {
+  color: var(--text-1);
+}
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+}
+.case-card {
+  position: relative;
+  height: 170px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-1);
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 16px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.case-card:hover {
+  transform: translateY(-2px);
+}
+.case-tag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+  background: #000000a6;
+  color: #fff;
+  font-size: 11px;
+}
+.case-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffffd9;
+}
+
+@media (max-width: 1080px) {
+  .hero-cards {
+    grid-template-columns: 1fr;
+  }
+  .tool-row {
+    grid-template-columns: repeat(4, 1fr);
+    row-gap: 24px;
+  }
+  .case-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .tool-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .case-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

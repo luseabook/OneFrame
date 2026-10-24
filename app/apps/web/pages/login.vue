@@ -58,7 +58,7 @@ async function login(): Promise<void> {
   submitting.value = true;
   try {
     await auth.login(phone.value, code.value, inviteCode.value || undefined, true);
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/create/text-to-video";
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
     await navigateTo(redirect);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";

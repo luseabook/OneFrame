@@ -1,11 +1,13 @@
 /* ============================================================
    万帧设计系统 · 令牌层
    基线来源：竞品 ReelMate 实测 CSS（2026-10-24 抓取 2412 个 CSS 变量解析）
-   品牌色/背景层/圆角/阴影/字号/动效均按竞品实测值 1:1 对齐；
-   工作台为浅色（产品决策），营销页为深色（与竞品一致）。
+   + App 界面截图（home/tools/t2v/pricing）。全站深色，与竞品 1:1：
+   base #000 / layout #141414 / container #1f1f1f / elevated #333，
+   文本与边框使用白色 alpha 阶，品牌紫 #7e70ff。
    ============================================================ */
 
 :root {
+  color-scheme: dark;
   /* ── 品牌紫（竞品 tech-purple / pink-purple 实测值）── */
   --brand-50: #f2f0ff;
   --brand-100: #e6e2ff;
@@ -41,28 +43,28 @@
   --dark-spotlight: #3d3d3d;
   --dark-brand-bg: #33288f;
 
-  /* ── 浅色表面（工作台）── */
-  --bg-app: #f6f7f9;
-  --bg-surface: #ffffff;
-  --bg-raised: #ffffff;
-  --bg-sunken: #f0f1f4;
-  --bg-hover: #f2f3f6;
-  --bg-active: #e9eaf0;
-  --bg-inverse: #1a1b1f;
+  /* ── 表面（竞品背景层，全站深色）── */
+  --bg-app: #000000; /* base */
+  --bg-surface: #141414; /* layout：面板/卡片 */
+  --bg-raised: #1f1f1f; /* container：容器/输入 */
+  --bg-sunken: #0d0d0d; /* 下沉区（表单底/表格头） */
+  --bg-hover: #ffffff0d; /* 悬停 = 白 5% */
+  --bg-active: #ffffff1a; /* 按下 = 白 10% */
+  --bg-inverse: #f5f5f7;
 
-  /* ── 文本 ── */
-  --text-1: #16171a; /* 标题 */
-  --text-2: #4a4d55; /* 正文 */
-  --text-3: #7c8089; /* 次要 */
-  --text-4: #a3a7b0; /* 占位/禁用 */
-  --text-inverse: #ffffff;
+  /* ── 文本（竞品前景白 alpha 阶）── */
+  --text-1: #ffffff; /* 标题 */
+  --text-2: #ffffffb8; /* 正文 */
+  --text-3: #ffffff8f; /* 次要 */
+  --text-4: #ffffff59; /* 占位/禁用 */
+  --text-inverse: #16171a;
   --text-inverse-2: #ffffffb8;
   --text-inverse-3: #ffffff8f;
 
-  /* ── 边框/分隔 ── */
-  --border-1: #e6e8ec;
-  --border-2: #d8dbe1;
-  --border-3: #c2c6ce;
+  /* ── 边框/分隔（白 alpha 阶）── */
+  --border-1: #ffffff14; /* 白 8% */
+  --border-2: #ffffff1f; /* 白 12% */
+  --border-3: #ffffff33; /* 白 20% */
   --border-inverse: #ffffff1a;
   --border-inverse-strong: #ffffff29;
 
@@ -137,7 +139,7 @@
 
   /* ── 布局 ── */
   --header-h: 56px;
-  --sidebar-w: 216px;
+  --sidebar-w: 240px; /* 竞品侧栏实测宽 */
   --content-max: 1440px;
 }
 
@@ -194,8 +196,8 @@ h4 {
 }
 
 ::selection {
-  background: var(--brand-200);
-  color: var(--text-1);
+  background: var(--brand-500);
+  color: #ffffff;
 }
 
 :focus-visible {

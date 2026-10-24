@@ -70,13 +70,13 @@ withDefaults(
 }
 
 .secondary {
-  background: var(--brand-50);
-  color: var(--brand-700);
-  border-color: var(--brand-200);
+  background: #7e70ff1f;
+  color: var(--brand-300);
+  border-color: #7e70ff45;
 }
 .secondary:hover:not(:disabled) {
-  background: var(--brand-100);
-  border-color: var(--brand-300);
+  background: #7e70ff33;
+  border-color: #7e70ff66;
 }
 
 .ghost {
@@ -104,7 +104,7 @@ withDefaults(
   padding: 0 var(--space-1);
 }
 .text:hover:not(:disabled) {
-  color: var(--brand-600);
+  color: var(--brand-400);
   background: var(--bg-hover);
 }
 

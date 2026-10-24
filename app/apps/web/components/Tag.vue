@@ -48,9 +48,9 @@ withDefaults(
   border-color: var(--border-1);
 }
 .brand {
-  background: var(--brand-50);
-  color: var(--brand-700);
-  border-color: var(--brand-200);
+  background: #7e70ff1f;
+  color: var(--brand-300);
+  border-color: #7e70ff45;
 }
 .success {
   background: var(--success-bg);

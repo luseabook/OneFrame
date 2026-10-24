@@ -1,11 +1,11 @@
 <script setup lang="ts">
-defineProps<{ title?: string; width?: string }>();
+withDefaults(defineProps<{ title?: string; width?: string; open?: boolean }>(), { open: true });
 const emit = defineEmits<{ close: [] }>();
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="title || $slots.default" class="mask" @click.self="emit('close')">
+    <div v-if="open && (title || $slots.default)" class="mask" @click.self="emit('close')">
       <div class="panel" role="dialog" aria-modal="true" :style="width ? { width } : undefined">
         <div v-if="title" class="head">
           <span class="title">{{ title }}</span>
@@ -22,8 +22,8 @@ const emit = defineEmits<{ close: [] }>();
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(16, 17, 21, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
