@@ -10,7 +10,7 @@ import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 
 // 端到端契约测试（需要真实 PG + Redis；CI 由 service containers 提供）
 let app: NestFastifyApplication;
-const phone = `13${String(Date.now()).slice(-9)}`;
+const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
 
 async function inject(
   method: "GET" | "POST",

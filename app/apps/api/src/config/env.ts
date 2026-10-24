@@ -24,6 +24,12 @@ const envSchema = z.object({
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
   QUOTE_TTL_S: z.coerce.number().int().min(30).default(300),
 
+  // LLM 步骤（大纲/角色/剧本/分镜）：mock 用于本地/CI；real 需 DEEPSEEK_API_KEY
+  LLM_MODE: z.enum(["mock", "real"]).default("mock"),
+  DEEPSEEK_API_KEY: z.string().optional(),
+  DEEPSEEK_BASE_URL: z.string().optional(),
+  DEEPSEEK_MODEL: z.string().default("deepseek-chat"),
+
   // 结果存储（ADR-005：生产替换为 OSS/S3 driver）
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
   STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),

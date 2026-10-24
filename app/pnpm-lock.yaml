@@ -29,6 +29,9 @@ importers:
       '@app/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@app/model-adapters':
+        specifier: workspace:*
+        version: link:../../packages/model-adapters
       '@app/shared':
         specifier: workspace:*
         version: link:../../packages/shared

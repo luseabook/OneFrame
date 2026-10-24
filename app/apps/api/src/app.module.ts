@@ -7,6 +7,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { CreditsModule } from "./modules/credits/credits.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
 import { ModelsModule } from "./modules/models/models.module";
+import { ScriptModule } from "./modules/script/script.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -23,6 +24,7 @@ import { StorageModule } from "./storage/storage.module";
     CreditsModule,
     GenerationsModule,
     TasksModule,
+    ScriptModule,
   ],
   controllers: [AppController, HealthController],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],

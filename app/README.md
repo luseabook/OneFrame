@@ -49,7 +49,9 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] 适配器运行时：mock 适配器 + DeepSeek 文本适配器（OpenAI 兼容，含契约测试）
 - [x] 结果转存/下载：worker 转存（local driver）+ 预签名 URL + `/files/local` 下载入口（OSS/S3 driver 待接）
 - [ ] P1.4/P1.5 真实视频供应商适配器（火山/百炼/可灵/Vidu，待 Key 与企业认证）
-- [ ] 工具页补齐图生视频/分享；剧本流水线前端（P1'/P2）
+- [x] P1' 流水线后端核心：项目/导入拆集/大纲/角色/剧本草稿/分镜（LLM mock + DeepSeek 双实现，6 项 e2e 契约测试）
+- [ ] P1' 剩余：定妆图任务链/定稿、批量投递、导出 zip、流水线前端
+- [ ] 工具页补齐图生视频/分享（P2）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

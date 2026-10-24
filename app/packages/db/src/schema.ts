@@ -308,6 +308,143 @@ export const idempotencyRecords = pgTable(
   ],
 );
 
+// ── 资产（database §5；P1' 剧本流水线先用到 image/portrait）───
+export const assetFolders = pgTable(
+  "asset_folders",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_asset_folders_space").on(t.spaceId)],
+);
+
+export const assets = pgTable(
+  "assets",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    kind: text("kind").notNull(), // image|video|audio
+    uri: text("uri").notNull(),
+    previewUri: text("preview_uri"),
+    sourceTaskId: bigint("source_task_id", { mode: "bigint" }).references(() => tasks.id),
+    folderId: bigint("folder_id", { mode: "bigint" }).references(() => assetFolders.id),
+    name: text("name").notNull().default(""),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    meta: jsonb("meta").notNull().default({}),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_assets_space").on(t.spaceId, t.kind, t.createdAt.desc()),
+    index("idx_assets_tags").using("gin", t.tags),
+  ],
+);
+
+// ── 剧本流水线（database §6；MVP 旗舰，PRD F2）─────────────
+export const scriptProjects = pgTable(
+  "script_projects",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    title: text("title").notNull(),
+    genre: text("genre"),
+    dramaType: smallint("drama_type").notNull().default(1), // 1 真人 2 动漫
+    ratio: text("ratio").notNull().default("9:16"),
+    sourceType: smallint("source_type").notNull().default(1), // 1novel 2idea 3script 4fission
+    sourceText: text("source_text"),
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_script_projects_space").on(t.spaceId, t.createdAt.desc())],
+);
+
+export const episodes = pgTable(
+  "episodes",
+  {
+    id: pk(),
+    projectId: bigint("project_id", { mode: "bigint" })
+      .notNull()
+      .references(() => scriptProjects.id),
+    epNo: integer("ep_no").notNull(),
+    title: text("title"),
+    synopsis: text("synopsis"), // 大纲梗概（PRD F2②）
+    scriptText: text("script_text"),
+    status: smallint("status").notNull().default(1), // 1草稿 2确认
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_episodes_project_no").on(t.projectId, t.epNo)],
+);
+
+export const projectAssets = pgTable(
+  "project_assets",
+  {
+    id: pk(),
+    projectId: bigint("project_id", { mode: "bigint" })
+      .notNull()
+      .references(() => scriptProjects.id),
+    kind: text("kind").notNull(), // character|scene|prop
+    name: text("name").notNull(),
+    description: text("description"),
+    prompt: text("prompt"),
+    refImageUri: text("ref_image_uri"),
+    sourceTaskId: bigint("source_task_id", { mode: "bigint" }).references(() => tasks.id),
+    portraitAssetId: bigint("portrait_asset_id", { mode: "bigint" }).references(() => assets.id),
+    status: smallint("status").notNull().default(1), // 1草稿 2已定稿
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_project_assets_project").on(t.projectId, t.kind, t.status)],
+);
+
+export const storyboards = pgTable(
+  "storyboards",
+  {
+    id: pk(),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => episodes.id),
+    shotNo: integer("shot_no").notNull(),
+    shotDesc: text("shot_desc"),
+    videoPrompt: text("video_prompt"),
+    durationS: integer("duration_s"),
+    ratio: text("ratio"),
+    resolution: text("resolution"),
+    status: smallint("status").notNull().default(1), // 1草稿 2确认 3已投递 4出图 5出片
+    imageTaskId: bigint("image_task_id", { mode: "bigint" }),
+    videoTaskId: bigint("video_task_id", { mode: "bigint" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_storyboards_episode_shot").on(t.episodeId, t.shotNo)],
+);
+
+export const storyboardAssets = pgTable(
+  "storyboard_assets",
+  {
+    storyboardId: bigint("storyboard_id", { mode: "bigint" })
+      .notNull()
+      .references(() => storyboards.id),
+    projectAssetId: bigint("project_asset_id", { mode: "bigint" })
+      .notNull()
+      .references(() => projectAssets.id),
+  },
+  (t) => [primaryKey({ columns: [t.storyboardId, t.projectAssetId] })],
+);
+
 // ── 商业化（Beta 支付；P2' 使用，先建表保持契约）───────────
 export const skus = pgTable("skus", {
   id: pk(),
