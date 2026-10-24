@@ -48,6 +48,8 @@ const exporting = ref(false);
 const portraitCount = ref(1);
 const candidates = ref<{ charId: string; task_id: string; list: Array<{ index: number; url: string }> } | null>(null);
 const matrix = ref<MatrixDto | null>(null);
+const budgetTouched = ref(false);
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let exportTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -140,6 +142,54 @@ async function saveOutline(): Promise<void> {
     });
     await loadProject();
     info.value = "大纲已确认";
+  });
+}
+
+function saveEpisodeDebounced(ep: EpisodeDto): void {
+  const existing = saveTimers.get(ep.id);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(async () => {
+    try {
+      await api.patch(`/projects/${projectId.value}/episodes/${ep.id}`, {
+        title: ep.title ?? undefined,
+        synopsis: ep.synopsis ?? undefined,
+      });
+      info.value = "大纲已自动保存";
+    } catch {
+      /* 自动保存失败不打断编辑 */
+    }
+  }, 600);
+  saveTimers.set(ep.id, timer);
+}
+
+async function prefillBudget(): Promise<void> {
+  if (!selectedEpisodeId.value || shots.value.length === 0) return;
+  await run("批量报价", async () => {
+    const byId = new Map(characters.value.map((c) => [c.id, c]));
+    const items = shots.value.map((shot) => ({
+      mode: "universal_reference",
+      model: modelName.value,
+      scene: "storyboard_reference_video",
+      input: {
+        prompt: shot.video_prompt ?? "",
+        reference_uris: shot.character_ids
+          .map((id) => byId.get(id)?.portrait_url)
+          .filter((url): url is string => Boolean(url)),
+      },
+      options: {
+        ratio: shot.ratio ?? project.value?.ratio ?? "9:16",
+        resolution: shot.resolution ?? "720p",
+        duration: shot.duration_s ?? 5,
+        count: 1,
+      },
+    }));
+    const quote = await api.post<{ total_credits: number; balance_after_estimate: number; sufficient: boolean }>(
+      "/credits/quote/batch",
+      { items },
+    );
+    budget.value = Math.max(1, quote.total_credits);
+    budgetTouched.value = false;
+    info.value = `批量报价 ${quote.total_credits} 积分；预算已预填`;
   });
 }
 
@@ -404,8 +454,8 @@ onUnmounted(() => {
                 <span class="tag">第{{ ep.ep_no }}集</span>
                 <span class="badge" :data-status="ep.status">{{ ep.status === 2 ? "已确认" : "草稿" }}</span>
               </div>
-              <input v-model="ep.title" class="input" maxlength="100" />
-              <textarea v-model="ep.synopsis" class="input textarea" maxlength="1000" />
+              <input v-model="ep.title" class="input" maxlength="100" @input="saveEpisodeDebounced(ep)" />
+              <textarea v-model="ep.synopsis" class="input textarea" maxlength="1000" @input="saveEpisodeDebounced(ep)" />
             </article>
           </div>
         </template>
@@ -493,8 +543,9 @@ onUnmounted(() => {
             </label>
             <label class="inline">
               预算上限
-              <input v-model.number="budget" type="number" min="1" class="input small" />
+              <input v-model.number="budget" type="number" min="1" class="input small" @input="budgetTouched = true" />
             </label>
+            <Button variant="ghost" :disabled="!!busy || shots.length === 0" @click="prefillBudget">按报价预填</Button>
             <Button :disabled="!!busy || shots.length === 0 || !allShotsSelected" @click="submitBatch">
               批量投递（{{ shots.length }} 镜）
             </Button>

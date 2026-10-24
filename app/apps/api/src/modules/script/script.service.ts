@@ -311,6 +311,28 @@ export class ScriptService {
     return rows.map((row) => assetDto(row));
   }
 
+  async patchEpisode(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    input: { title?: string; synopsis?: string; script_text?: string },
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const [row] = await db
+      .update(episodes)
+      .set({
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.synopsis !== undefined ? { synopsis: input.synopsis } : {}),
+        ...(input.script_text !== undefined ? { scriptText: input.script_text } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(episodes.id, episode.id))
+      .returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "episode not found");
+    return episodeDto(row);
+  }
+
   async generateScriptDraft(
     spaceId: string,
     projectId: string,
@@ -707,6 +729,7 @@ export class ScriptService {
       request: GenerationRequest;
       cost: number;
       dedupeKey: string;
+      durationAdjusted?: { from: number; to: number };
     };
     const candidates: Candidate[] = [];
     const items: Array<{
@@ -715,6 +738,7 @@ export class ScriptService {
       submitted: boolean;
       code?: number;
       reason?: string;
+      duration_adjusted?: { from: number; to: number };
     }> = [];
     let balance = 0;
 
@@ -739,6 +763,19 @@ export class ScriptService {
         });
         continue;
       }
+      const sceneCfg = (model.sceneModes as Record<string, { durations?: number[] } | undefined>)
+        .storyboard_reference_video;
+      const allowedDurations = sceneCfg?.durations ?? [];
+      const requestedDuration = shot.durationS ?? 5;
+      let duration = requestedDuration;
+      if (allowedDurations.length > 0 && !allowedDurations.includes(requestedDuration)) {
+        const lower = [...allowedDurations]
+          .filter((value) => value <= requestedDuration)
+          .sort((a, b) => b - a)[0];
+        duration = lower ?? Math.min(...allowedDurations);
+      }
+      const durationAdjusted =
+        duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;
       const request: GenerationRequest = {
         mode: "universal_reference",
         model: model.name,
@@ -747,7 +784,7 @@ export class ScriptService {
         options: {
           ratio: input.ratio ?? shot.ratio ?? project.ratio,
           resolution: input.resolution ?? shot.resolution ?? "720p",
-          duration: shot.durationS ?? 5,
+          duration,
           count: 1,
           enable_audio: true,
           mouth_drive: false,
@@ -761,6 +798,7 @@ export class ScriptService {
         request,
         cost: priced.credits,
         dedupeKey: `shot:${shot.id}:v1`,
+        ...(durationAdjusted ? { durationAdjusted } : {}),
       });
     }
 
@@ -822,7 +860,11 @@ export class ScriptService {
           id: newId(),
           taskId,
           type: "task.created",
-          payload: { shot_id: candidate.shotId, batch: true },
+          payload: {
+            shot_id: candidate.shotId,
+            batch: true,
+            ...(candidate.durationAdjusted ? { duration_adjusted: candidate.durationAdjusted } : {}),
+          },
         });
         await tx
           .update(storyboards)
@@ -830,7 +872,12 @@ export class ScriptService {
           .where(eq(storyboards.id, candidate.shot.id));
       });
       await this.queue.enqueueTask(String(taskId));
-      items.push({ shot_id: candidate.shotId, task_id: String(taskId), submitted: true });
+      items.push({
+        shot_id: candidate.shotId,
+        task_id: String(taskId),
+        submitted: true,
+        ...(candidate.durationAdjusted ? { duration_adjusted: candidate.durationAdjusted } : {}),
+      });
     }
 
     return {

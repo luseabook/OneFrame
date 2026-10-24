@@ -150,6 +150,17 @@ export interface ShareView {
   error: { message?: string } | null;
 }
 
+export interface FlowDto {
+  id: string;
+  kind: string;
+  delta: number;
+  frozen_delta: number;
+  balance_after: number;
+  task_id: string | null;
+  memo: string | null;
+  created_at: string;
+}
+
 export interface MatrixShot {
   id: string;
   shot_no: number;

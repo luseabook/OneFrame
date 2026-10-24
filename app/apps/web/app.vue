@@ -28,6 +28,7 @@ async function logout(): Promise<void> {
         <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
         <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
         <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
+        <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
         <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
         <ClientOnly>
           <template v-if="user">

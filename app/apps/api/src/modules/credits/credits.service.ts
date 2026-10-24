@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
-import { creditAccounts, modelPrices } from "@app/db";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { creditAccounts, creditFlows, modelPrices } from "@app/db";
 import type { GenerationRequest } from "@app/shared";
 import { AppError, ErrorCode } from "@app/shared";
 import { env } from "../../config/env";
@@ -181,6 +181,37 @@ export class CreditsService {
       balance_after_estimate: balance - total,
       sufficient: balance >= total,
       line_items: lineItems,
+    };
+  }
+
+  async listFlows(spaceId: string, page = 1, pageSize = 20, taskId?: string) {
+    const p = Math.max(1, page);
+    const ps = Math.min(100, Math.max(1, pageSize));
+    const conditions = [eq(creditFlows.spaceId, BigInt(spaceId))];
+    if (taskId) conditions.push(eq(creditFlows.refTaskId, BigInt(taskId)));
+    const where = and(...conditions);
+    const rows = await db
+      .select()
+      .from(creditFlows)
+      .where(where)
+      .orderBy(desc(creditFlows.createdAt))
+      .limit(ps)
+      .offset((p - 1) * ps);
+    const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(creditFlows).where(where);
+    return {
+      list: rows.map((row) => ({
+        id: String(row.id),
+        kind: row.kind,
+        delta: row.delta,
+        frozen_delta: row.frozenDelta,
+        balance_after: row.balanceAfter,
+        task_id: row.refTaskId ? String(row.refTaskId) : null,
+        memo: row.memo,
+        created_at: row.createdAt.toISOString(),
+      })),
+      total: countRow?.count ?? 0,
+      page: p,
+      page_size: ps,
     };
   }
 

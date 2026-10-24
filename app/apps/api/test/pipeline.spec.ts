@@ -91,6 +91,19 @@ describe("script pipeline (PRD F2 backend)", () => {
     expect(confirmed.data.every((ep: any) => ep.status === 2)).toBe(true);
   });
 
+  it("auto-saves outline edits via episode PATCH", async () => {
+    const patched = await inject("PATCH", `/projects/${projectId}/episodes/${episodeId}`, {
+      title: "第1集 自动保存",
+      synopsis: "自动保存后的梗概",
+    });
+    expect(patched.code).toBe(0);
+    expect(patched.data.title).toBe("第1集 自动保存");
+
+    const detail = await inject("GET", `/projects/${projectId}`);
+    const episode = detail.data.episodes.find((ep: { id: string }) => ep.id === episodeId);
+    expect(episode.synopsis).toBe("自动保存后的梗概");
+  });
+
   it("generates characters bound to the project", async () => {
     const res = await inject("POST", `/projects/${projectId}/characters/generate`, { count: 3 });
     expect(res.code).toBe(0);

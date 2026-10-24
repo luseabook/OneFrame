@@ -63,6 +63,16 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect(me.body.data.credits).toEqual({ balance: 80, frozen: 0 });
   });
 
+  it("lists credit flows including the signup gift", async () => {
+    const res = await inject("GET", "/credits/flows?page=1&page_size=50", undefined, {
+      authorization: `Bearer ${token}`,
+    });
+    expect(res.body.code).toBe(0);
+    const gift = res.body.data.list.find((flow: { kind: string }) => flow.kind === "gift");
+    expect(gift).toBeTruthy();
+    expect(gift.delta).toBe(80);
+  });
+
   it("quotes 8 credits for text2video 5s/720p", async () => {
     const quote = await inject(
       "POST",

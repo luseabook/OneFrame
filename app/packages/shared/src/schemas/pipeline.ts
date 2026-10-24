@@ -48,6 +48,13 @@ export const splitEpisodesRequestSchema = z.object({
 });
 export type SplitEpisodesRequest = z.infer<typeof splitEpisodesRequestSchema>;
 
+export const episodePatchSchema = z.object({
+  title: z.string().max(100).optional(),
+  synopsis: z.string().max(1000).optional(),
+  script_text: z.string().max(100_000).optional(),
+});
+export type EpisodePatchRequest = z.infer<typeof episodePatchSchema>;
+
 export const outlineConfirmSchema = z.object({
   episodes: z.array(outlineEpisodeSchema).min(1).max(20),
 });

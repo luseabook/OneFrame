@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, 
 import {
   charactersGenerateSchema,
   createProjectSchema,
+  episodePatchSchema,
   generateVideosBatchSchema,
   outlineConfirmSchema,
   portraitGenerateSchema,
@@ -101,6 +102,16 @@ export class ScriptController {
   @Get("projects/:id/episodes/:eid")
   async episode(@Req() req: AuthedRequest, @Param("id") id: string, @Param("eid") eid: string) {
     return this.script.episodeDetail(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  @Patch("projects/:id/episodes/:eid")
+  async patchEpisode(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    return this.script.patchEpisode(req.auth?.spaceId ?? "", id, eid, parseOrThrow(episodePatchSchema, body));
   }
 
   @Patch("projects/:id/episodes/:eid/storyboards/:sid")

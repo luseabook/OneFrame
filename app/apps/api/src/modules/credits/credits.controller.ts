@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req , Inject} from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, Req, Inject } from "@nestjs/common";
 import { z } from "zod";
 import { generationRequestSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
@@ -17,6 +17,16 @@ export class CreditsController {
   async quote(@Req() req: AuthedRequest, @Body() body: unknown) {
     const input = parseOrThrow(generationRequestSchema, body);
     return this.credits.quote(input, req.auth?.spaceId ?? "");
+  }
+
+  @Get("credits/flows")
+  async flows(
+    @Req() req: AuthedRequest,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
+    @Query("task_id") taskId?: string,
+  ) {
+    return this.credits.listFlows(req.auth?.spaceId ?? "", Number(page ?? 1), Number(pageSize ?? 20), taskId);
   }
 
   @Post("credits/quote/batch")
