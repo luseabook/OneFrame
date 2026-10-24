@@ -23,12 +23,14 @@ async function logout(): Promise<void> {
     <header class="header">
       <NuxtLink to="/" class="logo">AI 漫剧工作台</NuxtLink>
       <nav class="nav">
-        <NuxtLink to="/projects" class="nav-link">项目</NuxtLink>
-        <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">文生视频</NuxtLink>
-        <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
-        <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
-        <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
-        <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
+        <template v-if="user">
+          <NuxtLink to="/projects" class="nav-link">项目</NuxtLink>
+          <NuxtLink to="/create/text-to-video" class="nav-link" :class="{ active: isWorkspace }">文生视频</NuxtLink>
+          <NuxtLink to="/create/image-to-video" class="nav-link">图生视频</NuxtLink>
+          <NuxtLink to="/assets" class="nav-link">资产</NuxtLink>
+          <NuxtLink to="/tasks" class="nav-link">任务</NuxtLink>
+          <NuxtLink to="/credits" class="nav-link">积分</NuxtLink>
+        </template>
         <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
         <ClientOnly>
           <template v-if="user">
@@ -51,9 +53,7 @@ async function logout(): Promise<void> {
       <span class="sep">·</span>
       <NuxtLink to="/privacy" class="report-link">隐私政策</NuxtLink>
       <span class="sep">·</span>
-      <span>ICP 备案号占位（上线前替换，docs/06-security-compliance/compliance.md A3）</span>
-      <span class="sep">·</span>
-      <a class="report-link" href="mailto:report@example.com?subject=%E5%86%85%E5%AE%B9%E4%B8%BE%E6%8A%A5">举报邮箱</a>
+      <span>京 ICP 备 00000000 号（上线前替换）</span>
     </footer>
   </div>
 </template>
