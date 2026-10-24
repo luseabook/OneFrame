@@ -6,6 +6,7 @@ import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
 import { RedisService } from "../../redis/redis.service";
 import { CreditsService } from "../credits/credits.service";
+import { ModerationService } from "../moderation/moderation.service";
 import type { AuthContext } from "../../common/auth.types";
 
 const IDEM_TTL_S = 300;
@@ -24,9 +25,11 @@ export class GenerationsService {
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(QueueService) private readonly queue: QueueService,
     @Inject(RedisService) private readonly redis: RedisService,
+    @Inject(ModerationService) private readonly moderation: ModerationService,
   ) {}
 
   async create(auth: AuthContext, body: GenerationRequest, idempotencyKey: string): Promise<CreateTaskResult> {
+    this.moderation.assertPrompt(body.input.prompt);
     const idemKey = `idem:gen:${auth.spaceId}:${idempotencyKey}`;
     const acquired = await this.redis.setNx(idemKey, "pending", IDEM_TTL_S);
     if (!acquired) {

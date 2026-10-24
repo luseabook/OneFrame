@@ -68,7 +68,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] F1 年龄门禁 + 发码 IP 频控；F2 导出成功镜 <80% 拒绝（400106）
 - [x] F4 项目分镜矩阵 + 批量下载 zip（≤50）+ 任务轮询 ETag/304
 - [x] F2 大纲防抖自动保存、按批量报价预填预算、duration_adjusted 回写；F6 积分流水页
-- [ ] PRD 验收剩余：资产转存/回收站/90 天提醒、敏感词审核/漏斗看板、续投预填（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
+- [x] F7 敏感词输入审核（745801，生成/项目/大纲/角色/分镜入口）+ 全站页脚举报入口
+- [ ] PRD 验收剩余：资产转存/回收站/90 天提醒、供应商审核/漏斗看板、续投预填（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 

@@ -35,6 +35,13 @@ const envSchema = z.object({
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ADMIN_JWT_TTL_S: z.coerce.number().int().min(300).default(7200),
 
+  // 内容安全（MVP 敏感词；供应商审核 P2）
+  MODERATION_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  MODERATION_WORDS: z.string().optional(),
+
   // 结果存储（ADR-005：生产替换为 OSS/S3 driver）
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
   STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),

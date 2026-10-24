@@ -45,6 +45,8 @@ async function logout(): Promise<void> {
       <span>内容由 AI 生成，请仔细甄别</span>
       <span class="sep">·</span>
       <span>ICP 备案号占位（上线前替换，docs/06-security-compliance/compliance.md A3）</span>
+      <span class="sep">·</span>
+      <a class="report-link" href="mailto:report@example.com?subject=%E5%86%85%E5%AE%B9%E4%B8%BE%E6%8A%A5">举报 / 投诉</a>
     </footer>
   </div>
 </template>
@@ -116,5 +118,9 @@ async function logout(): Promise<void> {
 }
 .sep {
   color: var(--color-border);
+}
+.report-link {
+  color: var(--text-2);
+  text-decoration: underline;
 }
 </style>

@@ -9,6 +9,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { CreditsModule } from "./modules/credits/credits.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
 import { ModelsModule } from "./modules/models/models.module";
+import { ModerationModule } from "./modules/moderation/moderation.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { ScriptModule } from "./modules/script/script.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
@@ -22,6 +23,7 @@ import { StorageModule } from "./storage/storage.module";
     RedisModule,
     QueueModule,
     StorageModule,
+    ModerationModule,
     AdminModule,
     AssetsModule,
     AuthModule,

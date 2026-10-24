@@ -73,6 +73,22 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect(gift.delta).toBe(80);
   });
 
+  it("rejects sensitive prompts with 745801 and no task", async () => {
+    const res = await inject(
+      "POST",
+      "/generations",
+      {
+        mode: "text2video",
+        model: "sky-media-2.0",
+        input: { prompt: "赌博推广视频" },
+      },
+      { authorization: `Bearer ${token}`, "idempotency-key": "moderation-test-1" },
+    );
+    expect(res.body.code).toBe(745801);
+    const me = await inject("GET", "/me", undefined, { authorization: `Bearer ${token}` });
+    expect(me.body.data.credits).toEqual({ balance: 80, frozen: 0 });
+  });
+
   it("quotes 8 credits for text2video 5s/720p", async () => {
     const quote = await inject(
       "POST",

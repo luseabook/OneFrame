@@ -34,6 +34,7 @@ import { CreditsService } from "../credits/credits.service";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
 import { StorageService } from "../../storage/storage.service";
+import { ModerationService } from "../moderation/moderation.service";
 import { LlmService } from "./llm.service";
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
@@ -106,12 +107,14 @@ export class ScriptService {
     @Inject(ModelsService) private readonly models: ModelsService,
     @Inject(QueueService) private readonly queue: QueueService,
     @Inject(StorageService) private readonly storage: StorageService,
+    @Inject(ModerationService) private readonly moderation: ModerationService,
   ) {}
 
   async createProject(
     spaceId: string,
     input: { title: string; drama_type?: number; ratio?: string; source_type?: number; source_text?: string },
   ) {
+    this.moderation.assertText(input.source_text, "source_text");
     const [row] = await db
       .insert(scriptProjects)
       .values({
@@ -222,6 +225,7 @@ export class ScriptService {
     const project = await this.findProject(spaceId, projectId);
     const sourceText = (project.sourceText ?? "").trim();
     if (!sourceText) throw new AppError(ErrorCode.INVALID_PARAM, "source_text is empty", { field: "source_text" });
+    this.moderation.assertText(sourceText, "source_text");
     const outline = await this.llm.outline(sourceText);
 
     const rows = await db.transaction(async (tx) => {
@@ -281,6 +285,7 @@ export class ScriptService {
       project.sourceText ?? "",
       ...eps.map((ep) => `${ep.title ?? ""}: ${ep.synopsis ?? ""}`),
     ].join("\n");
+    this.moderation.assertText(context, "source_text");
     const result = await this.llm.characters(context, input.count);
 
     const rows = await db.transaction(async (tx) => {
@@ -364,6 +369,7 @@ export class ScriptService {
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
+    this.moderation.assertText(episode.scriptText, "script_text");
     const characters = await db
       .select()
       .from(projectAssets)
