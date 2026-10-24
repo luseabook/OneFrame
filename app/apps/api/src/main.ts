@@ -19,6 +19,10 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     logger: ["log", "warn", "error"],
+    // 支付回调验签需要原始请求体字节（微信 APIv3 签名串包含 body 原文）。
+    // rawBody: true 让 Nest 的 content-type parser 把原始 Buffer 挂到 req.rawBody，
+    // 用 JSON.stringify(解析后对象) 验签会因空白/键序差异在生产环境必然失败。
+    rawBody: true,
   });
 
   await app.register(cookie as unknown as Parameters<typeof app.register>[0]);

@@ -139,6 +139,43 @@ Worker                 Adapter(火山…)          OSS            PG/Redis
 
 **重试策略**：仅重试「网络错误 / 超时 / 5xx / 429」，指数退避（默认 2 次，基础 400~500ms）；4xx 业务错误不重试。
 
+#### 4.1.1 供应商错误映射（`src/errors.ts`，Ark/DeepSeek 共用）
+
+所有适配器抛出的错误统一为 `VendorError`（含 `kind` / `retryable` / `status` / `vendorCode`），
+可重试类为 `RetryableVendorError`。`classifyVendorHttpError(status, bodyText, context)` 负责映射，
+错误体兼容 `{error:{code,message,type}}`、`{code,message}`、`{error:"msg"}` 三种形态：
+
+| HTTP 状态 | kind | 是否重试 | 上层动作 |
+|---|---|---|---|
+| 401 / 403 | `auth_error` | 否 | 告警（Key 失效/权限），提示切换模型 |
+| 402 | `quota_exceeded` | 否 | 告警（供应商余额），运营充值 |
+| 429 | `rate_limited` | 是 | 指数退避 |
+| 400 / 404 / 422 | `invalid_param` | 否 | 置 FAILED，解冻积分，提示改参数 |
+| 5xx | `vendor_error` | 是 | 指数退避，耗尽后置 FAILED |
+| 其他 4xx | `vendor_error` | 否 | 置 FAILED |
+| 任意状态 + 审核信号（`*SensitiveContentDetected` / `audit` / `审核` / `敏感` 等） | `output_rejected` | 否 | REVIEW_REJECTED（745802），解冻 + 提示改提示词 |
+| 超时（`AbortError`） | `timeout` | 是 | 指数退避，耗尽后 `vendor_timeout` |
+| 网络层错误（`TypeError`） | `network_error` | 是 | 指数退避 |
+
+**错误文案约束**：仅保留截断后的供应商 message（≤300 字符），完整响应体不入日志/错误信息（防 Key/隐私泄漏）。
+既有前缀保持兼容：Ark 为 `ark <METHOD> <path> -> <status>: ...`，DeepSeek 为 `deepseek http <status>: ...`。
+
+#### 4.1.2 图像生成协议（火山方舟 Ark / Seedream，`src/ark-image.ts`）
+
+| 项 | 约定 |
+|---|---|
+| 端点 | `POST {ARK_IMAGE_BASE_URL}/api/v3/images/generations`（同步）；若响应含 `id`/`task_id` 则降级为异步：`GET /api/v3/contents/generations/tasks/{id}` + `POST .../cancel` |
+| 鉴权 | `Authorization: Bearer {ARK_API_KEY}` |
+| 请求字段 | `model`（经 `ARK_IMAGE_MODEL_MAP` 映射）、`prompt`、`size`、`response_format`（默认 `url`）、`watermark`（默认 `true`，AI 标识合规）、`seed`、`guidance_scale`、`image`（图生图：单图字符串 / 多图数组，取 `first_frame_uri` + `reference_uris` 去重）、`sequential_image_generation`（`count>1` 时 `auto` + `max_images`） |
+| 尺寸映射 | `resolution=720p` 按 `ratio` 映射到 Seedream 支持尺寸（`9:16→720x1280`、`16:9→1280x720`、`1:1→1024x1024`、`4:3→1152x864`、`3:4→864x1152`、`3:2→1248x832`、`2:3→832x1248`、`21:9→1512x648`）；`1080p→2K`；`1K/2K/4K` 直通；显式 `WxH` 直通；未知比例回落 `1024x1024` |
+| 响应解析 | `data[].url`（主）或 `data[].b64_json`（兜底，转 data URI 并标 `inline_base64`）；异步任务从 `content[].image_url` 提取；多图按 `data[]` 顺序全部返回 |
+| 结果语义 | 同步返回 `sync_results`（worker 直接转存 OSS，ADR-005）；异步返回 `vendor_task_id` 走统一轮询；成功但无图 → `vendor_error` |
+
+**registry 选择规则**（`src/registry.ts`）：`ADAPTER_MODE=mock` 一律 mock；真实模式按序：
+`deepseek:chat` → **Ark 图像**（`volcengine:image` / `volcengine:seedream`，或 `ARK_IMAGE_REPLACE_CODES` 显式列出的既有 code，如 `tomoviee:image`）→ Ark 视频（其余 `volcengine:*`）→ 通用 HTTP 网关 → 显式「未实现」报错。
+`ARK_IMAGE_REPLACE_CODES` 命中但缺少 Ark Key 时**硬失败**（配置错误必须暴露），绝不静默回落 mock；
+未列入时 `tomoviee:image` 仍按原样报「not implemented yet」。
+
 ## 5. 容量与扩展路径
 
 **MVP 假设**：DAU 500，人均 3 任务/日，视频占 40%；峰值 QPS：创建 ~5，轮询 ~100（500 活跃页 × 5s 间隔 / 平均页面停留），轮询接口 Redis 缓存 3s 直接扛。

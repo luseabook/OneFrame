@@ -74,6 +74,30 @@ describe("ArkVideoAdapter", () => {
     expect(st.error?.code).toBe("vendor_error");
   });
 
+  it("maps sensitive failure codes to review_rejected (not plain failed)", async () => {
+    const f = fakeFetch([
+      {
+        body: {
+          status: "failed",
+          error: { code: "OutputImageSensitiveContentDetected", message: "sensitive output" },
+        },
+      },
+    ]);
+    const st = await make(f).poll("vt-1");
+    expect(st.status).toBe("review_rejected");
+    expect(st.error?.code).toBe("output_rejected");
+  });
+
+  it("keeps vendor error code / status on retryable HTTP failures", async () => {
+    const f = fakeFetch([{ status: 503, body: { error: { code: "ServiceUnavailable", message: "busy" } } }]);
+    const err = await make(f, { maxRetries: 0 })
+      .submit(baseReq)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RetryableVendorError);
+    expect((err as RetryableVendorError).status).toBe(503);
+    expect((err as RetryableVendorError).vendorCode).toBe("ServiceUnavailable");
+  });
+
   it("returns running for unknown status (not rejected)", async () => {
     const f = fakeFetch([{ body: { status: "some_new_state" } }]);
     const st = await make(f).poll("vt-1");

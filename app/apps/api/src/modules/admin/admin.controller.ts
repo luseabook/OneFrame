@@ -4,6 +4,7 @@ import { z } from "zod";
 import { reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
 import { parseOrThrow } from "../../common/zod";
+import { BillingService } from "../billing/billing.service";
 import { AdminAuthService } from "./admin-auth.service";
 import { AdminGuard } from "./admin.guard";
 import { AdminService } from "./admin.service";
@@ -11,6 +12,12 @@ import { AdminService } from "./admin.service";
 const loginSchema = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(128),
+});
+
+// 退款（api-spec §10.5）：本期仅全额退款；amount_cents 只用于声明/校验，不等于订单金额直接 400101
+const refundOrderSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
+  amount_cents: z.number().int().positive().optional(),
 });
 
 const modelPatchSchema = z.object({
@@ -42,7 +49,10 @@ export class AdminAuthController {
 @UseGuards(AdminGuard)
 @Controller("ops/admin")
 export class AdminController {
-  constructor(@Inject(AdminService) private readonly admin: AdminService) {}
+  constructor(
+    @Inject(AdminService) private readonly admin: AdminService,
+    @Inject(BillingService) private readonly billing: BillingService,
+  ) {}
 
   @Get("dashboard")
   dashboard() {
@@ -134,5 +144,27 @@ export class AdminController {
   @Post("shares/:id/revoke")
   revokeShare(@Param("id") id: string) {
     return this.admin.revokeShare(id);
+  }
+
+  // ── 订单 / 退款（api-spec §10.5；运营审核后操作，工单与退款记录留痕） ──
+
+  @Get("orders")
+  orders(@Query("status") status?: string, @Query("page") page?: string, @Query("page_size") pageSize?: string) {
+    return this.admin.listOrders(Number(page ?? 1), Number(pageSize ?? 20), status ? Number(status) : undefined);
+  }
+
+  @Post("orders/:id/refund")
+  refundOrder(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest & { adminAuth?: { adminId: string; username?: string } },
+  ) {
+    const input = parseOrThrow(refundOrderSchema, body ?? {});
+    return this.billing.refundOrder({
+      orderId: id,
+      reason: input.reason,
+      amountCents: input.amount_cents,
+      operator: req.adminAuth?.username ?? req.adminAuth?.adminId,
+    });
   }
 }

@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq } from "drizzle-orm";
-import { createDb, creditFlows } from "@app/db";
+import { createDb, creditFlows, users } from "@app/db";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
@@ -11,6 +11,10 @@ import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 // 端到端契约测试（需要真实 PG + Redis；CI 由 service containers 提供）
 let app: NestFastifyApplication;
 const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
+// 独立连接用于直接断言落库字段（合规留痕），测试结束关闭连接池
+const { db: assertDb, pool: assertPool } = createDb(
+  process.env.DATABASE_URL ?? "postgres://app@127.0.0.1:55432/app",
+);
 
 async function inject(
   method: "GET" | "POST",
@@ -36,6 +40,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+  await assertPool.end();
 });
 
 describe("P1 vertical slice: auth → quote → generation → cancel", () => {
@@ -56,6 +61,14 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     spaceId = login.body.data.space_id as string;
     expect(login.body.data.user.id).toBeTruthy();
     expect(spaceId).toBeTruthy();
+
+    // 合规留痕（launch-checklist B3/C3）：建号事务必须写入 age_declared_at，
+    // 否则「已确认年满 18 周岁」无法举证。
+    const [createdUser] = await assertDb
+      .select()
+      .from(users)
+      .where(eq(users.id, BigInt(login.body.data.user.id as string)));
+    expect(createdUser?.ageDeclaredAt).toBeInstanceOf(Date);
   });
 
   it("returns balance 80 from /me", async () => {

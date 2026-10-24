@@ -142,7 +142,7 @@ export const creditFlows = pgTable(
     // delta=可用余额变动；frozen_delta=冻结额变动；不写 expire（Alpha/Beta 无有效期）
     delta: integer("delta").notNull(),
     frozenDelta: integer("frozen_delta").notNull().default(0),
-    kind: text("kind").notNull(), // recharge|gift|freeze|settle|unfreeze|adjust
+    kind: text("kind").notNull(), // recharge|gift|freeze|settle|unfreeze|adjust|refund
     refTaskId: bigint("ref_task_id", { mode: "bigint" }),
     refOrderId: bigint("ref_order_id", { mode: "bigint" }),
     refCodeId: bigint("ref_code_id", { mode: "bigint" }),
@@ -566,6 +566,24 @@ export const orders = pgTable(
     closedAt: timestamp("closed_at", { withTimezone: true }),
     /** 前端轮询用的一次性凭证（不暴露内部 id 规则） */
     payToken: text("pay_token"),
+    /**
+     * 渠道下单返回的支付参数（jsonb）：微信 code_url/h5_url/prepay_id+paySign、
+     * 支付宝 qr_code/pay_url。仅含可下发给前端的字段，绝不含私钥/证书。
+     * 重复下单复用未支付订单时直接回放，避免每次重复打渠道。
+     */
+    payParams: jsonb("pay_params"),
+    /**
+     * 退款（api-spec §10.5）：
+     * - refundNo：我方幂等退款单号（固定 `rf-{orderId}`），同时用于渠道路由幂等；
+     * - refundStatus：processing（渠道异步处理中）|succeeded|failed；
+     * - refundAmountCents：本期仅支持全额退款，恒等于 amount_cents（保留显式列便于对账）。
+     */
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    refundNo: text("refund_no"),
+    refundStatus: text("refund_status"),
+    refundAmountCents: integer("refund_amount_cents"),
+    refundReason: text("refund_reason"),
+    refundOperator: text("refund_operator"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

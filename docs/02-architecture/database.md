@@ -294,7 +294,7 @@ CREATE TABLE credit_flows (
   space_id      BIGINT NOT NULL REFERENCES spaces(id),
   delta         INT NOT NULL,                      -- 可用余额变动(P0-09 口径, 见下)
   frozen_delta  INT NOT NULL DEFAULT 0,            -- 冻结额变动(见下)
-  kind          TEXT NOT NULL,                     -- recharge|gift|freeze|settle|unfreeze|adjust
+  kind          TEXT NOT NULL,                     -- recharge|gift|freeze|settle|unfreeze|adjust|refund
                                                    -- 不写 expire：Alpha/Beta 积分不设有效期；
                                                    -- 若将来引入有效期，新增 kind 并同步 §4 对账不变式
   ref_task_id   BIGINT, ref_order_id BIGINT, ref_code_id BIGINT,  -- code_id=邀请码赠分
@@ -309,9 +309,14 @@ CREATE INDEX idx_flows_space ON credit_flows(space_id, created_at DESC);
 | kind | delta | frozen_delta |
 |---|---|---|
 | recharge / gift / expire / adjust | 充值/赠送记正、过期/调整按实 | 0 |
+| refund（全额退款回冲） | -credits（仅当 `balance >= credits`，绝不产生负余额） | 0 |
 | freeze（提交冻结） | -cost | +cost |
 | settle（成功结算） | 0 | -cost |
 | unfreeze（失败/取消/审核拒解冻） | +cost | -cost |
+
+> refund 流水的幂等由业务保证：`orders.status=2 → 4` 只发生一次（事务 + 行锁），
+> 且 `orders.refund_no = rf-{order_id}` 固定；`credit_flows.ref_order_id` 指回订单用于对账
+> （不建唯一索引：同订单可能同时存在 recharge 与 refund 两条流水）。
 
 **对账不变式（全库唯一表述，security §3 / testing §2-1 同文）**：`balance == Σ delta` 且 `frozen == Σ frozen_delta`。
 
@@ -332,13 +337,38 @@ CREATE TABLE skus (
   period TEXT, active BOOLEAN NOT NULL DEFAULT TRUE
 );
 CREATE TABLE orders (
-  id BIGINT PRIMARY KEY, space_id BIGINT NOT NULL, sku_id BIGINT NOT NULL,
-  amount_cents INT NOT NULL, channel TEXT,         -- wechat_native|wechat_h5
+  id BIGINT PRIMARY KEY, space_id BIGINT NOT NULL REFERENCES spaces(id),
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  sku_id BIGINT NOT NULL REFERENCES skus(id),
+  sku TEXT NOT NULL,                               -- SKU 编码快照（SKU 下架/改名不影响历史订单）
+  amount_cents INT NOT NULL,                       -- 下单时价格快照
+  credits INT NOT NULL,                            -- 下单时应到账积分快照
+  channel TEXT NOT NULL,                           -- wechat|alipay|mock（api-spec §10）
+  channel_order_id TEXT,                           -- 渠道侧订单号(回调对账)
   status SMALLINT NOT NULL DEFAULT 1,              -- 1待支付 2已支付 3已关闭 4已退款
-  paid_at TIMESTAMPTZ, refunded_at TIMESTAMPTZ,
-  channel_order_no TEXT
+  paid_at TIMESTAMPTZ, closed_at TIMESTAMPTZ,
+  pay_token TEXT,                                  -- 前端轮询凭证
+  pay_params JSONB,                                -- 渠道下单支付参数(二维码/跳转/预支付签名)，不含任何密钥
+  -- 退款（api-spec §10.5；迁移 0009_funny_rage.sql）
+  refund_no TEXT,                                  -- 我方幂等退款单号（rf-{order_id}）
+  refund_status TEXT,                              -- processing|succeeded
+  refund_amount_cents INT,                         -- 本期仅全额=amount_cents
+  refunded_at TIMESTAMPTZ, refund_reason TEXT, refund_operator TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (channel, channel_order_id)               -- uq_orders_channel_order：重复回调不重复入账
 );
+CREATE INDEX idx_orders_space ON orders(space_id, created_at DESC);
+CREATE INDEX idx_orders_status ON orders(status);
 ```
+
+> `pay_params`（迁移 `0008_worried_lady_deathstrike.sql`）由渠道适配层写入：
+> 微信 `{mode:"native",code_url}` / `{mode:"h5",h5_url}` / `{mode:"jsapi",prepay_id,pay_sign}`；
+> 支付宝 `{mode:"page",pay_url}` / `{mode:"precreate",qr_code}`。
+> 重复下单复用未支付订单时直接回放，避免重复打渠道。
+>
+> 退款字段（迁移 `0009_funny_rage.sql`）：全额退款成功后 `status=4` 并写 `refund_no/refund_status/refund_amount_cents/refunded_at/reason/operator`；
+> 渠道退款失败事务回滚，字段保持为空、订单仍为已支付。
 
 ## 5. 资产
 

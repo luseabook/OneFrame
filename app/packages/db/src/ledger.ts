@@ -35,6 +35,15 @@ async function lockAccount(tx: Tx, spaceId: bigint) {
   return account;
 }
 
+/**
+ * 显式加锁读取积分账户（REFUND §10.5）：
+ * 退款流程需要「先校验余额充足，再调渠道，最后扣减」——只有在事务最前面锁住账户行，
+ * 才能避免「渠道已退款、扣减时余额不足」的不可逆不一致。
+ */
+export async function lockCreditAccount(tx: Tx, spaceId: bigint) {
+  return lockAccount(tx, spaceId);
+}
+
 export interface LedgerRef {
   taskId?: bigint;
   orderId?: bigint;
@@ -147,6 +156,41 @@ export async function creditIn(
     kind: input.kind,
     refOrderId: input.orderId,
     refCodeId: input.codeId,
+    balanceAfter,
+    memo: input.memo,
+  });
+  return { balanceAfter };
+}
+
+/**
+ * 扣减可用积分（负向流水，kind=refund）。用于全额退款回冲。
+ *
+ * 安全约束（api-spec §10.5 / database.md §4 对账不变式）：
+ * - 扣减前必须在**同一事务**内锁账户并校验 `balance >= amount`，否则拒绝，
+ *   绝不允许出现负余额（`credit_accounts.balance` 有 CHECK >= 0，硬失败）；
+ * - 只追加流水，不更新历史流水；`balance_after` 保证链条连续。
+ */
+export async function creditOut(
+  tx: Tx,
+  input: { spaceId: bigint; amount: number; kind: "refund"; orderId?: bigint; memo?: string },
+): Promise<{ balanceAfter: number }> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    throw new Error("creditOut amount must be a positive integer");
+  }
+  const account = await lockAccount(tx, input.spaceId);
+  if (account.balance < input.amount) throw new InsufficientBalanceError();
+  const balanceAfter = account.balance - input.amount;
+  await tx
+    .update(creditAccounts)
+    .set({ balance: balanceAfter, updatedAt: new Date() })
+    .where(eq(creditAccounts.spaceId, input.spaceId));
+  await tx.insert(creditFlows).values({
+    id: newId(),
+    spaceId: input.spaceId,
+    delta: -input.amount,
+    frozenDelta: 0,
+    kind: input.kind,
+    refOrderId: input.orderId,
     balanceAfter,
     memo: input.memo,
   });

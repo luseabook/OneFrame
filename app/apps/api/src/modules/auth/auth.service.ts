@@ -112,7 +112,13 @@ export class AuthService {
       const created = await db.transaction(async (tx) => {
         const uid = newId();
         const sid = newId();
-        await tx.insert(users).values({ id: uid, nickname: `用户${phone.slice(-4)}` });
+        // 合规留痕（compliance launch-checklist B3/C3）：建号即记录成年确认时间，
+        // 用于举证「已确认年满 18 周岁」，而不只是靠请求参数临时校验。
+        await tx.insert(users).values({
+          id: uid,
+          nickname: `用户${phone.slice(-4)}`,
+          ageDeclaredAt: new Date(),
+        });
         await tx.insert(spaces).values({ id: sid, ownerUserId: uid });
         await tx.insert(spaceMembers).values({ spaceId: sid, userId: uid, role: 1 });
         await tx.insert(creditAccounts).values({ spaceId: sid });

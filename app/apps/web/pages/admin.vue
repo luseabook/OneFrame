@@ -22,12 +22,16 @@ const username = ref("admin");
 const password = ref("");
 const error = ref("");
 const loading = ref(false);
-const tab = ref<"dashboard" | "models" | "tasks" | "shares" | "reports" | "funnel">("dashboard");
+const tab = ref<
+  "dashboard" | "models" | "tasks" | "shares" | "reports" | "funnel" | "orders"
+>("dashboard");
 const dashboard = ref<Dashboard | null>(null);
 const models = ref<Array<Record<string, unknown>>>([]);
 const tasks = ref<Array<Record<string, unknown>>>([]);
 const shares = ref<Array<Record<string, unknown>>>([]);
 const reports = ref<Array<Record<string, unknown>>>([]);
+const orders = ref<Array<Record<string, unknown>>>([]);
+const refunding = ref("");
 const funnel = ref<
   Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>
 >([]);
@@ -80,7 +84,7 @@ async function login(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [d, m, t, s, r, f, tm] = await Promise.all([
+  const [d, m, t, s, r, f, tm, o] = await Promise.all([
     api<Dashboard>("/ops/admin/dashboard"),
     api<Array<Record<string, unknown>>>("/ops/admin/models"),
     api<{ list: Array<Record<string, unknown>> }>("/ops/admin/tasks"),
@@ -98,6 +102,7 @@ async function loadAll(): Promise<void> {
       adapter_latency: Array<{ adapter: string; samples: number; avg_ms: number; p95_ms: number }>;
       errors_by_code: Array<{ code: string; count: number }>;
     }>("/ops/admin/task-metrics"),
+    api<{ list: Array<Record<string, unknown>> }>("/ops/admin/orders?page=1&page_size=50"),
   ]);
   dashboard.value = d;
   models.value = m;
@@ -106,6 +111,36 @@ async function loadAll(): Promise<void> {
   reports.value = r.list;
   funnel.value = f;
   metrics.value = tm;
+  orders.value = o.list;
+}
+
+/**
+ * 全额退款（api-spec §10.5）：运营审批后执行，reason 填工单号。
+ * 仅已支付订单（status=2）可退；接口幂等（重复点击不会重复退钱/重复调渠道）。
+ */
+async function refundOrder(order: Record<string, unknown>): Promise<void> {
+  const reason = window.prompt(
+    `全额退款 ¥${(Number(order.amount_cents) / 100).toFixed(2)} / ${String(order.credits)} 积分\n请填写工单号/审批说明：`,
+  );
+  if (reason === null) return;
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    error.value = "退款必须填写工单号/审批说明";
+    return;
+  }
+  refunding.value = String(order.order_id);
+  error.value = "";
+  try {
+    await api(`/ops/admin/orders/${String(order.order_id)}/refund`, {
+      method: "POST",
+      body: { reason: trimmed },
+    });
+    await loadAll();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "退款失败";
+  } finally {
+    refunding.value = "";
+  }
 }
 
 async function downloadFailedCsv(): Promise<void> {
@@ -186,6 +221,7 @@ onMounted(async () => {
         <button :class="{ active: tab === 'shares' }" @click="tab = 'shares'">分享管理</button>
         <button :class="{ active: tab === 'reports' }" @click="tab = 'reports'">举报处置</button>
         <button :class="{ active: tab === 'funnel' }" @click="tab = 'funnel'">流水线漏斗</button>
+        <button :class="{ active: tab === 'orders' }" @click="tab = 'orders'">订单/退款</button>
         <button class="logout" @click="logout">退出</button>
       </div>
 
@@ -291,6 +327,34 @@ onMounted(async () => {
           <span v-else class="muted">{{ r.resolution }}</span>
         </div>
         <p v-if="reports.length === 0" class="muted">暂无举报。</p>
+      </section>
+
+      <section v-if="tab === 'orders'" class="card">
+        <h2>订单 / 全额退款</h2>
+        <p class="muted small">
+          仅已支付订单可退（status=2）；退款需填写工单号，接口幂等（重复点击不会重复退钱/重复调渠道）。
+          已消耗积分导致余额不足时接口返回 400101，请按未消耗余额人工处理。
+        </p>
+        <div v-for="o in orders" :key="String(o.order_id)" class="order-row">
+          <span class="mono">{{ String(o.order_id).slice(-10) }}</span>
+          <span>{{ o.sku }}</span>
+          <span class="muted">¥{{ (Number(o.amount_cents) / 100).toFixed(2) }}</span>
+          <span class="muted">{{ o.channel }}</span>
+          <span class="badge" :data-status="o.status">
+            {{ o.status === 1 ? "待支付" : o.status === 2 ? "已支付" : o.status === 3 ? "已关闭" : "已退款" }}
+          </span>
+          <span v-if="o.refund_no" class="muted mono">{{ o.refund_no }} · {{ o.refund_status }}</span>
+          <span v-else class="muted">-</span>
+          <button
+            v-if="o.status === 2"
+            class="mini danger"
+            :disabled="refunding === String(o.order_id)"
+            @click="refundOrder(o)"
+          >
+            {{ refunding === String(o.order_id) ? "退款中…" : "全额退款" }}
+          </button>
+        </div>
+        <p v-if="orders.length === 0" class="muted">暂无订单。</p>
       </section>
     </template>
   </main>
@@ -496,6 +560,25 @@ h1 {
 .muted {
   color: var(--text-3);
   font-size: 12px;
+}
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-1);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.order-row .mini {
+  margin-left: auto;
+}
+.badge[data-status="3"] {
+  color: var(--text-3);
+}
+.badge[data-status="4"] {
+  color: #4ade80;
+  border-color: #4ade80;
 }
 .small {
   font-size: 11px;

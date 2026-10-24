@@ -50,8 +50,18 @@ pnpm test && pnpm build
 - 数据模型：[database v1.2](docs/02-architecture/database.md)
 - 计划与里程碑：[WBS v1.3](docs/07-plan/wbs.md)
 - 文档地图/变更登记：[docs/README.md](docs/README.md)
+- 合规上线清单（外部/代码分离，可执行）：[launch-checklist](docs/06-security-compliance/launch-checklist.md)
 - 逆向一致性审查（RE-01~RE-25）：[审查报告](deliverables/software-company/wanxing-reverse-consistency-review-2026-10-24.md)
 - 竞品逆向基线：[REELMATE-逆向分析报告](rea-reelmate/REELMATE-逆向分析报告.md)
+
+## 商业化就绪（B 型）验收
+
+```powershell
+# 项目专用 PG 55432 / Redis 6380 运行中；不依赖真实商户号或供应商 Key
+pwsh _acceptance/b-type-acceptance.ps1        # 全量可复跑验收（当前 25/25 项通过）
+```
+
+覆盖：支付渠道适配层（微信 APIv3/支付宝）+ 回调验签/解密/ack/平台证书轮换 + 退款闭环 + 供应商 Ark/DeepSeek 契约测试 + 生产启动守卫 + request_id 可观测性 + 合规清单检查。各轮证据见 `deliverables/software-company/`（payment-channel-adapter、vendor-ark-image、compliance-launch-and-observability、refund-and-production-guard、commercial-readiness-2026-10-25）。
 
 ## 协作约定
 

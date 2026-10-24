@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { Worker } from "bullmq";
-import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import pino from "pino";
 import { createDb } from "@app/db";
+import { assertWorkerEnv } from "./env-guard";
 import { auditLedger, expireShares, purgeOldData, reconcileOrders, reviveStuckTasks } from "./maintenance";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
@@ -14,6 +14,10 @@ const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   redact: ["job.data.access_token", "*.access_token"], // observability §1：token 禁入日志
 });
+
+// 生产启动守卫（fail fast）：NODE_ENV=production 时禁止 ADAPTER_MODE=mock，
+// 且必须至少配置一种真实供应商，否则直接拒绝启动（错误信息不含密钥值）。
+assertWorkerEnv(process.env);
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://app:app@localhost:5432/app";
 const storageDir = process.env.STORAGE_DIR ?? resolve(process.cwd(), "../../data/storage");
@@ -38,6 +42,26 @@ const storage = createStorage({
     : {}),
 });
 
+/** env 里的 JSON 映射（如 ARK_MODEL_MAP）解析失败时忽略，交由适配器按原样发送 */
+function parseJsonRecord(raw: string | undefined): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 逗号分隔的 adapter_code 列表（ARK_IMAGE_REPLACE_CODES） */
+function parseCodeList(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((code) => code.trim())
+    .filter((code) => code.length > 0);
+}
+
+const arkModelMap = parseJsonRecord(process.env.ARK_MODEL_MAP);
+
 const adapterOptions: AdapterRuntimeOptions = {
   mode: process.env.ADAPTER_MODE === "real" ? "real" : "mock",
   ...(process.env.DEEPSEEK_API_KEY
@@ -54,18 +78,21 @@ const adapterOptions: AdapterRuntimeOptions = {
         ark: {
           apiKey: process.env.ARK_API_KEY,
           baseUrl: process.env.ARK_BASE_URL,
-          modelMap: (() => {
-            try {
-              return process.env.ARK_MODEL_MAP
-                ? (JSON.parse(process.env.ARK_MODEL_MAP) as Record<string, string>)
-                : undefined;
-            } catch {
-              return undefined;
-            }
-          })(),
+          modelMap: arkModelMap,
+        },
+        // 图像（Seedream）与视频共用 ARK_API_KEY；模型映射/超时可独立配置
+        arkImage: {
+          apiKey: process.env.ARK_API_KEY,
+          baseUrl: process.env.ARK_IMAGE_BASE_URL ?? process.env.ARK_BASE_URL,
+          modelMap: parseJsonRecord(process.env.ARK_IMAGE_MODEL_MAP) ?? arkModelMap,
+          responseFormat: process.env.ARK_IMAGE_RESPONSE_FORMAT === "b64_json" ? "b64_json" : "url",
+          watermark: process.env.ARK_IMAGE_WATERMARK !== "false",
+          timeoutMs: Number(process.env.ARK_IMAGE_TIMEOUT_MS ?? 120_000),
         },
       }
     : {}),
+  // 运营显式选择：把既有 adapter_code（如 tomoviee:image）路由到 Ark 图像；未配置时保持原报错
+  arkImageCodes: parseCodeList(process.env.ARK_IMAGE_REPLACE_CODES),
   ...(process.env.HTTP_VIDEO_BASE_URL
     ? {
         httpVideo: {
@@ -74,15 +101,7 @@ const adapterOptions: AdapterRuntimeOptions = {
           submitPath: process.env.HTTP_VIDEO_SUBMIT_PATH,
           pollPath: process.env.HTTP_VIDEO_POLL_PATH,
           cancelPath: process.env.HTTP_VIDEO_CANCEL_PATH,
-          modelMap: (() => {
-            try {
-              return process.env.HTTP_VIDEO_MODEL_MAP
-                ? (JSON.parse(process.env.HTTP_VIDEO_MODEL_MAP) as Record<string, string>)
-                : undefined;
-            } catch {
-              return undefined;
-            }
-          })(),
+          modelMap: parseJsonRecord(process.env.HTTP_VIDEO_MODEL_MAP),
         },
       }
     : {}),

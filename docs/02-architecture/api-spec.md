@@ -338,38 +338,120 @@ GET /credits/flows?page=&page_size=&task_id   // {list:[{id,kind,delta,frozen_de
 
 ```
 GET  /billing/skus                        （公开）← [{id,sku,kind,label,price_cents,credits,period,cents_per_credit}]
-POST /billing/orders                      {sku, channel: wechat|alipay|mock}
-  ← {order_id, sku, amount_cents, credits, channel, status, status_label, pay_token, created_at, expires_at}
+GET  /billing/channels                    （公开）← {live, channels:[{channel,configured,modes,missing?,reason?}]}
+POST /billing/orders                      {sku, channel: wechat|alipay|mock, mode?, openid?}
+  ← {order_id, sku, amount_cents, credits, channel, status, status_label, pay_token, pay_params, created_at, expires_at}
 GET  /billing/orders/{id}                 ← 同上（前端支付后轮询 ≤3min）
 GET  /billing/orders?page=&page_size=     ← 用户订单历史
-POST /billing/orders/{id}/close           ← 关闭待支付订单（幂等：非待支付返回 closed:false）
-POST /billing/orders/{id}/mock-pay        ← mock 渠道确认（PAYMENT_LIVE=true 时 403）
+POST /billing/orders/{id}/close           ← 关闭待支付订单（幂等：非待支付返回 closed:false；真实渠道 best-effort 关单）
+POST /billing/orders/{id}/mock-pay        ← mock 渠道确认（PAYMENT_LIVE=true 时 HTTP 403）
 ```
+
+**渠道与支付形态**
+
+| channel | 可选 mode | 下单接口 | `pay_params` 关键字段 | 前端呈现 |
+|---|---|---|---|---|
+| `wechat` | `native`（默认）/ `h5` / `jsapi` | `/v3/pay/transactions/{native,h5,jsapi}` | `code_url` / `h5_url` / `prepay_id`+`pay_sign` | 二维码 / 跳转 / JSAPI 调起 |
+| `alipay` | `page`（默认）/ `precreate` | `alipay.trade.page.pay` / `alipay.trade.precreate` | `pay_url` / `qr_code` | 收银台跳转 / 二维码 |
+| `mock` | — | — | `null` | 一键模拟支付 |
+
+- `mode` 省略时用渠道默认（桌面微信 `native`、支付宝 `page`）；`jsapi` 需显式传 `openid`，`h5` 缺用户 IP 会返回 `400101`。
+- `pay_params` 只含可下发给前端的支付参数（二维码/跳转地址/预支付签名），**绝不含私钥/证书**。
+- 重复下单（同 space + 同 sku + 同渠道 + 60s 内未支付）复用同一订单并回放 `pay_params`；旧订单缺参数时补下单后再返回。
+- 渠道下单失败：订单置为已关闭（不进入可支付状态），返回 `745900 VENDOR_ERROR` / `745901 VENDOR_TIMEOUT` + `details:{channel,channel_code,vendor_code,retryable}`。
 
 ### 10.2 渠道回调（服务端到服务端，不在用户契约）
 
 ```
-POST /billing/notify/wechat               // header: wechatpay-timestamp/nonce/signature
-POST /billing/notify/alipay               // form 参数含 sign / sign_type
-POST /billing/notify/mock                 // 仅联调，PAYMENT_LIVE=true 时 403
+POST /billing/notify/wechat    // header: Wechatpay-Timestamp/Nonce/Signature（APIv3）
+POST /billing/notify/alipay    // application/x-www-form-urlencoded，参数含 sign/sign_type（RSA2）
+POST /billing/notify/mock      // 仅联调，PAYMENT_LIVE=true 时 HTTP 403
 ```
+
+回调响应体**必须**符合渠道协议，因此这两个端点用 `@Res` 直写并绕过全局信封：
+
+| 渠道 | 成功 | 失败 |
+|---|---|---|
+| 微信 | HTTP 200 + `{"code":"SUCCESS","message":"成功"}` | HTTP 401/400/404 + `{"code":"FAIL","message":"..."}` |
+| 支付宝 | HTTP 200 + 纯文本 `success` | HTTP 401/400 + 纯文本 `failure` |
+| 所有回调 | 响应头 `x-request-id`（排障链路） | 同上 |
 
 ### 10.3 幂等与安全（实现约束）
 
 | 约束 | 实现 |
 |---|---|
 | 订单价格快照 | `orders.amount_cents / orders.credits` 下单时冻结，调价不影响已下单订单 |
-| 重复下单 | 同 space + 同 sku + 60s 内未支付 → 复用同一订单（防双击） |
+| 重复下单 | 同 space + 同 sku + 同渠道 + 60s 内未支付 → 复用同一订单（防双击） |
 | 重复回调 | 三重保证：`status=1` 才可流转；`SELECT ... FOR UPDATE` 行锁；`(channel, channel_order_id)` 唯一索引 |
 | 金额篡改 | 回调金额与订单快照不符 → `400101` 拒绝入账 |
-| 回调验签 | **默认拒绝**：未配置平台公钥一律 `401101`；微信校验 `timestamp\nnonce\nbody\n` 且时间戳容差 5 分钟；支付宝按 RSA2 拼接待签串 |
-| 微信资源解密 | AEAD_AES_256_GCM，`apiV3Key` 必须 32 字符；解密失败 `400101` |
-| 防假支付 | `PAYMENT_LIVE=false` 时非 mock 渠道下单直接拒绝；`mock-pay`/`notify/mock` 在 `PAYMENT_LIVE=true` 时 403 |
+| 微信回调验签 | 对**原始请求体字节**验签 `timestamp\nnonce\nbody\n`（`rawBody: true` 保留 Buffer），时间戳容差 5 分钟；未配置平台公钥一律 401 |
+| 微信证书轮换 | 按请求头 `Wechatpay-Serial` 从 `WECHAT_PLATFORM_PUBLIC_KEYS`（serial→PEM）精确选公钥；未知 serial 一律 401；未带 serial 回退 `WECHAT_PLATFORM_PUBLIC_KEY` |
+| 支付宝回调验签 | 原始 urlencoded 体用 `node:querystring` 自行解析后做 RSA2 验签（排除 `sign`，兼容 `sign_type` 两种官方拼法）；未配置公钥一律 401 |
+| 微信资源解密 | AEAD_AES_256_GCM，`apiV3Key` 必须 32 字符；解密失败 400 |
+| 防假支付 | `PAYMENT_LIVE=false` 时非 mock 渠道下单直接拒绝；`PAYMENT_LIVE=true` 时 mock 下单/回调返回 HTTP 403 |
+| 退款一致性 | 退款事务内 `SELECT ... FOR UPDATE` + 账户行锁；先校验积分余额再调渠道；渠道失败 → 整事务回滚（订单保持已支付、积分不动） |
 
-### 10.4 未实现（依赖外部资质）
+**渠道适配层**（`apps/api/src/modules/billing/channels/`）
 
-- `POST /billing/refund` 退款：需商户号与退款 SOP，Ph3 再做；
-- 微信 Native 下单（`code_url`）与支付宝当面付：当前仅落订单与回调入账，拉起收银台需真实商户配置。
+- `WechatPayV3Adapter`：商户私钥 RSA-SHA256 请求签名（`WECHATPAY2-SHA256-RSA2048`）、Native/H5/JSAPI 下单、按 `out_trade_no` 查单、关单、退款；JSAPI 另生成前端调起 `paySign`。
+- `AlipayAdapter`：RSA2 排序拼串签名、`precreate`/`page.pay`/`query`/`close`/`refund`；配置公钥时对网关响应原文验签。
+- 重试：网络错误/超时/HTTP 429/5xx 指数退避重试（默认 2 次）；4xx 与渠道业务错误码不重试（支付宝 `20000` 服务不可用按可重试处理）。
+- 统一错误 `ChannelError{code,retryable,httpStatus,vendorCode}`：`CHANNEL_NOT_CONFIGURED`（凭据不全→默认拒绝，绝不静默 mock）、`CHANNEL_AUTH_ERROR`、`CHANNEL_BUSINESS_ERROR`、`CHANNEL_RATE_LIMITED`、`CHANNEL_SERVER_ERROR`、`CHANNEL_NETWORK/TIMEOUT`、`CHANNEL_INVALID_RESPONSE`、`CHANNEL_SIGNATURE_INVALID`。
+- 凭据从 env 读取（见 §10.4），私钥支持 PEM 内联（`\n` 转义）或文件路径；适配器接受注入的 `fetch` 以便契约测试。
+
+### 10.4 上线所需环境变量
+
+```
+PAYMENT_LIVE=true
+# 微信 APIv3
+WECHAT_APP_ID / WECHAT_MCH_ID / WECHAT_MCH_SERIAL_NO
+WECHAT_MCH_PRIVATE_KEY（或 WECHAT_MCH_PRIVATE_KEY_PATH）
+WECHAT_API_V3_KEY（32 字符）
+WECHAT_PLATFORM_PUBLIC_KEY（或 _PATH，回调验签）
+# 证书轮换（推荐）：JSON {serial:PEM}，可同时配置新旧证书
+# WECHAT_PLATFORM_PUBLIC_KEYS（或 WECHAT_PLATFORM_PUBLIC_KEYS_PATH）
+WECHAT_NOTIFY_URL=https://<域名>/v1/billing/notify/wechat
+# 支付宝 RSA2
+ALIPAY_APP_ID
+ALIPAY_APP_PRIVATE_KEY（或 _PATH，请求签名）
+ALIPAY_PUBLIC_KEY（或 _PATH，回调/响应验签）
+ALIPAY_NOTIFY_URL=https://<域名>/v1/billing/notify/alipay
+ALIPAY_GATEWAY（默认生产网关，沙箱需显式覆盖）
+```
+
+凭据不全时对应渠道在 `GET /billing/channels` 标记 `configured:false` 并给出 `missing`，下单返回 `400101`（不会降级成 mock）。
+
+### 10.5 退款（全额，运营审批后执行）
+
+```
+GET  /ops/admin/orders?status=&page=&page_size=   // 运营查单（含退款留痕字段）
+POST /ops/admin/orders/{id}/refund                // 管理端鉴权（AdminGuard）
+     body { reason?: string, amount_cents?: int }  // amount_cents 仅用于声明/校验，必须等于订单金额
+  ← {order_id, status:4, status_label:"已退款", refund_no, refund_status, refund_amount_cents, refunded_at, idempotent, channel_refund_id?}
+```
+
+- **仅全额退款**：传 `amount_cents` 且不等于订单金额 → `400101 partial refund is not supported`。部分退款（按未消耗余额人工处理，E3 未成年人误充口径）本期走人工工单，不提供 API。
+- **仅已支付可退**：`status≠2` → `400101 order not refundable`；`status=4` 重复调用 → 幂等返回 `{idempotent:true}`（不重复扣积分、不重复调渠道）。
+- **积分回冲安全**：事务内先 `SELECT ... FOR UPDATE` 锁订单、再锁积分账户并校验 `balance >= credits`；不足 → `400101`（message 内含 `balance=/credits=`，提示人工按已消耗处理），绝不产生负余额、不破坏 `balance == Σdelta`。
+- **渠道一致性**：微信/支付宝退款在事务内调用（幂等单号固定 `rf-{orderId}`）；渠道失败 → 事务回滚 → 订单保持已支付、积分不冲正，返回 `745900 VENDOR_ERROR` / `745901 VENDOR_TIMEOUT`，运营可原单重试（渠道按幂等号去重）。
+- **落库字段**：`refund_no`（我方幂等号）、`refund_status`（`processing` 渠道异步处理中 / `succeeded`）、`refund_amount_cents`、`refunded_at`、`refund_reason`、`refund_operator`；负向流水 `credit_flows.kind=refund`（`delta=-credits`，`ref_order_id=订单`）。
+- 退款成功后 `status=4`；订单详情/历史 DTO 同步返回上述退款字段。
+
+### 10.6 生产启动守卫（fail fast）
+
+`NODE_ENV=production` 时 `buildEnv()` 在启动阶段聚合校验并拒绝启动（错误信息只含变量名，不含值）：
+
+- `JWT_SECRET` / `PHONE_HMAC_PEPPER` / `PHONE_ENC_KEY` 必须显式配置且不等于仓库默认值；
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 必须显式配置，且密码不能是开发默认值；`COOKIE_SECURE` 必须显式设置；
+- `PAYMENT_LIVE=true` 时：至少一个渠道凭据齐全；任何"已配置但缺项"的渠道会列出缺失变量（如微信缺 `WECHAT_APP_ID`）并拒绝启动。
+
+worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至少配置 `ARK_API_KEY` / `DEEPSEEK_API_KEY` / `HTTP_VIDEO_BASE_URL` 之一，否则拒绝启动。
+
+### 10.7 未实现（依赖外部资质/流程）
+
+- 部分退款 API（人工口径见 §10.5）；
+- 微信平台证书自动下载/轮换任务（当前手工更新 `WECHAT_PLATFORM_PUBLIC_KEYS`，见 `docs/05-ops/deployment.md`）；
+- 支付宝对账单下载与自动对账：待财务流程确定。
 
 
 ## 11. ops / admin（独立鉴权 admin_users）
@@ -384,6 +466,8 @@ GET  /ops/admin/task-metrics              // 失败率 + 错误码分布 + adapt
 GET  /ops/admin/failed-tasks.csv          // 失败任务清单导出(CSV, ≤1000 行)
 GET  /ops/admin/funnel                    // 流水线漏斗：建项→大纲→角色定稿→分镜→批量→成功(含转化率)
 GET  /ops/admin/reports · POST /ops/admin/reports/{id}/resolve {action:takedown|dismiss}
+GET  /ops/admin/orders?status=&page=&page_size=   // 订单列表（含退款留痕）
+POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（api-spec §10.5）
 ```
 
 > 鉴权：/ops/admin/* 需 admin_users 独立 JWT；无凭证 → 401101，携带普通用户 token → **403101**。

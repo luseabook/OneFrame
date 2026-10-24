@@ -1,3 +1,12 @@
+import {
+  classifyVendorHttpError,
+  classifyVendorNetworkError,
+  isRetryableVendorError,
+  looksLikeContentRejection,
+  readVendorJson,
+  VendorError,
+  vendorProtocolError,
+} from "./errors";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 export interface ArkVideoConfig {
@@ -14,16 +23,11 @@ export interface ArkVideoConfig {
 
 type Json = Record<string, unknown>;
 
-/** 可重试的失败（网络抖动、超时、5xx、429）；4xx 业务错误不重试 */
-export class RetryableVendorError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-    this.name = "RetryableVendorError";
-  }
-}
+const VENDOR = "ark";
+
+// 统一错误类型从 errors.ts 提供；此处 re-export 保持既有对外导入路径兼容
+export { RetryableVendorError } from "./errors";
+
 
 // 火山方舟（Ark）内容生成任务协议：
 // POST /api/v3/contents/generations/tasks  {model, content:[text, image_url...]}
@@ -64,7 +68,13 @@ export class ArkVideoAdapter implements ModelAdapter {
     };
     const data = await this.request("POST", "/api/v3/contents/generations/tasks", body);
     const id = typeof data.id === "string" ? data.id : typeof data.task_id === "string" ? data.task_id : undefined;
-    if (!id) throw new Error("ark response missing task id");
+    if (!id) {
+      throw vendorProtocolError("ark response missing task id", {
+        vendor: VENDOR,
+        operation: "POST /api/v3/contents/generations/tasks",
+        status: 200,
+      });
+    }
     return { vendor_task_id: id };
   }
 
@@ -98,10 +108,17 @@ export class ArkVideoAdapter implements ModelAdapter {
 
     if (status === "failed") {
       const error = data.error as { message?: string; code?: string } | undefined;
+      const code = error?.code;
+      const message = error?.message ?? "ark task failed";
+      // 失败原因含审核信号（如 OutputImageSensitiveContentDetected）→ 按审核驳回处理，
+      // 走 REVIEW_REJECTED（745802）而不是普通失败，前端才能提示「改提示词重试」
+      if (looksLikeContentRejection(`${code ?? ""} ${message}`)) {
+        return { status: "review_rejected", error: { code: "output_rejected", message }, raw: data };
+      }
       return {
         status: "failed",
         // 错误码与全站口径统一（vendor_error）
-        error: { code: error?.code ?? "vendor_error", message: error?.message ?? "ark task failed" },
+        error: { code: code ?? "vendor_error", message },
         raw: data,
       };
     }
@@ -149,8 +166,7 @@ export class ArkVideoAdapter implements ModelAdapter {
         return await this.requestOnce(method, path, body);
       } catch (err) {
         lastError = err;
-        const retryable = err instanceof RetryableVendorError;
-        if (!retryable || attempt === this.maxRetries) break;
+        if (!isRetryableVendorError(err) || attempt === this.maxRetries) break;
         await new Promise((r) => setTimeout(r, this.retryBaseMs * 2 ** attempt));
       }
     }
@@ -160,6 +176,7 @@ export class ArkVideoAdapter implements ModelAdapter {
   private async requestOnce(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60_000);
+    const operation = `${method} ${path}`;
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
@@ -172,16 +189,15 @@ export class ArkVideoAdapter implements ModelAdapter {
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        const retryable = res.status >= 500 || res.status === 429;
-        const message = `ark ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`;
-        if (retryable) throw new RetryableVendorError(message, res.status);
-        throw new Error(message);
+        // 错误体（{error:{code,message}} / {code,message}）统一映射；4xx 不重试
+        throw classifyVendorHttpError(res.status, text, { vendor: VENDOR, operation });
       }
-      return (await res.json()) as Json;
+      return await readVendorJson(res, { vendor: VENDOR, operation });
     } catch (err) {
+      if (err instanceof VendorError) throw err;
       // 超时 / 网络层错误 → 可重试
-      if (err instanceof Error && (err.name === "AbortError" || err.name === "TypeError")) {
-        throw new RetryableVendorError(`ark ${method} ${path} network error: ${err.message}`);
+      if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError" || err.name === "TypeError")) {
+        throw classifyVendorNetworkError(err, { vendor: VENDOR, operation });
       }
       throw err;
     } finally {

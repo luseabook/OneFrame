@@ -1,5 +1,12 @@
+import {
+  classifyVendorHttpError,
+  classifyVendorNetworkError,
+  isRetryableVendorError,
+  VendorError,
+  vendorParamError,
+  vendorProtocolError,
+} from "./errors";
 import type { ModelAdapter, NormalizedGenRequest } from "./types";
-import { RetryableVendorError } from "./ark-video";
 
 export interface DeepSeekConfig {
   apiKey: string;
@@ -43,7 +50,7 @@ export class DeepSeekChatAdapter implements ModelAdapter {
         return await this.chatOnce(messages, options);
       } catch (err) {
         lastError = err;
-        if (!(err instanceof RetryableVendorError) || attempt === this.maxRetries) break;
+        if (!isRetryableVendorError(err) || attempt === this.maxRetries) break;
         await new Promise((r) => setTimeout(r, this.retryBaseMs * 2 ** attempt));
       }
     }
@@ -55,6 +62,7 @@ export class DeepSeekChatAdapter implements ModelAdapter {
     options: { temperature?: number; maxTokens?: number },
   ): Promise<{ text: string; usage: Record<string, unknown> | null }> {
     const base = (this.config.baseUrl ?? "https://api.deepseek.com").replace(/\/$/, "");
+    const operation = "POST /chat/completions";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 30_000);
     try {
@@ -74,21 +82,40 @@ export class DeepSeekChatAdapter implements ModelAdapter {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        const message = `deepseek http ${res.status}: ${body.slice(0, 300)}`;
-        // 429 限流与 5xx 可重试；4xx（鉴权/参数）不重试
-        if (res.status === 429 || res.status >= 500) {
-          throw new RetryableVendorError(message, res.status);
-        }
-        throw new Error(message);
+        // 统一错误映射（401/403→auth_error、402→quota_exceeded、429→rate_limited 可重试、
+        // 5xx→可重试、其他 4xx→invalid_param/vendor_error 不重试）；
+        // messagePrefix 保持既有 `deepseek http <status>:` 文案，避免破坏日志/告警匹配
+        throw classifyVendorHttpError(res.status, body, {
+          vendor: "deepseek",
+          operation,
+          messagePrefix: "deepseek http ",
+        });
       }
-      const data = (await res.json()) as ChatResponse;
+      let data: ChatResponse;
+      try {
+        data = (await res.json()) as ChatResponse;
+      } catch {
+        throw vendorProtocolError("deepseek response is not valid json", {
+          vendor: "deepseek",
+          operation,
+          status: res.status,
+        });
+      }
       const choice = data.choices?.[0];
       const text = choice?.message?.content;
-      if (typeof text !== "string") throw new Error("deepseek response missing choices[0].message.content");
+      if (typeof text !== "string") {
+        // 结构错误重试无益（已计费的调用多半也不会变），显式失败便于上层告警
+        throw vendorProtocolError("deepseek response missing choices[0].message.content", {
+          vendor: "deepseek",
+          operation,
+          status: res.status,
+        });
+      }
       return { text, usage: data.usage ?? null };
     } catch (err) {
-      if (err instanceof Error && (err.name === "AbortError" || err.name === "TypeError")) {
-        throw new RetryableVendorError(`deepseek network error: ${err.message}`);
+      if (err instanceof VendorError) throw err;
+      if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError" || err.name === "TypeError")) {
+        throw classifyVendorNetworkError(err, { vendor: "deepseek" });
       }
       throw err;
     } finally {
@@ -98,7 +125,12 @@ export class DeepSeekChatAdapter implements ModelAdapter {
 
   async submit(req: NormalizedGenRequest) {
     const prompt = req.request.input.prompt;
-    if (!prompt) throw new Error("deepseek adapter requires input.prompt");
+    if (!prompt) {
+      throw vendorParamError("deepseek adapter requires input.prompt", {
+        vendor: "deepseek",
+        operation: "POST /chat/completions",
+      });
+    }
     const { text, usage } = await this.chat([{ role: "user", content: prompt }]);
     return {
       sync_results: [{ uri: "", text, meta: { model: this.config.model ?? "deepseek-chat", usage } }],

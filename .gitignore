@@ -32,4 +32,7 @@ rea-reelmate/*
 !rea-reelmate/*.png
 
 # 验收临时脚本与依赖（不入库）
-_acceptance/
+# 验收脚本默认不入库（含临时调试脚本）；仅保留可复跑门禁脚本
+_acceptance/*
+!_acceptance/compliance-check.cjs
+!_acceptance/b-type-acceptance.ps1

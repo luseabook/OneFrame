@@ -76,7 +76,12 @@ export function decryptWechatResource(params: {
 
 /**
  * 支付宝回调验签（RSA2）。
- * 签名内容：将所有非 sign / sign_type 参数按 key 升序拼成 k=v&k=v。
+ *
+ * 待验签内容：所有非空参数按 key 升序拼成 `k=v&k=v`。
+ * 关于 `sign_type`：官方文档（异步通知）要求排除 `sign` 与 `sign_type`，
+ * 而部分服务端 SDK 的 rsaCheckV2 只排除 `sign`。两种规则都是对同一私钥签名结果的
+ * 确定性校验，攻击者无法在缺少私钥时伪造任一版本；因此这里依次尝试两种拼法，
+ * 任一通过即认为验签成功（避免因渠道/SDK 版本差异导致回调被误拒、订单不到账）。
  */
 export function verifyAlipaySignature(input: {
   params: Record<string, string>;
@@ -88,20 +93,29 @@ export function verifyAlipaySignature(input: {
   const signature = params.sign;
   if (!signature) return false;
 
-  const keys = Object.keys(params)
-    .filter((k) => k !== "sign" && k !== "sign_type" && params[k] !== undefined && params[k] !== "")
-    .sort();
-  const content = keys.map((k) => `${k}=${params[k]}`).join("&");
+  const buildContent = (excluded: string[]): string =>
+    Object.keys(params)
+      .filter((k) => !excluded.includes(k) && params[k] !== undefined && params[k] !== "")
+      .sort()
+      .map((k) => `${k}=${params[k]}`)
+      .join("&");
 
-  try {
-    const algo = signType === "RSA2" ? "RSA-SHA256" : "RSA-SHA1";
-    const verifier = createVerify(algo);
-    verifier.update(content, "utf8");
-    verifier.end();
-    return verifier.verify(publicKeyPem, Buffer.from(signature, "base64"));
-  } catch {
-    return false;
+  const algo = signType === "RSA2" ? "RSA-SHA256" : "RSA-SHA1";
+  const signatureBytes = Buffer.from(signature, "base64");
+  for (const excluded of [
+    ["sign", "sign_type"],
+    ["sign"],
+  ]) {
+    try {
+      const verifier = createVerify(algo);
+      verifier.update(buildContent(excluded), "utf8");
+      verifier.end();
+      if (verifier.verify(publicKeyPem, signatureBytes)) return true;
+    } catch {
+      // 换下一种拼法继续验证
+    }
   }
+  return false;
 }
 
 /** 常时序比较（用于自定义签名算法，防时序攻击） */

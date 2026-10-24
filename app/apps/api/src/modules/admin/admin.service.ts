@@ -7,6 +7,7 @@ import {
   exportJobs,
   modelPrices,
   models,
+  orders,
   projectAssets,
   scriptProjects,
   storyboards,
@@ -265,6 +266,43 @@ export class AdminService {
         status: row.status,
         created_at: row.createdAt.toISOString(),
         expires_at: row.expiresAt?.toISOString() ?? null,
+      })),
+      total: countRow?.count ?? 0,
+      page: p,
+      page_size: ps,
+    };
+  }
+
+  /** 订单列表（api-spec §10.5）：运营按状态查单、核对退款留痕 */
+  async listOrders(page?: number, pageSize?: number, status?: number) {
+    const { page: p, pageSize: ps, offset } = pageArgs(page, pageSize);
+    const where = status !== undefined ? eq(orders.status, status) : undefined;
+    const rows = await db
+      .select()
+      .from(orders)
+      .where(where)
+      .orderBy(desc(orders.createdAt))
+      .limit(ps)
+      .offset(offset);
+    const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(orders).where(where);
+    return {
+      list: rows.map((row) => ({
+        order_id: String(row.id),
+        space_id: String(row.spaceId),
+        user_id: String(row.userId),
+        sku: row.sku,
+        amount_cents: row.amountCents,
+        credits: row.credits,
+        channel: row.channel,
+        status: row.status,
+        paid_at: row.paidAt?.toISOString() ?? null,
+        refund_no: row.refundNo,
+        refund_status: row.refundStatus,
+        refund_amount_cents: row.refundAmountCents,
+        refunded_at: row.refundedAt?.toISOString() ?? null,
+        refund_reason: row.refundReason,
+        refund_operator: row.refundOperator,
+        created_at: row.createdAt.toISOString(),
       })),
       total: countRow?.count ?? 0,
       page: p,
