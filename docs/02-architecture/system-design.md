@@ -109,11 +109,35 @@ Worker                 Adapter(火山…)          OSS            PG/Redis
 |---|---|---|
 | Worker 崩溃（任务卡 RUNNING） | 心跳表 + 看门狗扫描 RUNNING>10min | 重新入 poll 队；供应商侧幂等（vendor_task_id 去重） |
 | 供应商全面不可用 | adapter 健康探测(探针任务/错误率) | 熔断该模型：目录置灰 + 前端提示切换 |
+| 供应商 5xx / 429 / 网络抖动 | adapter 内建重试（指数退避） | 默认重试 2 次（`maxRetries`），4xx 业务错误不重试 |
 | OSS 转存失败 | transfer 队重试 3 次 | 降级：直接引用供应商 URL（24h 内）+ 告警人工补转 |
 | AI 标识后处理失败 | probe/水印断言 | 重试 3 次；仍失败→FAILED 且不结算 + 告警；禁止无标识产物对外（合规硬门） |
 | 支付回调丢失 | 对账任务每 5min 查未终态订单 | 主动查单补账 |
+| 支付回调被伪造 | 渠道签名验签（默认拒绝） | 微信 RSA-SHA256 + 5min 时间戳容差；支付宝 RSA2；未配公钥一律 401101 |
 | Redis 队列丢失(灾备) | 队列镜像/持久化(AOF) | PG tasks 表是事实来源，可重放入队 |
 | 秒级重复提交 | 幂等键 | 5min 内同键返回原任务 |
+
+### 4.1 供应商适配器契约（`packages/model-adapters`）
+
+所有适配器实现统一接口 `ModelAdapter`（`submit` / `poll` / `cancel`），**状态与错误码归一化**，上层不感知供应商差异。
+
+| 归一化状态 | 供应商原始状态示例 | 上层动作 |
+|---|---|---|
+| `pending` | `queued` / `pending` | 继续轮询 |
+| `running` | `running` / `processing` | 继续轮询 |
+| `succeeded` | `succeeded` / `success` | 转存 OSS → 结算 |
+| `failed` | `failed` / `error` / `cancelled` | 置 FAILED → 解冻积分 |
+| `review_rejected` | `rejected` / `review_rejected` / `audit_failed` | 置 REVIEW_REJECTED → 解冻 + 745802 |
+
+**错误码统一**（与 `packages/shared` errors 对齐）：
+- 内容审核驳回 → `output_rejected`（任务码 **745802**）
+- 供应商执行失败/无结果 → `vendor_error`（任务码 **745900**）
+- 超时 → `vendor_timeout`（**745901**）
+
+> **实现约束（踩过的坑）**：`review_rejected` 必须在状态归一化**之前**单独识别，
+> 否则会落入 `unknown → running` 分支造成**无限轮询、积分永久冻结**（已加契约测试锁死）。
+
+**重试策略**：仅重试「网络错误 / 超时 / 5xx / 429」，指数退避（默认 2 次，基础 400~500ms）；4xx 业务错误不重试。
 
 ## 5. 容量与扩展路径
 
