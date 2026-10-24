@@ -237,4 +237,15 @@ describe("P1 vertical slice: auth → quote → generation → cancel", () => {
     expect(me.body.data.credits.balance).toBe(80);
     expect(me.body.data.credits.frozen).toBe(0);
   });
+
+  it("deletes the account and redacts task records", async () => {
+    const deleted = await inject("POST", "/me/delete", {}, { authorization: `Bearer ${token}` });
+    expect(deleted.body.code).toBe(0);
+    expect(deleted.body.data.ok).toBe(true);
+    expect(new Date(deleted.body.data.purge_after).getTime()).toBeGreaterThan(Date.now());
+
+    // 注销后账号停用，原 token 不再可用
+    const me = await inject("GET", "/me", undefined, { authorization: `Bearer ${token}` });
+    expect(me.body.code).not.toBe(0);
+  });
 });

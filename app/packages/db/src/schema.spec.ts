@@ -69,6 +69,12 @@ describe("db schema contract (database.md P1)", () => {
     );
   });
 
+  it("users keeps age declaration and account deletion columns", () => {
+    expect(cols(schema.users)).toEqual(
+      expect.arrayContaining(["status", "age_declared_at", "deleted_at"]),
+    );
+  });
+
   it("tasks keeps pipeline/idempotency/credit columns", () => {
     expect(cols(schema.tasks)).toEqual(
       expect.arrayContaining([

@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { Worker } from "bullmq";
 import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import pino from "pino";
-import { assets, createDb, tasks } from "@app/db";
+import { assets, createDb, tasks, users } from "@app/db";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
@@ -117,7 +117,12 @@ async function runMaintenance(): Promise<void> {
       .delete(assets)
       .where(and(isNotNull(assets.deletedAt), lt(assets.deletedAt, new Date(Date.now() - 7 * 86_400_000))))
       .returning({ id: assets.id });
-    log.info({ purged_assets: deleted.length }, "maintenance done");
+    // 注销账号满 30 天 → 物理清理（PRD F1）
+    const purgedUsers = await db
+      .delete(users)
+      .where(and(isNotNull(users.deletedAt), lt(users.deletedAt, new Date(Date.now() - 30 * 86_400_000))))
+      .returning({ id: users.id });
+    log.info({ purged_assets: deleted.length, purged_users: purgedUsers.length }, "maintenance done");
   } catch (err) {
     log.warn({ err: err instanceof Error ? err.message : String(err) }, "maintenance failed");
   }

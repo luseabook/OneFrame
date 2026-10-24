@@ -75,7 +75,8 @@ pnpm test && pnpm build           # CI 四件套本地预演
 - [x] 失败率/adapter 延迟/失败清单 CSV 导出；分镜失败重投幂等（不重复扣费）；续投预算预填；价格表未覆盖时长时就近低档计费
 - [x] 定妆图转通用资产（自动打 `#角色` 标签，跨项目复用）
 - [x] 输出审核：供应商 review_rejected → 745802（任务状态 7）；LLM 输出同词表审核
-- [x] **代码侧 MVP 验收完成**：F1–F8 全部验收点落地，API 45 + adapters 9 测试通过，全栈 Compose 冒烟通过（见 `deliverables/software-company/mvp-fullstack-acceptance-2026-10-24.md`）
+- [x] 账号注销（脱敏 + 30 天清理 + token 即时失效）+ `/settings` 注销入口 + 用户协议/隐私政策/举报页
+- [x] **代码侧 MVP 验收完成**：F1–F8 全部验收点落地，API 46 + adapters 9 测试通过，全栈 Compose 冒烟通过（见 `deliverables/software-company/mvp-fullstack-acceptance-2026-10-24.md`）
 - [ ] 剩余外部依赖：真实 Ark Key/企业认证/ICP 备案、支付 Beta、供应商词库运营（详见 `deliverables/software-company/mvp-acceptance-audit-2026-10-24.md`）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）

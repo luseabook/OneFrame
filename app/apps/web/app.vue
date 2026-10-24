@@ -34,6 +34,7 @@ async function logout(): Promise<void> {
           <template v-if="user">
             <span class="balance" title="可用 / 冻结">积分 {{ balance }}<span v-if="frozen">（冻 {{ frozen }}）</span></span>
             <span class="nickname">{{ user.nickname }}</span>
+            <NuxtLink to="/settings" class="link-btn">设置</NuxtLink>
             <button class="link-btn" @click="logout">退出</button>
           </template>
           <NuxtLink v-else to="/login" class="login-btn">登录 / 注册</NuxtLink>
@@ -44,9 +45,15 @@ async function logout(): Promise<void> {
     <footer class="footer">
       <span>内容由 AI 生成，请仔细甄别</span>
       <span class="sep">·</span>
+      <NuxtLink to="/report" class="report-link">举报 / 投诉</NuxtLink>
+      <span class="sep">·</span>
+      <NuxtLink to="/terms" class="report-link">用户协议</NuxtLink>
+      <span class="sep">·</span>
+      <NuxtLink to="/privacy" class="report-link">隐私政策</NuxtLink>
+      <span class="sep">·</span>
       <span>ICP 备案号占位（上线前替换，docs/06-security-compliance/compliance.md A3）</span>
       <span class="sep">·</span>
-      <a class="report-link" href="mailto:report@example.com?subject=%E5%86%85%E5%AE%B9%E4%B8%BE%E6%8A%A5">举报 / 投诉</a>
+      <a class="report-link" href="mailto:report@example.com?subject=%E5%86%85%E5%AE%B9%E4%B8%BE%E6%8A%A5">举报邮箱</a>
     </footer>
   </div>
 </template>

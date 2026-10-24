@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Req, Res , Inject} from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { loginRequestSchema, smsCodeRequestSchema } from "@app/shared";
+import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode } from "@app/shared";
 import { env } from "../../config/env";
 import { Public } from "../../common/public.decorator";
 import { parseOrThrow } from "../../common/zod";
@@ -63,6 +63,16 @@ export class AuthController {
     const auth = req.auth;
     if (!auth) return null;
     return this.auth.me(auth.userId, auth.spaceId);
+  }
+
+  // 账号注销（PRD F1）
+  @Post("me/delete")
+  async deleteAccount(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: FastifyReply) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    const result = await this.auth.deleteAccount(auth.userId, auth.spaceId);
+    res.clearCookie("refresh_token", { path: "/v1/auth" });
+    return result;
   }
 
   @Public()

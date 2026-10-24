@@ -8,6 +8,7 @@ import {
   inviteRedemptions,
   spaceMembers,
   spaces,
+  tasks,
   users,
   waitlistEntries,
 } from "@app/db";
@@ -136,6 +137,33 @@ export class AuthService {
       space_id: String(spaceId),
       refresh_token: refreshToken,
     };
+  }
+
+  // 账号注销（PRD F1）：立即停用登录、任务记录脱敏、30 天后物理清理
+  async deleteAccount(userId: string, spaceId: string): Promise<{ ok: true; purge_after: string }> {
+    const deletedAt = new Date();
+    const purgeAfter = new Date(deletedAt.getTime() + 30 * 86_400_000);
+    await db.transaction(async (tx) => {
+      // 身份解绑（允许同手机号重新注册）
+      await tx
+        .update(identities)
+        .set({ phoneHash: null, phoneCipher: null, externalId: null, updatedAt: deletedAt })
+        .where(eq(identities.userId, BigInt(userId)));
+      // 账号停用
+      await tx
+        .update(users)
+        .set({ status: 2, nickname: "已注销用户", avatarUri: null, deletedAt, updatedAt: deletedAt })
+        .where(eq(users.id, BigInt(userId)));
+      // 任务记录脱敏：清空输入与结果，保留计数用于对账
+      await tx
+        .update(tasks)
+        .set({ input: { redacted: true }, results: [], status: 5, finishedAt: deletedAt, updatedAt: deletedAt })
+        .where(eq(tasks.userId, BigInt(userId)));
+      // 空间成员关系解除
+      await tx.delete(spaceMembers).where(eq(spaceMembers.spaceId, BigInt(spaceId)));
+      await tx.delete(spaceMembers).where(eq(spaceMembers.userId, BigInt(userId)));
+    });
+    return { ok: true, purge_after: purgeAfter.toISOString() };
   }
 
   async me(userId: string, spaceId: string) {

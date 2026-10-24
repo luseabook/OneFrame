@@ -31,6 +31,8 @@ export const users = pgTable("users", {
   status: smallint("status").notNull().default(1), // 1 正常 2 封禁
   ageDeclaredAt: timestamp("age_declared_at", { withTimezone: true }),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  /** 注销时间；保留 30 天后由维护任务物理清理（PRD F1） */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
