@@ -9,6 +9,9 @@ env:
   REDIS_URL: redis://localhost:6379
   NODE_ENV: test
   JWT_SECRET: ci-test-jwt-secret-0123456789abcdef
+  S3_TEST_ENDPOINT: http://127.0.0.1:9000
+  S3_TEST_ACCESS_KEY_ID: minioadmin
+  S3_TEST_SECRET_ACCESS_KEY: minioadmin
 
 defaults:
   run:
@@ -56,6 +59,16 @@ jobs:
       - run: pnpm --filter @app/db build
       - run: pnpm --filter @app/api db:migrate
       - run: pnpm --filter @app/api db:seed
+      - name: Start MinIO (S3 integration)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live && break
+            sleep 1
+          done
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

@@ -1,6 +1,14 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": ["NODE_ENV", "DATABASE_URL", "REDIS_URL", "JWT_SECRET"],
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "JWT_SECRET",
+    "S3_TEST_ENDPOINT",
+    "S3_TEST_ACCESS_KEY_ID",
+    "S3_TEST_SECRET_ACCESS_KEY"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
