@@ -9,6 +9,8 @@ env:
   REDIS_URL: redis://localhost:6379
   NODE_ENV: test
   JWT_SECRET: ci-test-jwt-secret-0123456789abcdef
+  # 测试并发发码会挤占同一 IP 的频控桶，CI 内放宽阈值
+  SMS_IP_HOURLY_LIMIT: "100000"
 
 defaults:
   run:

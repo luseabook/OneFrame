@@ -534,3 +534,44 @@ export const skus = pgTable("skus", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * 支付订单（PRD §10 / api-spec §10）。
+ * 状态机：1 待支付 → 2 已支付（已入账） / 3 已关闭 / 4 已退款
+ * 幂等键：channel + channelOrderId 唯一，回调重复到达不会重复入账。
+ */
+export const orders = pgTable(
+  "orders",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    skuId: bigint("sku_id", { mode: "bigint" })
+      .notNull()
+      .references(() => skus.id),
+    sku: text("sku").notNull(),
+    /** 金额（分）：下单时快照，不随 sku 调价变化 */
+    amountCents: integer("amount_cents").notNull(),
+    /** 应到账积分：下单时快照 */
+    credits: integer("credits").notNull(),
+    channel: text("channel").notNull(), // wechat|alipay|mock
+    /** 渠道侧订单号（回调对账用） */
+    channelOrderId: text("channel_order_id"),
+    status: smallint("status").notNull().default(1), // 1待支付 2已支付 3已关闭 4已退款
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** 前端轮询用的一次性凭证（不暴露内部 id 规则） */
+    payToken: text("pay_token"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_orders_space").on(t.spaceId, t.createdAt.desc()),
+    uniqueIndex("uq_orders_channel_order").on(t.channel, t.channelOrderId),
+    index("idx_orders_status").on(t.status),
+  ],
+);

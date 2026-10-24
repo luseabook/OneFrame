@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { db } from "./database";
-import { modelPrices, models } from "@app/db";
+import { modelPrices, models, skus } from "@app/db";
 
 // 种子数据：首批 10 个模型（从 RE 46 模型目录中选型，见 docs/02-architecture/database.md §2）
 // ⚠️ 价格均为 PLACEHOLDER（按 RE 实测锚点：文生视频 5s/720p = 8 积分；1080P≈×2）。
@@ -394,6 +394,14 @@ for (const model of MODEL_SEED) {
   }
 }
 
+
+// 支付 SKU 目录（PRD §10）：10 积分 = 1 元，Alpha/Beta 期不打折
+const SKU_SEED = [
+  { sku: "credits-500", label: "500 积分", priceCents: 5000, credits: 500 },
+  { sku: "credits-1000", label: "1000 积分", priceCents: 10000, credits: 1000 },
+  { sku: "credits-3000", label: "3000 积分", priceCents: 30000, credits: 3000 },
+  { sku: "credits-6000", label: "6000 积分", priceCents: 60000, credits: 6000 },
+];
 async function main(): Promise<void> {
   const modelIds = MODEL_SEED.map((m) => m.id);
   await db.transaction(async (tx) => {
@@ -411,7 +419,18 @@ async function main(): Promise<void> {
     }
   });
 
-  console.log(`[seed] models=${MODEL_SEED.length}, prices=${PRICE_SEED.length} (PLACEHOLDER pricing)`);
+  // SKU 目录：按 sku 唯一键 upsert，幂等
+  for (const s of SKU_SEED) {
+    await db
+      .insert(skus)
+      .values({ id: BigInt(Date.now()) * 1000n + BigInt(SKU_SEED.indexOf(s)), kind: "credits", active: true, ...s })
+      .onConflictDoUpdate({
+        target: skus.sku,
+        set: { label: s.label, priceCents: s.priceCents, credits: s.credits, active: true, updatedAt: new Date() },
+      });
+  }
+
+  console.log(`[seed] models=${MODEL_SEED.length}, prices=${PRICE_SEED.length}, skus=${SKU_SEED.length}`);
   process.exitCode = 0;
 }
 

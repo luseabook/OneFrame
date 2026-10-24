@@ -50,6 +50,13 @@
       "when": 1792859529673,
       "tag": "0006_smiling_wendell_vaughn",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792868153109,
+      "tag": "0007_groovy_christian_walker",
+      "breakpoints": true
     }
   ]
 }

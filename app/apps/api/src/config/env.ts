@@ -29,12 +29,25 @@ const envSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
+  // 短信 IP 频控阈值（条/小时）：测试环境需放宽，否则多测试文件并行发码会互相挤占
+  SMS_IP_HOURLY_LIMIT: z.coerce.number().int().min(1).default(20),
   // 新用户是否自动获得示例作品（PRD 增补 §3.2 首次体验）
   SEED_SAMPLE_PROJECT: z
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
   QUOTE_TTL_S: z.coerce.number().int().min(30).default(300),
+
+  // ── 支付（PRD §10 / api-spec §10）──
+  // PAYMENT_LIVE=false：仅允许 mock 渠道（联调用），非 mock 下单直接拒绝，避免"假支付"上线
+  PAYMENT_LIVE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  ORDER_TTL_S: z.coerce.number().int().min(60).default(900), // 订单有效期 15min
+  WECHAT_MCH_ID: z.string().optional(),
+  WECHAT_API_V3_KEY: z.string().optional(),
+  ALIPAY_APP_ID: z.string().optional(),
 
   // LLM 步骤（大纲/角色/剧本/分镜）：mock 用于本地/CI；real 需 DEEPSEEK_API_KEY
   LLM_MODE: z.enum(["mock", "real"]).default("mock"),

@@ -18,7 +18,7 @@ export class SmsService {
     if (perDay > 5) throw new AppError(ErrorCode.RATE_LIMITED, "今日发送次数已达上限");
     if (ip) {
       const perIp = await this.redis.incrWithTtl(`sms:ip:${ip}`, 3600);
-      if (perIp > 20) throw new AppError(ErrorCode.RATE_LIMITED, "当前网络发码次数已达上限");
+      if (perIp > env.SMS_IP_HOURLY_LIMIT) throw new AppError(ErrorCode.RATE_LIMITED, "当前网络发码次数已达上限");
     }
 
     const code = String(randomInt(100_000, 1_000_000));

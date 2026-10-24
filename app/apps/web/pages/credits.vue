@@ -35,12 +35,15 @@ async function load(): Promise<void> {
 
 const KIND_META: Record<string, { label: string; tone: "neutral" | "success" | "brand" | "warning" | "danger" }> = {
   gift: { label: "赠送", tone: "success" },
+  recharge: { label: "充值", tone: "success" },
   freeze: { label: "冻结", tone: "warning" },
   settle: { label: "结算", tone: "neutral" },
   unfreeze: { label: "解冻", tone: "brand" },
+  // 兼容旧口径（后端历史数据可能为 purchase）
   purchase: { label: "充值", tone: "success" },
   refund: { label: "退款", tone: "brand" },
   invite: { label: "邀请", tone: "success" },
+  adjust: { label: "调整", tone: "neutral" },
 };
 
 const kindLabel = (kind: string): string => KIND_META[kind]?.label ?? kind;

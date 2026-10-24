@@ -7,6 +7,7 @@ import { AdminModule } from "./modules/admin/admin.module";
 import { AssetsModule } from "./modules/assets/assets.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { CreditsModule } from "./modules/credits/credits.module";
+import { BillingModule } from "./modules/billing/billing.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
 import { ModelsModule } from "./modules/models/models.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
@@ -29,6 +30,7 @@ import { StorageModule } from "./storage/storage.module";
     AuthModule,
     ModelsModule,
     CreditsModule,
+    BillingModule,
     GenerationsModule,
     TasksModule,
     ScriptModule,
