@@ -46,6 +46,26 @@ const adapterOptions: AdapterRuntimeOptions = {
         },
       }
     : {}),
+  ...(process.env.HTTP_VIDEO_BASE_URL
+    ? {
+        httpVideo: {
+          baseUrl: process.env.HTTP_VIDEO_BASE_URL,
+          apiKey: process.env.HTTP_VIDEO_API_KEY,
+          submitPath: process.env.HTTP_VIDEO_SUBMIT_PATH,
+          pollPath: process.env.HTTP_VIDEO_POLL_PATH,
+          cancelPath: process.env.HTTP_VIDEO_CANCEL_PATH,
+          modelMap: (() => {
+            try {
+              return process.env.HTTP_VIDEO_MODEL_MAP
+                ? (JSON.parse(process.env.HTTP_VIDEO_MODEL_MAP) as Record<string, string>)
+                : undefined;
+            } catch {
+              return undefined;
+            }
+          })(),
+        },
+      }
+    : {}),
 };
 
 const aiLabel = {

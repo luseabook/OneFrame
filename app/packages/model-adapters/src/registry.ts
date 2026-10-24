@@ -1,4 +1,5 @@
 import { DeepSeekChatAdapter, type DeepSeekConfig } from "./deepseek";
+import { HttpVideoAdapter, type HttpVideoConfig } from "./http-video";
 import { MockAdapter, type MockAdapterOptions } from "./mock";
 import type { ModelAdapter } from "./types";
 
@@ -8,6 +9,8 @@ export interface AdapterRuntimeOptions {
   mode: AdapterMode;
   mock?: MockAdapterOptions;
   deepseek?: DeepSeekConfig;
+  /** 通用 HTTP 视频供应商（火山/百炼网关或自建代理） */
+  httpVideo?: HttpVideoConfig;
 }
 
 const sharedMock = new MockAdapter();
@@ -23,6 +26,10 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
     }
     return new DeepSeekChatAdapter(options.deepseek);
   }
+  // 配置了 HTTP 视频网关时，所有视频/图像供应商 code 走通用适配器
+  if (options.httpVideo?.baseUrl) {
+    return new HttpVideoAdapter(options.httpVideo);
+  }
   if (
     code.startsWith("volcengine:") ||
     code.startsWith("aliyun:") ||
@@ -35,4 +42,4 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
   throw new Error(`unknown adapter_code: ${code}`);
 }
 
-export { DeepSeekChatAdapter, MockAdapter };
+export { DeepSeekChatAdapter, HttpVideoAdapter, MockAdapter };
