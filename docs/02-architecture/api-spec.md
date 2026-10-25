@@ -5,6 +5,9 @@
 > v1.1 · 2026-10-24 · 按启动前审查报告修订（P0-04/05/10、P1-03/05/08/10/11/12/22/24、P2-03/08/21/23）
 > v1.2 · 2026-10-24 · 按《逆向一致性审查》修订：模型目录字段对齐 46 模型目录（mode_order/endpoint/default_*/resolution label）、批量报价与折扣字段、mode/scene 键补 `studio_asset_image` 等、预算触顶改逐镜 200 部分成功、新增 share/split/导出部分成功规则、错误码来源标注与 400104/400105/400106、任务与资产定稿门槛（RE-01~RE-20）
 > v1.3 · 2026-10-24 · 与实现同步：`/models` 增 `audio_video_support`；错误码 400104~400107 已落 `packages/shared`；P1 数据层 16 表见 database v1.3
+> **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
+> 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
+> 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
 
 ## 1. 通用约定
 
@@ -41,6 +44,7 @@
 | 4001xx | 400105 | ASSET_NOT_READY：引用的角色/场景资产未定稿（无 portrait_asset_id 或 status≠2） |
 | 4001xx | 400106 | EXPORT_INCOMPLETE：成功镜占比 <80%，拒绝全集导出 |
 | 4001xx | 400107 | QUOTE_REQUIRED：批量投递缺批量报价（预算上限来源不可缺失） |
+| 4001xx | 400108 | **TEAM_SEAT_EXCEEDED**：团队席位数已满（邀请/绑定成员时；`data.limit` 附当前上限） |
 | 4011xx | 401101 | token 无效 |
 | 4011xx | 401102 | token 已过期 |
 | 4031xx | 403101 | 越权访问资源 |
@@ -56,6 +60,8 @@
 | 7460xx | 746001 | 幂等重放 |
 | 7460xx | 746002 | 版本冲突（Ph3 画布） |
 | 7460xx | 746003 | NODE_LOCKED：画布节点被他端锁定（Ph3） |
+| 7460xx | 746004 | **STREAM_CURSOR_EXPIRED**：SSE 续传游标已失效，客户端须全量重建后重连（会话仍存在，勿按 400102 处理） |
+| 7460xx | 746005 | **AGENT_TURN_IN_FLIGHT**：同会话已有在途轮次（仅在客户端显式 `?wait=1` 时返回；默认语义为排队 200） |
 | 5xxxxx | 500000 | INTERNAL：服务端内部错误 |
 
 **码表来源与偏离声明**：745701（Insufficient Balance）与 RE 实测码同义；745703/745801/745802/7460xx 为本产品自造码——RE 的版本冲突/节点锁是 CLI 进程退出码 9/10，不是业务码，不得声称"竞品对齐"。745702 仅在 quote 与提交值不一致时使用；746002/746003 仅 Ph3 画布。RE 的 741001（长轮询超时）不使用：我们以 `304 + ETag` 轮询替代长轮询。
@@ -635,3 +641,113 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | tasks/{id}/share | 5/分 | — |
 | tasks 轮询 | 30/分 | — |
 | 其余 GET | 120/分 | 600/分 |
+
+---
+
+## 14. 四新域端点总则（F1 契约 · 2026-10-26）
+
+> 背景：全站 1:1 复刻引入 `canvas` / `agent` / `cam` / `film` 四个新域。
+> 本节定**总则与端点族清单**；逐端点的方法/请求体/响应/错误码见两份草案，F2 起按域落实现。
+
+### 14.1 端点规模（覆盖核对基线）
+
+| 域 | 路径数 | 方法×路径 | routes.txt 行号 | 归属说明 |
+|---|---:|---:|---|---|
+| `canvas` | **73** | 92 | 322–377 等 | 已扣除 `agent-skills` 8 条（裁决 D3：归 ops） |
+| `agent` | **12** | 12 | 123–134 | — |
+| `cam` | **39** | 40 | 228–266 | 同块含 `campaign` 6 条（属 ops，不计入） |
+| `film` | **37** | 48 | 775–811 | — |
+| **合计（本体）** | **161** | 192 | — | 另有附属：`canvas-tpls` 2 + `campaign` 6 + `agent-skills` 8 = 16 条归 ops/canvas 子族 |
+
+> ⚠️ 口径陷阱：`-like '/web/v1/cam*'` 会连 `campaign/*` 命中（45 而非 39）；`-like '/web/v1/df/canvas*'` 会连 `canvas-tpls/*` 命中（81 而非 79）。做分母必须说明口径。
+
+### 14.2 全局约定（四域一律沿用，不另立）
+
+| 项 | 约定 |
+|---|---|
+| 信封 | `{code,msg,data}`（§1） |
+| 鉴权 | `Authorization: Bearer <access_jwt>`（§2） |
+| 空间 | `X-Space-Id` 必填；**团队成员的所有请求都带团队 space_id**（ADR-010） |
+| 幂等 | 创建类必带 `Idempotency-Key`（§1 双层语义） |
+| 分页 | `?page&page_size` → `{list,total,page,page_size}` |
+| ID | 字符串化雪花 |
+| 任务 | 任何生成一律走 `tasks`，**不得新建任务表**（ADR-003） |
+| 账本 | 团队积分只走 `credit_flows`，**不得新建账本**（ADR-011） |
+
+### 14.3 权限与闸门（四层）
+
+| 层 | 判定 | 失败 |
+|---|---|---|
+| L0 功能准入 | `spaces.film_enabled` / `agent_whitelist` | 403101 + `data.reason=feature_disabled` |
+| L1 登录 | access token | 401101/401102 |
+| L2 空间 | 请求者 ∈ `space_members(space_id)` | 403101 + `data.reason=not_member` |
+| L3 角色 | 按 **码集**判定（**禁止** `role_level <= N`） | 403101 + `data.reason=role_insufficient` |
+| L4 项目作用域 | film project / team_member_projects | 403101 + `data.reason=project_scope_denied` |
+
+特权码集：`{master, admin, group_admin} ∪ {producer, maker, film_producer, film_maker}`。
+`role_level` **仅用于展示与排序**，不作判据（RE 实测 level 11 特权 > level 4）。
+
+### 14.4 `canvas` 端点族（13 子族）
+
+| 子族 | 条数 | 代表端点 | 关键约束 |
+|---|---:|---|---|
+| 画布根 | 2 | `GET/POST /canvases` | 乐观锁 `version`，冲突 746002 |
+| 整画布模板 | 8 | `/canvases/templates`、`/canvas-tpls/:id` | 三族**不合并**（裁决 D1） |
+| 节点 | 7 | `GET/PUT/DELETE /canvases/{id}/nodes/{node_id}`、`batch-edit-nodes` | 11 种 node_type 硬约束 |
+| 连线 | 4 | `POST/DELETE /canvases/{id}/edges`、`batch-edges` | `UK(canvas_id,src,dst,semantic)` 保证"确保存在"幂等 |
+| 节点锁 | 4 | `.../nodes/{node_id}/lock\|unlock\|renew`、`/canvases/{id}/heartbeat` | **Redis TTL 30s，不落库**；冲突 746003 |
+| 节点派生任务 | 9 | `.../video-parse`、`storyboard-parse`、`asset-extraction` | 一律落 `tasks`；`sub_mode` 校验（裁决 D2） |
+| 画布内对话 | 11 | `.../chat/sessions`、`.../stream` | SSE（§14.6） |
+| 评论 | 5 | `.../comment-nodes`、`.../comments`、`.../resolve` | 不复用 `content_reports` |
+| 组/固定组 | 13 | `/groups`、`/pin-groups`、`pinned-node` | 每画布 7 槽位，`UK(canvas_id,slot)` |
+| 素材 | 6 | `/materials`、`/upload-file`、`node/batch-download` | object_key 走 files 域约定 |
+| 图像编辑 | 2 | `/clip`、`/crop` | 走 `tasks` + `sub_mode` |
+| 表格节点 | 2 | `.../table/import`、`.../confirm-sheet` | — |
+| Agent 技能卡 | ~~8~~ → **0（归 ops）** | `agent-recommend-cards`、`agent-skills/*` | 裁决 D3：内容库属运营 |
+
+### 14.5 `cam` 与 `film` 端点族要点
+
+| 域 | 要点 |
+|---|---|
+| `cam` | 团队=`spaces(type=2)`；`team_id`→`space_id`、`wsid`→`user_id`。积分分配/回收**成对写 `credit_flows`**（`team_allocate_out/in`、`team_recover_out/in`）并填 `ref_space_id/ref_user_id/op_user_id/group_id` 四列——否则 `points-flow` 的 8 个筛选参数无处可查 |
+| `film` | 仿多维表格：table→fields→rows→cells；行级 CAS 冲突用 746002；**审核流无独立写端点属已知缺口（A3）**，F2 需决定补端点或接受只读；导入 A11 亦无状态查询端点。字段 9 种：`text/asset_ref/link/user/date/canvas_ref/task_status/review_ref/points_ro`；`is_unique_type` 语义是"每 type 每表至多一个" |
+
+### 14.6 SSE 协议（`agent` 与画布内对话共用）
+
+| 项 | 约定 |
+|---|---|
+| 传输 | `GET .../stream`；**不是原生 EventSource**，客户端用 fetch + 手写 SSE 解析（与参照一致） |
+| 鉴权 | `Authorization: Bearer`；**另需短时效 stream-token**（见下） |
+| 帧结构 | `{id, type, payload}`；`payload.type` 会被提升为消息 type |
+| 已知事件字面量（**仅 6 个，不保证全集**） | `ping`、`heartbeat`、`user_message`、`hitl_required`、`model_step.*`、`skill_status.*` |
+| 心跳 | `ping`/`heartbeat` 客户端忽略 |
+| 续传 | `?last_stream_id=<id>` 增量重放；游标过期 → **746004**，客户端全量重建 |
+| 退避 | 指数退避 `maxAttempts=5 / base=1s / max=30s` |
+| 与轮询关系 | **SSE 是通知加速器，不是状态存储**；结果以 `tasks.results` 为准；无条件回退 5s 轮询（ADR-012） |
+| 落库 | `agent_events` **必须持久化**（否则续传不可实现），默认保留 7 天 |
+
+> **待补端点**：`POST /stream-tokens {scope, session_id?}` → `{token, expires_in≤60s}`，一次性。
+> 理由：EventSource 语义下无法自定义请求头；用短时效 token 避免 access token 进 URL 日志。**本端点为契约新增，F2 实现时需同步补测试**。
+
+### 14.7 限流（四域新增基线）
+
+| 端点组 | 用户级 | 备注 |
+|---|---|---|
+| `POST /canvases/{id}/nodes`、`batch-*` | 120/分 | 画布高频写入 |
+| `POST .../nodes/{id}/lock\|renew` | 60/分 | 心跳 15s 一次，留余量 |
+| `GET .../stream` | 5 并发 | 每会话 |
+| `POST /agent/task/chat` | 10/分 | 同 generations |
+| `cam/team/member/batch` | 5/分 | 批量邀请/改密 |
+| `film/.../cells`（批量写） | 120/分 | 表格编辑 |
+| 四域其余 GET | 120/分 | 同 §13 |
+
+### 14.8 待取证清单（**不得当事实使用**）
+
+| 域 | 项 | 处置 |
+|---|---|---|
+| canvas | SSE 完整事件类型表（仅 6 个已见字面量） | 标假设，F2 取证后补 |
+| canvas | 模板 `payload` 结构、`comment-nodes`/`pin-groups` 产品语义 | 标假设 |
+| canvas | `GET /df/canvas/canvas-scaffold`（运行时实发但 routes/bundle 均无） | **不设计契约**，仅登记（裁决 D4） |
+| agent | `agent/home/resource/*` | 标假设 |
+| cam | `user/third/key/*`（BYOK 雏形）、席位档位 `max_seats` | 标假设，最小面落表 |
+| film | `config_json` schema、唯一性执行层、审核流写端点（A3）、导入状态查询（A11） | 标假设；A3/A11 为已知功能缺口，F2 决策 |

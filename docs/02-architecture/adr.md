@@ -68,3 +68,38 @@
 - **决策**：refresh_token 只经 `Set-Cookie: HttpOnly; Secure; SameSite=Strict; Path=/v1/auth` 下发，响应体不返回；每次 refresh 轮换旧 token 并失效（重放检测→全家下线）；access 只存内存。
 - **理由**：XSS 拿不到 refresh；SameSite=Strict + 自定义头 `X-Requested-With` 双保险防 CSRF。
 - **代价**：移动端/跨域场景需同站部署或 BFF；登出需 Redis 黑名单 access。
+
+---
+
+## ADR-009 四域按"资源所有权"划分，不按参照产品的微服务前缀照搬
+
+- **状态**：Accepted 2026-10-26（F1）
+- **背景**：全站 1:1 复刻（D-2026-10-26-01）引入 `canvas`/`agent`/`cam`/`film` 四域。参照产品用 `/df/*`(466 端点)、`/cam/*`、`/film/*`、`/agent/*` 做**服务前缀**（微服务拆分），我方是模块化单体（ADR-002）。
+- **决策**：**保留域名划分**（与资源所有权/权限边界一致），但**不拆服务**——四域是单一 NestJS 应用内的 4 个 module。同时把参照的 `df` 域拆为我方 `script`(既有) + `canvas`(新) + `novel_market`(F3)，因为三者权限模型与生命周期完全不同。
+- **理由**：域边界对齐参照便于 1:1 覆盖核对（本次核心诉求）；不拆服务保留 ADR-002 的运维简单性。
+- **代价**：单体内 module 边界靠约定与 code review 维持；若未来真拆，`canvas`/`film` 因共享 `tasks` 会成为拆分难点。
+
+## ADR-010 团队不另建表：`spaces(type=2)` 是团队唯一载体
+
+- **状态**：Accepted 2026-10-26（F1）
+- **背景**：既有 `spaces.type`(1个人/2团队) + `space_members`(role/credits_quota) 已是团队雏形但 MVP 只落 owner 一行；参照产品是独立 `cam/team/*` 体系 + `role_code:master`/`role_level:1`。
+- **决策**：**扩展 `spaces`/`space_members`，不新建 `teams` 表**。RE 的 `team_id` 映射为 `space_id`，`wsid` 映射为 `user_id`。`cam` 只是"团队的一组端点"，数据仍落 spaces 体系。
+- **理由**：一旦 `teams` 与 `spaces` 并存，所有 `space_id` 隔离的既有逻辑（112 端点绝大多数）都要双写判断，成本远大于收益。
+- **代价**：`space_members` 列会变多（10 列）；`role`(1/2/3) 与 `role_code`(11 级) 双轨并存，靠回填 UPDATE 与"之后只改 role_code"维持一致。
+
+## ADR-011 积分只有一本账：团队积分池 = space 级 `credit_accounts`，禁止双账本
+
+- **状态**：Accepted 2026-10-26（F1）
+- **背景**：参照产品有 `points-allocation`/`points-recovery`/`points-flow` 与 `team_credit_total`，看似"团队另有账本"。
+- **决策**：**团队积分池就是该 team-space 的 `credit_accounts(space_id)`**。分配=团队 space → 成员 space，写成对流水 `team_allocate_out`/`team_allocate_in`；回收=反向 `team_recover_out`/`team_recover_in`。团队总额不是一个字段，就是该 space 的 `balance`。
+- **补充（B 草案发现）**：`credit_flows` 必须同时加 4 列 `ref_space_id`/`ref_user_id`/`op_user_id`/`group_id`，否则 `points-flow` 的 8 个筛选参数无处可查。
+- **理由**：保持 `balance == Σdelta` 且 `frozen == Σ frozen_delta` 双不变式；任何双账都会破坏它且无法对账闭环。
+- **代价**：分配/回收必须成对写入（单边会让 Σ 漂移），需事务 + 单测强制；`credits_quota` 被"激活"为未回收分配额上限，但**不是余额**，不参与不变式。
+
+## ADR-012 SSE 是"新增通道"，轮询永远是降级基线
+
+- **状态**：Accepted 2026-10-26（F1）
+- **背景**：现有产品全靠 5s 批量轮询 + ETag；参照产品有 `agent/task/stream`、`canvas/:id/chat/sessions/:sid/stream`、`agent/home/resource/sse`。
+- **决策**：SSE 作为**独立只读通道**新增，**不替代**轮询；断线/不支持时回落 5s 轮询，语义等价。SSE 只推状态变更与结果指针，**不推二进制、不做计费动作**；鉴权用短时效 stream-token（`POST /stream-tokens`，≤60s 一次性）。
+- **理由**：客户端/代理对 SSE 支持不一致（参照自己也保留轮询）；WBS P2.4 要求"双通道可切换"。
+- **代价**：`agent_events` 必须落库（否则 `?last_stream_id=` 续传无法实现），增加写放大与保留期清理成本（建议 7 天）；两套通道需保证语义等价，测试成本翻倍。

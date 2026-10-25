@@ -54,6 +54,40 @@
 
 **依赖方向单向：API 模块 → billing/models 基础域**；模块间调用走内部 service 接口，禁止跨模块直查表（为未来拆服务留缝）。
 
+### 2.1 F1 四新域（2026-10-26 增补）
+
+| 模块 | 职责 | 可依赖 | 禁止依赖 |
+|---|---|---|---|
+| `canvas` | 画布/节点/边/分组/模板/快照；节点→任务绑定；节点锁与版本冲突 | `tasks`(建任务)、`assets`(素材)、`files`(上传)、`models`(枚举校验) | `script`（不得直接改剧本表）、`film`、adapters |
+| `agent` | 会话/消息/流式(SSE)；会话→节点绑定；STT token | `canvas`(节点绑定，经接口)、`tasks`(只读状态)、`models` | 账本写操作（**SSE 不得扣费**）、adapters |
+| `cam` | 团队/分组/成员/角色；团队积分分配回收 | `spaces`(核心)、`billing`(转账流水) | `canvas`/`film` 业务表（`team_member_projects` 故意无 FK） |
+| `film` | 影视版任务表/字段/单元格/审核评论/画布绑定/模板/导出 | `tasks`、`assets`、`canvas`(绑定)、`cam`(成员权限) | 直接查 `storyboards`（影视版任务表是独立模型） |
+
+**新增铁律**：
+1. `canvas` 与 `film` 都会"绑定任务"，但**都不得直接写 `tasks` 表**——统一走 `tasks` 模块 service；
+2. `cam` 不得依赖 `film`/`script` 业务表，项目作用域用不透明 `project_id` + 被依赖方 service 校验（见 `database.md` §12.3.2 `team_member_projects`）；
+3. 跨域读也必须经 service 接口，禁止 `select ... from canvas_nodes` 出现在 `film` 模块里。
+
+**四域与既有域的调用链（简）**：
+
+```
+canvas ──(建任务)──► tasks ──► worker ──► model-adapters ──► 供应商
+  ▲  │
+  │  └──(素材)──► assets / files
+  │
+agent ──(绑定节点)──► canvas
+  └──(只读状态)──► tasks
+
+cam ──(积分转账)──► billing(credit_accounts/credit_flows)
+  └──(成员/角色)──► spaces/space_members
+
+film ──(行↔画布)──► canvas
+  ├──(建任务)──► tasks
+  └──(成员权限)──► cam
+```
+
+**迁移顺序**：`0013_canvas` → `0014_agent` → `0015_cam` → `0016_film`（依赖顺序，见 `database.md` §12.5）。
+
 ## 3. 关键时序
 
 ### 3.1 任务创建（冻结 → 入队）
