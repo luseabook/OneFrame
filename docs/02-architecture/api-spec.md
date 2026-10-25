@@ -718,6 +718,8 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
+| POST | `/cam/team` | 登录 | **创建团队**（建 `spaces(type=2)` + 积分账户 + owner/master 成员 + 内置 11 角色），对齐参照"去开通" |
+| GET | `/cam/teams/mine` | 登录 | 我所属的全部空间（个人+团队），前端空间切换用 |
 | GET | `/cam/team/info` | 成员 | 团队信息（席位/已用/积分池=`credit_accounts.balance`） |
 | GET | `/cam/permission/user` | 成员 | 当前用户角色与特权（`privileged` 按码集算） |
 | GET | `/cam/role/list` | 成员 | 角色列表（首次访问按内置 11 级幂等初始化） |
@@ -740,6 +742,20 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 1. 参照用 `/cam/team/{team_id}/info` 把 team_id 放路径；我方**省略**，因为 `X-Space-Id` 已表达当前空间（ADR-010），路径带 ID 会产生"路径 ID 与头不一致"的二义性。
 2. 席位上限错误码为新码 **400108**（参照侧未见同义码，属我方自造，已在码表登记）。
 3. 已实现部分**不含**：`team/member/batch`（批量邀请/改密）、`member/export`、`project-points-flow`、`team/temp-info`（模型开关矩阵）、`linked-users`、`user/third/key/*`——按 F2 优先级后续补，**未实现即不暴露**（不做空壳接口）。
+
+#### 14.5.2 `X-Space-Id` 切空间已落地（2026-10-26）
+
+`AuthGuard` 现在支持请求头 `X-Space-Id`：
+
+| 情况 | 行为 |
+|---|---|
+| 未带该头 | 用 token 里的 `sid`（登录时的个人空间），行为与之前完全一致 |
+| 带了且等于 `sid` | 同上 |
+| 带了且 ≠ `sid` | **校验 `space_members` 成员关系**（status=1）与 `spaces.status≠停用`，通过后以该 space 为请求上下文 |
+| 带了但不是成员 | **403101** + `data.reason=not_member`（不能只信客户端头） |
+| 带了非法 ID | **400101**（field=`X-Space-Id`） |
+
+> 这使团队场景成立：同一个 access token，前端通过 `X-Space-Id` 在"个人空间/多个团队"之间切换，服务端每次校验成员身份。前端持久化在 localStorage（`active_space_id`），由 `useApi` 自动附加。
 
 ### 14.6 SSE 协议（`agent` 与画布内对话共用）
 

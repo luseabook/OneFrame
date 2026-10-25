@@ -48,6 +48,10 @@ const bindProjectBody = z.object({
   project_id: z.string().min(1),
   participation_type: z.number().int().min(1).max(3).optional(),
 });
+const createTeamBody = z.object({
+  name: z.string().min(1).max(40),
+  max_seats: z.number().int().min(1).max(200).optional(),
+});
 
 @Controller("cam")
 export class TeamController {
@@ -61,6 +65,22 @@ export class TeamController {
   }
 
   // ── 团队本体 ─────────────────────────────────────────────
+  /** 创建团队（对齐参照「去开通」）；创建者即 owner/master */
+  @Post("team")
+  async create(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.team.createTeam(auth.userId, parseOrThrow(createTeamBody, body));
+  }
+
+  /** 我所属的团队列表（前端空间切换用） */
+  @Get("teams/mine")
+  async mine(@Req() req: AuthedRequest) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.team.myTeams(auth.userId);
+  }
+
   @Get("team/info")
   async info(@Req() req: AuthedRequest) {
     return this.team.info((await this.ctx(req)).spaceId);

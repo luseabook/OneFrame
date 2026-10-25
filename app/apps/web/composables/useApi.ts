@@ -21,6 +21,10 @@ export const useApi = () => {
       ...((options.headers as Record<string, string>) || {}),
     };
     if (auth.state.value.accessToken) headers.Authorization = `Bearer ${auth.state.value.accessToken}`;
+    // 团队空间切换（ADR-010）：团队场景的所有请求都带 X-Space-Id；
+    // 服务端会校验成员身份（不是只信这个头），非成员返回 403。
+    const activeSpace = useActiveSpaceId();
+    if (activeSpace.value) headers["X-Space-Id"] = activeSpace.value;
 
     let envelope: Envelope<T> | undefined;
     try {

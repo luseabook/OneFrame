@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { eq } from "drizzle-orm";
-import { users } from "@app/db";
+import { and, eq } from "drizzle-orm";
+import { spaceMembers, spaces, users } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { AuthedRequest } from "./auth.types";
@@ -37,7 +37,41 @@ export class AuthGuard implements CanActivate {
     if (!user || user.status !== 1 || user.deletedAt) {
       throw new AppError(ErrorCode.UNAUTHORIZED, "account disabled");
     }
-    request.auth = { userId: payload.sub, spaceId: payload.sid, jti: payload.jti };
+
+    // ── 空间切换（ADR-010：团队成员的所有请求都带团队 space_id）──
+    // token 里的 sid 是登录时的个人空间；团队场景由 `X-Space-Id` 指定目标空间。
+    // 安全性：必须校验请求者确实是该空间成员，否则 403——不能只信客户端头。
+    let spaceId = payload.sid;
+    const rawSpace = request.headers["x-space-id"];
+    const requested = Array.isArray(rawSpace) ? rawSpace[0] : rawSpace;
+    if (requested && String(requested).trim() !== "" && String(requested) !== spaceId) {
+      const target = String(requested).trim();
+      let targetId: bigint;
+      try {
+        targetId = BigInt(target);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid X-Space-Id", { field: "X-Space-Id" });
+      }
+      const [membership] = await db
+        .select({ status: spaceMembers.status })
+        .from(spaceMembers)
+        .where(and(eq(spaceMembers.spaceId, targetId), eq(spaceMembers.userId, BigInt(payload.sub))));
+      if (!membership || membership.status !== 1) {
+        throw new AppError(ErrorCode.FORBIDDEN, "not a member of requested space", {
+          reason: "not_member",
+        });
+      }
+      const [space] = await db
+        .select({ status: spaces.status })
+        .from(spaces)
+        .where(eq(spaces.id, targetId));
+      if (!space || space.status === 2) {
+        throw new AppError(ErrorCode.FORBIDDEN, "space disabled", { reason: "space_disabled" });
+      }
+      spaceId = target;
+    }
+
+    request.auth = { userId: payload.sub, spaceId, jti: payload.jti };
     return true;
   }
 }

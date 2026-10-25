@@ -5,16 +5,18 @@ const auth = useAuth();
 const route = useRoute();
 const router = useRouter();
 
-const mainNav = [
+type NavItem = { key: string; to: string; label: string; icon: string; disabled?: boolean };
+const mainNav: NavItem[] = [
   { key: "home", to: "/home", label: "首页", icon: "home" },
   { key: "create", to: "/projects?create=1", label: "剧本创作", icon: "script" },
   { key: "agent", to: "", label: "创作 Agent", icon: "wand", disabled: true },
   { key: "projects", to: "/projects", label: "全部项目", icon: "folder" },
   { key: "tools", to: "/tools", label: "工具箱", icon: "wand" },
 ];
-const teamNav = [
+const teamNav: NavItem[] = [
   { key: "assets", to: "/assets", label: "资产库", icon: "folder" },
-  { key: "team", to: "", label: "团队管理", icon: "clock", disabled: true },
+  // 2026-10-26：cam 团队域已落地（后端 17 端点 + /team 页），置灰改为可进入
+  { key: "team", to: "/team", label: "团队管理", icon: "clock" },
 ];
 
 const collapsed = ref(false);

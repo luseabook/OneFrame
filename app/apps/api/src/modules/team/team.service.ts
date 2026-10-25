@@ -94,6 +94,85 @@ export class TeamService {
     }
   }
 
+  /**
+   * 创建团队空间（对齐参照「去开通」这一步）。
+   * 团队不是新表：建的是 `spaces(type=2)` + 积分账户 + owner 成员 + 内置角色（ADR-010）。
+   * 同一用户可拥有多个团队；`X-Space-Id` 决定"当前在哪个团队里操作"。
+   */
+  async createTeam(ownerUserId: string, input: { name: string; max_seats?: number }) {
+    const name = input.name.trim();
+    if (!name) throw new AppError(ErrorCode.INVALID_PARAM, "team name required", { field: "name" });
+    return db.transaction(async (tx) => {
+      const spaceId = newId();
+      await tx.insert(spaces).values({
+        id: spaceId,
+        ownerUserId: BigInt(ownerUserId),
+        type: 2,
+        name,
+        maxSeats: input.max_seats ?? 5,
+        status: 1,
+      });
+      await tx.insert(creditAccounts).values({
+        spaceId,
+        balance: 0,
+        frozen: 0,
+        updatedAt: new Date(),
+      });
+      await tx.insert(spaceMembers).values({
+        spaceId,
+        userId: BigInt(ownerUserId),
+        role: 1, // owner
+        roleCode: "master",
+        roleLevel: 1,
+        status: 1,
+        nickname: null,
+        joinedAt: new Date(),
+      });
+      await tx
+        .insert(teamRoles)
+        .values(
+          BUILTIN_ROLES.map((r) => ({
+            id: newId(),
+            spaceId,
+            roleCode: r.code,
+            roleName: r.name,
+            roleLevel: r.level,
+            isSystem: true,
+          })),
+        )
+        .onConflictDoNothing();
+      return { space_id: String(spaceId), name, max_seats: input.max_seats ?? 5 };
+    });
+  }
+
+  /** 当前用户所属的全部团队（用于前端空间切换） */
+  async myTeams(userId: string) {
+    const rows = await db
+      .select({
+        spaceId: spaceMembers.spaceId,
+        role: spaceMembers.role,
+        roleCode: spaceMembers.roleCode,
+        name: spaces.name,
+        type: spaces.type,
+        status: spaces.status,
+        maxSeats: spaces.maxSeats,
+      })
+      .from(spaceMembers)
+      .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
+      .where(and(eq(spaceMembers.userId, BigInt(userId)), eq(spaceMembers.status, 1)));
+    return {
+      list: rows.map((r) => ({
+        space_id: String(r.spaceId),
+        name: r.name,
+        type: r.type,
+        status: r.status,
+        max_seats: r.maxSeats,
+        role: r.role,
+        role_code: r.roleCode,
+      })),
+    };
+  }
+
   /** 团队信息（含席位/统计） */
   async info(spaceId: string) {
     const [space] = await db.select().from(spaces).where(eq(spaces.id, BigInt(spaceId)));
