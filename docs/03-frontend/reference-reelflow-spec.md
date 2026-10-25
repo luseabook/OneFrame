@@ -575,3 +575,54 @@ ffprobe: codec=h264  width=720  height=1280  fps=30/1  duration=10.000000  size=
 2. 未做姿势预设（参照有 `pose_preset`）、未做真实角色贴图（角色定妆图尚未作为贴图贴在胶囊体上，当前用品牌紫胶囊 + 名称标签）。
 3. 定格 PNG 只下载到本地，尚未回传服务端（若要「3D 定帧 → 作为首帧参考图」，需接 `/assets/upload` + `first_frame_uri` 链路）。
 4. 机位仅单机位（参照支持多机位列表）。
+
+---
+
+## 18. P9 实施记录：3D 定格 → 首帧 → 首帧生视频（闭环，2026-10-25 落地）
+
+把 P8 的「定格」从"只能下载 PNG"升级为**直接进入生成链路**：3D 摆位 → 定格 → 该镜首帧 → 首帧生视频。
+
+### 18.1 数据层（迁移 `0012_left_deathbird.sql`，已执行）
+
+`storyboards` 新增 `first_frame_uri` / `last_frame_uri`（text null，存 storage key）。
+
+### 18.2 DTO / 接口
+
+- `storyboardDto` 增 `first_frame_uri` / `last_frame_uri`（原值）+ **`first_frame_url` / `last_frame_url`**（`signDownload(uri,3600)` 派生，前端可直接 `<img>`）；`GET /episodes/:eid`、`PATCH /storyboards/:sid`、`POST .../storyboards/generate` 三处均返回。
+- `PATCH .../storyboards/:sid` 支持两字段：传 `null`/`""` 清空，未传不动，>500 字符 400101。
+
+### 18.3 generate-videos 取值优先级（只改取值）
+
+| 模式 | first | last |
+|---|---|---|
+| `first_frame` | `shot.first_frame_uri` **优先** → 否则第一个合格绑定资产 | — |
+| `first_last_frame` | `shot.first_frame_uri` → 否则第一个合格资产 | `shot.last_frame_uri` → 否则第二个合格资产 |
+| 缺失 | 该镜 400105（`asset_not_ready` / `need_two_assets`） | 同 |
+
+成功任务会写 `task_events.payload.frame_source = {first:"shot_frame"|"asset", last:...}` 供排查（响应结构不变）。
+
+### 18.4 前端
+
+- `Director3D` 的 `captured` 事件 → `onDirectorCaptured(dataUrl)`：dataURL → `POST /assets/upload`（拿 storage key + 签名 url）→ `PATCH .../storyboards/:sid { first_frame_uri }` → 重新拉取分集 → 提示「已把 3D 定格设为镜头 N 的首帧」。
+- 生成台新增「首帧」行（缩略图 + `3D 定格` + `清空`）；`首帧生视频` / `首尾帧生视频` 的可用性改为「有 shot frame **或** 有合格绑定资产」；报价/提交请求体按同样优先级取 `first_frame_uri`。
+
+### 18.5 验收（真实 UI + API + DB 断言，`_acceptance/e2e-p9.cjs`）
+
+1. 选第 3 镜 → 打开 3D 导演台 → 点「定格截图」→ 横幅「已把 3D 定格设为镜头 3 的首帧…」。
+2. 关闭导演台后生成台出现首帧缩略图（signed URL 可加载）。
+3. 切「首帧生视频」→ 立即生成 → 「镜头 3 已投递」。
+4. **DB 断言**：
+   ```
+   shot_no=3  first_frame_uri=u/…/assets/107839282820988928/orig.png
+   最近任务   mode=first_frame  input.first_frame_uri=u/…/assets/107839282820988928/orig.png
+   ```
+   —— 即任务真的用定格图当首帧（角色定妆图未被选用）。
+5. 全程无 pageerror / console error。截图：`evidence/reelflow-impl/p9-{first-frame,first-frame-submit}.png`。
+
+### 18.6 测试
+
+api **25 files / 234 passed**（新增 `storyboard-frames.spec.ts` 9 例）；worker 22 passed。
+
+### 18.7 ⚠️ 已知真实模式隐患（既有，非本次引入）
+
+`ADAPTER_MODE=real` 时，`reference_uris` / `first_frame_uri` / `last_frame_uri` 传的是 **storage key 原值**，供应商无法访问。要在真实供应商下可用，需在 worker 侧统一把这些 uri 签成公网 URL（`ADAPTER_MODE=real` 生效、mock 保持不变），涉及 worker + storage 配置。建议作为 P10 处理。

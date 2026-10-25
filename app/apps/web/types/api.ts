@@ -232,6 +232,11 @@ export interface StoryboardDto {
   image_task_id: string | null;
   video_task_id: string | null;
   character_ids: string[];
+  /** P9：3D 定格设为该镜首帧/尾帧（storage key）与其签名 URL */
+  first_frame_uri?: string | null;
+  last_frame_uri?: string | null;
+  first_frame_url?: string | null;
+  last_frame_url?: string | null;
 }
 
 export const TaskStatus = {

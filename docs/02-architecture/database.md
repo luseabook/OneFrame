@@ -423,7 +423,9 @@ CREATE TABLE storyboards (
                                                    -- 就近取低档并回写，不做全局固定档位(模型间枚举不同)
   ratio TEXT, resolution TEXT,                     -- 覆盖项目默认；必须在所选模型 scene 枚举内
   status SMALLINT NOT NULL DEFAULT 1,              -- 状态枚举见 §3 状态枚举表
-  image_task_id BIGINT, video_task_id BIGINT       -- 当前生效任务指针(P0-03)；重试历史经 tasks.shot_id+origin_task_id 反查
+  image_task_id BIGINT, video_task_id BIGINT,      -- 当前生效任务指针(P0-03)；重试历史经 tasks.shot_id+origin_task_id 反查
+  first_frame_uri TEXT, last_frame_uri TEXT        -- P9：3D 导演台定格图(storage key，非签名 URL)；
+                                                   -- first_frame/first_last_frame 生成时优先于绑定资产
 );
 CREATE TABLE storyboard_assets (
   storyboard_id BIGINT REFERENCES storyboards(id),

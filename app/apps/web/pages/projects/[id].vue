@@ -562,8 +562,9 @@ async function loadVideoModels(): Promise<void> {
 function modeEnabled(key: string): boolean {
   if (key === "ai_edit") return false;
   if (key === "text") return true;
-  if (key === "first_frame") return boundImageCount.value >= 1;
-  if (key === "first_last") return boundImageCount.value >= 2;
+  const hasShotFrame = Boolean(selectedShot.value?.first_frame_uri);
+  if (key === "first_frame") return hasShotFrame || boundImageCount.value >= 1;
+  if (key === "first_last") return (hasShotFrame || boundImageCount.value >= 1) && boundImageCount.value >= 1;
   return true;
 }
 const modeHint = computed(() => {
@@ -621,10 +622,11 @@ function buildQuoteItem(shot: StoryboardDto) {
   const prompt = shot.video_prompt || shot.shot_desc || "";
   const input: Record<string, unknown> = { prompt, reference_uris: [] as string[] };
   if (apiMode === "universal_reference") input.reference_uris = imgs;
-  if (apiMode === "first_frame") input.first_frame_uri = imgs[0] ?? null;
+  const shotFrame = shot.first_frame_uri ?? null;
+  if (apiMode === "first_frame") input.first_frame_uri = shotFrame ?? imgs[0] ?? null;
   if (apiMode === "first_last_frame") {
-    input.first_frame_uri = imgs[0] ?? null;
-    input.last_frame_uri = imgs[1] ?? null;
+    input.first_frame_uri = shotFrame ?? imgs[0] ?? null;
+    input.last_frame_uri = shot.last_frame_uri ?? imgs[1] ?? null;
   }
   return {
     mode: apiMode,
@@ -970,6 +972,60 @@ function hideBrokenImage(event: Event): void {
 const assetCandidates = ref<{ assetId: string; taskId: string; list: Array<{ index: number; url: string }> } | null>(null);
 /** 3D 导演台（P8）：真实 three.js 场景 */
 const director3dOpen = ref(false);
+
+/** 3D 定格 → 上传 → 写入该镜首帧（P9 闭环） */
+const firstFrameBusy = ref(false);
+async function onDirectorCaptured(dataUrl: string): Promise<void> {
+  const shot = selectedShot.value;
+  if (!shot || !selectedEpisodeId.value) return;
+  firstFrameBusy.value = true;
+  error.value = "";
+  try {
+    const comma = dataUrl.indexOf(",");
+    const meta = dataUrl.slice(0, comma);
+    const contentType = meta.includes("image/png") ? "image/png" : "image/jpeg";
+    const base64 = dataUrl.slice(comma + 1);
+    const uploaded = await api.post<{ id: string; uri: string; url: string }>("/assets/upload", {
+      filename: `director3d-shot-${shot.shot_no}.png`,
+      content_type: contentType,
+      data_base64: base64,
+    });
+    await api.patch(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}`,
+      { first_frame_uri: uploaded.uri },
+    );
+    await loadEpisode();
+    const refreshed = shots.value.find((s) => s.id === shot.id);
+    if (refreshed) {
+      refreshed.first_frame_uri = uploaded.uri;
+      refreshed.first_frame_url = uploaded.url;
+    }
+    info.value = `已把 3D 定格设为镜头 ${shot.shot_no} 的首帧：切到「首帧生视频」即可用它出片`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "设置首帧失败";
+  } finally {
+    firstFrameBusy.value = false;
+  }
+}
+
+/** 清空该镜首帧 */
+async function clearFirstFrame(): Promise<void> {
+  const shot = selectedShot.value;
+  if (!shot || !selectedEpisodeId.value) return;
+  await run("清空首帧", async () => {
+    await api.patch(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}`,
+      { first_frame_uri: null },
+    );
+    await loadEpisode();
+    const refreshed = shots.value.find((s) => s.id === shot.id);
+    if (refreshed) {
+      refreshed.first_frame_uri = null;
+      refreshed.first_frame_url = null;
+    }
+    info.value = "已清空该镜首帧，首帧模式将回退到绑定资产";
+  });
+}
 const assetImageBusyId = ref("");
 
 async function generateAssetImage(a: ProjectAssetDto): Promise<void> {
@@ -1865,6 +1921,32 @@ function kindLabel(kind: string): string {
           </div>
           <p class="gen-hint">{{ modeHint }}</p>
 
+          <div v-if="mode === 'first_frame' || mode === 'first_last' || selectedShot?.first_frame_uri" class="gen-frame">
+            <span class="gen-label">首帧</span>
+            <img
+              v-if="selectedShot?.first_frame_url"
+              :src="selectedShot.first_frame_url || ''"
+              class="gen-frame__img"
+              alt="首帧"
+              @error="hideBrokenImage"
+            />
+            <span v-else class="gen-frame__ph">{{ selectedShot?.first_frame_uri ? "已设置" : "未设置" }}</span>
+            <span class="gen-frame__ops">
+              <button class="mini-link" type="button" :disabled="firstFrameBusy" @click="director3dOpen = true">
+                {{ firstFrameBusy ? "上传中…" : "3D 定格" }}
+              </button>
+              <button
+                v-if="selectedShot?.first_frame_uri"
+                class="mini-link"
+                type="button"
+                :disabled="firstFrameBusy"
+                @click="clearFirstFrame"
+              >
+                清空
+              </button>
+            </span>
+          </div>
+
           <div class="gen-row">
             <span class="gen-label">模型</span>
             <select v-model="modelName" class="mini-select gen-select">
@@ -2283,6 +2365,7 @@ function kindLabel(kind: string): string {
       :shot-no="selectedShot?.shot_no ?? 1"
       :actors="boundAssets.map((a) => ({ id: a.id, name: a.name, image: a.ref_image_uri }))"
       @close="director3dOpen = false"
+      @captured="onDirectorCaptured"
     />
 
     <!-- ── 资产编辑（场景/道具/其他）── -->
@@ -4226,4 +4309,29 @@ function kindLabel(kind: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
+}.gen-frame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.25);
+}
+.gen-frame__img {
+  width: 54px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+}
+.gen-frame__ph {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-5);
+}
+.gen-frame__ops {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
 }</style>

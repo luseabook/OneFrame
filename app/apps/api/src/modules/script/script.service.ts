@@ -97,6 +97,9 @@ function storyboardDto(row: StoryboardRow, characterIds: string[] = []) {
     image_task_id: row.imageTaskId ? String(row.imageTaskId) : null,
     video_task_id: row.videoTaskId ? String(row.videoTaskId) : null,
     character_ids: characterIds,
+    // P9：3D 定格图 storage key（*_url 由 service 层签名后补充）
+    first_frame_uri: row.firstFrameUri ?? null,
+    last_frame_uri: row.lastFrameUri ?? null,
   };
 }
 
@@ -678,7 +681,9 @@ export class ScriptService {
       }
       return inserted;
     });
-    return rows.map((row) => storyboardDto(row, linkMap.get(String(row.id)) ?? []));
+    return Promise.all(
+      rows.map((row) => this.storyboardDtoWithUrls(row, linkMap.get(String(row.id)) ?? [])),
+    );
   }
 
   async episodeDetail(spaceId: string, projectId: string, episodeId: string) {
@@ -710,7 +715,9 @@ export class ScriptService {
     }
     return {
       episode: episodeDto(episode),
-      storyboards: shots.map((shot) => storyboardDto(shot, linkMap.get(String(shot.id)) ?? [])),
+      storyboards: await Promise.all(
+        shots.map((shot) => this.storyboardDtoWithUrls(shot, linkMap.get(String(shot.id)) ?? [])),
+      ),
     };
   }
 
@@ -731,12 +738,19 @@ export class ScriptService {
         ...(input.duration_s !== undefined ? { durationS: input.duration_s } : {}),
         ...(input.ratio !== undefined ? { ratio: input.ratio } : {}),
         ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
+        // P9：3D 定格图；null/"" → 清空（回退到绑定资产逻辑）
+        ...(input.first_frame_uri !== undefined
+          ? { firstFrameUri: normalizeOptionalText(input.first_frame_uri) }
+          : {}),
+        ...(input.last_frame_uri !== undefined
+          ? { lastFrameUri: normalizeOptionalText(input.last_frame_uri) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(storyboards.id, BigInt(storyboardId)), eq(storyboards.episodeId, episode.id)))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found");
-    return storyboardDto(row);
+    return this.storyboardDtoWithUrls(row);
   }
 
   async generatePortrait(
@@ -1511,6 +1525,7 @@ export class ScriptService {
       attemptNo: number;
       reusableTaskId: bigint | null;
       durationAdjusted?: { from: number; to: number };
+      frameSource?: { first: "shot_frame" | "asset"; last: "shot_frame" | "asset" };
     };
     const candidates: Candidate[] = [];
     const items: Array<{
@@ -1540,7 +1555,14 @@ export class ScriptService {
       const refs = readyAssets.map((asset) => asset.refImageUri!);
 
       // 各模式的资产/提示词前置条件（沿用既有逐镜 400105 语义）
+      // P9：3D 导演台定格图优先——shot.firstFrameUri/lastFrameUri 为空才回退绑定资产；
+      //     storage key 与资产 refImageUri 同口径直接写入 input（由下游按现有约定处理）
+      const shotFirstFrame = normalizeOptionalText(shot.firstFrameUri);
+      const shotLastFrame = normalizeOptionalText(shot.lastFrameUri);
       let prompt = shot.videoPrompt ?? shot.shotDesc ?? "";
+      let firstFrameUri: string | null = null;
+      let lastFrameUri: string | null = null;
+      let frameSource: { first: "shot_frame" | "asset"; last: "shot_frame" | "asset" } | null = null;
       if (generateMode === "universal_reference") {
         // 参考生视频：绑定资产必须全部定稿且有参考图
         if (refs.length === 0 || linked.length !== readyAssets.length) {
@@ -1554,8 +1576,9 @@ export class ScriptService {
           continue;
         }
       } else if (generateMode === "first_frame") {
-        // 首帧生视频：至少 1 个合格绑定资产
-        if (refs.length < 1) {
+        // 首帧生视频：优先分镜定格首帧，其次第一个合格绑定资产
+        firstFrameUri = shotFirstFrame ?? refs[0] ?? null;
+        if (!firstFrameUri) {
           items.push({
             shot_id: shotId,
             task_id: null,
@@ -1565,9 +1588,12 @@ export class ScriptService {
           });
           continue;
         }
+        frameSource = { first: shotFirstFrame ? "shot_frame" : "asset", last: "asset" };
       } else if (generateMode === "first_last_frame") {
-        // 首尾帧生视频：需要 2 个合格绑定资产
-        if (refs.length < 2) {
+        // 首尾帧生视频：first/last 各自优先分镜定格图，缺失再回退合格绑定资产
+        firstFrameUri = shotFirstFrame ?? refs[0] ?? null;
+        lastFrameUri = shotLastFrame ?? refs[1] ?? null;
+        if (!firstFrameUri || !lastFrameUri) {
           items.push({
             shot_id: shotId,
             task_id: null,
@@ -1577,6 +1603,10 @@ export class ScriptService {
           });
           continue;
         }
+        frameSource = {
+          first: shotFirstFrame ? "shot_frame" : "asset",
+          last: shotLastFrame ? "shot_frame" : "asset",
+        };
       } else {
         // text2video：不要求绑定资产，但必须有分镜提示词（video_prompt 优先，退化 shot_desc）
         prompt = (shot.videoPrompt ?? "").trim() || (shot.shotDesc ?? "").trim();
@@ -1610,9 +1640,14 @@ export class ScriptService {
         scene: generateMode === "universal_reference" ? "storyboard_reference_video" : null,
         input:
           generateMode === "first_frame"
-            ? { prompt, reference_uris: [], first_frame_uri: refs[0]! }
+            ? { prompt, reference_uris: [], first_frame_uri: firstFrameUri! }
             : generateMode === "first_last_frame"
-              ? { prompt, reference_uris: [], first_frame_uri: refs[0]!, last_frame_uri: refs[1]! }
+              ? {
+                  prompt,
+                  reference_uris: [],
+                  first_frame_uri: firstFrameUri!,
+                  last_frame_uri: lastFrameUri!,
+                }
               : { prompt, reference_uris: generateMode === "universal_reference" ? refs : [] },
         options: {
           ratio: input.ratio ?? shot.ratio ?? project.ratio,
@@ -1655,6 +1690,7 @@ export class ScriptService {
         attemptNo,
         reusableTaskId: reusable ? latestForShot.id : null,
         ...(durationAdjusted ? { durationAdjusted } : {}),
+        ...(frameSource ? { frameSource } : {}),
       });
     }
 
@@ -1747,6 +1783,7 @@ export class ScriptService {
             shot_id: candidate.shotId,
             batch: true,
             mode: generateMode,
+            ...(candidate.frameSource ? { frame_source: candidate.frameSource } : {}),
             ...(candidate.durationAdjusted ? { duration_adjusted: candidate.durationAdjusted } : {}),
           },
         });
@@ -2154,6 +2191,19 @@ export class ScriptService {
         duration: clip.duration,
       };
     });
+  }
+
+  /**
+   * 分镜 DTO + 首/尾帧派生签名 URL（P9）：前端刷新后可直接显示定格缩略图，
+   * 无需自己拼签名；storage key 原值仍通过 first_frame_uri/last_frame_uri 返回。
+   */
+  private async storyboardDtoWithUrls(row: StoryboardRow, characterIds: string[] = []) {
+    const dto = storyboardDto(row, characterIds);
+    const [firstFrameUrl, lastFrameUrl] = await Promise.all([
+      dto.first_frame_uri ? this.storage.signDownload(dto.first_frame_uri, 3600) : Promise.resolve(null),
+      dto.last_frame_uri ? this.storage.signDownload(dto.last_frame_uri, 3600) : Promise.resolve(null),
+    ]);
+    return { ...dto, first_frame_url: firstFrameUrl, last_frame_url: lastFrameUrl };
   }
 
   /** 单个项目资产的 DTO（预签名参考图 + 被分镜引用次数）；counts 可批量预取避免 N+1 */

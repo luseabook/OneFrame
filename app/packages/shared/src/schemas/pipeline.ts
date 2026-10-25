@@ -83,6 +83,9 @@ export const storyboardPatchSchema = z.object({
   ratio: z.string().min(1).optional(),
   resolution: z.string().min(1).optional(),
   character_ids: z.array(z.string()).max(10).optional(),
+  // P9：3D 定格图（storage key）；传 null/"" 清空
+  first_frame_uri: z.string().max(500).nullish(),
+  last_frame_uri: z.string().max(500).nullish(),
 });
 export type StoryboardPatchRequest = z.infer<typeof storyboardPatchSchema>;
 

@@ -436,6 +436,9 @@ export const storyboards = pgTable(
     status: smallint("status").notNull().default(1), // 1草稿 2确认 3已投递 4出图 5出片
     imageTaskId: bigint("image_task_id", { mode: "bigint" }),
     videoTaskId: bigint("video_task_id", { mode: "bigint" }),
+    /** P9：分镜首帧/尾帧（3D 导演台定格图上传后的 storage key，非签名 URL） */
+    firstFrameUri: text("first_frame_uri"),
+    lastFrameUri: text("last_frame_uri"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

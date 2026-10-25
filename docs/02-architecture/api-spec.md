@@ -241,8 +241,12 @@ POST /projects/{id}/episodes/{eid}/storyboards/generate {shot_count:4..30, defau
   ← {storyboards:[{id,shot_no,shot_desc,video_prompt,duration_s,ratio,resolution}]}
   // duration_s 默认 5、输入 1..30；ratio/resolution 可空(继承项目)；合法性在投递时按模型校验
 PATCH /projects/{id}/episodes/{eid}/storyboards/{sid}
-  {shot_desc?,video_prompt?,duration_s?,ratio?,resolution?,character_ids[]?}
+  {shot_desc?,video_prompt?,duration_s?,ratio?,resolution?,character_ids[]?,
+   first_frame_uri?, last_frame_uri?}         // P9：3D 导演台定格图（storage key，≤500；null/"" 清空）
   // 仅存储；投递时按所选模型 scene.storyboard_reference_video 校验并就近取合法低档
+  // 返回值 & GET episodes/{eid} 的每镜 DTO 含：
+  //   first_frame_uri/last_frame_uri（storage key 原值）
+  //   first_frame_url/last_frame_url（API 派生：预签名 1h，null 时为 null，供前端直接显示缩略图）
 POST /projects/{id}/episodes/{eid}/storyboards/generate-videos
   {shot_ids[], budget_credits_max, model, mode?, ratio?, resolution?}
   // mode: universal_reference(默认) | first_frame | first_last_frame | text2video；video_edit → 400101
@@ -254,10 +258,14 @@ POST /projects/{id}/episodes/{eid}/storyboards/generate-videos
                    //   universal_reference: mode=universal_reference, scene=storyboard_reference_video,
                    //                        input.reference_uris=全部绑定资产参考图；绑定资产须全部定稿，否则该镜 400105
                    //   first_frame:         mode=first_frame, scene=null,
-                   //                        input.first_frame_uri=第一个合格绑定资产 ref_image_uri, reference_uris=[]
+                   //                        input.first_frame_uri = shot.first_frame_uri（P9 定格图优先）
+                   //                                                ?? 第一个合格绑定资产 ref_image_uri,
+                   //                        reference_uris=[]；两者都没有 → 该镜 400105 + reason=asset_not_ready
                    //   first_last_frame:    mode=first_last_frame, scene=null,
-                   //                        input.first_frame_uri/last_frame_uri=前两个合格绑定资产（按资产创建顺序），
-                   //                        reference_uris=[]；合格资产 <2 → 该镜 400105 + reason=need_two_assets
+                   //                        input.first_frame_uri = shot.first_frame_uri ?? 第一个合格绑定资产,
+                   //                        input.last_frame_uri  = shot.last_frame_uri  ?? 第二个合格绑定资产
+                   //                        （定格图为 storage key，与资产 ref_image_uri 同口径直接写入，不额外签名），
+                   //                        reference_uris=[]；任一帧缺失 → 该镜 400105 + reason=need_two_assets
                    //   text2video:          mode=text2video, scene=null, reference_uris=[]；不要求绑定资产，
                    //                        prompt=video_prompt || shot_desc，为空 → 400101「text2video 需要分镜提示词」
                    //   video_edit:          本期不支持，整体 400101「暂不支持 AI 改视频（需源视频输入）」
@@ -270,6 +278,8 @@ POST /projects/{id}/episodes/{eid}/storyboards/generate-videos
 GET  /projects/{id}/episodes/{eid}                      // 分镜+任务矩阵(断点续跑视图)；
                                                         // 每镜含 current_task_id + attempts[](按 tasks.shot_id 反查)
                                                         // + asset_ready(角色/场景均已定稿) + last_reason(400105/745703)
+                                                        // + first_frame_uri/last_frame_uri（P9 定格图 storage key）
+                                                        // + first_frame_url/last_frame_url（派生签名 URL，1h）
 
 POST /projects/{id}/episodes/{eid}/export               // 导出异步化(P1-12)：返回 export_id
   ← {export_id, status:1}                               // 前置校验：SUCCEEDED 镜占比 ≥80%，否则 400106

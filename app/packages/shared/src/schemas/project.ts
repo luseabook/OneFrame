@@ -149,6 +149,11 @@ export const storyboardSchema = z.object({
   ratio: z.string().nullish(),
   resolution: z.string().nullish(),
   character_ids: z.array(z.string()).max(LIMITS.CHARACTER_MAX).default([]),
+  // P9：3D 导演台定格图（storage key）；*_url 为 API 派生字段（预签名 1h，便于前端直接显示）
+  first_frame_uri: z.string().nullish().default(null),
+  last_frame_uri: z.string().nullish().default(null),
+  first_frame_url: z.string().nullish().default(null),
+  last_frame_url: z.string().nullish().default(null),
 });
 export type Storyboard = z.infer<typeof storyboardSchema>;
 

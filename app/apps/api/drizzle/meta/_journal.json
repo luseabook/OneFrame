@@ -85,6 +85,13 @@
       "when": 1792933804956,
       "tag": "0011_common_stepford_cuckoos",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792935884087,
+      "tag": "0012_left_deathbird",
+      "breakpoints": true
     }
   ]
 }
