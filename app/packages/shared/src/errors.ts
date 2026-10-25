@@ -12,6 +12,7 @@ export const ErrorCode = {
   ASSET_NOT_READY: 400105, // 引用资产未定稿
   EXPORT_INCOMPLETE: 400106, // 成功镜 <80%，拒绝全集导出
   QUOTE_REQUIRED: 400107, // 批量投递缺批量报价（预算来源）
+  TEAM_SEAT_EXCEEDED: 400108, // 团队席位数已满（邀请/绑定成员时）
 
   UNAUTHORIZED: 401101,
   TOKEN_EXPIRED: 401102,
@@ -34,6 +35,8 @@ export const ErrorCode = {
   IDEMPOTENT_REPLAY: 746001,
   VERSION_CONFLICT: 746002, // Ph3 画布；对应 RE CLI exit 9
   NODE_LOCKED: 746003, // Ph3 画布；对应 RE CLI exit 10
+  STREAM_CURSOR_EXPIRED: 746004, // SSE 续传游标失效，客户端须全量重建后重连
+  AGENT_TURN_IN_FLIGHT: 746005, // 同会话已有在途轮次（仅在显式 ?wait=1 时返回）
 
   INTERNAL: 500000,
 } as const;

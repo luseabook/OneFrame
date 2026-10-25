@@ -65,8 +65,13 @@ export const spaces = pgTable("spaces", {
   ownerUserId: bigint("owner_user_id", { mode: "bigint" })
     .notNull()
     .references(() => users.id),
-  type: smallint("type").notNull().default(1), // 1 个人 2 团队(Ph3)
+  type: smallint("type").notNull().default(1), // 1 个人 2 团队
   name: text("name").notNull().default("我的空间"),
+  // ── cam 团队域扩展（F1 §12.3）──
+  maxSeats: integer("max_seats").notNull().default(5), // 席位上限（订阅档位，A13 待取证）
+  status: smallint("status").notNull().default(1), // 1 正常 2 停用 3 欠费冻结
+  agentWhitelist: smallint("agent_whitelist").notNull().default(0), // 对齐 RE team_info.agent_whitelist
+  filmEnabled: smallint("film_enabled").notNull().default(0), // 影视版功能准入（L0 闸门）
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -80,12 +85,27 @@ export const spaceMembers = pgTable(
     userId: bigint("user_id", { mode: "bigint" })
       .notNull()
       .references(() => users.id),
-    role: smallint("role").notNull().default(3), // 1 owner 2 admin 3 member
-    creditsQuota: integer("credits_quota").notNull().default(0),
+    role: smallint("role").notNull().default(3), // 1 owner 2 admin 3 member（空间归属；团队岗位走 roleCode）
+    creditsQuota: integer("credits_quota").notNull().default(0), // 团队域激活：未回收的已分配额上限，**不是余额**
+    // ── cam 团队域扩展（F1 §12.3）──
+    roleId: bigint("role_id", { mode: "bigint" }), // → team_roles.id（自定义角色）
+    roleCode: text("role_code"), // master|admin|group_admin|producer|maker|film_producer|film_maker|…
+    roleLevel: smallint("role_level"), // 1..11，**仅展示/排序，不作特权判据**
+    groupId: bigint("group_id", { mode: "bigint" }), // → team_groups.id
+    status: smallint("status").notNull().default(1), // 1 正常 2 停用 3 待激活
+    nickname: text("nickname"),
+    account: text("account"),
+    remark: text("remark"),
+    invitedAt: timestamp("invited_at", { withTimezone: true }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [primaryKey({ columns: [t.spaceId, t.userId] })],
+  (t) => [
+    primaryKey({ columns: [t.spaceId, t.userId] }),
+    index("idx_space_members_group").on(t.spaceId, t.groupId),
+    index("idx_space_members_role").on(t.spaceId, t.roleCode),
+  ],
 );
 
 // ── 运营（Alpha 邀请/等待名单；admin 独立鉴权）──────────────
@@ -146,11 +166,21 @@ export const creditFlows = pgTable(
     refTaskId: bigint("ref_task_id", { mode: "bigint" }),
     refOrderId: bigint("ref_order_id", { mode: "bigint" }),
     refCodeId: bigint("ref_code_id", { mode: "bigint" }),
+    // ── cam 团队积分池扩展（F1 §12.3 / ADR-011）──
+    // 分配/回收必须成对写入，并靠这 4 列回答"从哪个 space 转到哪、谁操作、当时在哪个组"
+    refSpaceId: bigint("ref_space_id", { mode: "bigint" }), // 对手方 space
+    refUserId: bigint("ref_user_id", { mode: "bigint" }), // 目标成员 user
+    opUserId: bigint("op_user_id", { mode: "bigint" }), // 操作者（审计）
+    groupId: bigint("group_id", { mode: "bigint" }), // 快照当时分组
     balanceAfter: integer("balance_after").notNull(),
     memo: text("memo"),
     createdAt: createdAt(),
   },
-  (t) => [index("idx_flows_space").on(t.spaceId, t.createdAt.desc())],
+  (t) => [
+    index("idx_flows_space").on(t.spaceId, t.createdAt.desc()),
+    index("idx_flows_space_kind").on(t.spaceId, t.kind, t.createdAt.desc()),
+    index("idx_flows_ref_space").on(t.refSpaceId, t.createdAt.desc()),
+  ],
 );
 
 export const inviteRedemptions = pgTable(
@@ -656,4 +686,95 @@ export const orders = pgTable(
     uniqueIndex("uq_orders_channel_order").on(t.channel, t.channelOrderId),
     index("idx_orders_status").on(t.status),
   ],
+);
+
+// ── cam 团队域（F1 契约 §12.3，2026-10-26）────────────────────
+// ADR-010：团队不另建表，spaces(type=2) 是唯一载体；team_id 映射为 space_id。
+// ADR-011：团队积分池是 space 级 credit_accounts，分配/回收成对写 credit_flows。
+
+/** 团队分组（树形；禁跨 space 的 parent，应用层校验→400101） */
+export const teamGroups = pgTable(
+  "team_groups",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    name: text("name").notNull(),
+    leaderUserId: bigint("leader_user_id", { mode: "bigint" }).references(() => users.id),
+    sort: integer("sort").notNull().default(0),
+    status: smallint("status").notNull().default(1), // 1 正常 2 停用
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_team_groups_space").on(t.spaceId, t.parentId, t.sort)],
+);
+
+/** 团队角色（内置 11 级 + 自定义）。role_level 仅展示/排序，不作特权判据（见 §12.3.1） */
+export const teamRoles = pgTable(
+  "team_roles",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    roleCode: text("role_code").notNull(),
+    roleName: text("role_name").notNull(),
+    roleLevel: smallint("role_level").notNull(),
+    isSystem: boolean("is_system").notNull().default(false),
+    description: text("description"),
+    powerList: jsonb("power_list").notNull().default(sql`'[]'::jsonb`),
+    moduleIdList: jsonb("module_id_list").notNull().default(sql`'{}'::jsonb`),
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_team_roles_code").on(t.spaceId, t.roleCode)],
+);
+
+/** 成员↔项目作用域（project_id 为不透明 ID，故意无 FK：cam 不得依赖 film/script 表） */
+export const teamMemberProjects = pgTable(
+  "team_member_projects",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    projectKind: smallint("project_kind").notNull().default(1), // 1 脚本 2 影视版
+    projectId: bigint("project_id", { mode: "bigint" }).notNull(),
+    /** 参与项目形式（2026-10-26 登录态实测：团队表格有该列）1全流程 2仅制作 3仅审核 */
+    participationType: smallint("participation_type").notNull().default(1),
+    grantedBy: bigint("granted_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_tmp_scope").on(t.spaceId, t.userId, t.projectKind, t.projectId),
+    index("idx_tmp_space_project").on(t.spaceId, t.projectKind, t.projectId),
+  ],
+);
+
+/** BYOK 第三方 Key（A6 待取证，最小面；密钥只存密文+哈希，对齐 identities 双列口径） */
+export const userThirdKeys = pgTable(
+  "user_third_keys",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    provider: text("provider").notNull(),
+    label: text("label").notNull().default(""),
+    keyCipher: text("key_cipher").notNull(),
+    keyHash: text("key_hash"),
+    status: smallint("status").notNull().default(1),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_user_third_keys_user").on(t.userId, t.provider)],
 );

@@ -712,6 +712,35 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | `cam` | 团队=`spaces(type=2)`；`team_id`→`space_id`、`wsid`→`user_id`。积分分配/回收**成对写 `credit_flows`**（`team_allocate_out/in`、`team_recover_out/in`）并填 `ref_space_id/ref_user_id/op_user_id/group_id` 四列——否则 `points-flow` 的 8 个筛选参数无处可查 |
 | `film` | 仿多维表格：table→fields→rows→cells；行级 CAS 冲突用 746002；**审核流无独立写端点属已知缺口（A3）**，F2 需决定补端点或接受只读；导入 A11 亦无状态查询端点。字段 9 种：`text/asset_ref/link/user/date/canvas_ref/task_status/review_ref/points_ro`；`is_unique_type` 语义是"每 type 每表至多一个" |
 
+#### 14.5.1 `cam` 已实现端点（2026-10-26，迁移 0013）
+
+> 与参照 `/web/v1/cam/*` 的**命名对齐但协议自研**（ADR-009）。当前已实现 14 个（其余按需补齐）：
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| GET | `/cam/team/info` | 成员 | 团队信息（席位/已用/积分池=`credit_accounts.balance`） |
+| GET | `/cam/permission/user` | 成员 | 当前用户角色与特权（`privileged` 按码集算） |
+| GET | `/cam/role/list` | 成员 | 角色列表（首次访问按内置 11 级幂等初始化） |
+| GET | `/cam/team/groups` | 成员 | 分组列表 |
+| POST | `/cam/team/group` | 特权 | 建分组（禁跨 space 的 parent→400101） |
+| PATCH | `/cam/team/group/{id}` | 特权 | 改分组 |
+| DELETE | `/cam/team/group/{id}` | 特权 | 删分组（有子组/成员时拒绝） |
+| GET | `/cam/team/members` | 成员 | 成员列表（支持 group/role/status 过滤 + 分页） |
+| PATCH | `/cam/team/member/{user_id}` | 特权 | 改成员（角色/分组/状态；禁止停用 owner） |
+| DELETE | `/cam/team/member/{user_id}` | 特权 | 移除成员（禁止移除 owner） |
+| POST | `/cam/team/points-allocation` | 特权 | **团队→成员**分配（成对记账 + `credits_quota` 增长） |
+| POST | `/cam/team/points-recovery` | 特权 | **成员→团队**回收（成对记账 + 配额回落） |
+| GET | `/cam/team/points-flow/list` | 成员 | 团队积分流水（kind/target/group/op 四维筛选） |
+| GET | `/cam/team/account-points-ranking` | 成员 | 成员已分配额排行 |
+| GET | `/cam/project/{project_id}/members` | 成员 | 成员↔项目作用域 |
+| POST | `/cam/project/{project_id}/members/bind` | 特权 | 绑定（含 `participation_type`） |
+| POST | `/cam/project/{project_id}/members/delete` | 特权 | 解绑 |
+
+**偏离说明**：
+1. 参照用 `/cam/team/{team_id}/info` 把 team_id 放路径；我方**省略**，因为 `X-Space-Id` 已表达当前空间（ADR-010），路径带 ID 会产生"路径 ID 与头不一致"的二义性。
+2. 席位上限错误码为新码 **400108**（参照侧未见同义码，属我方自造，已在码表登记）。
+3. 已实现部分**不含**：`team/member/batch`（批量邀请/改密）、`member/export`、`project-points-flow`、`team/temp-info`（模型开关矩阵）、`linked-users`、`user/third/key/*`——按 F2 优先级后续补，**未实现即不暴露**（不做空壳接口）。
+
 ### 14.6 SSE 协议（`agent` 与画布内对话共用）
 
 | 项 | 约定 |
