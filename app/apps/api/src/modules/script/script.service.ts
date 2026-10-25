@@ -16,6 +16,7 @@ import {
 import {
   AppError,
   ErrorCode,
+  LIMITS,
   TaskStatus,
   newId,
   type CharactersGenerateRequest,
@@ -28,6 +29,7 @@ import {
   type StoryboardPatchRequest,
   type StoryboardsGenerateRequest,
 } from "@app/shared";
+import { clampToNovelLimit, decodeBase64Upload, parseScriptFile } from "./script-parser";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
 import { CreditsService } from "../credits/credits.service";
@@ -51,6 +53,7 @@ function projectDto(row: ProjectRow) {
     ratio: row.ratio,
     source_type: row.sourceType,
     source_text: row.sourceText,
+    source_file_name: row.sourceFileName ?? null,
     status: row.status,
     archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
     is_sample: row.isSample === 1,
@@ -114,7 +117,14 @@ export class ScriptService {
 
   async createProject(
     spaceId: string,
-    input: { title: string; drama_type?: number; ratio?: string; source_type?: number; source_text?: string },
+    input: {
+      title: string;
+      drama_type?: number;
+      ratio?: string;
+      source_type?: number;
+      source_text?: string;
+      source_file_name?: string;
+    },
   ) {
     this.moderation.assertText(input.source_text, "source_text");
     const [row] = await db
@@ -127,10 +137,30 @@ export class ScriptService {
         ratio: input.ratio ?? "9:16",
         sourceType: input.source_type ?? 1,
         sourceText: input.source_text ?? "",
+        sourceFileName: input.source_file_name ?? null,
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "create project failed");
     return projectDto(row);
+  }
+
+  /**
+   * 新建项目「上传剧本」：解析 txt/md/csv/docx/xlsx 为纯文本（不落盘）。
+   * 返回文本交给前端回填到创建请求的 source_text；这里不出库、不扣积分。
+   */
+  async parseScript(fileName: string, fileBase64: string) {
+    const buffer = decodeBase64Upload(fileBase64);
+    const parsed = await parseScriptFile(fileName, buffer);
+    const { text, truncated } = clampToNovelLimit(parsed.text);
+    const warnings = [...parsed.warnings];
+    if (truncated) warnings.push(`文本超过 ${LIMITS.NOVEL_MAX} 字上限，已截断；可在项目中继续编辑`);
+    return {
+      text,
+      format: parsed.format,
+      chars: text.length,
+      truncated,
+      warnings,
+    };
   }
 
   async listProjects(spaceId: string, page = 1, pageSize = 20) {

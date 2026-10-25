@@ -5,14 +5,25 @@ definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 useHead({ title: "首页 · 一帧" });
 
 const tools = [
-  { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true },
-  { label: "文生视频", desc: "主流高质量模型，轻松出片", to: "/create/text-to-video", icon: "t2v", enabled: true },
-  { label: "图生视频", desc: "一键让静态图动出电影感", to: "/create/image-to-video", icon: "i2v", enabled: true },
-  { label: "剧本广场", desc: "海量剧本灵感与模板", to: null, icon: "plaza", enabled: false, tag: "即将上线" },
-  { label: "视频对口型", desc: "唇形贴合超自然", to: null, icon: "lips", enabled: false, tag: "即将上线" },
-  { label: "灵感成片", desc: "Agent 智能规划完整短片", to: null, icon: "spark", enabled: false, tag: "敬请期待" },
-  { label: "视频超清", desc: "重建高清细节，工业级画质", to: null, icon: "hd", enabled: false, tag: "敬请期待" },
+  { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true, modal: true },
+  { label: "文生视频", desc: "主流高质量模型，轻松出片", to: "/create/text-to-video", icon: "t2v", enabled: true, modal: false },
+  { label: "图生视频", desc: "一键让静态图动出电影感", to: "/create/image-to-video", icon: "i2v", enabled: true, modal: false },
+  { label: "剧本广场", desc: "海量剧本灵感与模板", to: null, icon: "plaza", enabled: false, modal: false, tag: "即将上线" },
+  { label: "视频对口型", desc: "唇形贴合超自然", to: null, icon: "lips", enabled: false, modal: false, tag: "即将上线" },
+  { label: "灵感成片", desc: "Agent 智能规划完整短片", to: null, icon: "spark", enabled: false, modal: false, tag: "敬请期待" },
+  { label: "视频超清", desc: "重建高清细节，工业级画质", to: null, icon: "hd", enabled: false, modal: false, tag: "敬请期待" },
 ];
+
+// 新建项目弹窗（参照产品：短剧工作流 / 剧本创作 → 新建项目）
+const showCreate = ref(false);
+const router = useRouter();
+function openCreate(): void {
+  showCreate.value = true;
+}
+function onProjectCreated(project: { id: string }): void {
+  showCreate.value = false;
+  void router.push(`/projects/${project.id}`);
+}
 
 const banners = [
   { title: "剧本到成片，效率翻倍", sub: "AI 漫剧流水线全新升级", from: "#3b2f6e", via: "#1f1f2e" },
@@ -55,7 +66,7 @@ async function dismissOnboarding(): Promise<void> {
     <h1 class="hero-title">您的专属AI漫剧工作室</h1>
 
     <section class="hero-cards">
-      <NuxtLink to="/projects" class="flow-card">
+      <button type="button" class="flow-card" @click="openCreate">
         <div class="flow-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="m14.5 4.5 5 5L8 21H3v-5Z" />
@@ -69,7 +80,7 @@ async function dismissOnboarding(): Promise<void> {
         <span class="plus" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
-      </NuxtLink>
+      </button>
       <NuxtLink to="/tools" class="canvas-card">
         <div class="flow-icon flat" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -90,10 +101,12 @@ async function dismissOnboarding(): Promise<void> {
     <section class="tool-row">
       <div v-for="t in tools" :key="t.label" class="tool-cell">
         <component
-          :is="t.enabled ? 'NuxtLink' : 'div'"
-          :to="t.to ?? undefined"
+          :is="t.modal ? 'button' : t.enabled ? 'NuxtLink' : 'div'"
+          :type="t.modal ? 'button' : undefined"
+          :to="t.modal ? undefined : (t.to ?? undefined)"
           class="tool-card"
           :class="{ disabled: !t.enabled }"
+          @click="t.modal ? openCreate() : undefined"
         >
           <span v-if="t.tag" class="corner-tag" :data-kind="t.tag">{{ t.tag }}</span>
           <span class="tool-icon" aria-hidden="true">
@@ -183,6 +196,8 @@ async function dismissOnboarding(): Promise<void> {
       </div>
     </section>
   </main>
+
+  <CreateProjectModal v-model:open="showCreate" @created="onProjectCreated" />
 </template>
 
 <style scoped>
@@ -534,5 +549,15 @@ async function dismissOnboarding(): Promise<void> {
   .case-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* 卡片作为可点击元素（button）时的样式复位 */
+button.flow-card,
+button.tool-card {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 </style>

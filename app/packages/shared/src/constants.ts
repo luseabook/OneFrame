@@ -79,7 +79,14 @@ export const CreditFlowKind = [
 ] as const;
 export type CreditFlowKind = (typeof CreditFlowKind)[number];
 
-export const DramaType = { LIVE: 1, ANIME: 2 } as const; // 真人 / 动漫（PRD F2）
+// 剧目类型（对齐参照产品「新建项目」三种选项）：
+// 1 国内仿真人剧 / 2 海外仿真人剧 / 3 2D/3D 动漫
+// 兼容：LIVE 为旧代码别名（=1）；旧 ANIME=2 的历史数据由迁移 0010 修正为 3
+export const DramaType = { LIVE: 1, DOMESTIC_LIVE: 1, OVERSEAS_LIVE: 2, ANIME: 3 } as const;
+export type DramaType = (typeof DramaType)[keyof typeof DramaType];
+// 新建项目可选画面比例（参照产品只提供两种）
+export const PROJECT_RATIOS = ["9:16", "16:9"] as const;
+export type ProjectRatio = (typeof PROJECT_RATIOS)[number];
 // PRD F2①：1 粘贴小说 / 2 一句话想法 / 3 导入剧本拆集 / 4 二创裂变（Ph3 预留）
 export const ProjectSourceType = { NOVEL: 1, IDEA: 2, SCRIPT: 3, FISSION: 4 } as const;
 export type ProjectSourceType = (typeof ProjectSourceType)[keyof typeof ProjectSourceType];

@@ -46,6 +46,20 @@ describe("createProjectSchema", () => {
       createProjectSchema.safeParse({ ...base, source_text: "x".repeat(50001) }).success,
     ).toBe(false);
   });
+
+  it("accepts the three drama types and two ratios shown in the new-project modal", () => {
+    const base = { title: "测试项目" };
+    for (const drama_type of [1, 2, 3]) {
+      expect(createProjectSchema.safeParse({ ...base, drama_type }).success).toBe(true);
+    }
+    expect(createProjectSchema.safeParse({ ...base, drama_type: 4 }).success).toBe(false);
+    expect(createProjectSchema.safeParse({ ...base, ratio: "9:16" }).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, ratio: "16:9" }).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, ratio: "4:3" }).success).toBe(false);
+    expect(createProjectSchema.safeParse({ ...base, title: "x".repeat(50) }).success).toBe(true);
+    expect(createProjectSchema.safeParse({ ...base, title: "x".repeat(51) }).success).toBe(false);
+    expect(createProjectSchema.safeParse({ ...base, source_file_name: "剧本.docx" }).success).toBe(true);
+  });
 });
 
 describe("generateVideosSchema", () => {

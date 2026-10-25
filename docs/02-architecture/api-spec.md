@@ -209,8 +209,11 @@ POST /files/sign-url       {object_key, expire?:3600}  ← {url}
 > LLM 步骤为同步端点（服务端内部流式聚合，30s 上限，每次 1~2 积分，失败不扣）；媒体步骤复用 §5/§6 任务系统。
 
 ```
-POST /projects {title, drama_type:1|2, ratio, source_type:1novel|2idea|3script, source_text}
+POST /projects {title≤50, drama_type:1国内仿真人剧|2海外仿真人剧|3 2D/3D动漫,
+                ratio:"9:16"|"16:9", source_type:1novel|2idea|3script, source_text≤5万字, source_file_name?}
   ← {project:{id,status}}                    // source_type=3 → 建项后调 /episodes/split
+POST /projects/parse-script {file_name, file_base64}   // 新建项目「上传剧本」：txt/md/csv/docx/xlsx（≤8MB）
+  ← {text, format, chars, truncated, warnings[]}       // 只解析不落库、不扣积分；旧版 .doc → 400101
 POST /projects/{id}/episodes/split             // 导入剧本→拆集（RE 制片工坊主路径；拆集不扣积分）
   {source_text?}                               // 省略则用建项时 source_text；≤5 万字（超限 400104）
   ← {episodes:[{ep_no,title,script_text}], task_id?}

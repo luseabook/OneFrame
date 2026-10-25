@@ -52,7 +52,7 @@ export class AuthService {
       spaceId,
       title: "示例：雨夜来信",
       genre: "悬疑",
-      dramaType: 2,
+      dramaType: 3,
       ratio: "9:16",
       sourceType: 2,
       sourceText: "林晚在雨夜收到一封来自失踪父亲的匿名信，循着地址走进老城区。",

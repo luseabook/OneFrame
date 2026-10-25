@@ -106,6 +106,7 @@ export interface ProjectDto {
   ratio: string;
   source_type: number;
   source_text: string | null;
+  source_file_name?: string | null;
   status: number;
   archived_at?: string | null;
   is_sample?: boolean;

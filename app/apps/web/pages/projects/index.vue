@@ -1,36 +1,31 @@
 <script setup lang="ts">
 import type { ProjectDto } from "~/types/api";
 
+// 项目页（对齐参照产品：顶部「项目 / 已导出」+ 空状态 + 底部悬浮「创建项目」）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "全部项目 · 一帧" });
+useHead({ title: "项目 · 一帧" });
 
 const api = useApi();
-const toast = useToast();
 const router = useRouter();
 
 const list = ref<ProjectDto[]>([]);
 const total = ref(0);
-// 初始为 true：SSR 与客户端首帧都渲染骨架屏，避免结构差异（与作品库一致）
 const loading = ref(true);
-const creating = ref(false);
 const error = ref("");
 const showCreate = ref(false);
-const form = reactive({
-  title: "",
-  source_type: 1,
-  ratio: "9:16",
-  source_text: "",
-});
+const tab = ref<"projects" | "exports">("projects");
 
-const SOURCE_LABEL: Record<number, string> = { 1: "小说", 2: "一句话想法", 3: "导入剧本", 4: "裂变" };
-
-// SelectField 以字符串 v-model 工作，这里与数字型 source_type 双向桥接
-const sourceTypeStr = computed({
-  get: () => String(form.source_type),
-  set: (v: string) => {
-    form.source_type = Number(v) || 1;
-  },
-});
+const DRAMA_LABEL: Record<number, string> = {
+  1: "国内仿真人剧",
+  2: "海外仿真人剧",
+  3: "2D/3D动漫",
+};
+// 封面按剧目类型给不同色相，保证卡片可区分
+const DRAMA_COVER: Record<number, string> = {
+  1: "linear-gradient(135deg, #3a2030, #16121c)",
+  2: "linear-gradient(135deg, #14303e, #0e161c)",
+  3: "linear-gradient(135deg, #2f1a44, #15101f)",
+};
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -45,74 +40,46 @@ async function load(): Promise<void> {
   }
 }
 
-async function create(): Promise<void> {
-  error.value = "";
-  if (!form.title.trim()) {
-    error.value = "请输入项目名称";
-    return;
-  }
-  creating.value = true;
-  try {
-    const project = await api.post<ProjectDto>("/projects", {
-      title: form.title,
-      source_type: form.source_type,
-      ratio: form.ratio,
-      source_text: form.source_text,
-    });
-    toast.success("项目已创建");
-    await navigateTo(`/projects/${project.id}`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "创建失败";
-    error.value = msg;
-    toast.error(msg);
-  } finally {
-    creating.value = false;
-  }
+function openCreate(): void {
+  showCreate.value = true;
 }
 
-function resetAndClose(): void {
+function onCreated(project: ProjectDto): void {
   showCreate.value = false;
-  form.title = "";
-  form.source_text = "";
-  form.source_type = 1;
-  form.ratio = "9:16";
-  error.value = "";
+  void router.push(`/projects/${project.id}`);
 }
 
 onMounted(load);
 </script>
 
 <template>
-  <div class="projects">
-    <header class="head">
-      <div>
-        <h1>全部项目</h1>
-        <p class="sub">
-          <template v-if="!loading">共 {{ total }} 个项目 · </template>从一句话或一部小说开始
-        </p>
-      </div>
-      <div class="actions">
-        <Button variant="ghost" size="sm" @click="router.push('/works')">按作品查看</Button>
-        <Button size="sm" @click="showCreate = true">+ 新建项目</Button>
-      </div>
-    </header>
+  <div class="projects-page">
+    <nav class="tabs">
+      <button type="button" class="tab" :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
+        项目
+      </button>
+      <button type="button" class="tab" :class="{ active: tab === 'exports' }" @click="tab = 'exports'">
+        已导出
+      </button>
+    </nav>
 
     <p v-if="error" class="err">{{ error }}</p>
 
-    <Skeleton v-if="loading" :rows="4" />
+    <template v-if="tab === 'projects'">
+      <Skeleton v-if="loading" :rows="4" />
 
-      <template v-else>
-        <div v-if="list.length" class="grid">
-          <NuxtLink v-for="item in list" :key="item.id" :to="`/projects/${item.id}`" class="proj-card">
-            <div class="cover">
-              <span class="ratio">{{ item.ratio }}</span>
-            <Tag v-if="item.is_sample" class="sample-tag" tone="brand" size="sm">示例</Tag>
-            <Tag v-else-if="item.archived_at" class="sample-tag" tone="neutral" size="sm">已归档</Tag>
+      <div v-else-if="list.length" class="grid">
+        <NuxtLink v-for="item in list" :key="item.id" :to="`/projects/${item.id}`" class="proj-card">
+          <div class="cover" :style="{ background: DRAMA_COVER[item.drama_type] ?? DRAMA_COVER[1] }">
+            <span class="ratio-chip">{{ item.ratio }}</span>
+            <span v-if="item.is_sample" class="flag">示例</span>
+            <span v-else-if="item.archived_at" class="flag muted">已归档</span>
+            <span class="cover-title">{{ item.title }}</span>
           </div>
           <div class="body">
             <p class="title" :title="item.title">{{ item.title }}</p>
             <p class="meta">
-              {{ SOURCE_LABEL[item.source_type] ?? "其他" }}
+              {{ DRAMA_LABEL[item.drama_type] ?? "短剧" }}
               <span class="sep">·</span>
               {{ new Date(item.created_at).toLocaleDateString("zh-CN") }}
             </p>
@@ -120,86 +87,90 @@ onMounted(load);
         </NuxtLink>
       </div>
 
-      <EmptyState
-        v-else
-        icon="▤"
-        title="还没有项目"
-        description="粘贴一部小说或写一句话想法，AI 会拆成 3~6 集并生成分镜。"
-      >
-        <Button @click="showCreate = true">新建第一个项目</Button>
-      </EmptyState>
+      <div v-else class="empty">
+        <span class="empty-art" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2.5h7A2.5 2.5 0 0 1 21 10v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17Z" />
+            <path d="M12 9.5v5.5M9.5 12H14.5" opacity="0.7" />
+          </svg>
+        </span>
+        <p class="empty-text">点击下方创建一个新项目</p>
+        <p v-if="total === 0" class="empty-hint">上传剧本或粘贴文本，AI 帮你拆集、定妆、出分镜</p>
+      </div>
     </template>
 
-    <Modal :open="showCreate" title="新建项目" width="560px" @close="resetAndClose">
-      <div class="form">
-        <TextField v-model="form.title" label="项目名称" placeholder="例如：雨夜来信" :maxlength="100" required />
-        <div class="row-2">
-          <SelectField
-            v-model="sourceTypeStr"
-            label="来源"
-            :options="[
-              { value: '1', label: '小说' },
-              { value: '2', label: '一句话想法' },
-              { value: '3', label: '导入剧本（拆集）' },
-            ]"
-          />
-          <SelectField
-            v-model="form.ratio"
-            label="画幅"
-            :options="[
-              { value: '9:16', label: '9:16 竖屏' },
-              { value: '16:9', label: '16:9 横屏' },
-            ]"
-          />
-        </div>
-        <TextAreaField
-          v-model="form.source_text"
-          label="素材 / 简介"
-          placeholder="粘贴小说章节、故事梗概或已有剧本（≤5 万字）"
-          :maxlength="50000"
-          :rows="6"
-          hint="可留空，稍后在流水线中补充"
-        />
-      </div>
-      <template #footer>
-        <Button variant="ghost" @click="resetAndClose">取消</Button>
-        <Button :disabled="creating" :loading="creating" @click="create">
-          {{ creating ? "创建中" : "创建并进入流水线" }}
-        </Button>
-      </template>
-    </Modal>
+    <div v-else class="empty exports">
+      <span class="empty-art small" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5" />
+          <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
+        </svg>
+      </span>
+      <p class="empty-text">暂无导出记录</p>
+      <p class="empty-hint">在项目流水线内完成分镜并导出后，成片记录会出现在这里</p>
+    </div>
+
+    <div class="fab-wrap">
+      <button type="button" class="fab" @click="openCreate">
+        <span class="fab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </span>
+        创建项目
+      </button>
+    </div>
+
+    <CreateProjectModal v-model:open="showCreate" @created="onCreated" />
   </div>
 </template>
 
 <style scoped>
-.projects {
+.projects-page {
+  position: relative;
   max-width: 1280px;
   margin: 0 auto;
-}
-.head {
+  padding: 8px 0 120px;
+  min-height: calc(100vh - 160px);
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
+  flex-direction: column;
 }
-.head h1 {
-  font-size: var(--text-2xl);
-  font-weight: 700;
+
+.tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--border-1);
+  margin-bottom: 24px;
 }
-.sub {
-  margin: var(--space-1) 0 0;
+
+.tab {
+  position: relative;
+  padding: 10px 2px 12px;
+  border: 0;
+  background: transparent;
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
 }
-.actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-shrink: 0;
+
+.tab.active {
+  color: var(--text-1);
+}
+
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
 }
 
 .err {
-  padding: var(--space-3) var(--space-4);
+  padding: 10px 14px;
   background: var(--danger-bg);
   color: var(--danger);
   border-radius: var(--radius-md);
@@ -208,74 +179,187 @@ onMounted(load);
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
 }
+
 .proj-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: 12px;
   overflow: hidden;
-  transition:
-    border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out),
-    transform var(--duration-base) var(--ease-out);
+  transition: border-color 0.15s, transform 0.15s;
 }
+
 .proj-card:hover {
   border-color: var(--border-3);
-  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
+
 .cover {
   position: relative;
   aspect-ratio: 16 / 10;
-  background: linear-gradient(135deg, var(--bg-sunken), var(--bg-hover));
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: flex-end;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
-.ratio {
-  color: var(--text-4);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-.sample-tag {
+
+.cover::after {
+  content: "";
   position: absolute;
-  top: var(--space-2);
-  left: var(--space-2);
+  inset: 0;
+  background-image: radial-gradient(#ffffff14 1px, transparent 1px);
+  background-size: 12px 12px;
+  -webkit-mask-image: linear-gradient(160deg, transparent 30%, #000);
+  mask-image: linear-gradient(160deg, transparent 30%, #000);
 }
+
+.cover-title {
+  position: relative;
+  z-index: 1;
+  color: #ffffffd0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.ratio-chip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #00000066;
+  color: #ffffffb0;
+  font-size: 11px;
+}
+
+.flag {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: 11px;
+}
+
+.flag.muted {
+  background: #ffffff24;
+  color: #ffffffc0;
+}
+
 .body {
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: 10px 14px 14px;
 }
+
 .title {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-base);
+  margin: 0 0 4px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.proj-card:hover .title {
-  color: var(--brand-600);
-}
+
 .meta {
   margin: 0;
   color: var(--text-3);
-  font-size: var(--text-xs);
-}
-.sep {
-  color: var(--border-3);
-  margin: 0 3px;
+  font-size: 12px;
 }
 
-.form {
+.sep {
+  color: var(--border-3);
+  margin: 0 4px;
+}
+
+.empty {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 420px;
+  text-align: center;
 }
-.row-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
+
+.empty-art {
+  width: 92px;
+  height: 92px;
+  color: #ffffff8a;
+  filter: drop-shadow(0 10px 30px #7e70ff33);
+}
+
+.empty-art.small {
+  width: 64px;
+  height: 64px;
+}
+
+.empty-art svg {
+  width: 100%;
+  height: 100%;
+}
+
+.empty-text {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.empty-hint {
+  margin: 0;
+  color: var(--text-4);
+  font-size: 12px;
+}
+
+.fab-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+.fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 1px solid #ffffff24;
+  background: linear-gradient(180deg, #24242c, #19191f);
+  color: var(--text-1);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 18px 40px #00000080;
+}
+
+.fab:hover {
+  border-color: var(--brand-500);
+}
+
+.fab-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--brand-300);
+}
+
+.fab-icon svg {
+  width: 100%;
+  height: 100%;
 }
 </style>

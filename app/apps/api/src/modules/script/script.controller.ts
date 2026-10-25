@@ -19,6 +19,12 @@ import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { ScriptService } from "./script.service";
 
+/** 上传剧本解析请求：前端把文件读成 base64 提交（不依赖 multipart 依赖） */
+const parseScriptSchema = z.object({
+  file_name: z.string().min(1).max(255),
+  file_base64: z.string().min(1).max(12_000_000),
+});
+
 @Controller()
 export class ScriptController {
   constructor(@Inject(ScriptService) private readonly script: ScriptService) {}
@@ -27,6 +33,13 @@ export class ScriptController {
   async create(@Req() req: AuthedRequest, @Body() body: unknown) {
     const input = parseOrThrow(createProjectSchema, body);
     return this.script.createProject(req.auth?.spaceId ?? "", input);
+  }
+
+  /** 新建项目「上传剧本」：解析 txt/md/csv/docx/xlsx（只解析、不入库） */
+  @Post("projects/parse-script")
+  async parseScript(@Body() body: unknown) {
+    const input = parseOrThrow(parseScriptSchema, body);
+    return this.script.parseScript(input.file_name, input.file_base64);
   }
 
   @Get("projects")

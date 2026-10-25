@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   DramaType,
   LIMITS,
+  PROJECT_RATIOS,
   ProjectAssetStatus,
   ProjectSourceType,
   STORYBOARD_DURATION_DEFAULT,
@@ -11,10 +12,11 @@ import {
 
 // api-spec §8 projects（MVP 旗舰：剧本流水线）
 export const createProjectSchema = z.object({
-  title: z.string().min(1).max(100),
-  drama_type: z.union([z.literal(DramaType.LIVE), z.literal(DramaType.ANIME)]).default(DramaType.LIVE),
-  // 画幅/分辨率合法性以模型目录为准；这里只做非空约束
-  ratio: z.string().min(1).default("9:16"),
+  title: z.string().min(1).max(50),
+  // 1 国内仿真人剧 / 2 海外仿真人剧 / 3 2D/3D 动漫（参照产品「新建项目」）
+  drama_type: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(DramaType.LIVE),
+  // 画面比例：参照产品新建项目只提供 9:16 / 16:9
+  ratio: z.enum(PROJECT_RATIOS).default("9:16"),
   source_type: z
     .union([
       z.literal(ProjectSourceType.NOVEL),
@@ -23,6 +25,8 @@ export const createProjectSchema = z.object({
     ])
     .default(ProjectSourceType.NOVEL),
   source_text: z.string().max(LIMITS.NOVEL_MAX).default(""),
+  /** 上传剧本的原始文件名（仅留痕展示，内容已解析进 source_text） */
+  source_file_name: z.string().max(200).optional(),
 });
 export type CreateProjectRequest = z.infer<typeof createProjectSchema>;
 

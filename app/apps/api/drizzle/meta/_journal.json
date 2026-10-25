@@ -71,6 +71,13 @@
       "when": 1792874660054,
       "tag": "0009_funny_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792912793234,
+      "tag": "0010_windy_ultimo",
+      "breakpoints": true
     }
   ]
 }

@@ -363,10 +363,12 @@ export const scriptProjects = pgTable(
       .references(() => spaces.id),
     title: text("title").notNull(),
     genre: text("genre"),
-    dramaType: smallint("drama_type").notNull().default(1), // 1 真人 2 动漫
+    dramaType: smallint("drama_type").notNull().default(1), // 1 国内仿真人剧 2 海外仿真人剧 3 2D/3D动漫
     ratio: text("ratio").notNull().default("9:16"),
     sourceType: smallint("source_type").notNull().default(1), // 1novel 2idea 3script 4fission
     sourceText: text("source_text"),
+    /** 上传剧本的原始文件名（内容已解析进 source_text；仅留痕展示） */
+    sourceFileName: text("source_file_name"),
     status: smallint("status").notNull().default(1),
     /** 作品归档时间（PRD 增补 §1.2：作品=项目，归档为软标记） */
     archivedAt: timestamp("archived_at", { withTimezone: true }),
