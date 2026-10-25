@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { assets, models, projectAssets, settleCredits, storyboards, taskEvents, tasks, unfreezeCredits } from "@app/db";
 import type { Db } from "@app/db";
-import type { GenResult, AdapterRuntimeOptions } from "@app/model-adapters";
+import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
 import type { StorageDriver } from "@app/storage";
 import { newId, TaskStatus, type GenerationRequest } from "@app/shared";
 import { labelResults, type AiLabelConfig } from "./label";
+import { resolveOutboundUris } from "./outbound-uri";
 
 export type TaskRow = typeof tasks.$inferSelect;
 
@@ -18,6 +19,10 @@ export interface ExecutorDeps {
   pollIntervalMs?: number;
   maxPollMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** 出站素材 URI 签名有效期（秒）；默认 21600，由 ADAPTER_URI_TTL_SECONDS 覆盖 */
+  outboundUriTtlSeconds?: number;
+  /** 适配器解析注入点（仅测试用；默认走 model-adapters 的 resolveAdapter） */
+  resolveAdapter?: (adapterCode: string, options: AdapterRuntimeOptions) => ModelAdapter;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -244,14 +249,25 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
       });
     });
 
+    // P10：出站素材签名（real 模式 storage key → 公网签名 URL；mock 原样透传）。
+    // 只改出站 payload；tasks.input 落库仍是 raw key（本函数不写 DB）。
+    const outboundInput = await resolveOutboundUris(
+      (task.input ?? {}) as GenerationRequest["input"],
+      {
+        adapterMode: deps.adapterOptions.mode === "real" ? "real" : "mock",
+        sign: (key, ttlSeconds) => deps.storage.signDownload(key, ttlSeconds),
+        ttlSeconds: deps.outboundUriTtlSeconds,
+        logger: deps.log,
+      },
+    );
     const request: GenerationRequest = {
       mode: task.mode as GenerationRequest["mode"],
       model: model.name,
       scene: (task.scene as GenerationRequest["scene"]) ?? null,
-      input: task.input as GenerationRequest["input"],
+      input: outboundInput,
       options: task.options as GenerationRequest["options"],
     };
-    const adapter = resolveAdapter(model.adapterCode, deps.adapterOptions);
+    const adapter = (deps.resolveAdapter ?? resolveAdapter)(model.adapterCode, deps.adapterOptions);
     const submitted = await adapter.submit({
       task_id: String(task.id),
       request,

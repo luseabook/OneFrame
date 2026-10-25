@@ -57,6 +57,8 @@ STORAGE_DIR / STORAGE_PUBLIC_BASE / STORAGE_SIGN_SECRET
 STORAGE_S3_BUCKET / STORAGE_S3_REGION / STORAGE_S3_ENDPOINT
 STORAGE_S3_PUBLIC_ENDPOINT   # 预签名 URL 的对外地址（内网 SDK 与公网下载分离）
 STORAGE_S3_ACCESS_KEY_ID / STORAGE_S3_SECRET_ACCESS_KEY / STORAGE_S3_FORCE_PATH_STYLE
+# P10：real 模式出站素材（reference_uris/first_frame_uri/last_frame_uri）签名有效期（秒），默认 21600=6h
+ADAPTER_URI_TTL_SECONDS=21600
 # 供应商（仅 worker.env）
 VOLC_AK / VOLC_SK / VOLC_MODEL_ENDPOINT
 ARK_API_KEY / ARK_BASE_URL / ARK_MODEL_MAP     # 火山方舟专用适配器（volcengine:* 任务）
@@ -310,4 +312,34 @@ real 模式下若某段无源视频/不可解码 → 跳过并计入 `skipped`�
   `ffmpeg -f lavfi -i color=c=0x14161d:s=720x1280:d=2 -c:v libx264 -pix_fmt yuv420p -r 30 -t 2 out.mp4`。
 - **对象存储清理**：成片存 `u/<space>/timelines/`，当前无自动过期（与旧 zip 导出一致，依赖运维按容量策略清理）；
   临时目录由 worker 自动清理，无需人工。
+
+### 7.8 真实适配器的存储前置条件（P10）
+
+**问题**：`ADAPTER_MODE=real` 时，出站给 Ark/Kling/Vidu 的素材必须**公网可访问**。`tasks.input` 里存的是
+storage key（如 `u/<space>/assets/<id>/orig.png`，无 scheme），直接发供应商必然 404 → 参考图/首帧全废（mock 下无感）。
+
+**实现**：worker 在调用适配器前统一解析（`apps/worker/src/outbound-uri.ts`）：
+- `ADAPTER_MODE=mock`：**完全保持现状**（raw key 透传，本地/CI 不依赖公网）；
+- `ADAPTER_MODE=real`：
+  - 无 scheme 的值视为 storage key → `storage.signDownload(key, ADAPTER_URI_TTL_SECONDS ?? 21600)`；
+  - 已是 http(s) 的透传（兼容历史数据/外部 URL）；
+  - 其它 scheme（mock://、ftp://）→ 任务失败（VENDOR_ERROR），不会静默发给供应商；
+  - 签名/透传后的 URL host 若是 loopback（`127.0.0.1`/`localhost`/`0.0.0.0`/`::1`）→ **不调用供应商**；
+- 覆盖**所有生成类任务**：视频 `reference_uris` / `first_frame_uri` / `last_frame_uri`，以及
+  `studio_asset_image`（角色定妆图/资产图）的参考图；`timeline export` 为本地合成，不涉及。
+- **只改出站 payload**：`tasks.input` 落库仍是 raw key（DB 不改写），结果回写仍是 storage key。
+
+**前置条件（real 模式必须满足其一）**：
+1. `STORAGE_DRIVER=s3`（推荐）：`STORAGE_S3_*` 齐全，且 `STORAGE_S3_PUBLIC_ENDPOINT` 为**公网可访问**的对外域名
+   （预签名 URL 的 host 取自该地址；不要指向 VPC 内网 endpoint，否则供应商访问不到）；
+2. `STORAGE_DRIVER=local` + `STORAGE_PUBLIC_BASE` 指向公网反代/内网穿透地址（如 `https://files.example.com/v1`），
+   且该地址对供应商可达；`STORAGE_SIGN_SECRET` 必须与 API 一致（本地驱动下载由 API `/v1/files/local` 校验 HMAC）。
+
+**失败表现与排查**：
+- 任务 `status=4` + `error.code=745900`，错误信息原文：
+  `real 适配器需要公网可访问的存储：请配置 STORAGE_DRIVER=s3 或把 STORAGE_PUBLIC_BASE 设为公网地址（当前 http://127.0.0.1:3000/v1）`
+- worker 日志：`outbound uri is not publicly reachable for real adapter`（含 `hint`、字段名、URL origin）；
+- 自检：在 worker 机器上 `curl -I '<签名 URL>'` 应 200 且公网可访问；检查 `STORAGE_PUBLIC_BASE`/`STORAGE_S3_PUBLIC_ENDPOINT`、
+  反代是否白名单限制、供应商出口是否可达；**不要**把 `ADAPTER_URI_TTL_SECONDS` 设得小于供应商最长任务时长（默认 6h）。
+
 

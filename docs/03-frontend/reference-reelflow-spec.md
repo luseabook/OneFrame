@@ -626,3 +626,48 @@ api **25 files / 234 passed**（新增 `storyboard-frames.spec.ts` 9 例）；wo
 ### 18.7 ⚠️ 已知真实模式隐患（既有，非本次引入）
 
 `ADAPTER_MODE=real` 时，`reference_uris` / `first_frame_uri` / `last_frame_uri` 传的是 **storage key 原值**，供应商无法访问。要在真实供应商下可用，需在 worker 侧统一把这些 uri 签成公网 URL（`ADAPTER_MODE=real` 生效、mock 保持不变），涉及 worker + storage 配置。建议作为 P10 处理。
+
+---
+
+## 19. P10 实施记录：真实适配器的出站素材签名 + 公网可达守卫（2026-10-25 落地）
+
+### 19.1 问题
+
+`ADAPTER_MODE=real` 时，worker 把 `reference_uris` / `first_frame_uri` / `last_frame_uri` 里的 **storage key**（如 `u/<space>/assets/<id>/orig.png`）原样发给 Ark/Kling/Vidu。供应商访问不到该值 → 参考图/首帧静默失效（mock 模式看不出来）。这是「能真实收钱跑业务」的硬门槛。
+
+### 19.2 实现（`apps/worker/src/outbound-uri.ts`，单一解析点）
+
+`resolveOutboundUris(input, { adapterMode, sign, ttlSeconds, logger })`：
+- **mock**：零改动，直接返回原对象（sign 不调用，raw key 透传）
+- **real**：
+  - 无 scheme 的值 → 视为 storage key → `storage.signDownload(key, ADAPTER_URI_TTL_SECONDS ?? 21600)`
+  - 已是 `http(s)://` → 原样透传（兼容外部 URL/历史数据）
+  - 其它 scheme（`mock://`/`ftp://`）→ 明确报错
+  - 签名/透传后校验 host：**loopback**（127.0.0.1 / localhost / 0.0.0.0 / ::1 / *.localhost）→ 抛 `OutboundUriError`（`VENDOR_ERROR 745900` + 可行动 hint），**不调用供应商**，worker 不崩
+- `executor.ts` 在 `resolveAdapter/submit` 之前调用；**`tasks.input` 落库仍是 raw key**，结果回写仍是 storage key；覆盖全部生成类任务（视频参考图/首尾帧 + `studio_asset_image` 参考图）；timeline export 不经过适配器、不受影响。
+
+### 19.3 现场验证（本机真实链路）
+
+1. 以 `ADAPTER_MODE=real`、`STORAGE_PUBLIC_BASE=http://127.0.0.1:3000`（默认 loopback）启动 worker；
+2. UI 选第 4 镜「参考生视频」→ 投递（横幅「镜头 4 已投递」）；
+3. 查库：
+   ```
+   task 107845864535408640 | status=4 | error.code=745900
+   message: real 适配器需要公网可访问的存储：请配置 STORAGE_DRIVER=s3 或把 STORAGE_PUBLIC_BASE 设为公网地址（当前 http://127.0.0.1:3000）
+   ```
+   —— 守卫在**调用供应商之前**拦下，错误可行动、进程未崩。
+
+### 19.4 测试
+
+- 新增 `apps/worker/test/outbound-uri.spec.ts`（9 例）：mock 透传（sign spy 0 调用）/ real 签名（含 https 透传、TTL 默认 21600、空值安全、`studio_asset_image` 也签名）/ loopback 守卫（异常 745900 + 完整提示 + adapter 0 调用 + 任务 status=4 且 worker 正常返回）。
+- worker **7 files / 31 passed**；api **25 files / 234 passed** 不回归。
+
+### 19.5 文档
+
+`docs/05-ops/deployment.md` §4 增 `ADAPTER_URI_TTL_SECONDS`，§7.8 新增「真实适配器的存储前置条件」：real 模式必须 `STORAGE_DRIVER=s3`（`STORAGE_S3_PUBLIC_ENDPOINT` 为公网域名）或 `STORAGE_PUBLIC_BASE` 公网反代/隧道；给出错误原文、worker 日志关键字、`curl -I 签名URL` 自检方法、TTL 需覆盖供应商最长任务，并说明守卫只能静态拦 loopback（私网 IP 无法静态判定，需运维保证可达）。
+
+### 19.6 上线前仍需人工确认
+
+1. 真实供应商 Key（Ark/Kling/Vidu）与 `STORAGE_S3_*` 公网桶配置；
+2. 签名 URL 的 TTL 要覆盖最长任务（当前默认 6h，可按供应商调整）；
+3. 若用内网穿透/反代，需要保证供应商侧可访问且不校验 Referer/UA。

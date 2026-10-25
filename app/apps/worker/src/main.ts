@@ -124,6 +124,8 @@ const deps: ExecutorDeps = {
   log: (obj, msg) => log.info(obj, msg),
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 1000),
   maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),
+  // P10：real 模式下出站素材 URI 的签名有效期（默认 6h，覆盖供应商长任务）
+  outboundUriTtlSeconds: Number(process.env.ADAPTER_URI_TTL_SECONDS ?? 21_600),
 };
 
 // P7 成片合成：ffmpeg 路径可配（默认 PATH）；mock 模式下源视频为占位字节 → 回退色板
