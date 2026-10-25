@@ -197,6 +197,60 @@ readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSecond
 - worker：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须 `real` 且至少一种真实供应商 Key，否则拒绝启动。
 - 部署自检：`docker compose logs api | grep "配置校验失败"` 为空；容器启动即崩溃时优先按错误里列出的变量名补齐 Secrets。
 
+## 7.5 账本对账与修复 SOP（ledger repair）
+
+**不变式**（database.md §4，PRD F6）：
+`credit_accounts.balance == Σ credit_flows.delta` 且 `credit_accounts.frozen == Σ credit_flows.frozen_delta`。
+
+### 何时跑
+- `flows-audit` 定时任务/worker 启动日志出现 `LEDGER MISMATCH`（指标 P1：余额对账不平）；
+- 大版本发布、手工数据修复、DB 恢复/迁移之后；
+- 客服反馈「充值到账金额不对」「退款后余额异常」时先跑一次只读对账。
+
+### 标准流程（先只读，再定向修复）
+1. **只读扫描（默认 dry-run，不写库）**
+   ```bash
+   DATABASE_URL=postgres://app@127.0.0.1:55432/app node _acceptance/ledger-repair.cjs --dry-run
+   ```
+   输出每个不一致 space 的 `balance / Σdelta / Δbal / frozen / Σfrozen / Δfrozen` 及修复方式；
+   另有「有流水无账户」的 orphan space 列表（脚本不自动修，需人工建账户/追查）。
+2. **人工判定类型**（决定是否需要业务侧处理）：
+   - `Δbal < 0` 且 `Δfrozen > 0`（`Σfrozen` 为负）：历史上出现过凭空/重复解冻——钱包被多发，脚本会**扣回**；
+   - `Δbal < 0` 且 `Σfrozen` 正常：账户少于流水（如历史上直接改了账户）——脚本按流水补齐；
+   - `Δbal > 0`：账户多于流水——脚本按流水扣减（如确属误发，先与财务确认）。
+3. **定向试修**（先挑 1~2 个 space，避免一次性大范围改动）：
+   ```bash
+   node _acceptance/ledger-repair.cjs --fix --space 107517947000438785,107584284706127873
+   ```
+4. **验证**：再次 `--dry-run`，对应 space 应消失；脚本 `--fix` 结束也会自检「修复后仍未一致的 space」，
+   非 0 即退出码 1（需排查 CHECK 失败/并发写入）。
+5. **全量修复**（确认试修结果后）：`node _acceptance/ledger-repair.cjs --fix`；
+   结束后 `--dry-run` 应为「账本一致，无需修复」。
+6. **留痕**：每次修复都会追加一条 `credit_flows.kind='adjust'`，`memo` 记录
+   `account before -> after, flows sum ... (reason)`；工单需附：执行人、时间、space 列表、adjust 流水 id、修复前后汇总。
+
+### 修复口径（只追加，不改历史流水）
+- 以流水为事实来源重算账户；`Σfrozen < 0`（凭空/重复解冻）时把多发的余额一并扣回，`frozen` 归 0；
+- `adjust` 流水的 `delta/frozen_delta` = 使重算后 Σ 与账户一致所需的差额（纯账户重置时可为 0），
+  脚本不会 UPDATE/DELETE 任何历史 `credit_flows`；
+- 账户列有 `CHECK (balance >= 0 AND frozen >= 0)`，目标值若被钳到 0，脚本会报告剩余不一致并以非 0 退出。
+
+### 防止再次发生
+- **所有资金变动必须走 `packages/db/src/ledger.ts`**（同一事务内锁账户 + 写流水）。禁止用直连 SQL
+  `UPDATE credit_accounts` 或手工插 `credit_flows`（历史脏数据即来自测试直接改账户，见下）。
+- 看门狗解冻已改为**以流水为准**（`apps/worker/src/maintenance.ts::reviveStuckTasks`）：
+  只有 `Σfrozen_delta > 0` 才解冻恰好该额度，且 UPDATE 带 `status in (1,2)` 抢占状态、检查 affected rows，
+  避免「没冻结过也解冻」与「settle 后重复解冻」。
+- 对账脚本/看门狗的 `kind=adjust`、`kind=unfreeze` 流水均写 `balance_after`，便于链式核对。
+
+### 历史脏数据备注（2026-10-25 排查结论）
+- 43 个 space 的「frozen 不平」（`Σfrozen=-10`）= 旧版 watchdog 凭空解冻（Bug A，已修）；
+- 22+ 个 space 的「balance 比流水少 1000」= `apps/api/test/refunds.spec.ts` 里为验证退款守卫
+  **直接用 SQL 扣减账户余额但不写流水**的测试数据（非生产代码路径；生产代码无绕过 ledger 的写入口）。
+  修复后这些测试 space 会按流水补回；如需避免再次污染，建议该用例改为使用独立的 freeze/settle 流水模拟消耗。
+
+
+
 ## 8. 上线前 72 小时运维演练清单
 
 与 `docs/06-security-compliance/launch-checklist.md` 的 D1–D9 一一对应；**任一项不通过不得发布**，

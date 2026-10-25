@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { DbHandle } from "@app/db";
 import { assets, creditAccounts, creditFlows, orders, taskShares, tasks } from "@app/db";
 import { creditIn } from "@app/db";
+import { newId } from "@app/shared";
 
 type Db = DbHandle["db"];
 
@@ -78,22 +79,46 @@ export async function reconcileOrders(db: Db, log: MaintenanceLogger, staleMinut
  *
  * 防的是「任务卡死 → 积分永久冻结」：worker 崩溃或供应商无响应时，
  * 任务停在 RUNNING，用户积分既不结算也不解冻。
+ *
+ * 记账安全（P0 修复，2026-10-25）：解冻额度**以流水为准**——
+ * 只有 `sum(credit_flows.frozen_delta) where ref_task_id = task.id > 0`
+ * 才存在「未释放的冻结」，解冻恰好该额度；没有冻结流水（任务从未冻结 /
+ * 已 settle / 已 unfreeze）时只标失败，绝不按 tasks.credits_frozen 凭空解冻。
  */
-export async function reviveStuckTasks(db: Db, log: MaintenanceLogger, stuckMinutes = 10): Promise<number> {
+export async function reviveStuckTasks(
+  db: Db,
+  log: MaintenanceLogger,
+  stuckMinutes = 10,
+  /** 仅处理指定 space（运维/测试排查用）；省略时全库扫描（生产默认） */
+  scopeSpaceId?: bigint,
+): Promise<number> {
   const cutoff = new Date(Date.now() - stuckMinutes * MINUTE);
 
   const stuck = await db
     .select({ id: tasks.id, spaceId: tasks.spaceId, frozen: tasks.creditsFrozen })
     .from(tasks)
-    .where(and(inArray(tasks.status, [1, 2]), lt(tasks.updatedAt, cutoff)))
+    .where(
+      and(
+        inArray(tasks.status, [1, 2]),
+        lt(tasks.updatedAt, cutoff),
+        ...(scopeSpaceId ? [eq(tasks.spaceId, scopeSpaceId)] : []),
+      ),
+    )
     .limit(200);
 
   let revived = 0;
   for (const t of stuck) {
     try {
-      await db.transaction(async (tx) => {
-        // 置失败
-        await tx
+      const claimed = await db.transaction(async (tx) => {
+        // 1) 以流水为准：该任务仍未释放的冻结额度（freeze +cost / settle -cost / unfreeze -cost）
+        const [flowSum] = await tx
+          .select({ amount: sql<number>`coalesce(sum(${creditFlows.frozenDelta}), 0)::int` })
+          .from(creditFlows)
+          .where(eq(creditFlows.refTaskId, t.id));
+        const outstanding = Number(flowSum?.amount ?? 0);
+
+        // 2) 抢占状态：仅 PENDING/RUNNING → FAILED；affected=0 说明 executor/其它实例已处理
+        const updated = await tx
           .update(tasks)
           .set({
             status: 4,
@@ -101,37 +126,79 @@ export async function reviveStuckTasks(db: Db, log: MaintenanceLogger, stuckMinu
             finishedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(tasks.id, t.id), inArray(tasks.status, [1, 2])));
-
-        // 解冻积分（frozen_delta = -cost，delta = +cost）
-        if (t.frozen > 0) {
-          const [account] = await tx
-            .select()
-            .from(creditAccounts)
-            .where(eq(creditAccounts.spaceId, t.spaceId))
-            .for("update");
-          if (account) {
-            const frozenAfter = Math.max(0, account.frozen - t.frozen);
-            const balanceAfter = account.balance + t.frozen;
-            await tx
-              .update(creditAccounts)
-              .set({ balance: balanceAfter, frozen: frozenAfter, updatedAt: new Date() })
-              .where(eq(creditAccounts.spaceId, t.spaceId));
-            await tx.insert(creditFlows).values({
-              id: BigInt(Date.now()) * 1000n + BigInt(revived % 1000),
-              spaceId: t.spaceId,
-              delta: t.frozen,
-              frozenDelta: -t.frozen,
-              kind: "unfreeze",
-              refTaskId: t.id,
-              balanceAfter,
-              memo: "watchdog unfreeze",
-            });
-          }
+          .where(and(eq(tasks.id, t.id), inArray(tasks.status, [1, 2])))
+          .returning({ id: tasks.id });
+        if (updated.length === 0) {
+          log.warn(
+            { task_id: String(t.id), credits_frozen: t.frozen, flow_frozen_delta: outstanding },
+            "stuck task skipped (state already changed by another worker)",
+          );
+          return false;
         }
+
+        // 3) 没有未释放冻结 → 只标失败：不写流水、不改账户（避免凭空造积分/双释放）
+        if (outstanding <= 0) {
+          log.warn(
+            {
+              task_id: String(t.id),
+              space_id: String(t.spaceId),
+              credits_frozen: t.frozen,
+              flow_frozen_delta: outstanding,
+            },
+            "stuck task failed without unfreeze (no outstanding freeze in ledger)",
+          );
+          return true;
+        }
+
+        // 4) 有未释放冻结 → 解冻恰好 outstanding（不是 tasks.credits_frozen）
+        const [account] = await tx
+          .select()
+          .from(creditAccounts)
+          .where(eq(creditAccounts.spaceId, t.spaceId))
+          .for("update");
+        if (!account) {
+          log.error(
+            { task_id: String(t.id), space_id: String(t.spaceId), flow_frozen_delta: outstanding },
+            "stuck task failed but credit account missing; unfreeze skipped",
+          );
+          return true;
+        }
+        // 账户值用 Math.max 兜底，流水记「实际生效」变动，保证 balance==Σdelta / frozen==Σfrozen_delta
+        const balanceAfter = Math.max(0, account.balance + outstanding);
+        const frozenAfter = Math.max(0, account.frozen - outstanding);
+        const appliedDelta = balanceAfter - account.balance;
+        const appliedFrozenDelta = frozenAfter - account.frozen;
+        if (appliedDelta !== 0 || appliedFrozenDelta !== 0) {
+          await tx
+            .update(creditAccounts)
+            .set({ balance: balanceAfter, frozen: frozenAfter, updatedAt: new Date() })
+            .where(eq(creditAccounts.spaceId, t.spaceId));
+          await tx.insert(creditFlows).values({
+            id: newId(),
+            spaceId: t.spaceId,
+            delta: appliedDelta,
+            frozenDelta: appliedFrozenDelta,
+            kind: "unfreeze",
+            refTaskId: t.id,
+            balanceAfter,
+            memo: `watchdog unfreeze (ledger outstanding ${outstanding})`,
+          });
+        }
+        log.warn(
+          {
+            task_id: String(t.id),
+            space_id: String(t.spaceId),
+            credits_frozen: t.frozen,
+            flow_frozen_delta: outstanding,
+            unfreezed: appliedDelta,
+            balance_after: balanceAfter,
+            frozen_after: frozenAfter,
+          },
+          "stuck task revived and unfrozen from ledger outstanding",
+        );
+        return true;
       });
-      revived += 1;
-      log.warn({ task_id: String(t.id), frozen: t.frozen }, "stuck task revived");
+      if (claimed) revived += 1;
     } catch (err) {
       log.error({ task_id: String(t.id), err: String(err) }, "revive failed");
     }

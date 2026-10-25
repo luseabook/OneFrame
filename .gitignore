@@ -36,3 +36,4 @@ rea-reelmate/*
 _acceptance/*
 !_acceptance/compliance-check.cjs
 !_acceptance/b-type-acceptance.ps1
+!_acceptance/ledger-repair.cjs

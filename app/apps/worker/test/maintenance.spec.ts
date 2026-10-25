@@ -93,8 +93,8 @@ describe("maintenance", () => {
   });
 
   it("revives a stuck running task and unfreezes credits", async () => {
-    // 先把余额设为 100、冻结 8，模拟已冻结的任务
-    await db.update(creditAccounts).set({ balance: 100, frozen: 8 }).where(eq(creditAccounts.spaceId, spaceId));
+    // 初始化：账户 492/8 且与该任务已写入的 freeze 流水一致（freeze -8 / frozen_delta +8）
+    await db.update(creditAccounts).set({ balance: 492, frozen: 8 }).where(eq(creditAccounts.spaceId, spaceId));
 
     const taskId = BigInt(`5${String(Date.now()).slice(-9)}`);
     const old = new Date(Date.now() - 20 * 60_000); // 20 分钟前，超过 10 分钟阈值
@@ -111,8 +111,18 @@ describe("maintenance", () => {
       creditsFrozen: 8,
       updatedAt: old,
     });
+    await db.insert(creditFlows).values({
+      id: BigInt(`5${String(Date.now()).slice(-8)}09`),
+      spaceId,
+      delta: -8,
+      frozenDelta: 8,
+      kind: "freeze",
+      refTaskId: taskId,
+      balanceAfter: 492,
+      memo: `freeze for ${taskId}`,
+    });
 
-    const n = await reviveStuckTasks(db, silent, 10);
+    const n = await reviveStuckTasks(db, silent, 10, spaceId);
     expect(n).toBeGreaterThanOrEqual(1);
 
     const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
@@ -121,7 +131,7 @@ describe("maintenance", () => {
 
     const [account] = await db.select().from(creditAccounts).where(eq(creditAccounts.spaceId, spaceId));
     expect(account.frozen).toBe(0); // 解冻
-    expect(account.balance).toBe(108); // 退回
+    expect(account.balance).toBe(500); // 退回
 
     // 解冻流水存在
     const flows = await db
@@ -131,39 +141,33 @@ describe("maintenance", () => {
     expect(flows.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("auditLedger reports no mismatch when ledger is consistent", async () => {
-    // 此时 balance=108, flows: +500 (recharge) +8 (unfreeze) = 508? 需与实际一致
-    // 校验前先读取真实值，确保不变式成立
+  it("keeps this space ledger-consistent after revive", async () => {
     const [account] = await db.select().from(creditAccounts).where(eq(creditAccounts.spaceId, spaceId));
     const rows = (await db.execute(sql`
       select coalesce(sum(delta),0)::int as s, coalesce(sum(frozen_delta),0)::int as f
         from credit_flows where space_id = ${spaceId}
     `)) as { rows?: Array<{ s: number; f: number }> };
     const sum = rows.rows?.[0];
-
-    // 若不一致，说明前面测试留下的数据本身不满足不变式 —— 直接断言检测能力
-    const mismatch = await auditLedger(db, silent);
-    if (account.balance === (sum?.s ?? 0) && account.frozen === (sum?.f ?? 0)) {
-      expect(mismatch).toBe(0);
-    } else {
-      // 不一致时应被检出
-      expect(mismatch).toBeGreaterThanOrEqual(1);
-    }
+    expect(account.balance).toBe(sum?.s ?? 0);
+    expect(account.frozen).toBe(sum?.f ?? 0);
+    // 全库检测仍可运行（dev 库可能存在其它历史脏数据，此处只验证返回值可用）
+    expect(typeof (await auditLedger(db, silent))).toBe("number");
   });
 
-  it("auditLedger detects a deliberate mismatch", async () => {
-    // 人为制造不平：直接改 balance 不加流水
-    const [before] = await db.select().from(creditAccounts).where(eq(creditAccounts.spaceId, spaceId));
+  it("auditLedger detects a deliberate mismatch (count increases by 1)", async () => {
+    const before = await auditLedger(db, silent);
+    const [accountBefore] = await db.select().from(creditAccounts).where(eq(creditAccounts.spaceId, spaceId));
     await db
       .update(creditAccounts)
-      .set({ balance: before.balance + 12345 })
+      .set({ balance: accountBefore.balance + 12345 })
       .where(eq(creditAccounts.spaceId, spaceId));
 
-    const mismatch = await auditLedger(db, silent);
-    expect(mismatch).toBeGreaterThanOrEqual(1);
+    const after = await auditLedger(db, silent);
+    expect(after).toBe(before + 1);
 
     // 还原
-    await db.update(creditAccounts).set({ balance: before.balance }).where(eq(creditAccounts.spaceId, spaceId));
+    await db.update(creditAccounts).set({ balance: accountBefore.balance }).where(eq(creditAccounts.spaceId, spaceId));
+    expect(await auditLedger(db, silent)).toBe(before);
   });
 
   it("purgeOldData clears 90-day-old task results", async () => {

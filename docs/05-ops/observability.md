@@ -104,8 +104,11 @@ credits_frozen / credits_settled / credits_unfrozen (counter)
 | 级别 | 条件 | 通道 | 响应 |
 |---|---|---|---|
 | P0 | API 5xx>1% / DB 不可达 / 支付回调失败 / `paid_without_credit>0` | 电话+IM | 立即, 止血优先 |
-| P1 | 任务成功率<85% / 队列 age>5min / 余额对账不平 / 慢请求持续 5min | IM 群@值班 | 1h 内 |
-| P2 | 毛利率漂移 / 探针失败 / 证书 14 天到期 / `aborted` 占比突增 | IM 群 | 当日 |
+| P1 | 任务成功率<85% / 队列 age>5min / 余额对账不平 / 慢请求持续 5min | IM 群@值班 | 1h 内 || P2 | 毛利率漂移 / 探针失败 / 证书 14 天到期 / `aborted` 占比突增 | IM 群 | 当日 |
+
+> 「余额对账不平」（`LEDGER MISMATCH`，指标口径 `balance != Σdelta` 或 `frozen != Σfrozen_delta`）
+> 先按 `deployment.md §7.5 账本对账与修复 SOP` 跑只读 `node _acceptance/ledger-repair.cjs --dry-run`，
+> 确认清单后再定向 `--fix`（只追加 `kind=adjust` 流水，不改历史流水），修复后复跑 dry-run 应为 0。
 
 ## 5. Sentry 配置
 
