@@ -415,3 +415,43 @@
 4. 片段顺序目前用左右移按钮而非拖拽（拖拽可后续补）。
 
 下一阶段建议：**P4-2 3D 导演台**（需引入 three.js）或 **时间线服务端持久化 + 按时间线合成导出**（需后端 ffmpeg 合成链路）。
+
+---
+
+## 14. P5-1 实施记录：4 种生成模式（文生视频 / 首帧 / 首尾帧 / 参考生视频）（2026-10-25 落地）
+
+### 14.1 后端（`generate-videos` 加可选 `mode`，响应结构不变）
+
+| mode | tasks.mode / scene | input 关键字段 | 前置条件 |
+|---|---|---|---|
+| `universal_reference`（默认） | 保持原样，scene=`storyboard_reference_video` | `reference_uris` = 全部绑定资产图 | 所有绑定资产须「定稿 + 有图」，否则逐镜 400105 `asset_not_ready` |
+| `first_frame` | `first_frame` / null | `first_frame_uri` = 第 1 个合格资产 | ≥1 个合格资产，否则 400105 |
+| `first_last_frame` | `first_last_frame` / null | `first_frame_uri` + `last_frame_uri` = 前两个合格资产 | ≥2 个，否则 400105 + `reason:"need_two_assets"` |
+| `text2video` | `text2video` / null | `reference_uris: []`，prompt=`video_prompt‖shot_desc` | 无需资产；prompt 为空 → 整单 400101 |
+| `video_edit` | — | — | 显式 400101「暂不支持 AI 改视频（需源视频输入）」 |
+
+- 模型校验：`visible` + `models.modes` 含该 mode，否则 400101「模型 X 不支持 mode Y」（在任何逐镜处理之前）。
+- duration/ratio/resolution 就近取低与计费复用：universal 用 scene 枚举，其余用 `models.modes[mode]` 枚举。
+- 新增 `apps/api/test/storyboard-modes.spec.ts`（11 例）→ **23 files / 215 passed**（无回归）。
+
+### 14.2 前端
+
+- 模式 tab 由「仅参考生视频可用」→ **4 种可用 + AI改视频仍禁用**；可用性按本镜「合格资产数量」实时判断（首帧 ≥1、首尾帧 ≥2、文生视频恒可用）。
+- 切模式会按 `GET /models?capability=video&mode=<mode>` **重取该模式可用模型**（实测：参考生视频 = Seedance 2.5 / Seedance 2.0 VIP / Vidu Q2 / Wan 3.0；文生视频 = 天幕2.0 / 天幕2.1 / 可灵2.6；首帧 = Seedance 2.0 VIP / 天幕2.0 / 可灵2.6 / Vidu Q2），并即时刷新报价。
+- 报价/提交请求体按模式组 `input`（reference_uris / first_frame_uri / last_frame_uri），与后端 mode 语义一致。
+- 新增幂等提示：镜头已有投递任务时提示「同一镜头幂等复用，切换模式不会重新出片；需重拍请复制为新镜头或用任务重试」。
+
+### 14.3 验收（`_acceptance/e2e-modes.cjs`）
+
+1. 初始：参考生视频选中；AI改视频 `off`（禁用）；模型 4 个。
+2. 切「文生视频」→ 模型变 3 个（天幕2.0/2.1、可灵2.6），提示「文生视频只用提示词，不需要参考图」→ 选第 2 镜 → 立即生成 → **「镜头 2 已投递」**。
+3. 切「首帧生视频」→ 模型变 4 个（含 Vidu Q2）→ 立即生成 → 已投递（幂等复用提示出现）。
+4. 切「首尾帧生视频」→ 因该镜只有 1 个合格资产而置灰禁用（符合预期）。
+5. 切回「参考生视频」→ 模型列表恢复 4 个。全程无 pageerror / console error。
+截图：`evidence/reelflow-impl/p5-{text2video,firstframe,firstlast}.png`。
+
+### 14.4 已知交互决策（需产品确认，后端已按此实现）
+
+1. 「第一个/前两个合格资产」按**项目资产创建时间**排序（`storyboard_assets` 无排序列，无法复现用户绑定顺序）；若要按绑定顺序当首帧，需给绑定表加列 + 迁移。
+2. 幂等按镜头维度：同镜已生成过时切 mode 再投会**复用原任务**（dedupeKey 未含 mode），前端已加提示；若要「切模式即重出片」需要改 745801 幂等语义。
+3. `first_frame` / `first_last_frame` 只校验「合格资产数量」，不要求全部绑定资产定稿（`universal_reference` 仍严格全定稿）。

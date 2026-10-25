@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { storyboardVideoModeSchema } from "./project";
 
 // 剧本流水线（PRD F2 / api-spec §8）请求与 LLM 输出 schema。
 // LLM 输出必须先过这里校验，再落库（WBS 2.2：解析失败零容忍）。
@@ -89,6 +90,8 @@ export const generateVideosBatchSchema = z.object({
   shot_ids: z.array(z.string().min(1)).min(1).max(30),
   budget_credits_max: z.number().int().min(1),
   model: z.string().min(1),
+  // P5-1：生成模式（默认参考生视频）；video_edit 由服务端显式 400101
+  mode: storyboardVideoModeSchema.default("universal_reference"),
   ratio: z.string().min(1).optional(),
   resolution: z.string().min(1).optional(),
 });

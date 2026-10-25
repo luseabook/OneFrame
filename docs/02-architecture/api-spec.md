@@ -244,16 +244,29 @@ PATCH /projects/{id}/episodes/{eid}/storyboards/{sid}
   {shot_desc?,video_prompt?,duration_s?,ratio?,resolution?,character_ids[]?}
   // 仅存储；投递时按所选模型 scene.storyboard_reference_video 校验并就近取合法低档
 POST /projects/{id}/episodes/{eid}/storyboards/generate-videos
-  {shot_ids[], budget_credits_max, model, ratio?, resolution?}
+  {shot_ids[], budget_credits_max, model, mode?, ratio?, resolution?}
+  // mode: universal_reference(默认) | first_frame | first_last_frame | text2video；video_edit → 400101
   ← 200 {budget_exceeded:boolean, items:[{shot_id, task_id|null, submitted:boolean,
                                           code?:400101|400105|745703, reason?:string}]}
                    // 预算上限必须来自 POST /credits/quote/batch；缺失/过期→400107(QUOTE_REQUIRED)
-                   // 逐镜任务 mode=universal_reference + scene=storyboard_reference_video；
-                   // duration/ratio/resolution 按所选模型 scene 枚举就近取低档后回写 storyboards
-                   // references=已定稿角色资产(服务端强制注入, ADR-角色一致性)；未定稿→该镜 400105，不整单失败
+                   // 模型必须 visible 且 models.modes 含该 mode，否则 400101「模型 X 不支持 mode Y」
+                   // 各模式的任务字段（tasks.mode / tasks.scene / tasks.input）：
+                   //   universal_reference: mode=universal_reference, scene=storyboard_reference_video,
+                   //                        input.reference_uris=全部绑定资产参考图；绑定资产须全部定稿，否则该镜 400105
+                   //   first_frame:         mode=first_frame, scene=null,
+                   //                        input.first_frame_uri=第一个合格绑定资产 ref_image_uri, reference_uris=[]
+                   //   first_last_frame:    mode=first_last_frame, scene=null,
+                   //                        input.first_frame_uri/last_frame_uri=前两个合格绑定资产（按资产创建顺序），
+                   //                        reference_uris=[]；合格资产 <2 → 该镜 400105 + reason=need_two_assets
+                   //   text2video:          mode=text2video, scene=null, reference_uris=[]；不要求绑定资产，
+                   //                        prompt=video_prompt || shot_desc，为空 → 400101「text2video 需要分镜提示词」
+                   //   video_edit:          本期不支持，整体 400101「暂不支持 AI 改视频（需源视频输入）」
+                   // duration/ratio/resolution 就近取低：参考生视频按 scene.storyboard_reference_video 枚举，
+                   //   其它模式按 models.modes[mode] 枚举；durations 缺失时按原值/价格表就近取低
                    // 预算触顶→该镜 submitted:false + code:745703 + reason:budget_exceeded，接口仍 200(部分成功)
                    // 余额不足→整单 745701(不落任何任务)；参考图超 media_limits→400101(附 field)
                    // 重试或断点续跑只对 submitted:false 的镜再次调用；幂等语义见 §1「批量接口幂等语义」
+                   // 幂等/复用仍按 shot 维度（最近一次任务成功/在途即复用），不因 mode 不同而强制重新投递
 GET  /projects/{id}/episodes/{eid}                      // 分镜+任务矩阵(断点续跑视图)；
                                                         // 每镜含 current_task_id + attempts[](按 tasks.shot_id 反查)
                                                         // + asset_ready(角色/场景均已定稿) + last_reason(400105/745703)

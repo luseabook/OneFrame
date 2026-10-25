@@ -152,11 +152,26 @@ export const storyboardSchema = z.object({
 });
 export type Storyboard = z.infer<typeof storyboardSchema>;
 
+// ── P5-1：分镜生成模式（文生视频/首帧/首尾帧）──────────────────────────
+// universal_reference 为默认（参考生视频，scene=storyboard_reference_video）；
+// video_edit（AI 改视频）仅出现在枚举里以便服务端返回明确 400101，不在本期实现。
+export const STORYBOARD_VIDEO_MODES = [
+  "universal_reference",
+  "first_frame",
+  "first_last_frame",
+  "text2video",
+  "video_edit",
+] as const;
+export type StoryboardVideoMode = (typeof STORYBOARD_VIDEO_MODES)[number];
+export const storyboardVideoModeSchema = z.enum(STORYBOARD_VIDEO_MODES);
+
 // 批量投递（api-spec §8 generate-videos）：批量报价预算 + 模型枚举校验 + 断点续跑（PRD F2-⑥）
 export const generateVideosSchema = z.object({
   shot_ids: z.array(z.string()).min(1).max(LIMITS.SHOT_COUNT_MAX),
   budget_credits_max: z.number().int().min(1),
   model: z.string().min(1),
+  // P5-1：生成模式（默认参考生视频）
+  mode: storyboardVideoModeSchema.default("universal_reference"),
   ratio: z.string().min(1).optional(),
   resolution: z.string().min(1).optional(),
 });

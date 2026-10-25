@@ -451,6 +451,7 @@ onMounted(async () => {
     await loadMatrix();
     await loadMaterials();
     await loadProjectAssets();
+    await loadVideoModels();
   });
   // 首次进入空项目时给一条可行动提示（PRD 增补 §3.2 空态引导）
   if (!episodes.value.length) {
@@ -506,6 +507,10 @@ const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.l
 function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline"): void {
   tab.value = key;
   viewMenu.value = false;
+  // 批量投递固定走参考生视频：切到导出视图时确保当前模型支持该模式
+  if (key === "batch" && models.value.length && !models.value.some((m) => m.name === modelName.value)) {
+    modelName.value = models.value[0]?.name ?? modelName.value;
+  }
 }
 
 // ══════════ 资产视图 ══════════
@@ -529,14 +534,43 @@ const stageTabOptions = [
 ];
 const genTab = ref<"image" | "video">("video");
 const mode = ref("reference");
-// 参照站有 5 种生成模式；我们后端目前只有 storyboard_reference_video 一种，其余显式标注未接入
+// 参照站 5 种生成模式：前 4 种已按 models.modes 接入，AI改视频需源视频输入、显式不支持
 const modeOptions = [
-  { key: "reference", label: "参考生视频", enabled: true, hint: "角色定妆图作为参考，逐镜生成（已接入）" },
-  { key: "first_frame", label: "首帧生视频", enabled: false, hint: "需首帧图 + 图生视频模型（后续）" },
-  { key: "text", label: "文生视频", enabled: false, hint: "需文生视频模型（后续）" },
-  { key: "first_last", label: "首尾帧生视频", enabled: false, hint: "需首尾帧模型（后续）" },
-  { key: "ai_edit", label: "AI改视频", enabled: false, hint: "需视频编辑模型（后续）" },
-];
+  { key: "reference", apiMode: "universal_reference", label: "参考生视频", hint: "绑定资产图作为参考，逐镜生成" },
+  { key: "first_frame", apiMode: "first_frame", label: "首帧生视频", hint: "用第 1 个合格资产图作为首帧" },
+  { key: "first_last", apiMode: "first_last_frame", label: "首尾帧生视频", hint: "用前 2 个合格资产图作为首帧/尾帧" },
+  { key: "text", apiMode: "text2video", label: "文生视频", hint: "只用提示词生成，不需要参考图" },
+  { key: "ai_edit", apiMode: "video_edit", label: "AI改视频", hint: "需要源视频输入，当前不支持" },
+] as const;
+const modeApi = computed(
+  () => modeOptions.find((m) => m.key === mode.value)?.apiMode ?? "universal_reference",
+);
+/** 该模式下的模型列表（按 models.modes 过滤，模型目录是权威） */
+const videoModels = ref<ModelDto[]>([]);
+async function loadVideoModels(): Promise<void> {
+  try {
+    const list = await api.get<ModelDto[]>(`/models?capability=video&visible=true&mode=${modeApi.value}`);
+    videoModels.value = list;
+    if (!list.some((m) => m.name === modelName.value)) modelName.value = list[0]?.name ?? "";
+  } catch {
+    videoModels.value = [];
+  }
+}
+/** 当前模式是否可用（按本镜已绑定资产数量与提示词判断，只做 UI 引导；后端仍会严格校验） */
+function modeEnabled(key: string): boolean {
+  if (key === "ai_edit") return false;
+  if (key === "text") return true;
+  if (key === "first_frame") return boundImageCount.value >= 1;
+  if (key === "first_last") return boundImageCount.value >= 2;
+  return true;
+}
+const modeHint = computed(() => {
+  const opt = modeOptions.find((m) => m.key === mode.value);
+  if (mode.value === "first_last" && boundImageCount.value < 2) return "首尾帧需要 2 张合格资产图（当前不足）";
+  if (mode.value === "first_frame" && boundImageCount.value < 1) return "首帧需要 1 张合格资产图（当前不足）";
+  if (mode.value === "text") return "文生视频只用提示词，不需要参考图";
+  return opt?.hint ?? "";
+});
 const selectedShotId = ref("");
 const selectedShot = computed<StoryboardDto | null>(
   () => shots.value.find((s) => s.id === selectedShotId.value) ?? null,
@@ -576,18 +610,25 @@ const shotDuration = computed<number>({
   },
 });
 const shotQuote = ref<number | null>(null);
+/** 按当前生成模式组报价/提交请求体（与后端 mode 语义一致） */
 function buildQuoteItem(shot: StoryboardDto) {
-  const byId = new Map(characters.value.map((c) => [c.id, c]));
+  const imgs = boundAssets.value
+    .filter((a) => a.status === 2 && a.ref_image_uri)
+    .map((a) => a.ref_image_uri as string);
+  const apiMode = modeApi.value;
+  const prompt = shot.video_prompt || shot.shot_desc || "";
+  const input: Record<string, unknown> = { prompt, reference_uris: [] as string[] };
+  if (apiMode === "universal_reference") input.reference_uris = imgs;
+  if (apiMode === "first_frame") input.first_frame_uri = imgs[0] ?? null;
+  if (apiMode === "first_last_frame") {
+    input.first_frame_uri = imgs[0] ?? null;
+    input.last_frame_uri = imgs[1] ?? null;
+  }
   return {
-    mode: "universal_reference",
+    mode: apiMode,
     model: modelName.value,
-    scene: "storyboard_reference_video",
-    input: {
-      prompt: shot.video_prompt ?? "",
-      reference_uris: shot.character_ids
-        .map((id) => byId.get(id)?.portrait_url)
-        .filter((url): url is string => Boolean(url)),
-    },
+    scene: apiMode === "universal_reference" ? "storyboard_reference_video" : null,
+    input,
     options: {
       ratio: shot.ratio ?? project.value?.ratio ?? "9:16",
       resolution: shot.resolution ?? "720p",
@@ -621,7 +662,7 @@ async function submitShot(shot: StoryboardDto): Promise<void> {
   await run("投递镜头", async () => {
     const res = await api.post<{ budget_exceeded: boolean; items: BatchItem[] }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/generate-videos`,
-      { shot_ids: [shot.id], budget_credits_max: budget.value, model: modelName.value },
+      { shot_ids: [shot.id], budget_credits_max: budget.value, model: modelName.value, mode: modeApi.value },
     );
     const kept = batchItems.value.filter((b) => b.shot_id !== shot.id);
     batchItems.value = [...kept, ...res.items];
@@ -647,6 +688,11 @@ watch(shots, (list) => {
 });
 watch(selectedShotId, () => {
   void quoteSelectedShot();
+});
+// 切模式：重取该模式的模型目录，并刷新报价
+watch(mode, async () => {
+  await loadVideoModels();
+  await quoteSelectedShot();
 });
 // ══════════ P2：项目资产（场景 / 道具 / 其他）+ 分镜资产绑定 ══════════
 const projectAssets = ref<Record<"scene" | "prop" | "other", ProjectAssetDto[]>>({ scene: [], prop: [], other: [] });
@@ -1509,23 +1555,27 @@ onUnmounted(() => {
               :key="mt.key"
               type="button"
               class="mode-tab"
-              :class="{ on: mode === mt.key, off: !mt.enabled }"
-              :disabled="!mt.enabled || !!busy"
-              :title="mt.enabled ? mt.hint : mt.hint"
+              :class="{ on: mode === mt.key, off: !modeEnabled(mt.key) }"
+              :disabled="!modeEnabled(mt.key) || !!busy"
+              :title="mt.hint"
               @click="mode = mt.key"
             >
               {{ mt.label }}
             </button>
           </div>
+          <p class="gen-hint">{{ modeHint }}</p>
 
           <div class="gen-row">
             <span class="gen-label">模型</span>
             <select v-model="modelName" class="mini-select gen-select">
-              <option v-for="m in models" :key="m.name" :value="m.name">{{ m.display_name }}</option>
+              <option v-for="m in videoModels" :key="m.name" :value="m.name">{{ m.display_name }}</option>
             </select>
           </div>
           <p class="gen-hint">
-            为保证生成效果，请确保角色定妆图已生成并定稿；未定稿角色绑定的镜头会被拒绝（400105）
+            参考生视频要求绑定资产「已定稿 + 有参考图」，否则该镜会被拒绝（400105）；文生视频只用提示词
+          </p>
+          <p v-if="selectedShot?.video_task_id" class="gen-hint gen-hint--warn">
+            该镜已有投递任务（{{ selectedShot.video_task_id.slice(-8) }}）：同一镜头按幂等复用，切换模式不会重新出片；需要重拍请复制为新镜头或用任务重试
           </p>
 
           <div class="gen-row gen-row--between">
@@ -3596,4 +3646,6 @@ onUnmounted(() => {
   .tl-rail {
     grid-row: 3;
   }
+}.gen-hint--warn {
+  color: var(--warning);
 }</style>

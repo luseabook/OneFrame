@@ -36,6 +36,7 @@ import {
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
   type StoryboardsGenerateRequest,
+  type StoryboardVideoMode,
 } from "@app/shared";
 import { clampToNovelLimit, decodeBase64Upload, parseScriptFile } from "./script-parser";
 import { db } from "../../db/database";
@@ -1440,6 +1441,22 @@ export class ScriptService {
     const episode = await this.findEpisode(project.id, episodeId);
     const model = await this.models.findByName(input.model);
 
+    // P5-1：生成模式（默认参考生视频）。单镜=批量只传 1 个 shot_id，走同一套逻辑。
+    const generateMode: StoryboardVideoMode = input.mode ?? "universal_reference";
+    if (generateMode === "video_edit") {
+      throw new AppError(ErrorCode.INVALID_PARAM, "暂不支持 AI 改视频（需源视频输入）", {
+        field: "mode",
+      });
+    }
+    const modelModes = (model.modes ?? {}) as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(modelModes, generateMode)) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `模型 ${model.name} 不支持 mode ${generateMode}`,
+        { field: "mode" },
+      );
+    }
+
     const ids = input.shot_ids.map((id) => {
       try {
         return BigInt(id);
@@ -1509,24 +1526,71 @@ export class ScriptService {
         items.push({ shot_id: shotId, task_id: null, submitted: false, code: ErrorCode.NOT_FOUND });
         continue;
       }
-      const linked = (linkMap.get(shotId) ?? []).map((id) => assetById.get(id)).filter(Boolean);
-      const refs = linked
-        .filter((c) => c && c.status === 2 && c.refImageUri)
-        .map((c) => c!.refImageUri!)
-        .filter(Boolean);
-      if (refs.length === 0 || linked.some((c) => !c || c.status !== 2 || !c.refImageUri)) {
-        items.push({
-          shot_id: shotId,
-          task_id: null,
-          submitted: false,
-          code: ErrorCode.ASSET_NOT_READY,
-          reason: "asset_not_ready",
-        });
-        continue;
+      const linked = (linkMap.get(shotId) ?? [])
+        .map((id) => assetById.get(id))
+        .filter((asset): asset is ProjectAssetRow => Boolean(asset))
+        // 绑定表无排序列：按项目资产创建顺序稳定排序，保证「第一个/前两个」可复现
+        .sort((a, b) =>
+          a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        );
+      const readyAssets = linked.filter((asset) => asset.status === 2 && Boolean(asset.refImageUri));
+      const refs = readyAssets.map((asset) => asset.refImageUri!);
+
+      // 各模式的资产/提示词前置条件（沿用既有逐镜 400105 语义）
+      let prompt = shot.videoPrompt ?? shot.shotDesc ?? "";
+      if (generateMode === "universal_reference") {
+        // 参考生视频：绑定资产必须全部定稿且有参考图
+        if (refs.length === 0 || linked.length !== readyAssets.length) {
+          items.push({
+            shot_id: shotId,
+            task_id: null,
+            submitted: false,
+            code: ErrorCode.ASSET_NOT_READY,
+            reason: "asset_not_ready",
+          });
+          continue;
+        }
+      } else if (generateMode === "first_frame") {
+        // 首帧生视频：至少 1 个合格绑定资产
+        if (refs.length < 1) {
+          items.push({
+            shot_id: shotId,
+            task_id: null,
+            submitted: false,
+            code: ErrorCode.ASSET_NOT_READY,
+            reason: "asset_not_ready",
+          });
+          continue;
+        }
+      } else if (generateMode === "first_last_frame") {
+        // 首尾帧生视频：需要 2 个合格绑定资产
+        if (refs.length < 2) {
+          items.push({
+            shot_id: shotId,
+            task_id: null,
+            submitted: false,
+            code: ErrorCode.ASSET_NOT_READY,
+            reason: "need_two_assets",
+          });
+          continue;
+        }
+      } else {
+        // text2video：不要求绑定资产，但必须有分镜提示词（video_prompt 优先，退化 shot_desc）
+        prompt = (shot.videoPrompt ?? "").trim() || (shot.shotDesc ?? "").trim();
+        if (!prompt) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "text2video 需要分镜提示词", {
+            field: "shot_ids",
+          });
+        }
       }
-      const sceneCfg = (model.sceneModes as Record<string, { durations?: number[] } | undefined>)
-        .storyboard_reference_video;
-      const allowedDurations = sceneCfg?.durations ?? [];
+
+      // duration 就近取低：参考生视频按 scene 配置，其它模式按 models.modes[mode] 配置
+      const durationCfg =
+        generateMode === "universal_reference"
+          ? (model.sceneModes as Record<string, { durations?: number[] } | undefined>)
+              .storyboard_reference_video
+          : (model.modes as Record<string, { durations?: number[] } | undefined>)[generateMode];
+      const allowedDurations = durationCfg?.durations ?? [];
       const requestedDuration = shot.durationS ?? 5;
       let duration = requestedDuration;
       if (allowedDurations.length > 0 && !allowedDurations.includes(requestedDuration)) {
@@ -1536,11 +1600,17 @@ export class ScriptService {
         duration = lower ?? Math.min(...allowedDurations);
       }
       let durationAdjusted =
-        duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;      const request: GenerationRequest = {
-        mode: "universal_reference",
+        duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;
+      const request: GenerationRequest = {
+        mode: generateMode,
         model: model.name,
-        scene: "storyboard_reference_video",
-        input: { prompt: shot.videoPrompt ?? shot.shotDesc ?? "", reference_uris: refs },
+        scene: generateMode === "universal_reference" ? "storyboard_reference_video" : null,
+        input:
+          generateMode === "first_frame"
+            ? { prompt, reference_uris: [], first_frame_uri: refs[0]! }
+            : generateMode === "first_last_frame"
+              ? { prompt, reference_uris: [], first_frame_uri: refs[0]!, last_frame_uri: refs[1]! }
+              : { prompt, reference_uris: generateMode === "universal_reference" ? refs : [] },
         options: {
           ratio: input.ratio ?? shot.ratio ?? project.ratio,
           resolution: input.resolution ?? shot.resolution ?? "720p",
@@ -1650,8 +1720,8 @@ export class ScriptService {
           episodeId: episode.id,
           shotId: candidate.shot.id,
           capability: "video",
-          mode: "universal_reference",
-          scene: "storyboard_reference_video",
+          mode: generateMode,
+          scene: candidate.request.scene ?? null,
           modelId: model.id,
           input: candidate.request.input,
           options: candidate.request.options,
@@ -1673,6 +1743,7 @@ export class ScriptService {
           payload: {
             shot_id: candidate.shotId,
             batch: true,
+            mode: generateMode,
             ...(candidate.durationAdjusted ? { duration_adjusted: candidate.durationAdjusted } : {}),
           },
         });
