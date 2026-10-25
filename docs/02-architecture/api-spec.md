@@ -341,13 +341,26 @@ PUT /projects/{id}/episodes/{eid}/storyboards/{sid}/assets
   {asset_ids: string[]}   // 0..20，含角色与场景/道具（角色也是 project_assets 行）
   ← {asset_ids: string[]} // 落库后的绑定顺序 = 入参顺序（重复 id 按首次出现去重）
   // 整体替换（同事务 delete + insert）；任一 id 不存在或不属于该项目 → 400101，不落库
+
+POST /projects/{id}/assets/extract          // P3 AI 提取资产：剧本/分集 → 场景/道具（可选角色）草稿
+  {episode_id?: string, include_characters?: false, overwrite?: false}
+  // 内容来源：episode_id → 该集 title/synopsis/script_text（该集不存在 → 400102）；
+  //           省略 → 项目 source_text + title（source_text 为空时用 title 兜底）
+  ← {created:number, updated:number, skipped:number, items:[ProjectAssetDto], truncated:boolean}
+  // 落库：kind=scene|prop（include_characters=true 时含 kind=character），status=1 草稿，写入 description/prompt
+  // 去重口径：同 project+kind+name(trim 后完全相同) 已存在 →
+  //   overwrite=false → 计入 skipped（二次调用幂等：created=0/skipped>0）
+  //   overwrite=true  → 仅当 description/prompt 与已存在行确有差异才更新并计入 updated，否则 skipped；
+  //                     更新绝不改 status / finalized_at / ref_image_uri / portrait_asset_id
+  // 单次最多落 20 个（按 scenes→props→characters 顺序截断，超出给 truncated=true）；
+  // items 只含本次 created/updated 的资产（P2 ProjectAssetDto 同构，含 finalized_at/bound_shot_count）
 ```
 
 **错误码**：`400101` 参数/枚举/长度非法、kind=character 走错端点、绑定含非法/跨项目 id；
-`400102` 项目或资产不存在（含跨 space 隔离）；`400105` 投递时绑定资产未定稿或缺少参考图。
+`400102` 项目/资产/分集不存在（含跨 space 隔离）；`400105` 投递时绑定资产未定稿或缺少参考图。
 
-**跨 space**：`GET/POST/PATCH/DELETE /projects/{id}/assets/**` 与绑定接口先按 `findProject(space, project)`
-校验，项目不属于当前 space → `400102`（不泄露资产是否存在）。
+**跨 space**：`GET/POST/PATCH/DELETE /projects/{id}/assets/**`（含 `assets/extract`）与绑定接口先按
+`findProject(space, project)` 校验，项目不属于当前 space → `400102`（不泄露资产是否存在）。
 
 ## 9. assets
 

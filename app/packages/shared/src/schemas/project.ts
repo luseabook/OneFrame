@@ -87,6 +87,37 @@ export const storyboardAssetsPutSchema = z.object({
 });
 export type StoryboardAssetsPutRequest = z.infer<typeof storyboardAssetsPutSchema>;
 
+// ── P3：AI 提取资产（剧本/分集 → 场景/道具/角色草稿资产）────────────────
+/** 单次提取最多落库条数（超出截断，响应 truncated=true） */
+export const PROJECT_ASSETS_EXTRACT_MAX = 20;
+
+/** LLM 提取结果中的单个资产条目（name trim 后 1..50） */
+export const assetExtractItemSchema = z.object({
+  name: z.string().trim().min(1).max(50),
+  description: z.string().max(500).default(""),
+  prompt: z.string().max(1000).default(""),
+});
+export type AssetExtractItem = z.infer<typeof assetExtractItemSchema>;
+
+/** LLM 提取结果（DeepSeek/mock 双路共用；characters 可选） */
+export const assetExtractResultSchema = z.object({
+  scenes: z.array(assetExtractItemSchema).max(50).default([]),
+  props: z.array(assetExtractItemSchema).max(50).default([]),
+  characters: z.array(assetExtractItemSchema).max(50).default([]),
+});
+export type AssetExtractResult = z.infer<typeof assetExtractResultSchema>;
+
+// POST /projects/{id}/assets/extract
+export const projectAssetsExtractSchema = z.object({
+  /** 指定分集：用该集 title/synopsis/script_text 作为提取内容；省略则用项目 source_text */
+  episode_id: z.string().min(1).max(32).optional(),
+  /** 是否同时提取并落库角色（kind=character 草稿；与已有同名角色去重） */
+  include_characters: z.boolean().default(false),
+  /** 同 kind+name 已存在时是否更新 description/prompt（绝不改 status/finalized_at/ref_image_uri） */
+  overwrite: z.boolean().default(false),
+});
+export type ProjectAssetsExtractRequest = z.infer<typeof projectAssetsExtractSchema>;
+
 export const storyboardSchema = z.object({
   id: z.string(),
   shot_no: z.number().int().min(1),

@@ -273,3 +273,38 @@
 1. 场景/道具的「生成X」（AI 生图）：需把 Ark 图像适配器接进 registry（model-adapters 已有实现）。
 2. AI 提取资产（P3）：剧本 → 资产清单（角色/场景/道具 + 提示词）→ 校验页 → 批量生成。
 3. 「仅展示主体」开关（subject）、更多素材源、放大编辑。
+
+---
+
+## 10. P3 实施记录：AI 提取资产（剧本 → 场景/道具草稿 → 校验定稿）（2026-10-25 落地）
+
+### 10.1 后端
+
+| 端点 | 说明 |
+|---|---|
+| `POST /v1/projects/:id/assets/extract` | body `{ episode_id?, include_characters?=false, overwrite?=false }` → `{ created, updated, skipped, items, truncated }` |
+
+- 内容来源：`episode_id` → 该集 `title/synopsis/script_text`（不存在 400102）；省略 → 项目 `source_text + title`。
+- 落库：`kind=scene|prop`（`include_characters=true` 时含 character）为 **草稿 status=1**，写 `description/prompt`。
+- 去重：同 `kind + name(trim)`；`overwrite=false` 计入 skipped（二次调用幂等）；`overwrite=true` 仅在文本确有差异时更新，**绝不改 status / finalized_at / ref_image_uri / portrait_asset_id**。
+- 单次上限 20（scenes→props→characters 顺序截断，`truncated=true`）。
+- `llm.service.extractAssets()`：mock 走「文本种子 + 固定候选池」确定性输出；real 走 DeepSeek JSON → zod → 既有输出审核（745802）。
+- 测试：新增 `project-assets-extract.spec.ts`（9 例）；`pnpm --filter @app/api test` → **21 files / 195 passed**（P2 的 186 + 9，无回归）。
+
+### 10.2 前端
+
+- 资产视图（场景/道具/其他）顶部常驻「AI 智能提取资产」条：`提取本集剧本`（用当前集）/ `AI 智能提取`（用项目素材）；结果横幅显示「新增 N，更新 N，跳过重复 N」。
+- 提取后草稿自动出现在对应 tab；顶部出现黄色校验条「有 N 个资产待定稿：定稿后才会作为参考图注入分镜生成」+ **一键定稿**（逐个 PATCH status=2）。
+- 卡片支持 编辑 / 定稿 / 取消定稿 / 删除；标题计数按当前 tab 统计（`资产 (N)`）。
+
+### 10.3 验收（真实 UI + 真实 API，`_acceptance/e2e-p3.cjs`）
+
+1. 场景 tab 初始 1 张（P2 手工建的「雨夜街头」）→ 点「AI 智能提取」→ 横幅「新增 5，更新 0，跳过重复 1」→ 场景 3 张、道具 3 张。
+2. 出现「有 5 个资产待定稿」校验条 → 点「一键定稿」→ 横幅「已定稿 5/5」，卡片草稿标签归零。
+3. 全程无 pageerror / console error。截图：`evidence/reelflow-impl/p3-{before,extracted,props,finalized}.png`。
+
+### 10.4 已知交互（下轮处理）
+
+1. `characters/generate` 会删除本项目所有 `kind=character` 且 `status=1` 的草稿行 —— 包括 AI 提取出的角色草稿。当前前端默认 `include_characters=false`（提取只做场景/道具），暂不冲突；若要开启角色提取，需先给 generate 加保护或改用「仅同步命名」策略。
+2. 资产「生成图」（AI 生图）仍未接：需要把 Ark/Seedream 图像适配器接进 registry（model-adapters 已有实现），并把生成结果写回 `ref_image_uri/portrait_asset_id`。
+3. 参照的独立「资产清单校验」页（上一集/下一集切换、按出现集数筛选、重新提取）尚未做成独立路由；当前在资产视图内内联完成，语义等价但信息密度更低。

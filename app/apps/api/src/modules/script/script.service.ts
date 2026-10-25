@@ -17,6 +17,7 @@ import {
   AppError,
   ErrorCode,
   LIMITS,
+  PROJECT_ASSETS_EXTRACT_MAX,
   ProjectAssetStatus,
   TaskStatus,
   newId,
@@ -28,6 +29,7 @@ import {
   type ProjectAssetCreateRequest,
   type ProjectAssetKind,
   type ProjectAssetPatchRequest,
+  type ProjectAssetsExtractRequest,
   type ScriptDraftGenerateRequest,
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
@@ -1056,6 +1058,133 @@ export class ScriptService {
       }
     });
     return { asset_ids: orderedIds };
+  }
+
+  /**
+   * POST /projects/{id}/assets/extract（P3 AI 提取资产）：
+   * 从分集内容（episode_id）或项目 source_text 抽取场景/道具（可选角色），落库为草稿资产。
+   * - 去重：同 project+kind+name(trim) 已存在 → overwrite=true 且 description/prompt 确有差异才更新，否则 skipped；
+   * - 更新绝不改 status / finalized_at / ref_image_uri / portrait_asset_id；
+   * - 单次最多落 20 个（按 scenes→props→characters 顺序截断，truncated=true）。
+   */
+  async extractProjectAssets(
+    spaceId: string,
+    projectId: string,
+    input: ProjectAssetsExtractRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+
+    // 内容来源：episode_id → 该集 title/synopsis/script_text；否则项目 source_text + title
+    let title = project.title;
+    let synopsis: string | undefined;
+    let scriptText: string | undefined;
+    let sourceText: string | undefined;
+    if (input.episode_id) {
+      const episode = await this.findEpisode(project.id, input.episode_id);
+      title = episode.title ?? project.title;
+      synopsis = episode.synopsis ?? undefined;
+      scriptText = episode.scriptText ?? undefined;
+    } else {
+      sourceText = project.sourceText ?? undefined;
+    }
+
+    const extracted = await this.llm.extractAssets({ title, synopsis, scriptText, sourceText });
+
+    type Candidate = {
+      kind: "scene" | "prop" | "character";
+      name: string;
+      description: string | null;
+      prompt: string | null;
+    };
+    const candidates: Candidate[] = [
+      ...extracted.scenes.map((item) => ({
+        kind: "scene" as const,
+        name: item.name,
+        description: normalizeOptionalText(item.description),
+        prompt: normalizeOptionalText(item.prompt),
+      })),
+      ...extracted.props.map((item) => ({
+        kind: "prop" as const,
+        name: item.name,
+        description: normalizeOptionalText(item.description),
+        prompt: normalizeOptionalText(item.prompt),
+      })),
+      ...(input.include_characters
+        ? extracted.characters.map((item) => ({
+            kind: "character" as const,
+            name: item.name,
+            description: normalizeOptionalText(item.description),
+            prompt: normalizeOptionalText(item.prompt),
+          }))
+        : []),
+    ].filter((candidate) => candidate.name.length > 0);
+
+    const truncated = candidates.length > PROJECT_ASSETS_EXTRACT_MAX;
+    const targets = candidates.slice(0, PROJECT_ASSETS_EXTRACT_MAX);
+
+    const existingRows = await db
+      .select()
+      .from(projectAssets)
+      .where(eq(projectAssets.projectId, project.id));
+    const byKindAndName = new Map<string, ProjectAssetRow>(
+      existingRows.map((row) => [`${row.kind}:${row.name.trim()}`, row]),
+    );
+
+    const changedRows: ProjectAssetRow[] = [];
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    await db.transaction(async (tx) => {
+      for (const candidate of targets) {
+        const key = `${candidate.kind}:${candidate.name}`;
+        const existing = byKindAndName.get(key);
+        if (!existing) {
+          const [row] = await tx
+            .insert(projectAssets)
+            .values({
+              id: newId(),
+              projectId: project.id,
+              kind: candidate.kind,
+              name: candidate.name,
+              description: candidate.description,
+              prompt: candidate.prompt,
+              status: ProjectAssetStatus.DRAFT,
+            })
+            .returning();
+          if (!row) throw new AppError(ErrorCode.INTERNAL, "failed to create extracted asset");
+          byKindAndName.set(key, row);
+          changedRows.push(row);
+          created += 1;
+          continue;
+        }
+        // 同名已存在：不改 status/finalized_at/ref_image_uri；仅 overwrite 且有差异时更新文本
+        const sameText =
+          (existing.description ?? null) === candidate.description &&
+          (existing.prompt ?? null) === candidate.prompt;
+        if (!input.overwrite || sameText) {
+          skipped += 1;
+          continue;
+        }
+        const [row] = await tx
+          .update(projectAssets)
+          .set({
+            description: candidate.description,
+            prompt: candidate.prompt,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectAssets.id, existing.id))
+          .returning();
+        if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+        byKindAndName.set(key, row);
+        changedRows.push(row);
+        updated += 1;
+      }
+    });
+
+    const counts = await this.boundShotCounts(changedRows.map((row) => row.id));
+    const items = await Promise.all(changedRows.map((row) => this.projectAssetDtoOf(row, counts)));
+    return { created, updated, skipped, items, truncated };
   }
 
   async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {

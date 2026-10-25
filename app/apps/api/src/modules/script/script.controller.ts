@@ -12,6 +12,7 @@ import {
   projectAssetCreateSchema,
   projectAssetKindSchema,
   projectAssetPatchSchema,
+  projectAssetsExtractSchema,
   projectPatchSchema,
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
@@ -274,6 +275,17 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(projectAssetCreateSchema, body);
     return this.script.createProjectAsset(req.auth?.spaceId ?? "", id, input);
+  }
+
+  /** P3 AI 提取资产：从分集/项目文本抽取场景/道具（可选角色）落库为草稿 */
+  @Post("projects/:id/assets/extract")
+  async extractProjectAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(projectAssetsExtractSchema, body ?? {});
+    return this.script.extractProjectAssets(req.auth?.spaceId ?? "", id, input);
   }
 
   /** 更新资产：改名/描述/提示词/参考图/定稿状态（status=2 写 finalized_at，=1 清空） */

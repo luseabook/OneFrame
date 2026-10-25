@@ -3,10 +3,12 @@ import type { z } from "zod";
 import {
   AppError,
   ErrorCode,
+  assetExtractResultSchema,
   charactersSchema,
   outlineSchema,
   scriptDraftSchema,
   storyboardsSchema,
+  type AssetExtractResult,
   type CharactersResult,
   type OutlineResult,
   type ScriptDraftResult,
@@ -15,6 +17,50 @@ import {
 import { DeepSeekChatAdapter } from "@app/model-adapters";
 import { env } from "../../config/env";
 import { resolveModerationWords } from "../moderation/moderation.service";
+
+// P3 AI 提取资产：mock 确定性候选池（同一输入 → 同一批资产名，便于幂等复跑）
+const MOCK_SCENE_POOL = [
+  "雨夜街头",
+  "旧仓库",
+  "出租屋天台",
+  "医院走廊",
+  "深夜咖啡馆",
+  "地下车库",
+  "废弃教堂",
+  "河堤长椅",
+  "老式办公室",
+  "酒店大堂",
+] as const;
+const MOCK_PROP_POOL = [
+  "旧怀表",
+  "匿名信",
+  "录音笔",
+  "红色雨伞",
+  "金属打火机",
+  "泛黄照片",
+  "老式钥匙",
+  "日记本",
+  "病历袋",
+  "银色项链",
+] as const;
+const MOCK_CHARACTER_POOL = ["林晚", "顾沉", "苏禾", "周野", "陈默", "叶青"] as const;
+
+/** 文本 → 稳定 32 位种子（mock 模式按内容确定性取候选池） */
+function textSeed(text: string): number {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+/** 从固定候选池按种子偏移取 count 个（不超过池长度，保证同批不重名） */
+function pickFromPool(pool: readonly string[], count: number, seed: number): string[] {
+  if (pool.length === 0) return [];
+  const size = Math.min(count, pool.length);
+  const offset = seed % pool.length;
+  return Array.from({ length: size }, (_, i) => pool[(offset + i) % pool.length]!);
+}
 
 // LLM 步骤：mock 确定性输出（本地/CI），real 走 DeepSeek（JSON 强约束 + Zod 校验 + 输出审核）
 @Injectable()
@@ -116,7 +162,61 @@ export class LlmService {
     );
   }
 
-  private async complete<T>(system: string, user: string, schema: z.ZodType<T>): Promise<T> {
+  /**
+   * P3 AI 提取资产：从剧本/分集内容抽取场景/道具（可选角色）清单。
+   * mock：按输入文本种子从固定候选池确定性派生（同一输入 → 同一批名称，幂等复跑友好）；
+   * real：DeepSeek 只输出 JSON，过 zod + 既有输出审核（745802）。
+   */
+  async extractAssets(input: {
+    title: string;
+    synopsis?: string;
+    scriptText?: string;
+    sourceText?: string;
+    maxScenes?: number;
+    maxProps?: number;
+  }): Promise<AssetExtractResult> {
+    const title = input.title.trim() || "短剧";
+    if (!this.deepseek) {
+      const seed = textSeed(
+        [input.title, input.synopsis ?? "", input.scriptText ?? "", input.sourceText ?? ""].join("\n"),
+      );
+      const sceneCount = Math.max(1, Math.min(input.maxScenes ?? 3, 10));
+      const propCount = Math.max(1, Math.min(input.maxProps ?? 3, 10));
+      const scenes = pickFromPool(MOCK_SCENE_POOL, sceneCount, seed).map((name) => ({
+        name,
+        description: `《${title}》中的关键场景：${name}。`,
+        prompt: `电影感短剧场景，${name}，《${title}》，9:16 竖屏，光影克制，浅景深，写实质感`,
+      }));
+      const props = pickFromPool(MOCK_PROP_POOL, propCount, seed >>> 3).map((name) => ({
+        name,
+        description: `推动《${title}》剧情的关键道具：${name}。`,
+        prompt: `电影感短剧道具特写，${name}，《${title}》，9:16 竖屏，浅景深，细节清晰`,
+      }));
+      const characters = pickFromPool(MOCK_CHARACTER_POOL, 3, seed >>> 5).map((name) => ({
+        name,
+        description: `《${title}》中的主要角色：${name}。`,
+        prompt: `电影感短剧角色肖像，${name}，《${title}》，9:16 竖屏，清晰五官，冷色光影`,
+      }));
+      return assetExtractResultSchema.parse({ scenes, props, characters });
+    }
+    const payload = JSON.stringify({
+      title: input.title,
+      synopsis: input.synopsis ?? "",
+      scriptText: (input.scriptText ?? "").slice(0, 12_000),
+      sourceText: (input.sourceText ?? "").slice(0, 12_000),
+      maxScenes: input.maxScenes ?? 6,
+      maxProps: input.maxProps ?? 6,
+    }).slice(0, 20_000);
+    return this.complete<AssetExtractResult>(
+      '你是短剧制片与美术指导。从剧本内容中提取可复用的「场景」与「道具」，并可选提取主要「角色」。' +
+        '只输出 JSON：{"scenes":[{"name":"","description":"","prompt":""}],"props":[{"name":"","description":"","prompt":""}],"characters":[{"name":"","description":"","prompt":""}]}。' +
+        'name 简洁不超过 50 字（如「雨夜街头」「旧怀表」）；description 一句话；prompt 为中文文生图提示词（含构图/光线/质感），不要输出 JSON 之外的任何文字。',
+      payload,
+      assetExtractResultSchema,
+    );
+  }
+
+  private async complete<T>(system: string, user: string, schema: z.ZodTypeAny): Promise<T> {
     if (!this.deepseek) throw new AppError(ErrorCode.INTERNAL, "LLM not configured");
     const { text } = await this.deepseek.chat(
       [
@@ -141,7 +241,7 @@ export class LlmService {
     }
     // PRD F7：LLM 输出同样过审（大纲/剧本/分镜提示词），未过返回 745802 且不落半写状态
     this.assertOutput(result.data);
-    return result.data;
+    return result.data as T;
   }
 
   // 输出审核：命中敏感词 → 745802（环节由调用方定位）

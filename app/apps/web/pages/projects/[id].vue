@@ -853,6 +853,54 @@ async function applyDrawerAssets(): Promise<void> {
     drawerSaving.value = false;
   }
 }
+// ══════════ P3：AI 提取资产（剧本 → 场景/道具草稿）══════════
+const extracting = ref(false);
+const draftAssets = computed<ProjectAssetDto[]>(() =>
+  [...projectAssets.value.scene, ...projectAssets.value.prop, ...projectAssets.value.other].filter((a) => a.status !== 2),
+);
+
+async function extractAssets(scope: "episode" | "project"): Promise<void> {
+  if (extracting.value) return;
+  extracting.value = true;
+  error.value = "";
+  try {
+    const body = scope === "episode" && selectedEpisodeId.value ? { episode_id: selectedEpisodeId.value } : {};
+    const res = await api.post<{
+      created: number;
+      updated: number;
+      skipped: number;
+      items: ProjectAssetDto[];
+      truncated?: boolean;
+    }>(`/projects/${projectId.value}/assets/extract`, body);
+    await loadProjectAssets();
+    const parts = [`新增 ${res.created}`, `更新 ${res.updated}`];
+    if (res.skipped) parts.push(`跳过重复 ${res.skipped}`);
+    info.value = `AI 提取完成：${parts.join("，")}${res.truncated ? "（已按单次上限截断）" : ""}；请校验并定稿后再用于分镜生成`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "AI 提取失败";
+  } finally {
+    extracting.value = false;
+  }
+}
+
+/** 一键定稿：把当前项目所有草稿资产置为定稿（批量 PATCH） */
+async function finalizeAllDrafts(): Promise<void> {
+  const drafts = draftAssets.value;
+  if (!drafts.length) return;
+  await run("批量定稿", async () => {
+    let ok = 0;
+    for (const a of drafts) {
+      try {
+        await api.patch(`/projects/${projectId.value}/assets/${a.id}`, { status: 2 });
+        ok += 1;
+      } catch {
+        /* 单个失败不阻塞其余 */
+      }
+    }
+    await loadProjectAssets();
+    info.value = `已定稿 ${ok}/${drafts.length} 个资产（无参考图的资产仍不会被后端采纳）`;
+  });
+}
 </script>
 
 
@@ -948,7 +996,7 @@ async function applyDrawerAssets(): Promise<void> {
     <!-- ══════════ ② 资产（角色 / 场景 / 道具） ══════════ -->
     <section v-else-if="tab === 'characters'" class="panel panel--page assets-view">
       <div class="av-head">
-        <h2>资产 <em>({{ assetItems.length }})</em></h2>
+        <h2>资产 <em>({{ assetTab === 'character' ? characters.length : assetItemsNonCharacter.length }})</em></h2>
         <div class="av-tabs">
           <button
             v-for="at in assetTabOptions"
@@ -980,6 +1028,24 @@ async function applyDrawerAssets(): Promise<void> {
           <Button size="sm" :disabled="!!busy" @click="generateCharacters">生成角色</Button>
         </div>
       </div>
+
+      <!-- AI 提取资产（常驻，提取结果落草稿，定稿后才注入分镜） -->
+      <div v-if="assetTab !== 'character'" class="ai-extract">
+        <div class="ai-extract__text">
+          <h3>AI 智能提取资产 <span class="free">首次免费</span></h3>
+          <p>AI 分析剧本，提取出镜的场景/道具并生成资产提示词（结果为草稿，需校验定稿）</p>
+        </div>
+        <div class="ai-extract__ops">
+          <Button variant="ghost" :disabled="extracting || !selectedEpisodeId" @click="extractAssets('episode')">提取本集剧本</Button>
+          <Button :disabled="extracting" @click="extractAssets('project')">
+            {{ extracting ? "提取中…" : "AI 智能提取" }}
+          </Button>
+        </div>
+      </div>
+      <p v-if="assetTab !== 'character' && draftAssets.length" class="banner banner--warn">
+        有 {{ draftAssets.length }} 个资产待定稿：定稿后才会作为参考图注入分镜生成。
+        <button class="mini-link" type="button" @click="finalizeAllDrafts">一键定稿</button>
+      </p>
 
       <!-- 角色：有数据 -->
       <div v-if="assetTab === 'character' && characters.length" class="char-grid">
@@ -1055,13 +1121,6 @@ async function applyDrawerAssets(): Promise<void> {
           </article>
         </div>
         <div v-else class="cta-rows">
-          <div class="cta-hero">
-            <div class="cta-hero__text">
-              <h3>AI 智能提取资产 <span class="free">首次免费</span></h3>
-              <p>AI 分析剧本，提取出镜的角色/场景/道具并生成资产提示词（提取链路 P3 接入；当前可先手动新建/导入）</p>
-              <button class="btn-white" type="button" disabled title="需要资产提取后端（P3）">✦ AI 智能提取资产</button>
-            </div>
-          </div>
           <div class="cta-two">
             <div class="cta-card">
               <h3>新建{{ assetTabLabel }}</h3>
@@ -2853,4 +2912,32 @@ async function applyDrawerAssets(): Promise<void> {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}.ai-extract {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: linear-gradient(120deg, #2a2140 0%, #17141f 60%, #121218 100%);
+}
+.ai-extract h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-extract p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ai-extract__ops {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }</style>
