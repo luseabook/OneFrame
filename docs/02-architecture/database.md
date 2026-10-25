@@ -979,6 +979,8 @@ CREATE TABLE team_member_projects (     -- 成员↔项目作用域
   user_id      BIGINT NOT NULL REFERENCES users(id),
   project_kind SMALLINT NOT NULL DEFAULT 1,   -- 1脚本 2影视版
   project_id   BIGINT NOT NULL,               -- **不透明 ID，无 FK**（cam 不得依赖 film/script 表）
+  -- 参与项目形式（2026-10-26 登录态实测：团队表格有「参与项目形式」列，此前无对应字段）
+  participation_type SMALLINT NOT NULL DEFAULT 1,  -- 1全流程 2仅制作 3仅审核（**枚举为假设**，界面上是下拉筛选项）
   granted_by   BIGINT REFERENCES users(id),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),

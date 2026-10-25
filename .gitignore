@@ -40,7 +40,12 @@ _acceptance/*
 
 # 全站复刻的差距底账与证据（2026-10-26 起入库，可复核）
 # _gap/：三条基线与门禁/代码/合规实测；ref2/：参照站公开页采集证据
+# ref-authed/：登录态 22 页采集（已脱敏：手机号/uid/token/OSS 签名全部替换；重复截图已去重）
 !_acceptance/_gap/
 !_acceptance/ref2/
+!_acceptance/ref-authed/
 !_acceptance/capture-public.cjs
+!_acceptance/capture-authed.cjs
+!_acceptance/scrub-pii.cjs
+!_acceptance/probe-auth.cjs
 !_acceptance/mcp-check.cjs

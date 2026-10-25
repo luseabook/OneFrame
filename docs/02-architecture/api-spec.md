@@ -743,11 +743,23 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 
 ### 14.8 待取证清单（**不得当事实使用**）
 
+> 2026-10-26 登录态采集（`_acceptance/ref-authed/`，22 页）已关闭部分缺口，逐页结论见
+> `_acceptance/_gap/authed-evidence-2026-10-26.md`。下表区分「已取证/仍待取证」。
+
 | 域 | 项 | 处置 |
 |---|---|---|
-| canvas | SSE 完整事件类型表（仅 6 个已见字面量） | 标假设，F2 取证后补 |
-| canvas | 模板 `payload` 结构、`comment-nodes`/`pin-groups` 产品语义 | 标假设 |
+| canvas | ~~`/mcp` 是否独立页~~ | ✅ **已取证**：登录态渲染首页（首页案例标记 7 处 vs MCP 3 处）→ **不是独立页**，按"首页内入口"处理，不为它设计路由 |
+| canvas | ~~`/workflow-canvas` 是否重定向~~ | ✅ **已取证**：独立页但空态极简（正文 103 字；DOM 50KB vs `/task` 115KB），非重定向 |
+| canvas | ~~节点工具栏构成~~ | ✅ **已取证**：`文本/表格/图像/视频/音频/视频合成/剧本拆资产/剧本拆分镜` + `Skill` |
+| canvas | SSE 完整事件类型表（仅 6 个已见字面量） | 仍待取证 |
+| canvas | 模板 `payload` 结构、`comment-nodes`/`pin-groups` 产品语义 | 仍待取证 |
 | canvas | `GET /df/canvas/canvas-scaffold`（运行时实发但 routes/bundle 均无） | **不设计契约**，仅登记（裁决 D4） |
-| agent | `agent/home/resource/*` | 标假设 |
-| cam | `user/third/key/*`（BYOK 雏形）、席位档位 `max_seats` | 标假设，最小面落表 |
+| agent | ~~Skill 卡结构~~ | ✅ **已取证**：6 张卡（武侠短片全流程/萌宠旅行Vlog/赛博CG动画/第一人称/废土风格/柔焦胶片），tabs `Skills/收藏/我的` |
+| agent | `agent/home/resource/*` | 仍待取证 |
+| cam | ~~团队表格列定义~~ | ✅ **已取证**：`成员/账号/角色/成员组/参与项目形式/当前积分/状态/备注`（8 列）→ 已补 `team_member_projects.participation_type` |
+| cam | `user/third/key/*`（BYOK 雏形）、席位档位 `max_seats` | 仍待取证 |
+| cam | 团队积分分配/回收的界面流程 | 仍待取证（需已开通团队且有成员的账号） |
 | film | `config_json` schema、唯一性执行层、审核流写端点（A3）、导入状态查询（A11） | 标假设；A3/A11 为已知功能缺口，F2 决策 |
+| film | 影视版任务表格**整体形态** | 仍待取证（需影视版内测账号；当前 `/film` 只有空壳） |
+| billing | ~~兑换码位置~~ | ✅ **已取证**：兑换码是 `/pricing` 的一个 tab（`订阅会员/积分加购/兑换码`），**不是独立页面** |
+| 全局 | `/setting` 渲染为资产页、`/creator-center` 加载失败 | 仍待取证（前者需交互探测，后者需创作者资质账号） |

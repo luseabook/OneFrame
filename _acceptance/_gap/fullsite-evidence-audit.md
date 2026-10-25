@@ -94,7 +94,7 @@
 | `_dom-nodes.json` | 274071 | 10-24 21:06:02 | DOM 节点表 **2053 节点**（`#document`→`html`→`HTML`…，含 H1/H2/TITLE）；页归属 **[未验证]**（同批产物指向首页） | [实测] 节点统计 |
 | `_extracted-capture_page.json.html` | 5232 | 21:05:32 | 首页捕获中抽出的 SVG/`__NUXT_DATA__` 片段 | [实测] |
 | `api-log.json` | 344330 | 03:39:40 | **110 条请求**：109 条 `app.reelmate.cn` + 1 条 `accounts.wondershare.cn`；前缀 `web/v1/config`(32)、`user`(11)、`buy`(10)、`cam`(10)、`op`(10)、`user-vip-info`(5)、`user-info`(5)、`subject`(5)、`renew`(5)、`msg`(4)、`func-whitelist`(3)、`task`(3)… | [实测] 统计 |
-| `api-log-decoded.txt` | 6759 | 04:16:52 | 上者的解码正文（含 `user-info` 原文：uid 267379182 / space 1960443501771751438 / 积分 0） | [实测] |
+| `api-log-decoded.txt` | 6759 | 04:16:52 | 上者的解码正文（含 `user-info` 原文：uid [REDACTED_UID] / space [REDACTED_SPACE] / 积分 0） | [实测] |
 | `tabids.txt` | 165 | 03:22:59 | 5 个 CDP target_id（首页/工具/文生视频/登录/FAB） | [实测] |
 | `tab-explore.txt` | 38 | 04:12:01 | `/film-creation` 的 target_id | [实测] |
 | `routes-canvas-new.txt` | **0** | 04:10:35 | 空文件（画布路由抓取失败，无内容） | [实测] |
@@ -262,7 +262,7 @@
 | 已登录 Chrome Profile | `rea-reelmate/chrome-profile/`（1581 文件 / 246.7 MB） | `reference-reelflow-spec.md:4` 原文：「复用已有登录态 Chrome Profile」 |
 | 第二份 Profile | `_acceptance/profiles/user/` | 实测含 Chrome 用户数据 |
 | CDP 端点 | `127.0.0.1:9222`（未登录/无头）、`127.0.0.1:9223`（已登录） | [实测] 从 `scenario-*.json` 的 `browser.cdp_endpoint` + UA 反推 |
-| 账号事实 | uid `267379182`、space `1960443501771751438`、**积分 0**、`role_code:"master"`、`team_info` 为空 | [文档] `REELMATE-逆向分析报告.md:259–260` + [实测] `api-log-decoded.txt` |
+| 账号事实 | uid `[REDACTED_UID]`、space `[REDACTED_SPACE]`、**积分 0**、`role_code:"master"`、`team_info` 为空 | [文档] `REELMATE-逆向分析报告.md:259–260` + [实测] `api-log-decoded.txt` |
 | 凭据文件 | `_acceptance/token.txt`（280 B） | **存在但本轮未读取**（可能含活动 token）。⚠️ 与 `net*.json` 同属敏感物，禁止外传 |
 
 ### 3.2 权限边界分级
