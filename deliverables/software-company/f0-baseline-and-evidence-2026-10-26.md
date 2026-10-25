@@ -16,9 +16,9 @@
 | F0.4 | 补抓 Top5 证据 | ⚠️ **部分完成** | 采集管线已打通（真实 CDP + 真实站点）；`/pricing`、`/tools`、`/mcp` 已采；`/task`、`/user-center`、`/team*` 等**需登录态**，卡在 Owner 账号 |
 | F0.5 | 证据账平 | ✅ **完成** | §9.6 更正 2 条、补登 2 条证据链、作废 1 张空屏、更正 `fc.png`≠`cli.png` |
 | F0.6 | 路由清单 v2 | ✅ **完成** | `fullsite-page-routes-v2.md`：102 页面 + `/mcp` 补录 = 103；含反查表 |
-| — | 推送 28 提交 + 配 upstream | ❌ **未完成** | 需 Owner 远程写权限（我未执行任何 git push） |
+| — | 提交推送 + CI 验证 | ✅ **完成** | 2 个提交已推 `origin/main`（`2e1fcca`、`61b5711`）；**CI run#61 success**；`main` 已配 upstream |
 
-**一句话**：**门禁现在是可复现的绿**（这是本轮最大变化：之前是 3/3 确定性红），**证据账已平**，**采集管线已通**；剩下的两件事都卡在你手上（推送权限、参照站登录态）。
+**一句话**：**门禁现在是可复现的绿**（这是本轮最大变化：之前是 3/3 确定性红），**证据账已平**，**采集管线已通**，**CI 已对当前 HEAD 出绿**；剩余证据补抓卡在参照站登录态。
 
 ---
 
@@ -172,7 +172,6 @@ pnpm -w typecheck --force   → Tasks: 11 successful (web 新增 1 个 task)
 
 | 项 | 状态 | 原因 |
 |---|---|---|
-| 推送 28 个提交 + 配 upstream + 让 CI 跑当前 HEAD | ❌ 未做 | 需要远程仓库写权限；我**没有执行任何 `git push`**，也没有改 git 配置 |
 | `b-type-acceptance.ps1` 全量重跑 | ❌ 未做 | 脚本内会起 docker/compose 相关步骤，本机无 docker CLI；且耗时较长，本轮优先修单点根因 |
 | 注入 env 的对照实验 | ✅ 已被更强证据替代 | 直接用 `vitest.config.ts` 的**默认值修正**让裸跑转绿，无需"注入 env 才绿"的中间态 |
 | docker compose 路径验证 | ❌ 未做 | 本机无 docker |
@@ -211,6 +210,31 @@ pnpm -w typecheck --force   → Tasks: 11 successful (web 新增 1 个 task)
 
 ## 9. 下一轮（F1 前置）
 
-1. **你给推送权限** → 我推送 28 提交、配 upstream、看 CI 对当前 HEAD 出结论（这是"可信基线"的最后一环）；
+1. ~~你给推送权限 → 推送、配 upstream、让 CI 对当前 HEAD 出结论~~ ✅ **已完成**（见 §10）；
 2. **你给参照站登录态**（或确认可复用的账号）→ 我补抓 `/task`、`/user-center`、`/team*`、`/film*`、`/pricing` 完整页、`/mcp`；
 3. 我做 **F1 四新域契约草案**（canvas/agent/cam/film 的表与端点，先文档后代码）。
+
+---
+
+## 10. 提交与 CI（2026-10-26 03:04–03:10）
+
+| 项 | 结果 |
+|---|---|
+| 提交 1 | `2e1fcca` fix(gate): 裸跑 pnpm -w test 转绿 + web 纳入门禁 + 堵死 LLM 静默降级（F0）— 20 文件 |
+| 提交 2 | `61b5711` chore(evidence): 全站复刻差距底账 + 参照站公开页采集证据入库 — 21 文件 |
+| 推送 | `origin/main` 116eac4 → **61b5711**（30 个提交） |
+| upstream | ✅ `main` 已跟踪 `origin/main`（`git status` 显示 `## main...origin/main`，ahead/behind = 0/0） |
+| **CI** | **run #61 · success**（https://github.com/luseabook/OneFrame/actions/runs/40224503703）：lint / typecheck / test / build 全过 |
+
+### 推送过程中遇到的两个坑（记录备查）
+
+1. **`| tail` 掩盖真实退出码**：`git push | Select-Object -Last N` 显示成功文本但 `$LASTEXITCODE=1`。实测用 `git ls-remote` 核对 `origin/main` 才确认没推上去。
+2. **本机 git 配了 `http.https://github.com.proxy=http://127.0.0.1:7890`**：大包推送在该代理下反复 `RPC failed / Recv failure: Connection was reset`（30 个提交、~17MB 打包）。改用 `git -c http.https://github.com.proxy= push origin main` 一次性绕过代理即成功。
+   - 我**没有**永久删掉你的代理配置（已恢复原值），只在这一次推送用命令行覆盖。
+   - 附带设了 `http.version=HTTP/1.1`、`http.postBuffer=500MB`（这两项对 HTTP 推送更稳，如不需要可回退）。
+
+### 入库范围说明（公开仓库，已做安全检查）
+
+- 提交 2 给 `_acceptance/_gap/` 与 `_acceptance/ref2/` 开了 `.gitignore` 白名单（此前整个 `_acceptance/*` 不入库，导致差距结论无法复核）；
+- 推前扫描：无 `sk-*` / 无 PEM 私钥 / 无 access_token / 无商户号；
+- 仍未入库（保持忽略）：`rea-reelmate/chrome-profile/`（246MB 登录态）、`*.log`、临时调试脚本、`node_modules`。
