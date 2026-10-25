@@ -317,6 +317,7 @@ onMounted(bootstrap);
           @update:model-value="switchSpace"
         />
         <Button :disabled="busy" @click="newTeamOpen = true">创建团队</Button>
+        <Button v-if="team?.type === 2" :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
         <Button :disabled="!canManage || busy" @click="groupOpen = true">新建分组</Button>
         <Button :disabled="busy" @click="bootstrap">刷新</Button>
       </div>
@@ -363,6 +364,25 @@ onMounted(bootstrap);
 
     <!-- 积分管理 -->
     <section v-else-if="tab === 'points'" class="tm-panel">
+      <div class="tm-cards">
+        <Card class="tm-card">
+          <h2 class="tm-h2">团队积分池</h2>
+          <p class="tm-hint">
+            团队积分池当前 <b>{{ team?.credit_total ?? 0 }}</b> 分
+            <span v-if="(team?.frozen ?? 0) > 0">（冻结中 {{ team?.frozen }}）</span>。
+            充值是给「团队空间」下单，入账后可在下面的分配表单发给成员。
+          </p>
+          <Button :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
+        </Card>
+        <Card class="tm-card">
+          <h2 class="tm-h2">分配规则</h2>
+          <p class="tm-hint">
+            分配 = 团队池 → 成员个人余额；回收 = 反向。每次分配/回收都会写两条流水（出/入各一条），
+            因此「团队池 + 所有成员余额」的总额守恒，可对账。成员页的「当前积分」是<b>已分配额度</b>，不是余额。
+          </p>
+        </Card>
+      </div>
+
       <div class="tm-cards">
         <Card class="tm-card">
           <h2 class="tm-h2">分配积分</h2>

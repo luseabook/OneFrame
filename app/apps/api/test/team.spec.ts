@@ -21,10 +21,18 @@ describe("team (cam) e2e", () => {
   let app: NestFastifyApplication;
   let uid = 0;
 
-  const inject = async (method: string, url: string, payload?: unknown, authToken?: string) => {
+  const inject = async (
+    method: string,
+    url: string,
+    payload?: unknown,
+    authToken?: string,
+    spaceId?: string,
+  ) => {
     const headers: Record<string, string> = {};
     if (payload !== undefined) headers["content-type"] = "application/json";
     if (authToken) headers.authorization = `Bearer ${authToken}`;
+    // 切空间（ADR-010）：服务端会校验成员身份
+    if (spaceId) headers["x-space-id"] = spaceId;
     const res = await app.inject({
       method: method as "GET" | "POST" | "PATCH" | "DELETE",
       url: `/v1${url}`,
@@ -245,5 +253,52 @@ describe("team (cam) e2e", () => {
       `);
     }
     await expect(svc.assertSeatAvailable(teamSpaceId)).rejects.toMatchObject({ code: 400108 });
+  });
+
+  /**
+   * 团队池入账：验证"在团队空间下单 + 支付回填"会把积分充进团队空间，
+   * 而不是个人空间。这条链不需要新代码（billing 全部按 auth.spaceId 记账），
+   * 但必须有回归测试锁住——否则 X-Space-Id 语义一变就会静默充错账户。
+   */
+  it("团队空间下单支付后，积分充进团队池而非个人空间", async () => {
+    // 确保有可售 SKU（seed 可能未跑）
+    const skuCount = (await db.execute(sql`select count(*)::int as n from skus where active = true`)) as {
+      rows?: Array<{ n: number }>;
+    };
+    if ((skuCount.rows?.[0]?.n ?? 0) === 0) {
+      await db.execute(sql`
+        insert into skus (id, kind, sku, label, price_cents, credits, active, created_at, updated_at)
+        values (1, 'credits', 'credits-500', '500 积分', 5000, 500, true, now(), now())
+        on conflict (sku) do nothing
+      `);
+    }
+
+    const owner = await loginNewUser("79");
+    const { teamSpaceId } = await createTeam(owner.userId);
+
+    // 通过 HTTP + X-Space-Id 在团队空间下单（同时也验证了守卫的切空间逻辑）
+    const skus = await inject("GET", "/billing/skus", undefined, owner.token, teamSpaceId);
+    // listSkus 返回数组（不是 {list}）
+    const sku = Array.isArray(skus.data) ? skus.data[0] : (skus.data?.list ?? [])[0];
+    expect(sku?.sku).toBeTruthy();
+
+    const before = await inject("GET", "/cam/team/info", undefined, owner.token, teamSpaceId);
+    const teamBefore = Number(before.data?.credit_total ?? 0);
+
+    const order = await inject("POST", "/billing/orders", { sku: sku.sku, channel: "mock" }, owner.token, teamSpaceId);
+    expect(order.code).toBe(0);
+    const orderId = order.data?.order_id;
+    expect(orderId).toBeTruthy();
+
+    const pay = await inject("POST", `/billing/orders/${orderId}/mock-pay`, {}, owner.token, teamSpaceId);
+    expect(pay.code).toBe(0);
+
+    const after = await inject("GET", "/cam/team/info", undefined, owner.token, teamSpaceId);
+    const teamAfter = Number(after.data?.credit_total ?? 0);
+    expect(teamAfter).toBe(teamBefore + Number(sku.credits));
+
+    // 个人空间不应因此增加（新用户赠送的 80 与本次充值无关）
+    const personal = await inject("GET", "/cam/team/info", undefined, owner.token);
+    expect(Number(personal.data?.credit_total ?? 0)).toBeLessThan(teamAfter);
   });
 });

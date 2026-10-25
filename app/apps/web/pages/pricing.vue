@@ -68,6 +68,12 @@ const balance = ref<number | null>(null);
 const loading = ref(true);
 const error = ref("");
 
+// 购买目标空间（2026-10-26）：活动空间决定订单入账到哪个 space。
+// 团队上下文下充进团队积分池（ADR-011），个人上下文充进个人余额。
+const activeSpace = useActiveSpaceId();
+const buyingFor = ref("");
+const isTeamContext = computed(() => !!activeSpace.value);
+
 const live = ref(false);
 const channels = ref<ChannelDto[]>([]);
 const selectedChannel = ref("mock");
@@ -272,6 +278,16 @@ function redeem(): void {
 
 onMounted(async () => {
   isMobile.value = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  // 显示"当前购买至哪个空间"，避免在团队上下文里误以为充到个人账户
+  try {
+    const mine = await useApi().get<{ list: Array<{ space_id: string; name: string; type: number }> }>("/cam/teams/mine");
+    const target = activeSpace.value
+      ? mine.list.find((s) => s.space_id === activeSpace.value)
+      : mine.list.find((s) => s.type === 1);
+    buyingFor.value = target ? `${target.name}${target.type === 2 ? "" : "（个人）"}` : "";
+  } catch {
+    buyingFor.value = "";
+  }
   await load();
 });
 onUnmounted(stopPoll);
@@ -299,6 +315,13 @@ onUnmounted(stopPoll);
     </section>
 
     <template v-else>
+    <!-- 购买目标空间提示（2026-10-26）：团队空间下单会直接充进团队积分池，
+         避免用户在团队上下文里误以为充到了个人账户 -->
+    <p v-if="buyingFor" class="buy-target">
+      当前购买至：<b>{{ buyingFor }}</b>
+      <span v-if="isTeamContext" class="buy-target-tag">团队积分池</span>
+      <NuxtLink v-else class="buy-target-switch" to="/team">切换到团队</NuxtLink>
+    </p>
     <section class="promo-banner">
       <p class="promo-title">算力积分补贴活动</p>
       <p class="promo-text">
@@ -494,6 +517,33 @@ onUnmounted(stopPoll);
   background: #26262c;
   color: var(--text-1);
   font-weight: 600;
+}
+/* 购买目标空间提示 */
+.buy-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.buy-target b {
+  color: var(--text-1);
+}
+.buy-target-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft, rgba(126, 112, 255, 0.14));
+  color: var(--brand-1);
+  font-size: 12px;
+}
+.buy-target-switch {
+  color: var(--brand-1);
+  text-decoration: none;
+  font-size: 12px;
+}
+.buy-target-switch:hover {
+  text-decoration: underline;
 }
 .redeem-card {
   max-width: 520px;
