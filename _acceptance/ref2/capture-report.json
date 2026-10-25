@@ -1,0 +1,83 @@
+{
+  "capturedAt": "2026-10-25T18:15:07.642Z",
+  "cdp": "http://127.0.0.1:9222",
+  "pages": {
+    "pricing-full": {
+      "route": "/pricing",
+      "url": "https://www.reelmate.cn/pricing",
+      "status": 200,
+      "renderWarn": "正文渲染等待超时（可能仍是壳）",
+      "finalUrl": "https://www.reelmate.cn/pricing",
+      "title": "万兴剧厂 -AI驱动的一站式精品漫剧创作平台 影视级规模化生产 小成本成就大爆款",
+      "png": "_acceptance\\ref2\\pricing-full.png",
+      "pngBytes": 60330,
+      "docHeight": 900,
+      "pngBottom": "_acceptance\\ref2\\pricing-full-bottom.png",
+      "pngBottomBytes": 60330,
+      "textLen": 113,
+      "headings": [],
+      "hasFooter": false,
+      "elapsedMs": 29018
+    },
+    "mcp": {
+      "route": "/mcp",
+      "url": "https://www.reelmate.cn/mcp",
+      "status": 200,
+      "finalUrl": "https://www.reelmate.cn/",
+      "title": "万兴剧厂 -AI驱动的一站式精品漫剧创作平台 影视级规模化生产 小成本成就大爆款",
+      "png": "_acceptance\\ref2\\mcp.png",
+      "pngBytes": 518594,
+      "docHeight": 900,
+      "pngBottom": "_acceptance\\ref2\\mcp-bottom.png",
+      "pngBottomBytes": 518243,
+      "textLen": 1953,
+      "headings": [
+        "您的专属AI影视工作室",
+        "爆款案例",
+        "ALL EYES ON US",
+        "天才机甲师",
+        "零频副官",
+        "我靠赶海致富，全家悔不当初",
+        "BEFORE I'M DEFINED",
+        "烽火家书",
+        "Echo One",
+        "憨爸与机灵娃",
+        "如神降临",
+        "Burberry她掉进了自己的包里",
+        "山藏古寺",
+        "金刀王",
+        "烬海",
+        "五十岁闪婚后我成厂长夫人了",
+        "她舞会",
+        "无级",
+        "The Ace Is Out",
+        "GHOST RIDER",
+        "对方无应答",
+        "Alone",
+        "鱼刺",
+        "不被复制的未来",
+        "失而复我"
+      ],
+      "hasFooter": true,
+      "elapsedMs": 5764
+    },
+    "tools-recheck": {
+      "route": "/tools",
+      "url": "https://www.reelmate.cn/tools",
+      "status": 200,
+      "finalUrl": "https://www.reelmate.cn/tools",
+      "title": "万兴剧厂 -AI驱动的一站式精品漫剧创作平台 影视级规模化生产 小成本成就大爆款",
+      "png": "_acceptance\\ref2\\tools-recheck.png",
+      "pngBytes": 1045719,
+      "docHeight": 900,
+      "pngBottom": "_acceptance\\ref2\\tools-recheck-bottom.png",
+      "pngBottomBytes": 1045719,
+      "textLen": 411,
+      "headings": [
+        "工具箱"
+      ],
+      "hasFooter": false,
+      "elapsedMs": 5773
+    }
+  }
+}

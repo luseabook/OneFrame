@@ -37,3 +37,10 @@ _acceptance/*
 !_acceptance/compliance-check.cjs
 !_acceptance/b-type-acceptance.ps1
 !_acceptance/ledger-repair.cjs
+
+# 全站复刻的差距底账与证据（2026-10-26 起入库，可复核）
+# _gap/：三条基线与门禁/代码/合规实测；ref2/：参照站公开页采集证据
+!_acceptance/_gap/
+!_acceptance/ref2/
+!_acceptance/capture-public.cjs
+!_acceptance/mcp-check.cjs
