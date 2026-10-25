@@ -9,6 +9,7 @@ export const QUEUES = {
   RESULT_TRANSFER: "result.transfer",
   NOTIFY: "notify",
   EXPORT: "export.zip",
+  TIMELINE_EXPORT: "timeline.export",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

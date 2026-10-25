@@ -7,11 +7,13 @@ import {
   freezeCredits,
   models,
   projectAssets,
+  projectTimelines,
   scriptProjects,
   storyboardAssets,
   storyboards,
   taskEvents,
   tasks,
+  timelineExports,
 } from "@app/db";
 import {
   AppError,
@@ -47,6 +49,7 @@ import { ModelsService } from "../models/models.service";
 import { StorageService } from "../../storage/storage.service";
 import { ModerationService } from "../moderation/moderation.service";
 import { LlmService } from "./llm.service";
+import type { TimelineClipDto, TimelineClipInput, TimelinePutRequest } from "./timeline.schema";
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
 type EpisodeRow = typeof episodes.$inferSelect;
@@ -1931,6 +1934,226 @@ export class ScriptService {
       error: row.error,
       expires_at: row.expiresAt?.toISOString() ?? null,
     };
+  }
+
+  // ── P7：时间线持久化 + 成片合成导出 ─────────────────────────────────────
+
+  /** GET /projects/{id}/episodes/{eid}/timeline → { clips }（无记录返回空数组） */
+  async getTimeline(spaceId: string, projectId: string, episodeId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const [row] = await db
+      .select()
+      .from(projectTimelines)
+      .where(eq(projectTimelines.episodeId, episode.id));
+    return { clips: this.timelineClipsDto(row?.clips) };
+  }
+
+  /** PUT /projects/{id}/episodes/{eid}/timeline：整体覆盖写（同 episode upsert） */
+  async putTimeline(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    input: TimelinePutRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const clips = await this.normalizeTimelineClips(spaceId, episode.id, input.clips);
+    await db
+      .insert(projectTimelines)
+      .values({
+        id: newId(),
+        spaceId: BigInt(spaceId),
+        projectId: project.id,
+        episodeId: episode.id,
+        clips,
+      })
+      .onConflictDoUpdate({
+        target: projectTimelines.episodeId,
+        set: {
+          spaceId: BigInt(spaceId),
+          projectId: project.id,
+          clips,
+          updatedAt: new Date(),
+        },
+      });
+    return { clips };
+  }
+
+  /** DELETE /projects/{id}/episodes/{eid}/timeline → { ok: true } */
+  async deleteTimeline(spaceId: string, projectId: string, episodeId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    await db.delete(projectTimelines).where(eq(projectTimelines.episodeId, episode.id));
+    return { ok: true };
+  }
+
+  /** POST /projects/{id}/episodes/{eid}/timeline/export：创建合成导出任务 */
+  async createTimelineExport(spaceId: string, projectId: string, episodeId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const [timeline] = await db
+      .select()
+      .from(projectTimelines)
+      .where(eq(projectTimelines.episodeId, episode.id));
+    const clips = this.timelineClipsDto(timeline?.clips);
+    if (clips.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "timeline is empty, add clips before exporting", {
+        field: "clips",
+      });
+    }
+    const durationS = clips.reduce((sum, clip) => sum + clip.duration, 0);
+    const id = newId();
+    await db.insert(timelineExports).values({
+      id,
+      spaceId: BigInt(spaceId),
+      projectId: project.id,
+      episodeId: episode.id,
+      status: 1,
+      clipCount: clips.length,
+      durationS,
+    });
+    await this.queue.enqueueTimelineExport(String(id));
+    return { export_id: String(id), status: 1 };
+  }
+
+  /** GET /projects/{id}/episodes/{eid}/timeline/export/:exportId */
+  async getTimelineExport(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    exportId: string,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    let id: bigint;
+    try {
+      id = BigInt(exportId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid export id", { field: "exportId" });
+    }
+    const [row] = await db
+      .select()
+      .from(timelineExports)
+      .where(
+        and(
+          eq(timelineExports.id, id),
+          eq(timelineExports.episodeId, episode.id),
+          eq(timelineExports.spaceId, BigInt(spaceId)),
+        ),
+      );
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "timeline export not found");
+    const downloadUrl =
+      row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null;
+    return {
+      export_id: String(row.id),
+      status: row.status,
+      download_url: downloadUrl,
+      error: row.error,
+      // 附加信息（不影响契约字段）：被跳过的片段数（无源视频/不可解码且非 mock）
+      skipped: row.skipped,
+    };
+  }
+
+  /** 从 jsonb 读出 clips 并归一化（防御历史/脏数据） */
+  private timelineClipsDto(raw: unknown): TimelineClipDto[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item) => ({
+        clip_id: String(item.clip_id ?? ""),
+        shot_id: String(item.shot_id ?? ""),
+        task_id: item.task_id === null || item.task_id === undefined ? null : String(item.task_id),
+        name: String(item.name ?? ""),
+        duration: Number(item.duration ?? 1),
+      }))
+      .filter((clip) => clip.clip_id.length > 0 && clip.shot_id.length > 0);
+  }
+
+  /** 校验并归一化 clips：shot 必须属于本集、task 必须属于本 space（且本集/本集镜头） */
+  private async normalizeTimelineClips(
+    spaceId: string,
+    episodeId: bigint,
+    input: TimelineClipInput[],
+  ): Promise<TimelineClipDto[]> {
+    const parseId = (raw: string, field: string): bigint => {
+      try {
+        return BigInt(raw);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, `invalid ${field}: ${raw}`, { field });
+      }
+    };
+
+    const shotIds = new Set<string>();
+    for (const [index, clip] of input.entries()) {
+      const shotId = parseId(clip.shot_id, `clips[${index}].shot_id`).toString();
+      shotIds.add(shotId);
+    }
+    const shotRows =
+      shotIds.size > 0
+        ? await db
+            .select({ id: storyboards.id })
+            .from(storyboards)
+            .where(
+              and(
+                eq(storyboards.episodeId, episodeId),
+                inArray(storyboards.id, [...shotIds].map((id) => BigInt(id))),
+              ),
+            )
+        : [];
+    const validShotIds = new Set(shotRows.map((row) => String(row.id)));
+    for (const [index, clip] of input.entries()) {
+      if (!validShotIds.has(parseId(clip.shot_id, `clips[${index}].shot_id`).toString())) {
+        throw new AppError(
+          ErrorCode.INVALID_PARAM,
+          `clips[${index}].shot_id does not belong to this episode`,
+          { field: `clips[${index}].shot_id` },
+        );
+      }
+    }
+
+    const taskIds = [...new Set(input.map((clip) => clip.task_id).filter((v): v is string => Boolean(v)))];
+    const taskRows =
+      taskIds.length > 0
+        ? await db
+            .select()
+            .from(tasks)
+            .where(
+              and(
+                eq(tasks.spaceId, BigInt(spaceId)),
+                inArray(tasks.id, taskIds.map((id) => parseId(id, "clips[].task_id"))),
+              ),
+            )
+        : [];
+    const taskById = new Map(taskRows.map((row) => [String(row.id), row]));
+    for (const [index, clip] of input.entries()) {
+      if (!clip.task_id) continue;
+      const taskId = parseId(clip.task_id, `clips[${index}].task_id`).toString();
+      const task = taskById.get(taskId);
+      const belongsToEpisode =
+        task && (task.episodeId === episodeId || (task.shotId ? validShotIds.has(String(task.shotId)) : false));
+      if (!task || !belongsToEpisode) {
+        throw new AppError(
+          ErrorCode.INVALID_PARAM,
+          `clips[${index}].task_id does not belong to this episode/space`,
+          { field: `clips[${index}].task_id` },
+        );
+      }
+    }
+
+    const usedClipIds = new Set<string>();
+    return input.map((clip) => {
+      let clipId = clip.clip_id?.trim() ?? "";
+      if (!clipId || usedClipIds.has(clipId)) clipId = String(newId());
+      usedClipIds.add(clipId);
+      return {
+        clip_id: clipId,
+        shot_id: parseId(clip.shot_id, "clips[].shot_id").toString(),
+        task_id: clip.task_id ? parseId(clip.task_id, "clips[].task_id").toString() : null,
+        name: clip.name,
+        duration: clip.duration,
+      };
+    });
   }
 
   /** 单个项目资产的 DTO（预签名参考图 + 被分镜引用次数）；counts 可批量预取避免 N+1 */

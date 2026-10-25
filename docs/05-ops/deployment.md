@@ -276,3 +276,38 @@ readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSecond
 - **api 测试改为串行文件执行**：`apps/api/package.json` 的 test 脚本加 `--no-file-parallelism`。原因：多个测试文件并行时共用同一 Postgres/Redis，`project-assets.spec.ts` 的「绑定顺序 / 删除解绑」两条断言会偶发失败（单独跑该文件 13/13 全绿，并行全量跑时 2 例失败）。串行后 `pnpm --filter @app/api test` 稳定 **23 files / 215 passed**（约 30s）。
 - **本机 dev 库账本已修复**：按 §7.5 SOP 执行 `node _acceptance/ledger-repair.cjs --fix`，`repaired=61`，复跑 `--dry-run` 为 **不一致 0**（此前 40 个 watchdog 凭空解冻类 + 21 个测试脏数据类）。
 - **仍需注意**：`apps/api/test/refunds.spec.ts` 的退款守卫用例仍用直连 `update credit_accounts` 模拟「积分已消耗」，每跑一次全量测试会给 dev 库留下 1 个「有 recharge 流水但余额少 1000」的脏 space —— 生产代码无此问题，但会让账本告警长期有噪音。建议后续把该用例改成用真实 freeze/settle 流水模拟消耗（未做）。
+
+### 7.7 成片合成（ffmpeg）与时间线
+
+**依赖**：worker 机器需有 `ffmpeg`/`ffprobe`（本机验证版本 8.1.1-full_build，PATH 可达）。
+可用 `FFMPEG_PATH` / `FFPROBE_PATH` 指定绝对路径（默认 `ffmpeg`/`ffprobe` 走 PATH）。
+worker 启动**不强制**校验 ffmpeg（避免 dev 无 ffmpeg 起不来）；缺失时导出任务失败为
+`status=4` + `error.message`（如 `spawn ffmpeg ENOENT`），worker 进程不崩溃。
+
+**链路**：
+1. api `POST /v1/projects/{id}/episodes/{eid}/timeline/export` → 写 `timeline_exports(status=1)` → Redis 队列 `timeline.export`；
+2. worker `runTimelineExport`：读 `project_timelines.clips` → 逐段取 `tasks.results[0].uri`（`storage.read`）→
+   `ffmpeg -vf scale/pad/setsar/format=yuv420p -r 30 -c:v libx264 -an -t <clip.duration>` 归一化
+   （9:16→720x1280 / 16:9→1280x720 / 1:1→720x720）→ concat demuxer → 叠加「AI 生成」水印（drawtext 右下角）
+   → 上传 `u/<space>/timelines/<exportId>.mp4` → `status=3`、`file_uri`、`watermarked=true`、`clip_count/skipped/duration_s`；
+3. api `GET .../timeline/export/{exportId}` 读取并签名 1h `download_url`。
+
+**mock 模式（dev/CI）**：`ADAPTER_MODE=mock` 的任务结果是占位字节，ffmpeg 无法解码 →
+该段回退 `lavfi color` 深色色板 + clip 名称文字（时长 = clip.duration），日志 warn 级可查
+`timeline mock segment generated (lavfi color plate)`，最终仍产出可播放 mp4（验收用）。
+real 模式下若某段无源视频/不可解码 → 跳过并计入 `skipped`（接口返回可见）。
+
+**并发与临时目录**：
+- 每个导出任务在系统临时目录 `timeline-export-*` 内独立工作（`mkdtemp`），成功/失败均在 `finally` 中删除；
+- 不同导出之间无共享文件名；同一 `exportId` 重复投递时任务开始时读状态，已 3/4 直接返回（幂等）；
+- worker 并发由 `WORKER_CONCURRENCY` 控制（默认 5）；合成是 CPU 密集操作，生产建议给 worker 单独限流/资源配额。
+
+**失败排查**：
+- `status=4` + `error.message` 含 `spawn ffmpeg ENOENT` / `spawn ffprobe ENOENT` → 安装 ffmpeg 或修 `FFMPEG_PATH`；
+- 含 `timeline is empty` → 该分集没有时间线（或 clips 为空）；含 `no usable clips to export` → real 模式所有片段都没有可解码源视频；
+- 日志检索：worker 日志 `timeline export failed`（含 `export_id`/`err`），成功为 `timeline export succeeded (mock segments synthesized)`；
+- 手动重试：重新 `POST .../timeline/export` 生成新 export（旧记录保留审计）；本地可只读复现：
+  `ffmpeg -f lavfi -i color=c=0x14161d:s=720x1280:d=2 -c:v libx264 -pix_fmt yuv420p -r 30 -t 2 out.mp4`。
+- **对象存储清理**：成片存 `u/<space>/timelines/`，当前无自动过期（与旧 zip 导出一致，依赖运维按容量策略清理）；
+  临时目录由 worker 自动清理，无需人工。
+

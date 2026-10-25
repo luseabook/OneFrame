@@ -432,6 +432,47 @@ CREATE TABLE storyboard_assets (
 );
 ```
 
+### 6.1 时间线与成片合成导出（P7）
+
+> 迁移：`apps/api/drizzle/0011_common_stepford_cuckoos.sql`。时间线按**分集**持久化（替代前端 localStorage）；
+> 合成导出与旧「整集 zip 导出」`exports` 表**分离**，保证旧语义零回归。
+
+```sql
+CREATE TABLE project_timelines (
+  id BIGINT PRIMARY KEY,
+  space_id BIGINT NOT NULL REFERENCES spaces(id),
+  project_id BIGINT NOT NULL REFERENCES script_projects(id),
+  episode_id BIGINT NOT NULL REFERENCES episodes(id),
+  clips JSONB NOT NULL DEFAULT '[]',   -- 有序片段：[{clip_id, shot_id, task_id|null, name, duration}]，数组顺序=成片顺序
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_project_timelines_episode ON project_timelines(episode_id);  -- 一个分集一条时间线(PUT 覆盖)
+CREATE INDEX idx_project_timelines_project ON project_timelines(project_id, episode_id);
+
+CREATE TABLE timeline_exports (
+  id BIGINT PRIMARY KEY,
+  space_id BIGINT NOT NULL REFERENCES spaces(id),
+  project_id BIGINT NOT NULL REFERENCES script_projects(id),
+  episode_id BIGINT NOT NULL REFERENCES episodes(id),
+  status SMALLINT NOT NULL DEFAULT 1,   -- 1排队 2处理中 3完成 4失败（沿用 exports 状态语义）
+  file_uri TEXT,                        -- 产物 storage key（API 读取时签 1h URL，不落会过期的签名 URL）
+  clip_count INT NOT NULL DEFAULT 0,    -- 实际拼接进成片的片段数
+  skipped INT NOT NULL DEFAULT 0,       -- 无源视频/不可解码且非 mock 时被跳过的片段数
+  duration_s INT NOT NULL DEFAULT 0,    -- 成片时长（Σ clip.duration）
+  watermarked BOOLEAN NOT NULL DEFAULT FALSE,  -- 是否已叠加「AI 生成」显式水印（合规留痕）
+  error JSONB,                          -- {code,message}，失败时
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_timeline_exports_space ON timeline_exports(space_id, created_at DESC);
+CREATE INDEX idx_timeline_exports_episode ON timeline_exports(episode_id, created_at DESC);
+```
+
+设计取舍：新增 `timeline_exports` 而不给 `exports` 加 discriminator——旧 zip 导出逻辑（`apps/worker/src/export.ts`）
+对 `exports` 的列/语义保持不变；时间线导出需要 `clip_count/skipped/duration_s/watermarked` 等合成专属字段，
+单独建表避免旧表膨胀与语义耦合。
+
 ## 7. 画布（Ph3，占位）
 
 ```sql

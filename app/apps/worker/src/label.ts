@@ -91,9 +91,14 @@ export async function labelResults(
   return labeled;
 }
 
-function watermarkFilter(text: string, fontPath?: string): string {
+export function escapeDrawtext(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
+}
+
+/** 右下角「AI 生成」显式水印 filter（半透明白字 + 黑底），供任务标识与成片合成共用 */
+export function watermarkFilter(text: string, fontPath?: string): string {
   const font = fontPath ? `fontfile='${fontPath.replace(/\\/g, "/").replace(":", "\\:")}':` : "";
-  const safe = text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
+  const safe = escapeDrawtext(text);
   return `drawtext=${font}text='${safe}':x=w-tw-16:y=h-th-16:fontsize=max(20\\,h/40):fontcolor=white@0.85:box=1:boxcolor=black@0.45`;
 }
 

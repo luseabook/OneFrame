@@ -523,6 +523,65 @@ export const exportJobs = pgTable(
   (t) => [index("idx_exports_space").on(t.spaceId, t.createdAt.desc())],
 );
 
+// ── P7：时间线（per-episode 持久化）+ 成片合成导出 ─────────
+export const projectTimelines = pgTable(
+  "project_timelines",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    projectId: bigint("project_id", { mode: "bigint" })
+      .notNull()
+      .references(() => scriptProjects.id),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => episodes.id),
+    /** 有序片段数组：[{ clip_id, shot_id, task_id|null, name, duration }]（顺序即成片顺序） */
+    clips: jsonb("clips").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 一个分集只有一条时间线（PUT 覆盖写）
+    uniqueIndex("uq_project_timelines_episode").on(t.episodeId),
+    index("idx_project_timelines_project").on(t.projectId, t.episodeId),
+  ],
+);
+
+// 时间线合成导出（与旧「整集 zip 导出」exports 表分离，保证旧语义零回归）
+export const timelineExports = pgTable(
+  "timeline_exports",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    projectId: bigint("project_id", { mode: "bigint" })
+      .notNull()
+      .references(() => scriptProjects.id),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => episodes.id),
+    status: smallint("status").notNull().default(1), // 1排队 2处理中 3完成 4失败（沿用 exports 语义）
+    /** 产物 storage key（API 读取时签 1h URL；不落签名 URL，避免过期失效） */
+    fileUri: text("file_uri"),
+    clipCount: integer("clip_count").notNull().default(0),
+    /** 因无 task/结果不可解码而被跳过的片段数（mock 模式回退色板时不计入） */
+    skipped: integer("skipped").notNull().default(0),
+    durationS: integer("duration_s").notNull().default(0),
+    /** 是否已叠加「AI 生成」显式水印（合规留痕） */
+    watermarked: boolean("watermarked").notNull().default(false),
+    error: jsonb("error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_timeline_exports_space").on(t.spaceId, t.createdAt.desc()),
+    index("idx_timeline_exports_episode").on(t.episodeId, t.createdAt.desc()),
+  ],
+);
+
 // ── 商业化（Beta 支付；P2' 使用，先建表保持契约）───────────
 export const skus = pgTable("skus", {
   id: pk(),

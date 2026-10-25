@@ -78,6 +78,13 @@
       "when": 1792912793234,
       "tag": "0010_windy_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792933804956,
+      "tag": "0011_common_stepford_cuckoos",
+      "breakpoints": true
     }
   ]
 }

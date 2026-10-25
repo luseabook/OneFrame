@@ -481,3 +481,59 @@
 4. 全程无 pageerror / console error。截图：`evidence/reelflow-impl/p6-confirm-{list,generate,submitted,finalized}.png`。
 
 **限制**：参照页有「按出现集数筛选」（搜索框占位语），我们的数据模型没有「资产出现在哪些集」的聚合，暂以 `bound_shot_count`（被多少分镜引用）+ 名称/描述搜索替代；如要精确到集，需给绑定关系补投影（P7+）。
+
+---
+
+## 16. P7 实施记录：时间线服务端持久化 + ffmpeg 合成导出成片（2026-10-25 落地）
+
+把 P4-1 的两个限制（只存本地、只能导出整集 zip）变成真能力。
+
+### 16.1 数据层（迁移 `0011_common_stepford_cuckoos.sql`，已执行）
+
+| 表 | 用途 |
+|---|---|
+| `project_timelines` | 每个分集一条（`episode_id` unique），`clips jsonb` 有序数组 = 成片顺序 |
+| `timeline_exports` | 合成导出任务（`status/file_uri/clip_count/skipped/duration_s/watermarked/error`）；**不动旧 `exports` 语义**，旧整集 zip 零回归 |
+
+DB 只存 `file_uri`（storage key），查询时签 1h `download_url`，避免签名 URL 过期后落库失效。
+
+### 16.2 接口（5 个，script 模块，space 隔离）
+
+`GET/PUT/DELETE /v1/projects/:id/episodes/:eid/timeline`、`POST .../timeline/export`、`GET .../timeline/export/:id`
+- PUT：≤100 条、duration 1..30；`shot_id` 必须属本分集、`task_id` 必须属本 space；`clip_id` 缺失自动生成、重复自动重建；覆盖写。
+- export：空时间线 400101；状态 1 排队 / 2 渲染 / 3 完成 / 4 失败。
+
+### 16.3 worker 合成（队列 `timeline.export`）
+
+1. 逐段取 `tasks.results[0].uri` → ffprobe 校验 → 归一化 `scale/pad → 720x1280（9:16）或 1280x720（16:9）`、h264 / yuv420p / 30fps / 无音轨、`-t clip.duration` 裁齐；
+2. `concat demuxer` 拼接 + **右下角 `drawtext` 叠「AI生成」水印**（合规显式标识，`watermarked=true`）；
+3. 产物 `u/<space>/timelines/<exportId>.mp4`，签名 URL 回写；
+4. **mock 兼容**：源结果是占位字节、且 `ADAPTER_MODE!=real` → 用 `lavfi color` 深色色板 + clip 名称文字（时长=clip.duration）合成，产出**可播放 mp4**；real 模式则跳过并计 `skipped`；
+5. `FFMPEG_PATH`/`FFPROBE_PATH` 可配，缺失时 status=4 且 worker 不崩；临时目录 `mkdtemp` + finally 清理；同 exportId 终态幂等。
+
+### 16.4 前端
+
+- 时间线读写走服务端（`GET/PUT .../timeline`，700ms 防抖保存），localStorage 仅作离线缓存兜底；服务端不可用时提示「时间线仅保存在本地」。
+- 底栏 `导出成片（zip）` → **`合成导出成片`**：POST export → 每 2s 轮询状态 → 显示 `排队中/渲染中/已完成/失败` 与 `下载 mp4`；进入时间线视图自动从服务端加载并按需补齐片段签名播放地址。
+
+### 16.5 验收（真实 API 3000 + Web 3001 + worker mock）
+
+`_acceptance/e2e-p7.cjs`：进入时间线（服务端加载 0 条）→ 加入 2 个镜头（总长 `00:10`）→ 点「合成导出成片」→ 状态「已完成」→ 下载 mp4：
+
+```
+ffprobe: codec=h264  width=720  height=1280  fps=30/1  duration=10.000000  size=20175
+```
+
+横幅「合成完成，可下载 mp4（含 AI 生成水印）」，全程无 pageerror / console error。截图：`evidence/reelflow-impl/p7-{timeline-saved,compose-done}.png`。
+
+### 16.6 测试
+
+- api **24 files / 225 passed**（新增 `timeline.spec.ts` 10 例，含旧 zip 导出回归）
+- worker **6 files / 22 passed**（新增 `timeline-export.spec.ts` 3 例，含 ffmpeg 缺失与 real 模式跳过）
+- 注意：跑 api 测试前仍需停 worker（共享 DB/Redis，见 §11.4）。
+
+### 16.7 剩余差距
+
+1. 合成目前只做「逐段拼接 + 统一分辨率/帧率 + 水印」：未做片段 trim 微调、转场、音轨/BGM、字幕轨。
+2. 时间线仍是「顺序列表」而非多轨（单视频轨），拖动排序未做（用左右移按钮）。
+3. 3D 导演台仍未做（需 three.js）。

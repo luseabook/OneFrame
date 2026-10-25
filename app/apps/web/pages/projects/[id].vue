@@ -508,6 +508,7 @@ const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.l
 function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline" | "confirm"): void {
   tab.value = key;
   viewMenu.value = false;
+  if (key === "timeline") void loadTimeline();
   // 批量投递固定走参考生视频：切到导出视图时确保当前模型支持该模式
   if (key === "batch" && models.value.length && !models.value.some((m) => m.name === modelName.value)) {
     modelName.value = models.value[0]?.name ?? modelName.value;
@@ -1072,22 +1073,97 @@ const activeClip = computed<TimelineClip | null>(() => {
   return clips.value.length ? clips.value[clips.value.length - 1] ?? null : null;
 });
 
-function saveTimeline(silent = false): void {
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const timelineDirty = ref(false);
+const timelineLoading = ref(false);
+
+/** 本地缓存（离线兜底 / 快速首帧） */
+function cacheTimeline(): void {
   try {
     localStorage.setItem(timelineKey.value, JSON.stringify(clips.value));
-    if (!silent) info.value = "时间线已保存（本地浏览器；服务端时间线待后续版本）";
   } catch {
     /* ignore quota errors */
   }
 }
-function loadTimeline(): void {
+
+/** 写入：本地立即缓存 + 服务端防抖保存 */
+function saveTimeline(silent = false): void {
+  cacheTimeline();
+  timelineDirty.value = true;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    void persistTimeline(silent);
+  }, 700);
+  if (!silent) info.value = "时间线保存中…";
+}
+
+async function persistTimeline(silent = false): Promise<void> {
+  if (!selectedEpisodeId.value) return;
   try {
-    const raw = localStorage.getItem(timelineKey.value);
-    clips.value = raw ? (JSON.parse(raw) as TimelineClip[]) : [];
-  } catch {
-    clips.value = [];
+    const res = await api.put<{ clips: Array<{ clip_id: string; shot_id: string; task_id: string | null; name: string; duration: number }> }>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline`,
+      {
+        clips: clips.value.map((c) => ({
+          clip_id: c.id,
+          shot_id: c.shotId,
+          task_id: c.taskId,
+          name: c.name,
+          duration: c.duration,
+        })),
+      },
+    );
+    // 服务端会回填 clip_id：同步回本地
+    if (Array.isArray(res.clips) && res.clips.length === clips.value.length) {
+      clips.value = clips.value.map((c, i) => ({ ...c, id: res.clips[i]?.clip_id ?? c.id }));
+      cacheTimeline();
+    }
+    timelineDirty.value = false;
+    if (!silent) info.value = "时间线已保存（服务端）";
+  } catch (e) {
+    // 服务端接口不可用时保留本地缓存，不阻塞编辑
+    if (!silent) error.value = e instanceof Error ? `时间线仅保存在本地：${e.message}` : "时间线仅保存在本地";
   }
+}
+
+/** 读取：优先服务端，失败回退本地缓存 */
+async function loadTimeline(): Promise<void> {
   playhead.value = 0;
+  timelineLoading.value = true;
+  try {
+    const res = await api.get<{ clips: Array<{ clip_id: string; shot_id: string; task_id: string | null; name: string; duration: number }> }>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline`,
+    );
+    clips.value = (res.clips ?? []).map((c) => ({
+      id: c.clip_id,
+      shotId: c.shot_id,
+      shotNo: shots.value.find((s) => s.id === c.shot_id)?.shot_no ?? 0,
+      name: c.name,
+      duration: c.duration,
+      taskId: c.task_id,
+      url: null,
+    }));
+    cacheTimeline();
+    void hydrateClipUrls();
+  } catch {
+    try {
+      const raw = localStorage.getItem(timelineKey.value);
+      clips.value = raw ? (JSON.parse(raw) as TimelineClip[]) : [];
+    } catch {
+      clips.value = [];
+    }
+  } finally {
+    timelineLoading.value = false;
+  }
+}
+
+/** 补齐片段播放地址（签名 URL） */
+async function hydrateClipUrls(): Promise<void> {
+  for (const clip of clips.value) {
+    if (!clip.taskId || clip.url) continue;
+    const url = await clipUrl(clip.taskId);
+    const target = clips.value.find((c) => c.id === clip.id);
+    if (target && url) target.url = url;
+  }
 }
 
 /** 取某条结果的播放地址（后端签名 URL，1h 有效） */
@@ -1191,8 +1267,76 @@ function togglePlay(): void {
   }
 }
 
+// ── 按时间线合成导出（服务端 ffmpeg）──
+const tlExportId = ref("");
+const tlExportStatus = ref(0);
+const tlExportUrl = ref<string | null>(null);
+const tlExportError = ref("");
+let tlExportTimer: ReturnType<typeof setInterval> | undefined;
+const tlExportLabel = computed(
+  () => ({ 0: "", 1: "排队中", 2: "渲染中", 3: "已完成", 4: "失败" })[tlExportStatus.value] ?? "",
+);
+
+async function exportTimeline(): Promise<void> {
+  if (!selectedEpisodeId.value) return;
+  if (!clips.value.length) {
+    error.value = "时间线为空：先从左侧加入分镜";
+    return;
+  }
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+  }
+  await persistTimeline(true);
+  tlExportError.value = "";
+  tlExportUrl.value = null;
+  try {
+    const res = await api.post<{ export_id: string; status: number }>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/export`,
+      {},
+    );
+    tlExportId.value = res.export_id;
+    tlExportStatus.value = res.status ?? 1;
+    info.value = "已提交合成导出：服务端正在按时间线渲染…";
+    startTlExportPoll();
+  } catch (e) {
+    tlExportError.value = e instanceof Error ? e.message : "提交失败";
+    error.value = tlExportError.value;
+  }
+}
+
+function startTlExportPoll(): void {
+  if (tlExportTimer) clearInterval(tlExportTimer);
+  let tries = 0;
+  tlExportTimer = setInterval(async () => {
+    tries += 1;
+    try {
+      const data = await api.get<{ export_id: string; status: number; download_url: string | null; error: { message?: string } | null }>(
+        `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/export/${tlExportId.value}`,
+      );
+      tlExportStatus.value = data.status;
+      if (data.download_url) tlExportUrl.value = data.download_url;
+      if (data.status === 3) {
+        tlExportError.value = "";
+        info.value = "合成完成，可下载 mp4（含 AI 生成水印）";
+        if (tlExportTimer) clearInterval(tlExportTimer);
+      } else if (data.status === 4) {
+        tlExportError.value = data.error?.message ?? "合成失败";
+        error.value = `合成失败：${tlExportError.value}`;
+        if (tlExportTimer) clearInterval(tlExportTimer);
+      }
+    } catch {
+      /* 继续轮询 */
+    }
+    if (tries > 120 && tlExportTimer) clearInterval(tlExportTimer);
+  }, 2000);
+}
+
 watch([selectedEpisodeId, projectId], () => {
-  loadTimeline();
+  void loadTimeline();
+});
+onUnmounted(() => {
+  if (tlExportTimer) clearInterval(tlExportTimer);
 });
 watch(clips, () => saveTimeline(true), { deep: true });
 onUnmounted(() => {
@@ -1945,13 +2089,13 @@ function kindLabel(kind: string): string {
             <input v-model.number="pxPerSec" type="range" min="16" max="120" step="4" />
           </label>
           <span class="tl-spacer" />
-          <Button size="sm" variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
-            {{ exporting ? "提交中…" : "导出成片" }}
+          <Button size="sm" :disabled="!clips.length || tlExportStatus === 1 || tlExportStatus === 2" @click="exportTimeline">
+            合成导出成片
           </Button>
-          <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="link" target="_blank" rel="noreferrer">下载 zip</a>
-          <Tag v-else-if="exportJob" :tone="exportJob.status === 4 ? 'danger' : 'info'" size="sm">
-            {{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : "失败" }}
+          <Tag v-if="tlExportStatus" :tone="tlExportStatus === 4 ? 'danger' : tlExportStatus === 3 ? 'success' : 'info'" size="sm" dot>
+            {{ tlExportLabel }}
           </Tag>
+          <a v-if="tlExportUrl" :href="tlExportUrl" class="link" target="_blank" rel="noreferrer">下载 mp4</a>
         </div>
 
         <div class="tl-track" @click.self="seekTo(($event.offsetX) / pxPerSec)">
@@ -1983,7 +2127,7 @@ function kindLabel(kind: string): string {
             <div class="tl-head" :style="{ left: `${playhead.value * pxPerSec}px` }" />
           </div>
         </div>
-        <p class="tl-note">时间线顺序保存在本浏览器（服务端时间线/多端同步待后续版本）；导出仍走「整集 zip」。</p>
+        <p class="tl-note">时间线按分集保存在服务端（本浏览器有本地缓存兜底）；「合成导出成片」由服务端 ffmpeg 按时间线渲染 mp4 并叠加「AI 生成」水印。</p>
       </footer>
     </div>
     <!-- ══════════ ⑥ 资产校验（对齐参照 /series-manage/asset-confirm） ══════════ -->

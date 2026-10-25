@@ -396,6 +396,43 @@ POST /projects/{id}/assets/{assetId}/select            // 选定候选图并定�
 `assets/{assetId}/generate-image|candidates|select`）与绑定接口先按
 `findProject(space, project)` 校验，项目不属于当前 space → `400102`（不泄露资产是否存在）。
 
+## 8.3 分集时间线与成片合成导出（P7）
+
+> 时间线按分集持久化（`project_timelines`，一个分集一条，PUT 覆盖写）；成片合成为异步任务
+> （Redis 队列 `timeline.export` → worker ffmpeg），状态机与旧 zip 导出一致：
+> `1 排队 → 2 处理中 → 3 完成 / 4 失败`。数据表见 database.md §6.1。
+> 所有端点先按 `findProject(space, project)` + `findEpisode(project, episode)` 隔离，跨 space → `400102`。
+
+```
+GET /projects/{id}/episodes/{eid}/timeline
+  ← {clips:[{clip_id, shot_id, task_id, name, duration}]}    // 无记录返回 {clips:[]}
+  // clips 顺序即时间线顺序；task_id 为 null 表示该片段暂无视频任务
+
+PUT /projects/{id}/episodes/{eid}/timeline     // 整体覆盖（同 episode upsert）
+  {clips:[{clip_id?, shot_id, task_id?, name, duration}]}   // ≤100 条；duration 1..30 整数
+  // clip_id 可省略：服务端生成并回填（同集内唯一，重复 clip_id 会重新生成）；
+  // shot_id 必须属于本分集；task_id 非空时必须属于当前 space 且属于本分集/本集镜头，否则 400101；
+  // 校验失败不覆盖已有时间线
+  ← {clips:[...]}   // 归一化后（clip_id 必有、task_id 归一 string|null）
+
+DELETE /projects/{id}/episodes/{eid}/timeline
+  ← {ok:true}
+
+POST /projects/{id}/episodes/{eid}/timeline/export
+  ← {export_id, status:1}      // 时间线为空 → 400101；入队失败不回滚记录（可重试再建）
+  // worker：按 clips 顺序逐段归一化（9:16→720x1280 / 16:9→1280x720 / 1:1→720x720，30fps h264 yuv420p 无音轨）
+  //         → concat demuxer 拼接 → 右下角叠加「AI 生成」显式水印 → 上传 u/<space>/timelines/<exportId>.mp4
+  // mock（ADAPTER_MODE=mock）：源视频是占位字节 → 该段用 lavfi 深色色板 + clip 名称替代（保证 dev 可播）
+
+GET /projects/{id}/episodes/{eid}/timeline/export/{exportId}
+  ← {export_id, status:1|2|3|4, download_url, error, skipped}
+  // download_url：status=3 时为预签名 URL（1h），否则 null；error：{code,message} 或 null；
+  // skipped：无源视频/不可解码且非 mock 时被跳过的片段数（status=3 也可能 >0）
+```
+
+**错误码**：`400101` 参数/长度/时长非法、clip 的 shot/task 不属于本分集或时间线为空；
+`400102` 项目/分集/导出记录不存在（含跨 space）；导出执行失败不入接口错误码，通过 `status=4 + error` 表达。
+
 ## 9. assets
 
 ```

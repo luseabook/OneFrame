@@ -9,6 +9,7 @@ import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
 import { runGenerationTask, type ExecutorDeps } from "./executor";
 import { runExport } from "./export";
+import { runTimelineExport } from "./timeline-export";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -125,6 +126,17 @@ const deps: ExecutorDeps = {
   maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),
 };
 
+// P7 成片合成：ffmpeg 路径可配（默认 PATH）；mock 模式下源视频为占位字节 → 回退色板
+const timelineExportDeps = {
+  db,
+  storage,
+  ffmpegPath: process.env.FFMPEG_PATH,
+  ffprobePath: process.env.FFPROBE_PATH,
+  adapterMode: adapterOptions.mode,
+  aiLabel,
+  log: (obj: Record<string, unknown>, msg: string) => log.info(obj, msg),
+};
+
 // ── 定时维护（deployment.md §7）──
 // 各任务频率不同，因此拆成多个独立定时器，而不是塞进一个 6h 的大任务里。
 // 资金相关（对账/看门狗）必须高频，否则用户付了钱没到账、或积分永久冻结。
@@ -204,6 +216,12 @@ const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
         const exportId = (job.data as { exportId?: string }).exportId;
         if (!exportId) throw new Error("missing exportId");
         await runExport(exportId, { db, storage, log: (obj, msg) => log.info(obj, msg) });
+        return { ok: true, exportId };
+      }
+      if (name === QUEUES.TIMELINE_EXPORT) {
+        const exportId = (job.data as { exportId?: string }).exportId;
+        if (!exportId) throw new Error("missing exportId");
+        await runTimelineExport(exportId, timelineExportDeps);
         return { ok: true, exportId };
       }
       log.info({ queue: name, job_id: job.id }, "job received (no-op)");

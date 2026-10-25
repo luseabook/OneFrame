@@ -25,6 +25,7 @@ import {
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { ScriptService } from "./script.service";
+import { timelinePutSchema } from "./timeline.schema";
 
 /** 上传剧本解析请求：前端把文件读成 base64 提交（不依赖 multipart 依赖） */
 const parseScriptSchema = z.object({
@@ -407,5 +408,60 @@ export class ScriptController {
       eid,
       input,
     );
+  }
+
+  // ── P7：时间线持久化 + 成片合成导出 ─────────────────────────────────────
+
+  /** 读取分集时间线（无记录返回 { clips: [] }） */
+  @Get("projects/:id/episodes/:eid/timeline")
+  async getTimeline(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.script.getTimeline(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  /** 覆盖写分集时间线（≤100 条；clip_id 缺失由服务端生成） */
+  @Put("projects/:id/episodes/:eid/timeline")
+  async putTimeline(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(timelinePutSchema, body);
+    return this.script.putTimeline(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /** 删除分集时间线 */
+  @Delete("projects/:id/episodes/:eid/timeline")
+  async deleteTimeline(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.script.deleteTimeline(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  /** 按时间线创建成片合成导出任务（worker ffmpeg 合成） */
+  @Post("projects/:id/episodes/:eid/timeline/export")
+  async createTimelineExport(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.script.createTimelineExport(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  /** 查询成片导出状态（1排队/2处理中/3完成/4失败） */
+  @Get("projects/:id/episodes/:eid/timeline/export/:exportId")
+  async getTimelineExport(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("exportId") exportId: string,
+  ) {
+    return this.script.getTimelineExport(req.auth?.spaceId ?? "", id, eid, exportId);
   }
 }

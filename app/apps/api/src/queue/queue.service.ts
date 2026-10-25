@@ -8,6 +8,7 @@ export const QUEUES = {
   RESULT_TRANSFER: "result.transfer",
   NOTIFY: "notify",
   EXPORT: "export.zip",
+  TIMELINE_EXPORT: "timeline.export",
 } as const;
 
 function connectionOptions(): { host: string; port: number; password?: string } {
@@ -23,10 +24,12 @@ function connectionOptions(): { host: string; port: number; password?: string } 
 export class QueueService implements OnModuleDestroy {
   readonly submitQueue: Queue;
   readonly exportQueue: Queue;
+  readonly timelineExportQueue: Queue;
 
   constructor() {
     this.submitQueue = new Queue(QUEUES.GEN_SUBMIT, { connection: connectionOptions() });
     this.exportQueue = new Queue(QUEUES.EXPORT, { connection: connectionOptions() });
+    this.timelineExportQueue = new Queue(QUEUES.TIMELINE_EXPORT, { connection: connectionOptions() });
   }
 
   async enqueueTask(taskId: string): Promise<void> {
@@ -57,8 +60,22 @@ export class QueueService implements OnModuleDestroy {
     );
   }
 
+  async enqueueTimelineExport(exportId: string): Promise<void> {
+    await this.timelineExportQueue.add(
+      "timeline-export",
+      { exportId },
+      {
+        jobId: `timeline-export-${exportId}-${Date.now()}`,
+        attempts: 1,
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    );
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.submitQueue.close();
     await this.exportQueue.close();
+    await this.timelineExportQueue.close();
   }
 }
