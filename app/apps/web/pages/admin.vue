@@ -1,5 +1,6 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false, layout: "app" });
+// 运营后台使用独立壳层（layouts/admin.vue）：不复用用户端菜单/积分/页脚
+definePageMeta({ ssr: false, layout: "admin" });
 
 interface Envelope<T> {
   code: number;
