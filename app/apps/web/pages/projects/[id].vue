@@ -883,13 +883,22 @@ async function extractAssets(scope: "episode" | "project"): Promise<void> {
   }
 }
 
-/** 一键定稿：把当前项目所有草稿资产置为定稿（批量 PATCH） */
+/** 无参考图的草稿资产：定稿也不会被后端采纳（400105），单独统计引导去生成图 */
+const draftsWithoutImage = computed(() => draftAssets.value.filter((a) => !a.ref_image_uri));
+const draftsWithImage = computed(() => draftAssets.value.filter((a) => !!a.ref_image_uri));
+
+/** 一键定稿：只定稿「已有参考图」的草稿资产；缺图的提示先生成图 */
 async function finalizeAllDrafts(): Promise<void> {
-  const drafts = draftAssets.value;
-  if (!drafts.length) return;
+  const targets = draftsWithImage.value;
+  if (!targets.length) {
+    error.value = draftsWithoutImage.value.length
+      ? "待定稿的资产都还没有参考图：先点「生成图」（或导入图片）再定稿"
+      : "没有待定稿的资产";
+    return;
+  }
   await run("批量定稿", async () => {
     let ok = 0;
-    for (const a of drafts) {
+    for (const a of targets) {
       try {
         await api.patch(`/projects/${projectId.value}/assets/${a.id}`, { status: 2 });
         ok += 1;
@@ -898,10 +907,92 @@ async function finalizeAllDrafts(): Promise<void> {
       }
     }
     await loadProjectAssets();
-    info.value = `已定稿 ${ok}/${drafts.length} 个资产（无参考图的资产仍不会被后端采纳）`;
+    const missing = draftsWithoutImage.value.length;
+    info.value = `已定稿 ${ok}/${targets.length} 个资产${missing ? `；另有 ${missing} 个缺少参考图，先「生成图」再定稿才会被采纳` : ""}`;
   });
 }
+
+/** mock/失效图片兜底：加载失败时隐藏 img，露出底色占位 */
+function hideBrokenImage(event: Event): void {
+  const el = event.target as HTMLImageElement | null;
+  if (el) el.style.display = "none";
+}
+// ══════════ P3.5：项目资产参考图生成（generate-image → 轮询候选 → 选图定稿）══════════
+const assetCandidates = ref<{ assetId: string; taskId: string; list: Array<{ index: number; url: string }> } | null>(null);
+const assetImageBusyId = ref("");
+
+async function generateAssetImage(a: ProjectAssetDto): Promise<void> {
+  if (assetImageBusyId.value) return;
+  assetImageBusyId.value = a.id;
+  error.value = "";
+  try {
+    const res = await api.post<{ task_id: string; model: string }>(
+      `/projects/${projectId.value}/assets/${a.id}/generate-image`,
+      {},
+    );
+    info.value = `已提交生成（${res.model}），正在等待结果…`;
+    await pollAssetCandidates(a.id, res.task_id);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "生成失败";
+  } finally {
+    assetImageBusyId.value = "";
+  }
+}
+
+/** 轮询候选图（400105 = 任务尚未成功，继续等；最多 ~90s） */
+async function pollAssetCandidates(assetId: string, taskId: string): Promise<void> {
+  for (let i = 0; i < 45; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const res = await api.get<{ task_id: string; candidates: Array<{ index: number; url: string }> }>(
+        `/projects/${projectId.value}/assets/${assetId}/candidates`,
+      );
+      if (res.candidates.length) {
+        assetCandidates.value = { assetId, taskId: res.task_id ?? taskId, list: res.candidates };
+        info.value = "候选图已就绪：选择一张作为该资产的参考图（采纳即定稿）";
+        return;
+      }
+    } catch {
+      /* 任务未成功：继续轮询 */
+    }
+  }
+  error.value = "生成超时：稍后可在资产卡上点「候选图」再试";
+}
+
+async function showAssetCandidates(a: ProjectAssetDto): Promise<void> {
+  assetImageBusyId.value = a.id;
+  error.value = "";
+  try {
+    const res = await api.get<{ task_id: string; candidates: Array<{ index: number; url: string }> }>(
+      `/projects/${projectId.value}/assets/${a.id}/candidates`,
+    );
+    assetCandidates.value = { assetId: a.id, taskId: res.task_id, list: res.candidates };
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "暂无可选候选图";
+  } finally {
+    assetImageBusyId.value = "";
+  }
+}
+
+async function selectAssetCandidate(item: { index: number; url: string }): Promise<void> {
+  const cur = assetCandidates.value;
+  if (!cur) return;
+  await run("采用参考图", async () => {
+    await api.post(`/projects/${projectId.value}/assets/${cur.assetId}/select`, {
+      task_id: cur.taskId,
+      index: item.index,
+    });
+    assetCandidates.value = null;
+    await loadProjectAssets();
+    info.value = "已采用为参考图并定稿，可绑定到分镜后投递";
+  });
+}
+
+function assetImageRunning(a: ProjectAssetDto): boolean {
+  return assetImageBusyId.value === a.id;
+}
 </script>
+
 
 
 <template>
@@ -1043,8 +1134,10 @@ async function finalizeAllDrafts(): Promise<void> {
         </div>
       </div>
       <p v-if="assetTab !== 'character' && draftAssets.length" class="banner banner--warn">
-        有 {{ draftAssets.length }} 个资产待定稿：定稿后才会作为参考图注入分镜生成。
-        <button class="mini-link" type="button" @click="finalizeAllDrafts">一键定稿</button>
+        有 {{ draftAssets.length }} 个资产待定稿（其中 {{ draftsWithoutImage.length }} 个还没有参考图）：定稿 + 有图才会作为参考图注入分镜生成。
+        <button v-if="draftsWithImage.length" class="mini-link" type="button" @click="finalizeAllDrafts">
+          一键定稿 {{ draftsWithImage.length }} 个
+        </button>
       </p>
 
       <!-- 角色：有数据 -->
@@ -1112,6 +1205,10 @@ async function finalizeAllDrafts(): Promise<void> {
               <b>{{ a.name }}</b>
               <p>{{ a.description || a.prompt || "—" }}</p>
               <div class="pa-card__ops">
+                <Button size="sm" :loading="assetImageRunning(a)" :disabled="!!assetImageBusyId" @click="generateAssetImage(a)">
+                  {{ a.ref_image_uri ? "重新生成图" : "生成图" }}
+                </Button>
+                <button v-if="a.source_task_id" type="button" class="mini-btn" :disabled="!!assetImageBusyId" @click="showAssetCandidates(a)">候选图</button>
                 <Button size="sm" variant="ghost" :disabled="!!busy" @click="openAssetForm(assetTabKind || 'scene', a)">编辑</Button>
                 <Button v-if="a.status !== 2" size="sm" :disabled="!!busy" @click="patchProjectAsset(a, { status: 2 })">定稿</Button>
                 <Button v-else size="sm" variant="ghost" :disabled="!!busy" @click="patchProjectAsset(a, { status: 1 })">取消定稿</Button>
@@ -1486,6 +1583,22 @@ async function finalizeAllDrafts(): Promise<void> {
           <Button variant="ghost" @click="assetFormOpen = false">取消</Button>
           <Button :disabled="!!busy" @click="saveAssetForm">保存</Button>
         </div>
+      </div>
+    </Modal>
+
+    <!-- ── 资产参考图候选 ── -->
+    <Modal :open="!!assetCandidates" title="选择参考图" width="720px" @close="assetCandidates = null">
+      <div class="cand-grid">
+        <button
+          v-for="item in assetCandidates?.list ?? []"
+          :key="item.index"
+          type="button"
+          class="cand"
+          @click="selectAssetCandidate(item)"
+        >
+          <img :src="item.url" :alt="`候选 ${item.index + 1}`" />
+          <span>候选 {{ item.index + 1 }} · 点击采用</span>
+        </button>
       </div>
     </Modal>
 

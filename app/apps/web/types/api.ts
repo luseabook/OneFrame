@@ -154,6 +154,7 @@ export interface ProjectAssetDto {
   ref_image_uri: string | null;
   portrait_asset_id: string | null;
   portrait_url?: string | null;
+  source_task_id?: string | null;
   status: number;
   finalized_at?: string | null;
   bound_shot_count?: number;

@@ -354,12 +354,33 @@ POST /projects/{id}/assets/extract          // P3 AI 提取资产：剧本/分�
   //                     更新绝不改 status / finalized_at / ref_image_uri / portrait_asset_id
   // 单次最多落 20 个（按 scenes→props→characters 顺序截断，超出给 truncated=true）；
   // items 只含本次 created/updated 的资产（P2 ProjectAssetDto 同构，含 finalized_at/bound_shot_count）
+
+POST /projects/{id}/assets/{assetId}/generate-image   // P3.5 非角色资产参考图（走任务系统）
+  {prompt?: string, count?: 1..4}   // prompt 优先级：body.prompt > asset.prompt > asset.description > asset.name
+  ← {task_id, model, project_asset_id}
+  // 仅 kind=scene|prop|other；kind=character → 400101（角色走 /characters/{cid}/portrait）
+  // mode=studio_asset_image、scene=null、input.reference_uris=[]（纯文生图）
+  // 发起新任务后回写 asset：source_task_id=task_id、prompt=实际提示词，并清空旧 ref_image_uri/status（回 1）/finalized_at
+
+GET  /projects/{id}/assets/{assetId}/candidates        // 与角色 portrait 候选同构
+  ← {task_id, candidates:[{index, url}]}                // url 为预签名下载地址（1h）
+  // 从未发起生图 → 400105（"asset image not generated yet"）；最新任务未成功 → 400105
+
+POST /projects/{id}/assets/{assetId}/select            // 选定候选图并定稿
+  {task_id: string, index: 0..3}
+  ← ProjectAssetDto   // P2 DTO（含 portrait_url 预签名 / finalized_at / bound_shot_count）
+  // 事务内：insert assets(kind=image, source_task_id, name=资产名, tags=[asset.kind],
+  //                       meta={project_id, project_asset_id, candidate_index})
+  //        + update project_assets(portrait_asset_id, ref_image_uri, status=2, finalized_at)
+  // 任务不存在/未成功 → 400105；index 超出结果数组 → 400102
 ```
 
-**错误码**：`400101` 参数/枚举/长度非法、kind=character 走错端点、绑定含非法/跨项目 id；
-`400102` 项目/资产/分集不存在（含跨 space 隔离）；`400105` 投递时绑定资产未定稿或缺少参考图。
+**错误码**：`400101` 参数/枚举/长度非法、kind=character 走错端点（含 generate-image）、绑定含非法/跨项目 id；
+`400102` 项目/资产/分集不存在或候选下标越界（含跨 space 隔离）；`400105` 投递时绑定资产未定稿、
+参考图未生成/生成任务未成功。
 
-**跨 space**：`GET/POST/PATCH/DELETE /projects/{id}/assets/**`（含 `assets/extract`）与绑定接口先按
+**跨 space**：`GET/POST/PATCH/DELETE /projects/{id}/assets/**`（含 `assets/extract`、
+`assets/{assetId}/generate-image|candidates|select`）与绑定接口先按
 `findProject(space, project)` 校验，项目不属于当前 space → `400102`（不泄露资产是否存在）。
 
 ## 9. assets

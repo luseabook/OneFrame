@@ -10,6 +10,8 @@ import {
   portraitRebindSchema,
   portraitSelectSchema,
   projectAssetCreateSchema,
+  projectAssetImageGenerateSchema,
+  projectAssetImageSelectSchema,
   projectAssetKindSchema,
   projectAssetPatchSchema,
   projectAssetsExtractSchema,
@@ -286,6 +288,48 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(projectAssetsExtractSchema, body ?? {});
     return this.script.extractProjectAssets(req.auth?.spaceId ?? "", id, input);
+  }
+
+  // ── P3.5：项目资产参考图（generate-image → candidates → select）──────────
+
+  /** 为非角色资产生成参考图（mode=studio_asset_image 走任务系统；kind=character → 400101） */
+  @Post("projects/:id/assets/:assetId/generate-image")
+  async generateProjectAssetImage(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(projectAssetImageGenerateSchema, body ?? {});
+    return this.script.generateProjectAssetImage(
+      req.auth?.spaceId ?? "",
+      req.auth?.userId ?? "",
+      id,
+      assetId,
+      input,
+    );
+  }
+
+  /** 生图任务候选（与 portrait candidates 同构；未生成/未成功 → 400105） */
+  @Get("projects/:id/assets/:assetId/candidates")
+  async projectAssetImageCandidates(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+  ) {
+    return this.script.projectAssetImageCandidates(req.auth?.spaceId ?? "", id, assetId);
+  }
+
+  /** 选定候选图：落 assets 行 + 回填 portrait_asset_id/ref_image_uri/status=2/finalized_at */
+  @Post("projects/:id/assets/:assetId/select")
+  async selectProjectAssetImage(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(projectAssetImageSelectSchema, body);
+    return this.script.selectProjectAssetImage(req.auth?.spaceId ?? "", id, assetId, input);
   }
 
   /** 更新资产：改名/描述/提示词/参考图/定稿状态（status=2 写 finalized_at，=1 清空） */

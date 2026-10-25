@@ -308,3 +308,40 @@
 1. `characters/generate` 会删除本项目所有 `kind=character` 且 `status=1` 的草稿行 —— 包括 AI 提取出的角色草稿。当前前端默认 `include_characters=false`（提取只做场景/道具），暂不冲突；若要开启角色提取，需先给 generate 加保护或改用「仅同步命名」策略。
 2. 资产「生成图」（AI 生图）仍未接：需要把 Ark/Seedream 图像适配器接进 registry（model-adapters 已有实现），并把生成结果写回 `ref_image_uri/portrait_asset_id`。
 3. 参照的独立「资产清单校验」页（上一集/下一集切换、按出现集数筛选、重新提取）尚未做成独立路由；当前在资产视图内内联完成，语义等价但信息密度更低。
+
+---
+
+## 11. P3.5 实施记录：项目资产生成参考图（闭环最后一环）（2026-10-25 落地）
+
+### 11.1 后端（照搬角色定妆图链路，不改既有角色端点）
+
+| 端点 | 说明 |
+|---|---|
+| `POST /v1/projects/:id/assets/:assetId/generate-image` | body `{ prompt?, count?=1..4 }`；`kind=character` → 400101（提示走 characters/:cid/portrait）；prompt 优先级 `body > asset.prompt > description > name`；返回 `{ task_id, model, project_asset_id }`，并把资产重置为草稿（`source_task_id/prompt` 回写，`ref_image_uri/portrait_asset_id/finalized_at` 清空） |
+| `GET /v1/projects/:id/assets/:assetId/candidates` | 与 portrait candidates 同构；未生成 / 任务未成功 → 400105；成功返回 1h 预签名候选列表 |
+| `POST /v1/projects/:id/assets/:assetId/select` | `{ task_id, index }`；事务内落 `assets`（kind=image、tags=[asset.kind]、meta 含 project/asset/candidate）+ 回填 `portrait_asset_id/ref_image_uri/status=2/finalized_at`，返回 P2 DTO |
+
+底层走 `mode=studio_asset_image` → `generations.create` → worker 用适配器出图（dev 为 `ADAPTER_MODE=mock`）。测试新增 9 例 → **22 files / 204 passed**。
+
+### 11.2 前端
+
+- 资产卡新增 `生成图 / 重新生成图`（loading 态）与 `候选图`（已有任务时）按钮；生成后自动轮询 candidates（400105 视为「生成中」，最多 ~90s），就绪弹「选择参考图」候选框，点选即采用并定稿。
+- 修两处体验问题：
+  1. **一键定稿语义**：原先会把「没有参考图」的草稿也置为定稿（对参考生视频毫无意义）；现在只定稿**已有参考图**的草稿，并在横幅里区分「N 个待定稿 / 其中 M 个还没有参考图」，缺图时提示先生成图。
+  2. 图片加载失败（mock 阶段返回的字节不是合法 PNG）时隐藏 `<img>` 露出底色占位，不再出现碎图与 alt 文本。
+- mock 说明：`ADAPTER_MODE=mock` 时图片内容是文本字节，浏览器会显示占位底色（接口与流程全部打通）；配真实 `ARK_API_KEY` 后即为真图。
+
+### 11.3 验收
+
+- 端到端（`_acceptance/e2e-p35.cjs`，worker 以 mock 适配器运行）：资产卡点「生成图」→ 候选就绪 → 选第一张 → 横幅「已采用为参考图并定稿」→ 卡片出现参考图 + 已定稿标签，无 pageerror。
+- 截图：`evidence/reelflow-impl/p35-{candidates,selected}.png`。
+
+### 11.4 测试环境注意（重要）
+
+`api` 测试与本地 dev 的 **worker 共用同一个 Postgres/Redis**：worker 常驻会在测试断言期间把新建任务处理掉（表现为 `project-assets-image` / `project-assets-extract` 各 1 例偶发失败）。因此跑 `pnpm --filter @app/api test` 前**先停掉本地 worker**（停掉后 204 全绿已复核）。后续若要把这层隔离做掉，可给测试用独立 Redis DB（如 `REDIS_URL=redis://127.0.0.1:6380/1`）或让 worker 在 `NODE_ENV=test` 下拒绝启动。
+
+### 11.5 至此链路状态
+
+`剧本 → AI 提取资产(场景/道具) → 生成参考图 → 定稿 → 绑定分镜 → 参考生视频 → 导出`：**前半段（提取/生图/定稿/绑定）已可跑通**；视频投递本身仍要求「角色定妆图」也定稿（既有 400105 语义），角色这一环用既有「角色 → 生成定妆图 → 定稿」流程即可。
+
+下一阶段：P4 时间线导出编辑器 + 3D 导演台（需 three.js 与合成导出），以及参照独立「资产清单校验」页。

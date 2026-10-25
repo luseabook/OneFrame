@@ -27,6 +27,8 @@ import {
   type OutlineConfirmRequest,
   type PortraitGenerateRequest,
   type ProjectAssetCreateRequest,
+  type ProjectAssetImageGenerateRequest,
+  type ProjectAssetImageSelectRequest,
   type ProjectAssetKind,
   type ProjectAssetPatchRequest,
   type ProjectAssetsExtractRequest,
@@ -1185,6 +1187,173 @@ export class ScriptService {
     const counts = await this.boundShotCounts(changedRows.map((row) => row.id));
     const items = await Promise.all(changedRows.map((row) => this.projectAssetDtoOf(row, counts)));
     return { created, updated, skipped, items, truncated };
+  }
+
+  // ── P3.5：项目资产参考图（generate-image → candidates → select）──────────
+
+  /**
+   * POST /projects/{id}/assets/:assetId/generate-image：
+   * 与角色定妆图链路同构（mode=studio_asset_image 走任务系统），仅允许 scene|prop|other。
+   * prompt 优先级：body.prompt > asset.prompt > asset.description > asset.name。
+   */
+  async generateProjectAssetImage(
+    spaceId: string,
+    userId: string,
+    projectId: string,
+    assetId: string,
+    input: ProjectAssetImageGenerateRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    if (asset.kind === "character") {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        "character images must be generated via POST /projects/{id}/characters/{cid}/portrait",
+        { field: "assetId" },
+      );
+    }
+
+    const [model] = await db
+      .select()
+      .from(models)
+      .where(and(eq(models.visible, true), sql`${models.modes} ? 'studio_asset_image'`))
+      .orderBy(models.sort)
+      .limit(1);
+    if (!model) throw new AppError(ErrorCode.INVALID_PARAM, "no model supports studio_asset_image");
+    const cfg = (model.modes as Record<string, {
+      ratios?: string[];
+      default_ratio?: string;
+      resolution_options?: Array<{ value: string }>;
+      default_resolution?: string;
+    }>).studio_asset_image;
+
+    const prompt =
+      normalizeOptionalText(input.prompt) ??
+      normalizeOptionalText(asset.prompt) ??
+      normalizeOptionalText(asset.description) ??
+      asset.name;
+    const request: GenerationRequest = {
+      mode: "studio_asset_image",
+      model: model.name,
+      scene: null,
+      input: { prompt, reference_uris: [] },
+      options: {
+        ratio: cfg?.default_ratio ?? cfg?.ratios?.[0] ?? "1:1",
+        resolution: cfg?.default_resolution ?? cfg?.resolution_options?.[0]?.value ?? "1K",
+        duration: 5,
+        count: input.count,
+        enable_audio: false,
+        mouth_drive: false,
+      },
+    };
+    const created = await this.generations.create(
+      { userId, spaceId, jti: "script-asset-image" },
+      request,
+      `asset-image:${asset.id}:${Date.now()}`,
+    );
+    // 新一轮生图：清空旧参考图/定稿状态（与 portrait 保持一致），等待 select 回填
+    await db
+      .update(projectAssets)
+      .set({
+        sourceTaskId: BigInt(created.task_id),
+        prompt,
+        status: ProjectAssetStatus.DRAFT,
+        portraitAssetId: null,
+        refImageUri: null,
+        finalizedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectAssets.id, asset.id));
+    return { task_id: created.task_id, model: model.name, project_asset_id: String(asset.id) };
+  }
+
+  /** GET /projects/{id}/assets/:assetId/candidates：与 portrait 候选同构（签名 URL 1h） */
+  async projectAssetImageCandidates(spaceId: string, projectId: string, assetId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    if (!asset.sourceTaskId) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "asset image not generated yet");
+    }
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, asset.sourceTaskId), eq(tasks.spaceId, BigInt(spaceId))));
+    if (!task || task.status !== TaskStatus.SUCCEEDED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "asset image task not succeeded");
+    }
+    const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
+    const candidates = await Promise.all(
+      results
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => Boolean(item.uri))
+        .map(async ({ item, index }) => ({ index, url: await this.storage.signDownload(item.uri!, 3600) })),
+    );
+    return { task_id: String(task.id), candidates };
+  }
+
+  /**
+   * POST /projects/{id}/assets/:assetId/select：
+   * 落 assets 行（kind=image，tags=[asset.kind]，meta 记录来源）并回填
+   * portrait_asset_id/ref_image_uri/status=2/finalized_at，返回 P2 ProjectAssetDto。
+   */
+  async selectProjectAssetImage(
+    spaceId: string,
+    projectId: string,
+    assetId: string,
+    input: ProjectAssetImageSelectRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    let bigTaskId: bigint;
+    try {
+      bigTaskId = BigInt(input.task_id);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid task_id", { field: "task_id" });
+    }
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, bigTaskId), eq(tasks.spaceId, BigInt(spaceId))));
+    if (!task || task.status !== TaskStatus.SUCCEEDED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "asset image task not succeeded");
+    }
+    const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
+    const picked = results[input.index];
+    if (!picked?.uri) throw new AppError(ErrorCode.NOT_FOUND, "candidate not found");
+
+    const imageAssetId = newId();
+    await db.transaction(async (tx) => {
+      await tx.insert(assets).values({
+        id: imageAssetId,
+        spaceId: BigInt(spaceId),
+        kind: "image",
+        uri: picked.uri!,
+        sourceTaskId: task.id,
+        name: asset.name,
+        tags: [asset.kind],
+        meta: {
+          project_id: String(project.id),
+          project_asset_id: String(asset.id),
+          candidate_index: input.index,
+        },
+      });
+      await tx
+        .update(projectAssets)
+        .set({
+          portraitAssetId: imageAssetId,
+          refImageUri: picked.uri!,
+          status: ProjectAssetStatus.FINALIZED,
+          finalizedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(projectAssets.id, asset.id));
+    });
+    const [updated] = await db
+      .select()
+      .from(projectAssets)
+      .where(eq(projectAssets.id, asset.id));
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    return this.projectAssetDtoOf(updated);
   }
 
   async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {

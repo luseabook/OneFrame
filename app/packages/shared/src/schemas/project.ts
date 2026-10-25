@@ -118,6 +118,22 @@ export const projectAssetsExtractSchema = z.object({
 });
 export type ProjectAssetsExtractRequest = z.infer<typeof projectAssetsExtractSchema>;
 
+// ── P3.5：项目资产参考图（generate-image → candidates → select）──────────
+// 与角色定妆图（characters/:cid/portrait*）同构，只是作用对象为非角色资产。
+export const projectAssetImageGenerateSchema = z.object({
+  /** 覆盖资产自带 prompt；省略则按 asset.prompt > description > name 取 */
+  prompt: z.string().max(1000).optional(),
+  count: z.number().int().min(1).max(4).default(1),
+});
+export type ProjectAssetImageGenerateRequest = z.infer<typeof projectAssetImageGenerateSchema>;
+
+export const projectAssetImageSelectSchema = z.object({
+  task_id: z.string().min(1),
+  // 候选下标（count ≤ 4）
+  index: z.number().int().min(0).max(3),
+});
+export type ProjectAssetImageSelectRequest = z.infer<typeof projectAssetImageSelectSchema>;
+
 export const storyboardSchema = z.object({
   id: z.string(),
   shot_no: z.number().int().min(1),
