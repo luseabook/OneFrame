@@ -37,7 +37,7 @@ const models = ref<ModelDto[]>([]);
 const modelName = ref("wan-3.0");
 const budget = ref(1000);
 const shotCount = ref(10);
-const tab = ref<"outline" | "characters" | "storyboards" | "batch" | "timeline">("storyboards");
+const tab = ref<"outline" | "characters" | "storyboards" | "batch" | "timeline" | "confirm">("storyboards");
 const busy = ref("");
 const error = ref("");
 const info = ref("");
@@ -502,9 +502,10 @@ const viewOptions = [
   { key: "storyboards" as const, label: "分镜", desc: "单集工作台：分镜条 / 素材区 / 生成台" },
   { key: "batch" as const, label: "导出", desc: "批量投递、分镜矩阵与整集 zip" },
   { key: "timeline" as const, label: "时间线导出", desc: "合成预览、镜头排序与整集导出" },
+  { key: "confirm" as const, label: "资产校验", desc: "清单核对、批量定稿与批量生成参考图" },
 ];
 const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.label ?? "分镜");
-function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline"): void {
+function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline" | "confirm"): void {
   tab.value = key;
   viewMenu.value = false;
   // 批量投递固定走参考生视频：切到导出视图时确保当前模型支持该模式
@@ -1197,6 +1198,159 @@ watch(clips, () => saveTimeline(true), { deep: true });
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId);
 });
+// ══════════ P6：资产校验（对齐参照 /series-manage/asset-confirm）══════════
+const confirmStage = ref<"list" | "generate">("list");
+const confirmSelected = ref<string[]>([]);
+const confirmSearch = ref("");
+const confirmBusy = ref(false);
+
+const confirmEpisodeIndex = computed(() => episodes.value.findIndex((e) => e.id === selectedEpisodeId.value));
+const confirmEpisodeLabel = computed(() => {
+  const idx = confirmEpisodeIndex.value;
+  return idx >= 0 ? `第${episodes.value[idx]?.ep_no ?? idx + 1}集` : "本集";
+});
+/** 校验清单：角色 + 场景/道具/其他（可搜索） */
+const confirmAssets = computed<ProjectAssetDto[]>(() => {
+  const list = [
+    ...characters.value.map((c) => assetMap.value.get(c.id)).filter((a): a is ProjectAssetDto => Boolean(a)),
+    ...projectAssets.value.scene,
+    ...projectAssets.value.prop,
+    ...projectAssets.value.other,
+  ];
+  const kw = confirmSearch.value.trim();
+  return kw ? list.filter((a) => a.name.includes(kw) || (a.description ?? "").includes(kw)) : list;
+});
+const confirmStats = computed(() => {
+  const all = confirmAssets.value;
+  return {
+    total: all.length,
+    drafts: all.filter((a) => a.status !== 2).length,
+    withImage: all.filter((a) => Boolean(a.ref_image_uri)).length,
+    selected: confirmSelected.value.length,
+  };
+});
+const confirmSelectedAssets = computed(() =>
+  confirmAssets.value.filter((a) => confirmSelected.value.includes(a.id)),
+);
+
+function toggleConfirm(id: string): void {
+  confirmSelected.value = confirmSelected.value.includes(id)
+    ? confirmSelected.value.filter((x) => x !== id)
+    : [...confirmSelected.value, id];
+}
+function selectAllConfirm(): void {
+  confirmSelected.value =
+    confirmSelected.value.length === confirmAssets.value.length ? [] : confirmAssets.value.map((a) => a.id);
+}
+function selectNoImageConfirm(): void {
+  // 角色图走「角色定妆图」链路（generate-image 对 kind=character 会 400101），这里只选场景/道具/其他
+  confirmSelected.value = confirmAssets.value
+    .filter((a) => !a.ref_image_uri && a.kind !== "character")
+    .map((a) => a.id);
+}
+function prevEpisode(): void {
+  const idx = confirmEpisodeIndex.value;
+  if (idx > 0) {
+    const ep = episodes.value[idx - 1];
+    if (ep) void selectEpisode(ep.id);
+  }
+}
+function nextEpisode(): void {
+  const idx = confirmEpisodeIndex.value;
+  if (idx >= 0 && idx < episodes.value.length - 1) {
+    const ep = episodes.value[idx + 1];
+    if (ep) void selectEpisode(ep.id);
+  }
+}
+
+/** 批量定稿 / 取消定稿（仅对有参考图的可定稿） */
+async function batchConfirmStatus(status: 1 | 2): Promise<void> {
+  const targets = confirmSelectedAssets.value.filter((a) => (status === 2 ? Boolean(a.ref_image_uri) : true));
+  if (!targets.length) {
+    error.value = status === 2 ? "所选资产都还没有参考图：先批量生成图再定稿" : "请先勾选资产";
+    return;
+  }
+  confirmBusy.value = true;
+  try {
+    let ok = 0;
+    for (const a of targets) {
+      try {
+        await api.patch(`/projects/${projectId.value}/assets/${a.id}`, { status });
+        ok += 1;
+      } catch {
+        /* 单条失败不阻塞 */
+      }
+    }
+    await loadProjectAssets();
+    await loadProject();
+    info.value = status === 2 ? `已定稿 ${ok}/${targets.length} 个资产` : `已取消定稿 ${ok}/${targets.length} 个资产`;
+  } finally {
+    confirmBusy.value = false;
+  }
+}
+
+/** 批量生成参考图：逐个提交生成任务（不阻塞等待；完成后到「资产」视图采用） */
+async function batchGenerateSelected(): Promise<void> {
+  const picked = confirmSelectedAssets.value;
+  const targets = picked.filter((a) => a.kind !== "character");
+  const skippedCharacters = picked.length - targets.length;
+  if (!targets.length) {
+    error.value = skippedCharacters
+      ? "所选都是角色资产：角色图请在「资产 → 角色」里用「生成定妆图」"
+      : "请先勾选要生成参考图的资产";
+    return;
+  }
+  confirmBusy.value = true;
+  error.value = "";
+  try {
+    let ok = 0;
+    for (const a of targets) {
+      try {
+        await api.post(`/projects/${projectId.value}/assets/${a.id}/generate-image`, { count: 1 });
+        ok += 1;
+      } catch {
+        /* 单条失败不阻塞 */
+      }
+    }
+    await loadProjectAssets();
+    info.value = `已提交 ${ok}/${targets.length} 个生成任务：完成后到「资产」视图逐个「候选图」采用（采用即定稿）${
+      skippedCharacters ? `；另有 ${skippedCharacters} 个角色已跳过（请用「生成定妆图」）` : ""
+    }`;
+  } finally {
+    confirmBusy.value = false;
+  }
+}
+
+/** 删除勾选资产（连带解绑） */
+async function batchDeleteSelected(): Promise<void> {
+  const targets = confirmSelectedAssets.value;
+  if (!targets.length) {
+    error.value = "请先勾选要删除的资产";
+    return;
+  }
+  confirmBusy.value = true;
+  try {
+    let ok = 0;
+    for (const a of targets) {
+      try {
+        await api.delete(`/projects/${projectId.value}/assets/${a.id}`);
+        ok += 1;
+      } catch {
+        /* ignore */
+      }
+    }
+    confirmSelected.value = [];
+    await loadProjectAssets();
+    await loadEpisode();
+    info.value = `已删除 ${ok} 个资产`;
+  } finally {
+    confirmBusy.value = false;
+  }
+}
+/** 资产类型中文名 */
+function kindLabel(kind: string): string {
+  return ({ character: "角色", scene: "场景", prop: "道具", other: "其他" } as Record<string, string>)[kind] ?? kind;
+}
 </script>
 
 
@@ -1733,7 +1887,7 @@ onUnmounted(() => {
     </section>
 
     <!-- ══════════ ⑤ 时间线导出（左素材 / 中预览 / 下时间线） ══════════ -->
-    <div v-else class="tl">
+    <div v-else-if="tab === 'timeline'" class="tl">
       <aside class="tl-rail">
         <div class="tl-rail__head">
           <b>剧集资产</b>
@@ -1831,6 +1985,99 @@ onUnmounted(() => {
         </div>
         <p class="tl-note">时间线顺序保存在本浏览器（服务端时间线/多端同步待后续版本）；导出仍走「整集 zip」。</p>
       </footer>
+    </div>
+    <!-- ══════════ ⑥ 资产校验（对齐参照 /series-manage/asset-confirm） ══════════ -->
+    <div v-else class="cf">
+      <div class="cf-head">
+        <button type="button" class="cf-crumb" :class="{ on: confirmStage === 'list' }" @click="confirmStage = 'list'">
+          资产清单校验
+        </button>
+        <span class="cf-arrow">➤</span>
+        <button type="button" class="cf-crumb" :class="{ on: confirmStage === 'generate' }" @click="confirmStage = 'generate'">
+          批量生成资产
+        </button>
+        <span class="cf-spacer" />
+        <input v-model="confirmSearch" class="cf-search" type="search" placeholder="搜索资产名称 / 描述" />
+        <Button size="sm" variant="ghost" :disabled="extracting || !selectedEpisodeId" @click="extractAssets('episode')">
+          {{ extracting ? "提取中…" : "重新提取" }}
+        </Button>
+      </div>
+
+      <div class="cf-toolbar">
+        <button type="button" class="cf-ep" :disabled="confirmEpisodeIndex <= 0" @click="prevEpisode">◀ 上一集</button>
+        <span class="cf-ep-label">{{ confirmEpisodeLabel }}</span>
+        <button
+          type="button"
+          class="cf-ep"
+          :disabled="confirmEpisodeIndex < 0 || confirmEpisodeIndex >= episodes.length - 1"
+          @click="nextEpisode"
+        >
+          下一集 ▶
+        </button>
+        <span class="cf-stat">
+          共 {{ confirmStats.total }} · 草稿 {{ confirmStats.drafts }} · 有图 {{ confirmStats.withImage }} · 已选
+          {{ confirmStats.selected }}
+        </span>
+        <span class="cf-spacer" />
+        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="selectNoImageConfirm">选中缺图</button>
+        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="selectAllConfirm">
+          {{ confirmSelected.length === confirmAssets.length ? "取消全选" : "全选" }}
+        </button>
+      </div>
+
+      <div v-if="confirmAssets.length" class="cf-list">
+        <div class="cf-row cf-row--head">
+          <span class="cf-check" />
+          <span>资产</span>
+          <span>类型</span>
+          <span>提示词</span>
+          <span>状态</span>
+          <span>引用</span>
+        </div>
+        <label
+          v-for="a in confirmAssets"
+          :key="a.id"
+          class="cf-row"
+          :class="{ on: confirmSelected.includes(a.id) }"
+        >
+          <input class="cf-check" type="checkbox" :checked="confirmSelected.includes(a.id)" @change="toggleConfirm(a.id)" />
+          <span class="cf-name">
+            {{ a.name }}
+            <em>{{ a.description || "—" }}</em>
+          </span>
+          <span class="cf-kind">{{ kindLabel(a.kind) }}</span>
+          <span class="cf-prompt">{{ a.prompt || "—" }}</span>
+          <span>
+            <Tag :tone="a.status === 2 ? 'success' : 'warning'" size="sm" dot>
+              {{ a.status === 2 ? "已定稿" : "草稿" }}
+            </Tag>
+          </span>
+          <span class="cf-bound">{{ a.bound_shot_count ?? 0 }} 镜</span>
+        </label>
+      </div>
+
+      <div v-else class="cf-empty">
+        <span>🔍</span>
+        <p>未找到结果</p>
+        <em>先点右上「重新提取」从本集剧本抽取场景/道具</em>
+      </div>
+
+      <div class="cf-foot">
+        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="batchDeleteSelected">🗑 删除勾选</button>
+        <span class="cf-spacer" />
+        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(1)">取消定稿</Button>
+        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(2)">批量定稿</Button>
+        <Button
+          v-if="confirmStage === 'list'"
+          :disabled="confirmBusy || !confirmStats.selected"
+          @click="confirmStage = 'generate'"
+        >
+          下一步，批量生成资产图
+        </Button>
+        <Button v-else :disabled="confirmBusy || !confirmStats.selected" @click="batchGenerateSelected">
+          {{ confirmBusy ? "提交中…" : `提交生成（${confirmStats.selected}）` }}
+        </Button>
+      </div>
     </div>
     <!-- ── 项目资产抽屉（角色 / 场景 / 道具） ── -->
     <Teleport to="body">
@@ -3648,4 +3895,180 @@ onUnmounted(() => {
   }
 }.gen-hint--warn {
   color: var(--warning);
+}/* ═══════════ P6：资产校验（清单核对 / 批量定稿 / 批量生成） ═══════════ */
+.cf {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: var(--panel-tint);
+  overflow: hidden;
+}
+.cf-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cf-crumb {
+  padding: 6px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-3);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cf-crumb.on {
+  color: var(--text-1);
+  border-bottom-color: var(--brand-500);
+}
+.cf-arrow {
+  color: var(--brand-500);
+  font-size: 14px;
+}
+.cf-search {
+  width: 260px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text-1);
+  font-size: 13px;
+  outline: none;
+}
+.cf-spacer {
+  flex: 1;
+}
+.cf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cf-ep {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cf-ep:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cf-ep-label {
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: var(--panel-tint-strong);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.cf-stat {
+  margin-left: 6px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.cf-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.cf-row {
+  display: grid;
+  grid-template-columns: 22px minmax(160px, 1.1fr) 56px minmax(0, 1.6fr) 84px 60px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-line);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.cf-row:last-child {
+  border-bottom: 0;
+}
+.cf-row.on {
+  background: var(--brand-soft);
+}
+.cf-row--head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #15151c;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: default;
+}
+.cf-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--brand-500);
+}
+.cf-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.cf-name em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-kind,
+.cf-bound {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cf-prompt {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-4);
+  font-size: 13px;
+}
+.cf-empty span {
+  font-size: 26px;
+  opacity: 0.7;
+}
+.cf-empty em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-5);
+}
+.cf-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }</style>
