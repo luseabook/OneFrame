@@ -1256,7 +1256,7 @@ function assetImageRunning(a: ProjectAssetDto): boolean {
           >
             <span class="shot-chip__no">{{ s.shot_no }}</span>
             <span class="shot-chip__pic">
-              <img v-if="shotThumb(s)" :src="shotThumb(s)!" alt="" />
+              <img v-if="shotThumb(s)" :src="shotThumb(s) || ''" alt="" @error="hideBrokenImage" />
               <i v-else />
             </span>
             <span class="shot-chip__state">{{ s.video_task_id ? "已投递" : s.status === 5 ? "已定稿" : "未定稿" }}</span>
@@ -1293,7 +1293,7 @@ function assetImageRunning(a: ProjectAssetDto): boolean {
           <div v-if="stageTab !== 'video'" class="mats">
             <figure v-for="m in boundAssets" :key="m.id" class="mat">
               <button type="button" class="mat__rm" title="移出本镜" @click="removeShotAsset(m.id)">✕</button>
-              <img v-if="assetImage(m)" :src="assetImage(m) || ''" :alt="m.name" />
+              <img v-if="assetImage(m)" :src="assetImage(m) || ''" :alt="m.name" @error="hideBrokenImage" />
               <i v-else />
               <figcaption>
                 {{ m.name }}
