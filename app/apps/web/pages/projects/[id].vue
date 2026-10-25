@@ -37,7 +37,7 @@ const models = ref<ModelDto[]>([]);
 const modelName = ref("wan-3.0");
 const budget = ref(1000);
 const shotCount = ref(10);
-const tab = ref<"outline" | "characters" | "storyboards" | "batch">("storyboards");
+const tab = ref<"outline" | "characters" | "storyboards" | "batch" | "timeline">("storyboards");
 const busy = ref("");
 const error = ref("");
 const info = ref("");
@@ -500,9 +500,10 @@ const viewOptions = [
   { key: "characters" as const, label: "资产", desc: "角色定妆（场景/道具需 AI 提取链路）" },
   { key: "storyboards" as const, label: "分镜", desc: "单集工作台：分镜条 / 素材区 / 生成台" },
   { key: "batch" as const, label: "导出", desc: "批量投递、分镜矩阵与整集 zip" },
+  { key: "timeline" as const, label: "时间线导出", desc: "合成预览、镜头排序与整集导出" },
 ];
 const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.label ?? "分镜");
-function setView(key: "outline" | "characters" | "storyboards" | "batch"): void {
+function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline"): void {
   tab.value = key;
   viewMenu.value = false;
 }
@@ -991,7 +992,167 @@ async function selectAssetCandidate(item: { index: number; url: string }): Promi
 function assetImageRunning(a: ProjectAssetDto): boolean {
   return assetImageBusyId.value === a.id;
 }
+// ══════════ P4-1：时间线导出（本地时间线 + 真实成片播放）══════════
+type TimelineClip = { id: string; shotId: string; shotNo: number; name: string; duration: number; taskId: string | null; url: string | null };
+
+const clips = ref<TimelineClip[]>([]);
+const playing = ref(false);
+const playhead = ref(0);
+const pxPerSec = ref(36);
+const tlFilter = ref<"all" | "finalized">("all");
+let rafId = 0;
+
+const timelineKey = computed(() => `timeline:${projectId.value}:${selectedEpisodeId.value}`);
+const totalDuration = computed(() => clips.value.reduce((sum, c) => sum + c.duration, 0));
+function fmtTime(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+const playheadLabel = computed(() => fmtTime(playhead.value));
+const totalLabel = computed(() => fmtTime(totalDuration.value));
+const trackWidth = computed(() => Math.max(320, totalDuration.value * pxPerSec.value));
+
+/** 时间线里的镜头（带出片任务）；「已定稿」筛选 = 有可用的出片结果 */
+const timelineShots = computed(() =>
+  shots.value.filter((s) => (tlFilter.value === "finalized" ? Boolean(s.video_task_id) : true)),
+);
+const activeClip = computed<TimelineClip | null>(() => {
+  let acc = 0;
+  for (const clip of clips.value) {
+    if (playhead.value < acc + clip.duration) return clip;
+    acc += clip.duration;
+  }
+  return clips.value.length ? clips.value[clips.value.length - 1] ?? null : null;
+});
+
+function saveTimeline(silent = false): void {
+  try {
+    localStorage.setItem(timelineKey.value, JSON.stringify(clips.value));
+    if (!silent) info.value = "时间线已保存（本地浏览器；服务端时间线待后续版本）";
+  } catch {
+    /* ignore quota errors */
+  }
+}
+function loadTimeline(): void {
+  try {
+    const raw = localStorage.getItem(timelineKey.value);
+    clips.value = raw ? (JSON.parse(raw) as TimelineClip[]) : [];
+  } catch {
+    clips.value = [];
+  }
+  playhead.value = 0;
+}
+
+/** 取某条结果的播放地址（后端签名 URL，1h 有效） */
+async function clipUrl(taskId: string): Promise<string | null> {
+  try {
+    const res = await api.get<{ url: string }>(`/tasks/${taskId}/results/0/download-url`);
+    return res.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function addShotClip(shot: StoryboardDto): Promise<void> {
+  const clip: TimelineClip = {
+    id: `${shot.id}-${Date.now()}`,
+    shotId: shot.id,
+    shotNo: shot.shot_no,
+    name: `分镜 ${shot.shot_no}`,
+    duration: shot.duration_s ?? 5,
+    taskId: shot.video_task_id,
+    url: null,
+  };
+  clips.value = [...clips.value, clip];
+  if (shot.video_task_id) {
+    const url = await clipUrl(shot.video_task_id);
+    const target = clips.value.find((c) => c.id === clip.id);
+    if (target) target.url = url;
+  }
+  saveTimeline(true);
+}
+
+/** 更新分镜：按当前分集重建时间线（保留有出片结果的镜头） */
+async function rebuildTimeline(): Promise<void> {
+  await run("更新分镜", async () => {
+    const list = shots.value.filter((s) => Boolean(s.video_task_id));
+    const built: TimelineClip[] = [];
+    for (const shot of list) {
+      built.push({
+        id: `${shot.id}-${Date.now()}-${built.length}`,
+        shotId: shot.id,
+        shotNo: shot.shot_no,
+        name: `分镜 ${shot.shot_no}`,
+        duration: shot.duration_s ?? 5,
+        taskId: shot.video_task_id,
+        url: shot.video_task_id ? await clipUrl(shot.video_task_id) : null,
+      });
+    }
+    clips.value = built;
+    playhead.value = 0;
+    saveTimeline(true);
+    info.value = built.length
+      ? `已按本集 ${built.length} 个已出片镜头重建时间线`
+      : "本集还没有已出片镜头：先在「分镜」里投递并等任务完成";
+  });
+}
+
+function removeClip(id: string): void {
+  clips.value = clips.value.filter((c) => c.id !== id);
+  if (playhead.value > totalDuration.value) playhead.value = totalDuration.value;
+  saveTimeline(true);
+}
+
+function moveClip(id: string, dir: -1 | 1): void {
+  const index = clips.value.findIndex((c) => c.id === id);
+  const next = index + dir;
+  if (index < 0 || next < 0 || next >= clips.value.length) return;
+  const list = [...clips.value];
+  const [item] = list.splice(index, 1);
+  if (item) list.splice(next, 0, item);
+  clips.value = list;
+  saveTimeline(true);
+}
+
+function seekTo(seconds: number): void {
+  playhead.value = Math.min(Math.max(0, seconds), totalDuration.value);
+}
+
+function togglePlay(): void {
+  if (!clips.value.length) {
+    error.value = "时间线还是空的：从左侧点选分镜加入";
+    return;
+  }
+  playing.value = !playing.value;
+  if (playing.value) {
+    const startedAt = Date.now() - playhead.value * 1000;
+    const tick = (): void => {
+      if (!playing.value) return;
+      const elapsed = (Date.now() - startedAt) / 1000;
+      if (elapsed >= totalDuration.value) {
+        playhead.value = totalDuration.value;
+        playing.value = false;
+        return;
+      }
+      playhead.value = elapsed;
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+  } else if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+}
+
+watch([selectedEpisodeId, projectId], () => {
+  loadTimeline();
+});
+watch(clips, () => saveTimeline(true), { deep: true });
+onUnmounted(() => {
+  if (rafId) cancelAnimationFrame(rafId);
+});
 </script>
+
 
 
 
@@ -1431,7 +1592,7 @@ function assetImageRunning(a: ProjectAssetDto): boolean {
     </div>
 
     <!-- ══════════ ④ 导出（投递结果 / 矩阵 / 导出） ══════════ -->
-    <section v-else class="panel panel--page">
+    <section v-else-if="tab === 'batch'" class="panel panel--page">
       <div class="panel__head">
         <div>
           <h2>导出与投递</h2>
@@ -1521,6 +1682,106 @@ function assetImageRunning(a: ProjectAssetDto): boolean {
       />
     </section>
 
+    <!-- ══════════ ⑤ 时间线导出（左素材 / 中预览 / 下时间线） ══════════ -->
+    <div v-else class="tl">
+      <aside class="tl-rail">
+        <div class="tl-rail__head">
+          <b>剧集资产</b>
+          <select v-model="tlFilter" class="mini-select">
+            <option value="all">全部</option>
+            <option value="finalized">已出片</option>
+          </select>
+        </div>
+        <div class="tl-list">
+          <button
+            v-for="s in timelineShots"
+            :key="s.id"
+            type="button"
+            class="tl-item"
+            @click="addShotClip(s)"
+          >
+            <span class="tl-item__no">{{ s.shot_no }}</span>
+            <span class="tl-item__name">{{ s.shot_desc || `分镜 ${s.shot_no}` }}</span>
+            <em :class="{ on: s.video_task_id }">{{ s.video_task_id ? '已出片' : '未出片' }}</em>
+          </button>
+          <p v-if="!timelineShots.length" class="tl-empty-sm">本集还没有分镜：先去「分镜」生成</p>
+        </div>
+      </aside>
+
+      <section class="tl-stage">
+        <div class="tl-stage__bubble">更新分镜：时间线不会自动同步，点下方「更新分镜」按本集已出片镜头重建</div>
+        <div v-if="activeClip" class="tl-player">
+          <video
+            v-if="activeClip.url"
+            :key="activeClip.id"
+            :src="activeClip.url"
+            class="tl-video"
+            muted
+            playsinline
+          />
+          <div v-else class="tl-player__ph">
+            <span>▶</span>
+            <p>{{ activeClip.name }} 暂无可用视频文件（mock 阶段结果为占位字节）</p>
+          </div>
+        </div>
+        <div v-else class="tl-player__ph tl-player__ph--empty">
+          <span>▶</span>
+          <p>请在左侧选择分镜资产加入至时间线</p>
+        </div>
+      </section>
+
+      <footer class="tl-bar">
+        <div class="tl-bar__head">
+          <Button size="sm" variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="rebuildTimeline">更新分镜</Button>
+          <button type="button" class="tl-play" @click="togglePlay">{{ playing ? "暂停" : "播放" }}</button>
+          <span class="tl-time">{{ playheadLabel }} / {{ totalLabel }}</span>
+          <span class="tl-count">{{ clips.length }} 个片段</span>
+          <label class="tl-zoom">
+            缩放
+            <input v-model.number="pxPerSec" type="range" min="16" max="120" step="4" />
+          </label>
+          <span class="tl-spacer" />
+          <Button size="sm" variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
+            {{ exporting ? "提交中…" : "导出成片" }}
+          </Button>
+          <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="link" target="_blank" rel="noreferrer">下载 zip</a>
+          <Tag v-else-if="exportJob" :tone="exportJob.status === 4 ? 'danger' : 'info'" size="sm">
+            {{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : "失败" }}
+          </Tag>
+        </div>
+
+        <div class="tl-track" @click.self="seekTo(($event.offsetX) / pxPerSec)">
+          <div class="tl-ruler">
+            <span
+              v-for="tick in Math.ceil(totalDuration / 5) + 1"
+              :key="tick"
+              class="tl-tick"
+              :style="{ left: `${(tick - 1) * 5 * pxPerSec}px` }"
+            >{{ fmtTime((tick - 1) * 5) }}</span>
+          </div>
+          <div class="tl-clips" :style="{ width: `${trackWidth}px` }">
+            <div
+              v-for="clip in clips"
+              :key="clip.id"
+              class="tl-clip"
+              :style="{ width: `${clip.duration * pxPerSec}px` }"
+              :class="{ on: activeClip?.id === clip.id }"
+            >
+              <b>{{ clip.name }}</b>
+              <em>{{ clip.duration }}s</em>
+              <span class="tl-clip__ops">
+                <button type="button" title="左移" @click.stop="moveClip(clip.id, -1)">‹</button>
+                <button type="button" title="右移" @click.stop="moveClip(clip.id, 1)">›</button>
+                <button type="button" title="移除" @click.stop="removeClip(clip.id)">✕</button>
+              </span>
+            </div>
+            <p v-if="!clips.length" class="tl-clips__empty">时间线为空：从左侧点选分镜加入</p>
+            <div class="tl-head" :style="{ left: `${playhead.value * pxPerSec}px` }" />
+          </div>
+        </div>
+        <p class="tl-note">时间线顺序保存在本浏览器（服务端时间线/多端同步待后续版本）；导出仍走「整集 zip」。</p>
+      </footer>
+    </div>
     <!-- ── 项目资产抽屉（角色 / 场景 / 道具） ── -->
     <Teleport to="body">
       <div v-if="assetDrawer" class="drawer-mask" @click.self="assetDrawer = false">
@@ -3053,4 +3314,286 @@ function assetImageRunning(a: ProjectAssetDto): boolean {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}/* ═══════════ P4-1：时间线导出 ═══════════ */
+.tl {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 200px;
+  gap: 12px;
+}
+.tl-rail {
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: var(--panel-tint);
+  overflow: auto;
+  min-height: 0;
+}
+.tl-rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-1);
+}
+.tl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tl-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.tl-item:hover {
+  border-color: var(--border-3);
+}
+.tl-item__no {
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tl-item__name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-item em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-5);
+}
+.tl-item em.on {
+  color: var(--success);
+}
+.tl-empty-sm {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-4);
+  line-height: 1.6;
+}
+.tl-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: var(--bg-sunken);
+  overflow: hidden;
+  min-height: 0;
+}
+.tl-stage__bubble {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  max-width: 380px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--brand-40);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tl-player {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.tl-video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  background: #000;
+}
+.tl-player__ph {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-4);
+  font-size: 13px;
+  text-align: center;
+}
+.tl-player__ph span {
+  font-size: 34px;
+  opacity: 0.6;
+}
+.tl-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: var(--panel-tint);
+  min-height: 0;
+  overflow: hidden;
+}
+.tl-bar__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.tl-play {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tl-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.tl-count {
+  color: var(--text-4);
+}
+.tl-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-4);
+}
+.tl-zoom input {
+  width: 120px;
+}
+.tl-spacer {
+  flex: 1;
+}
+.tl-track {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 22px 0 8px;
+}
+.tl-ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  pointer-events: none;
+}
+.tl-tick {
+  position: absolute;
+  top: 2px;
+  font-size: 10px;
+  color: var(--text-5);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(2px);
+}
+.tl-clips {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 76px;
+  padding: 0 0 0 4px;
+}
+.tl-clip {
+  position: relative;
+  min-width: 46px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: linear-gradient(160deg, #2a2140, #17141f);
+  color: var(--text-2);
+  padding: 6px 8px;
+  overflow: hidden;
+  cursor: default;
+}
+.tl-clip.on {
+  border-color: var(--brand-500);
+  box-shadow: inset 0 0 0 1px var(--brand-500);
+}
+.tl-clip b {
+  display: block;
+  font-size: 12px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-clip em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-4);
+}
+.tl-clip__ops {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+.tl-clip:hover .tl-clip__ops {
+  opacity: 1;
+}
+.tl-clip__ops button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.tl-clips__empty {
+  margin: 0;
+  padding: 22px 10px;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.tl-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--brand-500);
+  pointer-events: none;
+}
+.tl-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-5);
+}
+@media (max-width: 1180px) {
+  .tl {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 200px minmax(0, 1fr);
+  }
+  .tl-rail {
+    grid-row: 3;
+  }
 }</style>
