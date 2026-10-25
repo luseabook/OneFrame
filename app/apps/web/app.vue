@@ -8,6 +8,7 @@ const workspacePaths = [
   "/home",
   "/works",
   "/projects",
+  "/tools",
   "/assets",
   "/tasks",
   "/credits",

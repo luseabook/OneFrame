@@ -6,14 +6,15 @@ const route = useRoute();
 const router = useRouter();
 
 const mainNav = [
-  { to: "/home", label: "首页", icon: "home" },
-  { to: "/works", label: "我的作品", icon: "film" },
-  { to: "/projects", label: "全部项目", icon: "folder" },
-  { to: "/tools", label: "工具箱", icon: "wand" },
+  { key: "home", to: "/home", label: "首页", icon: "home" },
+  { key: "create", to: "/projects?create=1", label: "剧本创作", icon: "script" },
+  { key: "agent", to: "", label: "创作 Agent", icon: "wand", disabled: true },
+  { key: "projects", to: "/projects", label: "全部项目", icon: "folder" },
+  { key: "tools", to: "/tools", label: "工具箱", icon: "wand" },
 ];
 const teamNav = [
-  { to: "/assets", label: "资产库", icon: "folder" },
-  { to: "/tasks", label: "任务中心", icon: "clock" },
+  { key: "assets", to: "/assets", label: "资产库", icon: "folder" },
+  { key: "team", to: "", label: "团队管理", icon: "clock", disabled: true },
 ];
 
 const collapsed = ref(false);
@@ -26,8 +27,15 @@ const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
 const user = computed(() => auth.state.value.user);
 const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).toUpperCase());
 
-function isActive(to: string): boolean {
-  return route.path === to || route.path.startsWith(`${to}/`);
+function isActive(to: string, key?: string): boolean {
+  if (!to) return false;
+  if (key === "create") return route.path === "/projects" && String(route.query.create ?? "") === "1";
+  if (key === "projects") return route.path === "/projects" && String(route.query.create ?? "") !== "1";
+  return route.path === to || route.path.startsWith(`${to.split("?")[0]}/`);
+}
+
+function onNavClick(item: { disabled?: boolean }, event: Event): void {
+  if (item.disabled) event.preventDefault();
 }
 
 async function logout(): Promise<void> {
@@ -60,10 +68,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       <nav class="nav">
         <NuxtLink
           v-for="item in mainNav"
-          :key="item.to"
-          :to="item.to"
+          :key="item.key"
+          :to="item.disabled ? route.fullPath : item.to"
           class="item"
-          :class="{ active: isActive(item.to) }"
+          :class="{ active: isActive(item.to, item.key), disabled: item.disabled }"
+          @click="onNavClick(item, $event)"
         >
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -71,13 +80,20 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19Z" />
                 <path d="M9.5 20.5v-6h5v6" />
               </template>
-              <template v-else-if="item.icon === 'film'">
-                <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
-                <path d="M8 5v14M16 5v14M3.5 9.5h4.5M3.5 14.5h4.5M16 9.5h4.5M16 14.5h4.5" />
+              <template v-else-if="item.icon === 'script'">
+                <path d="M6 3.5h10.5A1.5 1.5 0 0 1 18 5v15.5H7.5A1.5 1.5 0 0 1 6 19Z" />
+                <path d="M9 7.5h6M9 11h6M9 14.5h3.5" />
+              </template>
+              <template v-else-if="item.icon === 'folder'">
+                <path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h4l2 2.5h6A2.5 2.5 0 0 1 20.5 9.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5Z" />
               </template>
               <template v-else-if="item.icon === 'wand'">
                 <path d="m5 19 9.5-9.5M16.5 4.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z" />
                 <path d="M12.8 6.8 5 14.6a2 2 0 0 0 0 2.8l1.6 1.6a2 2 0 0 0 2.8 0l7.8-7.8" />
+              </template>
+              <template v-else>
+                <circle cx="12" cy="12" r="8.5" />
+                <path d="M12 7.5V12l3 2" />
               </template>
             </svg>
           </span>
@@ -88,10 +104,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
         <p v-if="!collapsed" class="group-label">团队</p>
         <NuxtLink
           v-for="item in teamNav"
-          :key="item.to"
-          :to="item.to"
+          :key="item.key"
+          :to="item.disabled ? route.fullPath : item.to"
           class="item"
-          :class="{ active: isActive(item.to) }"
+          :class="{ active: isActive(item.to, item.key), disabled: item.disabled }"
+          @click="onNavClick(item, $event)"
         >
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -109,7 +126,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       </nav>
 
       <div class="foot">
-        <NuxtLink to="/pricing" class="item">
+        <span class="item disabled" title="影视版（申请内测）">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
@@ -118,7 +135,25 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           </span>
           <span v-if="!collapsed" class="foot-label">影视版</span>
           <span v-if="!collapsed" class="tag-beta">申请内测</span>
-        </NuxtLink>
+        </span>
+        <span class="item disabled">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+              <path d="m7 9.5 2.5 2.5L7 14.5M12 14.5h4" />
+            </svg>
+          </span>
+          <span v-if="!collapsed">MCP &amp; CLI</span>
+        </span>
+        <span class="item disabled">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 4v2.5M12 17.5V20M4.5 12H7M17 12h2.5M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8M8.8 15.2 7 17" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </span>
+          <span v-if="!collapsed">活动</span>
+        </span>
         <NuxtLink to="/report" class="item assist">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -142,7 +177,19 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       <header class="topbar">
         <div class="crumb"><slot name="crumb" /></div>
         <div class="right">
-
+            <span class="mini-pill disabled" title="创作手册即将上线">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 4.5h9.5A1.5 1.5 0 0 1 16 6v14H6.5A1.5 1.5 0 0 1 5 18.5Z" />
+                <path d="M9 8h4M9 11.5h4" />
+              </svg>
+              创作手册
+            </span>
+            <span class="mini-pill disabled" title="商务合作即将上线">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20s-7-4.3-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.7-7 9-7 9Z" />
+              </svg>
+              商务合作
+            </span>
             <NuxtLink to="/tasks" class="icon-btn" title="任务中心">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
@@ -162,7 +209,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <circle cx="9.5" cy="19" r="1.4" />
                 <circle cx="16.5" cy="19" r="1.4" />
               </svg>
-              <b>积分充值</b>
+              <b>会员订阅</b>
               <i class="sep" />
               <span>视频低至 8 积分/条</span>
             </NuxtLink>
@@ -184,6 +231,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 </button>
                 <div v-if="menuOpen" class="menu">
                   <p class="menu-name">{{ user.nickname }}</p>
+                  <NuxtLink to="/works" class="menu-item" @click="menuOpen = false">我的作品</NuxtLink>
+                  <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">任务中心</NuxtLink>
                   <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">个人设置</NuxtLink>
                   <button class="menu-item" @click="logout">退出登录</button>
                 </div>
@@ -294,6 +343,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   background: var(--bg-hover);
   color: var(--text-1);
 }
+.item.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.item.disabled:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+.item.disabled:hover .ico {
+  color: var(--text-3);
+}
 .item.active {
   background: linear-gradient(90deg, #ffffff1a, #ffffff08);
   color: var(--text-1);
@@ -393,6 +453,27 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   border: 1px solid var(--border-2);
   color: var(--text-2);
   background: transparent;
+}
+.mini-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-surface);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mini-pill svg {
+  width: 15px;
+  height: 15px;
+}
+.mini-pill.disabled {
+  opacity: 0.75;
+  cursor: default;
 }
 .icon-btn svg {
   width: 17px;

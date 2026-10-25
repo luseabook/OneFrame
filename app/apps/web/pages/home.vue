@@ -6,23 +6,33 @@ useHead({ title: "首页 · 一帧" });
 
 const tools = [
   { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true, modal: true },
-  { label: "文生视频", desc: "主流高质量模型，轻松出片", to: "/create/text-to-video", icon: "t2v", enabled: true, modal: false },
-  { label: "图生视频", desc: "一键让静态图动出电影感", to: "/create/image-to-video", icon: "i2v", enabled: true, modal: false },
   { label: "剧本广场", desc: "海量剧本灵感与模板", to: null, icon: "plaza", enabled: false, modal: false, tag: "即将上线" },
-  { label: "视频对口型", desc: "唇形贴合超自然", to: null, icon: "lips", enabled: false, modal: false, tag: "即将上线" },
-  { label: "灵感成片", desc: "Agent 智能规划完整短片", to: null, icon: "spark", enabled: false, modal: false, tag: "敬请期待" },
-  { label: "视频超清", desc: "重建高清细节，工业级画质", to: null, icon: "hd", enabled: false, modal: false, tag: "敬请期待" },
+  { label: "视频转绘", desc: "风格化重绘，一支视频多种画风", to: null, icon: "spark", enabled: false, modal: false, tag: "一周会员" },
+  { label: "视频转译", desc: "多语种视频翻译与口型同步", to: null, icon: "lips", enabled: false, modal: false, tag: "即将上线" },
+  { label: "视频拉片", desc: "逐帧拆解，学习爆款镜头语言", to: null, icon: "t2v", enabled: false, modal: false },
+  { label: "音色修改", desc: "一句话克隆音色，重塑角色声线", to: null, icon: "i2v", enabled: false, modal: false },
+  { label: "错字重读", desc: "智能识别台词错字并重新配音", to: null, icon: "hd", enabled: false, modal: false },
 ];
 
 // 新建项目弹窗（参照产品：短剧工作流 / 剧本创作 → 新建项目）
 const showCreate = ref(false);
 const router = useRouter();
+const toast = useToast();
 function openCreate(): void {
   showCreate.value = true;
+}
+function comingSoon(name: string): void {
+  toast.info(`${name}即将上线，敬请期待`);
 }
 function onProjectCreated(project: { id: string }): void {
   showCreate.value = false;
   void router.push(`/projects/${project.id}`);
+}
+
+function onToolClick(tool: { enabled: boolean; modal: boolean; to: string | null }): void {
+  if (!tool.enabled) return;
+  if (tool.modal) openCreate();
+  else if (tool.to) void router.push(tool.to);
 }
 
 const banners = [
@@ -81,7 +91,7 @@ async function dismissOnboarding(): Promise<void> {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
       </button>
-      <NuxtLink to="/tools" class="canvas-card">
+      <button type="button" class="canvas-card" @click="comingSoon('无限画布')">
         <div class="flow-icon flat" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 4v16M16 4v16M4 8h16M4 16h16" />
@@ -89,24 +99,22 @@ async function dismissOnboarding(): Promise<void> {
           </svg>
         </div>
         <div class="flow-text">
-          <h2>工具箱</h2>
-          <p>文生视频 / 图生视频，一键创作</p>
+          <h2>无限画布</h2>
+          <p>创建画布，连接节点定制工作流</p>
         </div>
         <span class="plus" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
-      </NuxtLink>
+      </button>
     </section>
 
     <section class="tool-row">
       <div v-for="t in tools" :key="t.label" class="tool-cell">
-        <component
-          :is="t.modal ? 'button' : t.enabled ? 'NuxtLink' : 'div'"
-          :type="t.modal ? 'button' : undefined"
-          :to="t.modal ? undefined : (t.to ?? undefined)"
+        <button
+          type="button"
           class="tool-card"
           :class="{ disabled: !t.enabled }"
-          @click="t.modal ? openCreate() : undefined"
+          @click="onToolClick(t)"
         >
           <span v-if="t.tag" class="corner-tag" :data-kind="t.tag">{{ t.tag }}</span>
           <span class="tool-icon" aria-hidden="true">
@@ -142,7 +150,7 @@ async function dismissOnboarding(): Promise<void> {
               </template>
             </svg>
           </span>
-        </component>
+        </button>
         <p class="tool-label" :class="{ dim: !t.enabled }">{{ t.label }}</p>
       </div>
     </section>
@@ -553,6 +561,7 @@ async function dismissOnboarding(): Promise<void> {
 
 /* 卡片作为可点击元素（button）时的样式复位 */
 button.flow-card,
+button.canvas-card,
 button.tool-card {
   width: 100%;
   text-align: left;

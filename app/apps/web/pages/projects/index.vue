@@ -7,6 +7,7 @@ useHead({ title: "项目 · 一帧" });
 
 const api = useApi();
 const router = useRouter();
+const route = useRoute();
 
 const list = ref<ProjectDto[]>([]);
 const total = ref(0);
@@ -49,7 +50,14 @@ function onCreated(project: ProjectDto): void {
   void router.push(`/projects/${project.id}`);
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  // 侧栏「剧本创作」/首页入口：/projects?create=1 直接打开新建项目弹窗
+  if (String(route.query.create ?? "") === "1") {
+    showCreate.value = true;
+    void router.replace("/projects");
+  }
+});
 </script>
 
 <template>

@@ -68,7 +68,11 @@ export const useAuth = () => {
     ready.value = true;
   }
 
-  async function refresh(): Promise<boolean> {
+  // refresh 单飞：同一页面的 bootstrap 与路由中间件会并发触发 refresh；
+  // refresh token 是单次消费（服务端轮换），并发调用会有一次拿到旧 token 失败，
+  // 导致「刚登录却被重定向回登录页」。这里共享同一个在途 Promise。
+  let refreshPromise: Promise<boolean> | null = null;
+  async function doRefresh(): Promise<boolean> {
     try {
       const data = await call<{ access_token: string; user: AuthUser; space_id: string }>("/auth/refresh", {
         method: "POST",
@@ -85,6 +89,14 @@ export const useAuth = () => {
     } catch {
       return false;
     }
+  }
+  function refresh(): Promise<boolean> {
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    return refreshPromise;
   }
 
   async function me(): Promise<void> {
