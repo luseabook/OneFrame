@@ -2208,7 +2208,7 @@ function kindLabel(kind: string): string {
               </span>
             </div>
             <p v-if="!clips.length" class="tl-clips__empty">时间线为空：从左侧点选分镜加入</p>
-            <div class="tl-head" :style="{ left: `${playhead.value * pxPerSec}px` }" />
+            <div class="tl-head" :style="{ left: `${playhead * pxPerSec}px` }" />
           </div>
         </div>
         <p class="tl-note">时间线按分集保存在服务端（本浏览器有本地缓存兜底）；「合成导出成片」由服务端 ffmpeg 按时间线渲染 mp4 并叠加「AI 生成」水印。</p>

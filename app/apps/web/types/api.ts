@@ -8,7 +8,11 @@ export interface Envelope<T> {
 export interface AuthUser {
   id: string;
   nickname: string;
+  /** 服务端返回的原始字段名为 avatar_uri（见 /v1/me）；前端统一映射到 avatar */
+  avatar_uri?: string | null;
   avatar: string | null;
+  /** 首次登录/注册接口可能不回 avatar，故允许缺省（由 /me 补齐） */
+  onboarded?: boolean;
 }
 
 export interface Credits {

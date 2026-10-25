@@ -18,6 +18,12 @@ x-app-env: &app-env
   STORAGE_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-minioadmin}
   STORAGE_S3_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-minioadmin}
   STORAGE_S3_FORCE_PATH_STYLE: "true"
+  # LLM 步骤（大纲/角色/剧本/分镜）：real 走 DeepSeek，mock 为确定性假文案。
+  # 显式透传而非隐式默认：NODE_ENV=production 下若设 LLM_MODE=real 而缺 DEEPSEEK_API_KEY，
+  # api 启动守卫会直接 fail fast（apps/api/src/config/env.ts collectLlmProblems）。
+  LLM_MODE: ${LLM_MODE:-mock}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
 
 services:
   postgres:
@@ -116,7 +122,10 @@ services:
       <<: *app-env
       AI_LABEL_ENABLED: ${AI_LABEL_ENABLED:-true}
       AI_LABEL_TEXT: ${AI_LABEL_TEXT:-AI生成}
-      ADAPTER_MODE: ${ADAPTER_MODE:-mock}
+      # 不设默认值：worker 启动守卫要求 ADAPTER_MODE=real（禁止 mock 生成），
+      # 给它一个 mock 默认值只会让 worker 以"必须为 real"的报错启动失败，误导排查。
+      # 部署时必须在 .env 里显式设置 ADAPTER_MODE=real 及至少一种真实供应商凭据。
+      ADAPTER_MODE: ${ADAPTER_MODE:-}
       HTTP_VIDEO_BASE_URL: ${HTTP_VIDEO_BASE_URL:-}
       HTTP_VIDEO_API_KEY: ${HTTP_VIDEO_API_KEY:-}
     depends_on:

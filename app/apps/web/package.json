@@ -7,7 +7,9 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "postinstall": "nuxt prepare",
-    "test": "echo 'web e2e lands in P2' && exit 0"
+    "lint": "eslint .",
+    "typecheck": "nuxt prepare && vue-tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "echo 'NOTE: web 无单测（e2e 走 _acceptance/*.cjs 真实浏览器）；本任务恒真，勿计入通过率' && exit 0"
   },
   "dependencies": {
     "nuxt": "^3.15.0",
@@ -18,6 +20,7 @@
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
-    "@types/three": "^0.186.0"
+    "@types/three": "^0.186.0",
+    "vue-tsc": "^2.2.12"
   }
 }

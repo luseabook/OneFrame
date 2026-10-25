@@ -44,12 +44,93 @@ let grid: THREE.GridHelper | null = null;
 let actorGroup: THREE.Group | null = null;
 let shotFrame: THREE.LineSegments | null = null;
 let labels: THREE.Sprite[] = [];
+const actorsWithTexture: THREE.Mesh[] = [];
 let raf = 0;
 const orbit = { theta: Math.PI * 0.15, phi: Math.PI * 0.42, radius: 9, dragging: false, lastX: 0, lastY: 0 };
 const snapStep = 0.5;
 const STORAGE_KEY = () => `director3d:${props.shotId || "default"}`;
 
-const positions = ref<Array<{ id: string; name: string; x: number; z: number; image?: string | null }>>([]);
+type Actor = { id: string; name: string; x: number; z: number; rot: number; pose: PoseKey; image?: string | null };
+type Cam = { id: string; name: string; pos: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; fov: number };
+const POSE_KEYS = ["stand", "walk", "sit", "jump"] as const;
+type PoseKey = (typeof POSE_KEYS)[number];
+const POSE_META: Record<PoseKey, { label: string; scaleY: number; lift: number; tilt: number }> = {
+  stand: { label: "站立", scaleY: 1, lift: 0.75, tilt: 0 },
+  walk: { label: "行走", scaleY: 1, lift: 0.78, tilt: 0.18 },
+  sit: { label: "坐姿", scaleY: 0.62, lift: 0.42, tilt: 0.08 },
+  jump: { label: "跳跃", scaleY: 1.02, lift: 1.12, tilt: -0.12 },
+};
+
+const positions = ref<Actor[]>([]);
+const cameras = ref<Cam[]>([
+  { id: "cam-1", name: "机位1", pos: { x: 2.4, y: 2.2, z: 3.2 }, target: { x: 0, y: 1, z: 0 }, fov: 50 },
+]);
+const activeCamIndex = ref(0);
+const selectedActorId = ref<string | null>(null);
+const textureReady = ref<Record<string, boolean>>({});
+const dragState = { id: null as string | null, plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0) };
+const camSelect = computed({
+  get: () => cameras.value[activeCamIndex.value]?.id ?? "",
+  set: (id: string) => {
+    const idx = cameras.value.findIndex((c) => c.id === id);
+    if (idx >= 0) switchCamera(idx);
+  },
+});
+
+/** 把编辑缓冲写回当前机位，保证列表/机位框同步 */
+function syncActiveCam(): void {
+  const cam = cameras.value[activeCamIndex.value];
+  if (!cam) return;
+  cam.pos = { ...camPos };
+  cam.target = { ...camTarget };
+  cam.fov = fov.value;
+}
+function switchCamera(index: number): void {
+  const cam = cameras.value[index];
+  if (!cam) return;
+  activeCamIndex.value = index;
+  Object.assign(camPos, cam.pos);
+  Object.assign(camTarget, cam.target);
+  fov.value = cam.fov;
+  saveState();
+  snapMsg.value = `已切换到 ${cam.name}`;
+  setTimeout(() => (snapMsg.value = ""), 1500);
+}
+function addCamera(): void {
+  syncActiveCam();
+  const idx = cameras.value.length + 1;
+  cameras.value = [
+    ...cameras.value,
+    {
+      id: `cam-${Date.now()}`,
+      name: `机位${idx}`,
+      pos: { x: -2.4, y: 2.0, z: 3.0 },
+      target: { x: 0, y: 1, z: 0 },
+      fov: 50,
+    },
+  ];
+  switchCamera(cameras.value.length - 1);
+}
+function removeCamera(index: number): void {
+  if (cameras.value.length <= 1) {
+    snapMsg.value = "至少保留一个机位";
+    setTimeout(() => (snapMsg.value = ""), 1500);
+    return;
+  }
+  const list = cameras.value.filter((_, i) => i !== index);
+  cameras.value = list;
+  switchCamera(Math.max(0, Math.min(index, list.length - 1)));
+}
+/** 把当前编辑缓冲另存为新机位 */
+function duplicateCamera(): void {
+  syncActiveCam();
+  const cur = cameras.value[activeCamIndex.value]!;
+  cameras.value = [
+    ...cameras.value,
+    { id: `cam-${Date.now()}`, name: `机位${cameras.value.length + 1}`, pos: { ...cur.pos }, target: { ...cur.target }, fov: cur.fov },
+  ];
+  switchCamera(cameras.value.length - 1);
+}
 
 function loadState(): void {
   try {
@@ -60,7 +141,24 @@ function loadState(): void {
       Object.assign(camTarget, (s.camTarget as typeof camTarget) ?? camTarget);
       if (typeof s.fov === "number") fov.value = s.fov;
       if (typeof s.groundOpacity === "number") groundOpacity.value = s.groundOpacity;
-      if (Array.isArray(s.positions)) positions.value = s.positions as typeof positions.value;
+      if (Array.isArray(s.cameras) && s.cameras.length) {
+        cameras.value = (s.cameras as Cam[]).map((c, i) => ({
+          ...c,
+          name: c.name || `机位${i + 1}`,
+        }));
+        activeCamIndex.value = Math.min(Number(s.activeCamIndex ?? 0) || 0, cameras.value.length - 1);
+      }
+      if (Array.isArray(s.positions)) {
+        positions.value = (s.positions as Array<Partial<Actor>>).map((p, i) => ({
+          id: p.id ?? `actor-${i}`,
+          name: p.name ?? `角色${i + 1}`,
+          x: Number(p.x ?? 0),
+          z: Number(p.z ?? 0),
+          rot: Number(p.rot ?? 0),
+          pose: (POSE_KEYS as readonly string[]).includes(String(p.pose)) ? (p.pose as PoseKey) : "stand",
+          image: p.image ?? null,
+        }));
+      }
     }
   } catch {
     /* ignore */
@@ -71,11 +169,21 @@ function loadState(): void {
       name: a.name,
       x: Number(((i - (props.actors.length - 1) / 2) * 1.6).toFixed(2)),
       z: 0,
+      rot: 0,
+      pose: "stand" as PoseKey,
       image: a.image ?? null,
     }));
   }
+  // 编辑缓冲取当前机位
+  const cam = cameras.value[activeCamIndex.value];
+  if (cam) {
+    Object.assign(camPos, cam.pos);
+    Object.assign(camTarget, cam.target);
+    fov.value = cam.fov;
+  }
 }
 function saveState(): void {
+  syncActiveCam();
   try {
     localStorage.setItem(
       STORAGE_KEY(),
@@ -85,6 +193,8 @@ function saveState(): void {
         fov: fov.value,
         groundOpacity: groundOpacity.value,
         positions: positions.value,
+        cameras: cameras.value,
+        activeCamIndex: activeCamIndex.value,
       }),
     );
   } catch {
@@ -111,6 +221,7 @@ function makeLabel(text: string): THREE.Sprite {
   return sprite;
 }
 
+/** 角色占位体 + 定妆图贴图（可选）+ 名称标签 */
 function rebuildActors(): void {
   if (!scene) return;
   if (actorGroup) {
@@ -118,7 +229,9 @@ function rebuildActors(): void {
     actorGroup.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose();
-        (obj.material as THREE.Material).dispose();
+        const mat = obj.material as THREE.Material & { map?: THREE.Texture | null };
+        mat.map?.dispose();
+        mat.dispose();
       }
       if (obj instanceof THREE.Sprite) {
         obj.material.map?.dispose();
@@ -128,24 +241,69 @@ function rebuildActors(): void {
   }
   actorGroup = new THREE.Group();
   labels = [];
+  actorsWithTexture.length = 0;
+  const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin("anonymous");
+
   for (const pos of positions.value) {
+    const pose = POSE_META[pos.pose] ?? POSE_META.stand;
+    const selected = selectedActorId.value === pos.id;
+
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.28, 0.9, 6, 12),
-      new THREE.MeshStandardMaterial({ color: 0x9b46ff, roughness: 0.55, metalness: 0.15 }),
+      new THREE.MeshStandardMaterial({
+        color: selected ? 0xcf9fff : 0x9b46ff,
+        roughness: 0.55,
+        metalness: 0.15,
+        transparent: true,
+        opacity: pos.image ? 0.25 : 1,
+      }),
     );
-    body.position.set(pos.x, 0.75, pos.z);
-    body.name = pos.id;
+    body.position.set(pos.x, pose.lift, pos.z);
+    body.scale.set(1, pose.scaleY, 1);
+    body.rotation.z = pose.tilt;
+    body.rotation.y = (pos.rot * Math.PI) / 180;
+    body.name = `actor:${pos.id}`;
+    body.userData = { actorId: pos.id, kind: "body" };
     actorGroup.add(body);
 
     const base = new THREE.Mesh(
       new THREE.CylinderGeometry(0.42, 0.42, 0.04, 24),
-      new THREE.MeshBasicMaterial({ color: 0x9b46ff, transparent: true, opacity: 0.28 }),
+      new THREE.MeshBasicMaterial({ color: selected ? 0xcf9fff : 0x9b46ff, transparent: true, opacity: 0.28 }),
     );
     base.position.set(pos.x, 0.02, pos.z);
     actorGroup.add(base);
 
+    // 定妆图贴图（billboard 平面，加载失败则忽略，保留胶囊占位）
+    if (pos.image) {
+      const planeMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.96, depthWrite: false });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 1.5), planeMat);
+      plane.position.set(pos.x, 0.8, pos.z);
+      plane.userData = { actorId: pos.id, kind: "texture" };
+      if (textureReady.value[pos.id]) {
+        // 已缓存过：直接从 userData 复用
+        const cached = textureReady.value[`${pos.id}:tex`];
+        void cached;
+      }
+      loader.load(
+        pos.image,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          planeMat.map = tex;
+          planeMat.needsUpdate = true;
+          textureReady.value = { ...textureReady.value, [pos.id]: true };
+        },
+        undefined,
+        () => {
+          textureReady.value = { ...textureReady.value, [pos.id]: false };
+        },
+      );
+      actorGroup.add(plane);
+      actorsWithTexture.push(plane);
+    }
+
     const label = makeLabel(pos.name);
-    label.position.set(pos.x, 1.65, pos.z);
+    label.position.set(pos.x, 1.9, pos.z);
     label.visible = showLabels.value;
     actorGroup.add(label);
     labels.push(label);
@@ -217,15 +375,75 @@ function resize(): void {
   shotCam.updateProjectionMatrix();
 }
 
+function pointerToNdc(e: PointerEvent): THREE.Vector2 {
+  const el = renderer!.domElement;
+  const rect = el.getBoundingClientRect();
+  return new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+}
+
+/** 命中角色（胶囊/贴图平面）→ 返回 actorId */
+function pickActor(e: PointerEvent): string | null {
+  if (!actorGroup || !activeCam) return null;
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(pointerToNdc(e), activeCam);
+  const hits = ray.intersectObjects(actorGroup.children, false);
+  for (const hit of hits) {
+    const id = (hit.object.userData as { actorId?: string }).actorId;
+    if (id) return id;
+  }
+  return null;
+}
+
+/** 把屏幕点投到地面 y=0 平面，返回网格吸附后的坐标 */
+function groundPoint(e: PointerEvent): { x: number; z: number } | null {
+  if (!activeCam) return null;
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(pointerToNdc(e), activeCam);
+  const hit = new THREE.Vector3();
+  if (!ray.ray.intersectPlane(dragState.plane, hit)) return null;
+  return { x: snapValue(hit.x), z: snapValue(hit.z) };
+}
+
+/** 拖拽中同步该角色所有对象的坐标（不重建场景） */
+function moveActorObjects(actorId: string, x: number, z: number): void {
+  if (!actorGroup) return;
+  for (const obj of actorGroup.children) {
+    if ((obj.userData as { actorId?: string }).actorId === actorId) {
+      obj.position.x = x;
+      obj.position.z = z;
+    }
+  }
+}
+
 function bindPointer(): void {
   const el = renderer?.domElement;
   if (!el) return;
   el.addEventListener("pointerdown", (e) => {
+    const hitId = pickActor(e);
+    if (hitId) {
+      // 命中角色 → 选中并进入拖拽（不再轨道旋转）
+      selectedActorId.value = hitId;
+      dragState.id = hitId;
+      rebuildActors();
+      el.style.cursor = "grabbing";
+      return;
+    }
+    selectedActorId.value = null;
     orbit.dragging = true;
     orbit.lastX = e.clientX;
     orbit.lastY = e.clientY;
   });
   el.addEventListener("pointermove", (e) => {
+    if (dragState.id) {
+      const pt = groundPoint(e);
+      const target = positions.value.find((p) => p.id === dragState.id);
+      if (pt && target) {
+        target.x = pt.x;
+        target.z = pt.z;
+        moveActorObjects(target.id, pt.x, pt.z);
+      }
+      return;
+    }
     if (!orbit.dragging) return;
     const dx = e.clientX - orbit.lastX;
     const dy = e.clientY - orbit.lastY;
@@ -236,8 +454,21 @@ function bindPointer(): void {
       orbit.phi = Math.min(Math.PI * 0.52, Math.max(Math.PI * 0.08, orbit.phi - dy * 0.006));
     }
   });
-  el.addEventListener("pointerup", () => (orbit.dragging = false));
-  el.addEventListener("pointerleave", () => (orbit.dragging = false));
+  el.addEventListener("pointerup", () => {
+    if (dragState.id) {
+      dragState.id = null;
+      saveState();
+      snapMsg.value = "站位已更新（已吸附网格）";
+      setTimeout(() => (snapMsg.value = ""), 1500);
+    }
+    orbit.dragging = false;
+    el.style.cursor = "grab";
+  });
+  el.addEventListener("pointerleave", () => {
+    dragState.id = null;
+    orbit.dragging = false;
+  });
+  el.style.cursor = "grab";
   el.addEventListener(
     "wheel",
     (e) => {
@@ -300,8 +531,28 @@ function animate(): void {
     scene.rotation.x = (sceneRot.x * Math.PI) / 180;
   }
   for (const label of labels) label.visible = showLabels.value;
+  // 定妆图平面始终朝向当前相机（billboard）
+  if (activeCam) {
+    for (const plane of actorsWithTexture) plane.lookAt(activeCam.position);
+  }
   renderer.render(scene, activeCam!);
   drawGizmo();
+  exposeDebugState();
+}
+
+/** 测试/排查钩子：暴露只读快照（不影响渲染） */
+function exposeDebugState(): void {
+  const w = window as unknown as { __director3d?: () => unknown };
+  if (typeof w.__director3d !== "function") {
+    w.__director3d = () => ({
+      positions: positions.value.map((p) => ({ id: p.id, name: p.name, x: p.x, z: p.z, rot: p.rot, pose: p.pose, textured: Boolean(textureReady.value[p.id]) })),
+      cameras: cameras.value.map((c) => ({ id: c.id, name: c.name, fov: c.fov })),
+      activeCamIndex: activeCamIndex.value,
+      viewMode: viewMode.value,
+      selectedActorId: selectedActorId.value,
+      canvas: renderer ? [renderer.domElement.width, renderer.domElement.height] : null,
+    });
+  }
 }
 
 // ── 交互 ──
@@ -351,7 +602,14 @@ function addActorSlot(): void {
   const idx = positions.value.length;
   positions.value = [
     ...positions.value,
-    { id: `actor-${Date.now()}`, name: `角色${idx + 1}`, x: snapValue((idx - 1) * 1.2), z: snapValue(-0.6) },
+    {
+      id: `actor-${Date.now()}`,
+      name: `角色${idx + 1}`,
+      x: snapValue((idx - 1) * 1.2),
+      z: snapValue(-0.6),
+      rot: 0,
+      pose: "stand",
+    },
   ];
   rebuildActors();
   saveState();

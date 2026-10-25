@@ -917,14 +917,22 @@
 | `/task`（任务中心） | ✅ 路由存在（`/web/v1/task` 系列接口） | ❌ 无截图 | `pages/tasks.vue` |
 | `/user-center`（个人中心） | ✅ | ❌ 无截图 | `pages/settings.vue`（近似） |
 | `/team`、`/team/dashboard`、`/team/knowledge-base` | ✅ | ❌ 无截图 | 无（侧栏「团队管理」置灰） |
-| `/asset`、`/film/assets`（资产库） | ✅ | ❌ 无截图 | `pages/assets.vue` |
-| `/workflow-canvas` | ✅ | ❌ 无截图 | 无 |
-| `/reelflow/edit/:projectId`（剪辑器） | ✅ | ❌ 无截图 | `pages/projects/[id].vue`（自定义流水线，非剪辑器） |
-| `/film`、`/film-creation`、`/film/projects/:id/tasks` | ✅ | ❌ 无截图 | 无 |
-| `/script-manage`、`/script-view/:id` | ✅ | ❌ 无截图 | 无 |
+| `/asset`（资产库） | ✅ | ✅ **已有截图**（2026-10-26 更正：`docs/03-frontend/evidence/reelflow/08-asset-workbench.png` ≡ `_acceptance/ref/page-assets.png`，字节级同源） | `pages/assets.vue` |
+| `/film/assets` | ✅ | ❌ 无截图（影视版资产，与 `/asset` 不同页） | 无 |
+| `/workflow-canvas` | ✅ | ❌ 无截图（`/canvas` 有空态截图，`/workflow-canvas` 未单独取证） | 无 |
+| `/reelflow/edit/:projectId`（剪辑器） | ✅ | ✅ **已有截图**（2026-10-26 更正：`evidence/reelflow/02-timeline-editor.png` ≡ `_acceptance/ref/proj-02-editor.png`，字节级同源） | `pages/projects/[id].vue`（时间线已内嵌） |
+| `/film`、`/film-creation`、`/film/projects/:id/tasks` | ✅ | ⚠️ 仅 `/film-creation` 有开通弹窗（`fc.png`）；任务表格本体 ❌ 无截图 | 无 |
+| `/script-manage`、`/script-view/:id` | ✅ | ❌ 无有效截图（`_acceptance/ref/page-script-manage.png` 与 `modal-3s.png` **字节完全相同且是纯 `rgb(11,11,16)` 空屏**，须作废） | 无 |
 | `/novel-market/:id`、`/novel-to-script-agent/*` | ✅ | ❌ 无截图 | 无 |
 | `/creator-center/*`、`/ad-drama/*`、`/video-redraw/*` | ✅ | ❌ 无截图 | 无 |
+| `/mcp`（MCP 服务页） | ✅ | ⚠️ **有截图但未入册**（`rea-reelmate/mcp.png`，1664×955；且 `/mcp` **不在 `routes.txt`**） | 无 |
 | `/pricing` 的 FAQ / 页脚 | — | ❌ 未滚到底 | 无 |
+
+> **2026-10-26 证据复核更正**（像素/哈希实测，非目视）：
+> 1. 上表两条「❌ 无截图」已过期（`/asset`、`/reelflow/edit` 均有字节级同源截图）；
+> 2. §12 中「`fc.png` = `cli.png`」**不成立**：两者不同字节（`3185BDEC…` vs `E391B193…`，87653B vs 86735B），`fc.png` 是影视版开通弹窗、`cli.png` 是 CLI 页；
+> 3. **导出面板实际未取证**：`_acceptance/ref/proj-03-export-panel.png` 与基线仅差 0.122%（只差顶栏一条带），不能作为「时间线导出面板」证据；
+> 4. 证据不止 `rea-reelmate/` 一处：`_acceptance/ref/`（31 张 PNG）与 `docs/03-frontend/evidence/`（49 张 PNG）是**两条未登记的第二证据链**，见 §12 新增行。
 
 > 这些页面若本期要复刻，**必须重新抓图**（登录后逐个页面 `capture_web_screenshot`），不要按"全局设计语言"硬猜具体布局。可用的只有：**壳层（侧栏+顶栏）可直接复用 §1**；**内容区一律按"页标题 24px/700 + 24px 内距 + 卡片 C 范式"起手**，这是从 `tools.png` 推出的最保守基线。
 
@@ -1014,13 +1022,24 @@
 | `login-modal-dom.txt` (540KB) | **一手设计系统**：CSS 变量、组件 CSS、DOM class、boot 脚本 | 240/64/8px、#0A0A0E、#7769FF、圆角/间距阶、字体、本地存储键 |
 | `canvas.png` / `node.png` (1280×720) | 画布空态 | 点阵背景 / 顶栏胶囊 / 节点 chips 文案 |
 | `x4.png` (1664×955) | CLI/Agent 工具页 | 全部文案、三卡结构 |
-| `fc.png` = `cli.png` (1280×720) | 影视版开通弹窗 | 开通文案 + 二维码 |
+| `fc.png` (1280×720) | **影视版开通弹窗**（2026-10-26 更正：与 `cli.png` **不是**同一张图，两者字节不同） | 开通文案 + 二维码 |
+| `cli.png` (1280×720) | CLI 页（与 `x4.png` 同页不同分辨率） | 三卡结构 |
+| `mcp.png` (1664×955) | **`/mcp` 页**（2026-10-26 补入；`/mcp` **不在 `routes.txt`**，按路由表做全站覆盖会漏此页） | 页面结构 |
 | `x5.png` (1280×720) | 404 | 「页面未找到」胶囊 |
 | `x3.png` (1280×720) | 空白/加载态 | 纯 #0B0B10 |
 | `shot-*.json` | 截图元数据（viewport / target.url） | 1424×805、各页 URL |
 | `routes.txt`（927 条） | 路由/端点清单 | `/create/*` 20+ 工具、`/reelflow/list`、`/canvas`、`/cli` |
 | `model-catalog-summary.json` | 46 个模型目录 | `天幕2.0` / `天幕2.1` / `天幕写实版` 确认存在 |
 | `REELMATE-逆向分析报告.md` | 业务/接口/计费背景 | §12.2 计价、§12.3 任务请求体（含 `add_bgm`/`mouth_drive`）、§12.7 剧目类型/画幅 |
+
+**2026-10-26 补登的两条第二证据链**（此前未入册，做全站复刻时同样有效，勿重复抓取）：
+
+| 目录 | 内容 | 覆盖 |
+|---|---|---|
+| `_acceptance/ref/`（31 张 PNG + 交互态） | 早期 ref-sweep 采集：`proj-01-list` / `proj-02-editor` / `proj-03-export-panel` / `proj-04-series` / `page-list` / `page-assets` / `page-asset-confirm` / `page-asset-extract` / `page-script-manage` / `step-00~04` / `w-01~05` / `confirm-base` / `confirm-batch-gen` / `asset-*` / `modal-*` / `probe-*` | 项目列表、时间线编辑器、资产库、资产校验、资产抽取、分镜步骤流 |
+| `docs/03-frontend/evidence/`（49 张 PNG） | `reelflow/`（11 张：01-project-list ~ 11-*）＝ `_acceptance/ref/` 的字节级同源副本；`reelflow-impl/`（我方实现截图） | 上述同一批参照页 + 我方实现对照 |
+
+> ⚠️ 使用前必须验真：`_acceptance/ref/page-script-manage.png` 与 `_acceptance/ref/modal-3s.png` **字节完全相同**，且是纯 `rgb(11,11,16)` 空屏（5247B）——它们不是有效证据，应作废重抓。
 
 ---
 

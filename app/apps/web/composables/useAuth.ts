@@ -63,6 +63,7 @@ export const useAuth = () => {
       user: data.user,
       spaceId: data.space_id,
       credits: null,
+      onboarded: state.value.onboarded,
     };
     await me();
     ready.value = true;
@@ -103,7 +104,8 @@ export const useAuth = () => {
     const data = await call<MeResponse>("/me");
     state.value = {
       ...state.value,
-      user: data.user,
+      // /me 返回的服务端字段是 avatar_uri，前端类型用 avatar（两处都保留，避免各处再映射）
+      user: { ...data.user, avatar: data.user.avatar_uri },
       spaceId: data.space.id,
       credits: data.credits,
       onboarded: data.onboarded ?? true,

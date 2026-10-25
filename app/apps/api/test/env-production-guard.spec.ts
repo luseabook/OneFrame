@@ -71,6 +71,31 @@ describe("production env guard (api)", () => {
     expect(env.PAYMENT_LIVE).toBe(false);
   });
 
+  describe("LLM 步骤不得静默回落 mock（F0.2）", () => {
+    it("rejects LLM_MODE=real without DEEPSEEK_API_KEY in production", () => {
+      const problems = collectProductionProblems(secureProd({ LLM_MODE: "real" }));
+      expect(problems.join("\n")).toContain("DEEPSEEK_API_KEY");
+      expect(() => buildEnv(secureProd({ LLM_MODE: "real" }))).toThrow(/LLM_MODE=real/);
+    });
+
+    it("rejects LLM_MODE=real when the key is present but empty/blank", () => {
+      const problems = collectProductionProblems(secureProd({ LLM_MODE: "real", DEEPSEEK_API_KEY: "   " }));
+      expect(problems.join("\n")).toContain("DEEPSEEK_API_KEY");
+    });
+
+    it("accepts LLM_MODE=real with a key, and LLM_MODE=mock without one", () => {
+      expect(collectProductionProblems(secureProd({ LLM_MODE: "real", DEEPSEEK_API_KEY: "sk-test" }))).toEqual([]);
+      expect(collectProductionProblems(secureProd({ LLM_MODE: "mock" }))).toEqual([]);
+      // 未显式设置时默认 mock，不应误报（本地/CI 正常可用）
+      expect(collectProductionProblems(secureProd())).toEqual([]);
+    });
+
+    it("does not enforce the LLM rule outside production", () => {
+      expect(collectProductionProblems({ NODE_ENV: "test", LLM_MODE: "real" })).toEqual([]);
+      expect(collectProductionProblems({ NODE_ENV: "development", LLM_MODE: "real" })).toEqual([]);
+    });
+  });
+
   it("fails fast with an aggregated error message that never prints secret values", () => {
     const raw = {
       NODE_ENV: "production",

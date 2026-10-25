@@ -252,8 +252,26 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
     problems.push("COOKIE_SECURE 必须显式设置（HTTPS 部署为 true；内网 HTTP 需显式 false）");
   }
 
+  problems.push(...collectLlmProblems(raw));
   problems.push(...collectPaymentProblems(raw));
   return problems;
+}
+
+/**
+ * LLM 步骤配置一致性（F0.2 / 2026-10-26）。
+ *
+ * 背景：`LlmService` 在 `LLM_MODE=real` 但缺 `DEEPSEEK_API_KEY` 时会**静默回落**
+ * 到确定性 mock 文案（`llm.service.ts` 的 `if (!this.deepseek)` 分支），
+ * 生产会"看起来在跑、实际输出假内容"，且与 worker 侧"缺 Key 硬失败"的策略不一致。
+ * 这里把该组合变为**启动即失败**，让配置错误暴露在部署阶段而不是用户内容里。
+ *
+ * 注意：未显式设置 `LLM_MODE` 时默认 mock（本地/CI 正常可用），不算问题。
+ */
+export function collectLlmProblems(raw: RawEnv): string[] {
+  const llmMode = rawValue(raw, "LLM_MODE") ?? "mock";
+  if (llmMode !== "real") return [];
+  if (rawValue(raw, "DEEPSEEK_API_KEY") !== undefined) return [];
+  return ["LLM_MODE=real 但缺少 DEEPSEEK_API_KEY：会静默回落到 mock 文案，必须显式配置或改回 LLM_MODE=mock"];
 }
 
 /**
