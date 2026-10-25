@@ -84,6 +84,15 @@ const editForm = ref({ role_code: "", group_id: "", nickname: "", remark: "", st
 const groupOpen = ref(false);
 const groupName = ref("");
 
+// 批量添加成员 / 选中态
+const inviteOpen = ref(false);
+const invitePhones = ref("");
+const inviteRole = ref("");
+const inviteGroup = ref("");
+const inviteResult = ref<Array<{ phone?: string; user_id?: string; ok: boolean; reason?: string }>>([]);
+const selected = ref<string[]>([]);
+const allSelected = computed(() => members.value.length > 0 && selected.value.length === members.value.length);
+
 // 状态用字符串桥接（SelectField 的 model 是 string）
 const statusStr = computed({
   get: () => String(editForm.value.status),
@@ -289,6 +298,117 @@ async function createGroup(): Promise<void> {
   }
 }
 
+// ── 批量添加成员 ─────────────────────────────────────────
+async function inviteMembers(): Promise<void> {
+  const phones = invitePhones.value
+    .split(/[\s,，;；]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (phones.length === 0) return flash("请输入至少一个手机号");
+  const bad = phones.filter((p) => !/^1\d{10}$/.test(p));
+  if (bad.length > 0) return flash(`手机号格式不对：${bad.slice(0, 3).join("、")}`);
+  busy.value = true;
+  error.value = "";
+  try {
+    const res = await api.post<{ added: number; failed: number; items: typeof inviteResult.value }>(
+      "/cam/team/member/batch",
+      {
+        members: phones.map((phone) => ({
+          phone,
+          ...(inviteRole.value ? { role_code: inviteRole.value } : {}),
+          ...(inviteGroup.value ? { group_id: inviteGroup.value } : {}),
+        })),
+      },
+    );
+    inviteResult.value = res.items;
+    await Promise.all([loadMembers(), bootstrapTeamInfo()]);
+    flash(`已添加 ${res.added} 人${res.failed > 0 ? `，${res.failed} 人未加入` : ""}`);
+    if (res.failed === 0) {
+      inviteOpen.value = false;
+      invitePhones.value = "";
+    }
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function bootstrapTeamInfo(): Promise<void> {
+  try {
+    team.value = await api.get<TeamInfo>("/cam/team/info");
+  } catch { /* 忽略：抬头信息刷新失败不影响列表 */ }
+}
+
+function toggleAll(): void {
+  selected.value = allSelected.value ? [] : members.value.map((m) => m.user_id);
+}
+function toggle(id: string): void {
+  selected.value = selected.value.includes(id)
+    ? selected.value.filter((x) => x !== id)
+    : [...selected.value, id];
+}
+
+/** 批量改状态 */
+async function batchStatus(status: number): Promise<void> {
+  if (selected.value.length === 0) return flash("请先选择成员");
+  busy.value = true;
+  try {
+    await api.post("/cam/team/member/batch/status", { user_ids: selected.value, status });
+    selected.value = [];
+    await loadMembers();
+    flash("已更新成员状态");
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 批量换组 */
+async function batchGroup(groupId: string): Promise<void> {
+  if (selected.value.length === 0) return flash("请先选择成员");
+  busy.value = true;
+  try {
+    await api.post("/cam/team/member/change-group", {
+      user_ids: selected.value,
+      group_id: groupId || null,
+    });
+    selected.value = [];
+    await loadMembers();
+    flash("已调整成员分组");
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 导出成员 CSV */
+function exportMembers(): void {
+  const token = auth.state.value.accessToken;
+  const base = (useRuntimeConfig().public.apiBase as string) || "";
+  const space = activeSpace.value;
+  // 用 fetch 带 Authorization/X-Space-Id 拿 blob，避免把 token 放 URL
+  fetch(`${base}/v1/cam/team/member/export`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(space ? { "X-Space-Id": space } : {}),
+    },
+    credentials: "include",
+  })
+    .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`导出失败 ${r.status}`))))
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "team-members.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch((e) => (error.value = (e as Error).message));
+}
+
 onMounted(bootstrap);
 </script>
 
@@ -318,7 +438,9 @@ onMounted(bootstrap);
         />
         <Button :disabled="busy" @click="newTeamOpen = true">创建团队</Button>
         <Button v-if="team?.type === 2" :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
+        <Button v-if="canManage" :disabled="busy" @click="inviteOpen = true">邀请成员</Button>
         <Button :disabled="!canManage || busy" @click="groupOpen = true">新建分组</Button>
+        <Button v-if="canManage" :disabled="busy" @click="exportMembers">导出 CSV</Button>
         <Button :disabled="busy" @click="bootstrap">刷新</Button>
       </div>
     </header>
@@ -333,15 +455,35 @@ onMounted(bootstrap);
 
     <!-- 成员管理 -->
     <section v-if="tab === 'members'" class="tm-panel">
+      <!-- 批量操作条 -->
+      <div v-if="canManage && selected.length > 0" class="tm-batch">
+        <span>已选 {{ selected.length }} 人</span>
+        <Button :disabled="busy" @click="batchStatus(1)">启用</Button>
+        <Button :disabled="busy" @click="batchStatus(2)">停用</Button>
+        <SelectField
+          class="tm-batch-group"
+          label=""
+          :options="[{ value: '', label: '移到分组…' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
+          @update:model-value="batchGroup"
+        />
+        <Button :disabled="busy" @click="selected = []">取消选择</Button>
+      </div>
+
       <table class="tm-table">
         <thead>
           <tr>
+            <th v-if="canManage" class="tm-check">
+              <input type="checkbox" :checked="allSelected" @change="toggleAll" />
+            </th>
             <th>成员</th><th>账号</th><th>角色</th><th>成员组</th>
             <th>当前积分</th><th>状态</th><th>备注</th><th v-if="canManage">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="m in members" :key="m.user_id">
+            <td v-if="canManage" class="tm-check">
+              <input type="checkbox" :checked="selected.includes(m.user_id)" @change="toggle(m.user_id)" />
+            </td>
             <td>{{ m.nickname || m.user_id }}</td>
             <td class="tm-mono">{{ m.account || "—" }}</td>
             <td><Tag>{{ roleName(m.role_code) }}</Tag></td>
@@ -354,8 +496,8 @@ onMounted(bootstrap);
             </td>
           </tr>
           <tr v-if="members.length === 0">
-            <td :colspan="canManage ? 8 : 7" class="tm-empty">
-              还没有成员。团队成员用于协作制片与积分分配。
+            <td :colspan="canManage ? 9 : 7" class="tm-empty">
+              还没有成员。团队成员用于协作制片与积分分配，点右上「邀请成员」开始。
             </td>
           </tr>
         </tbody>
@@ -481,6 +623,37 @@ onMounted(bootstrap);
       </template>
     </Modal>
 
+    <!-- 邀请成员弹窗 -->
+    <Modal :open="inviteOpen" title="邀请成员" @close="inviteOpen = false">
+      <p class="tm-hint">
+        输入手机号，多个用空格或逗号分隔（单次最多 50 个）。
+        <b>仅支持已注册账号</b>——不会代建账号，未注册手机号会逐条提示。
+      </p>
+      <TextAreaField
+        v-model="invitePhones"
+        label="手机号"
+        placeholder="13800000000 13900000000"
+      />
+      <SelectField
+        v-model="inviteRole"
+        label="角色（可选）"
+        :options="[{ value: '', label: '默认：项目执行' }, ...roles.map((r) => ({ value: r.role_code, label: r.role_name }))]"
+      />
+      <SelectField
+        v-model="inviteGroup"
+        label="成员组（可选）"
+        :options="[{ value: '', label: '未分组' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
+      />
+      <div v-if="inviteResult.length > 0" class="tm-invite-result">
+        <p v-for="(r, i) in inviteResult" :key="i" :class="r.ok ? 'ok' : 'bad'">
+          {{ r.phone || r.user_id }} — {{ r.ok ? "已加入" : r.reason || "失败" }}
+        </p>
+      </div>
+      <template #footer>
+        <Button :disabled="busy" @click="inviteMembers">添加成员</Button>
+      </template>
+    </Modal>
+
     <!-- 新建分组弹窗 -->
     <Modal :open="groupOpen" title="新建成员组" @close="groupOpen = false">
       <TextField v-model="groupName" label="分组名称" placeholder="如：编剧组 / 动画组" />
@@ -516,6 +689,17 @@ onMounted(bootstrap);
   padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-1); white-space: nowrap;
 }
 .tm-table td { padding: var(--space-3); border-bottom: 1px solid var(--border-1); }
+.tm-check { width: 32px; }
+.tm-batch {
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3); background: var(--surface-2);
+  border-radius: var(--radius-2); font-size: 13px;
+}
+.tm-batch-group { min-width: 160px; }
+.tm-invite-result { max-height: 140px; overflow: auto; font-size: 12px; }
+.tm-invite-result p { margin: 2px 0; }
+.tm-invite-result .ok { color: var(--success-1, #2f9e44); }
+.tm-invite-result .bad { color: var(--danger-1, #e03131); }
 .tm-empty { text-align: center; color: var(--text-3); padding: var(--space-6); }
 .tm-mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
 .tm-num { font-variant-numeric: tabular-nums; font-weight: 600; }

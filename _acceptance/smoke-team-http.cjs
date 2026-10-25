@@ -66,6 +66,52 @@ async function login(phone) {
   const alloc = await call("POST", "/cam/team/points-allocation", { user_id: a.userId, amount: 10 }, a.token, teamSpaceId);
   console.log("allocate with 0 pool ->", alloc.status, alloc.code, alloc.msg);
 
+  // 8) 批量添加成员（B 用 user_id 加入；再造一个未注册手机号验证逐条拒绝）
+  const batch = await call(
+    "POST",
+    "/cam/team/member/batch",
+    { members: [{ user_id: b.userId, role_code: "animator" }, { phone: "13900000009" }] },
+    a.token,
+    teamSpaceId,
+  );
+  console.log("batch add ->", batch.code, `added=${batch.data?.added} failed=${batch.data?.failed}`);
+
+  // 9) 批量改状态 + 换组
+  const grp = await call("POST", "/cam/team/group", { name: "冒烟动画组" }, a.token, teamSpaceId);
+  const groupId = grp.data?.id;
+  const st = await call(
+    "POST",
+    "/cam/team/member/batch/status",
+    { user_ids: [b.userId], status: 2 },
+    a.token,
+    teamSpaceId,
+  );
+  const cg = await call(
+    "POST",
+    "/cam/team/member/change-group",
+    { user_ids: [b.userId], group_id: groupId },
+    a.token,
+    teamSpaceId,
+  );
+  console.log("batch status/change-group ->", st.code, cg.code);
+
+  // 10) CSV 导出（直接看 content-type 与前几行）
+  const csvRes = await fetch(`${BASE}/cam/team/member/export`, {
+    headers: { authorization: `Bearer ${a.token}`, "x-space-id": teamSpaceId },
+  });
+  const csvText = await csvRes.text();
+  const csvOk = csvRes.ok && csvText.includes("role_code") && csvText.split("\n").length >= 2;
+  console.log("csv export ->", csvRes.status, csvRes.headers.get("content-type"), `lines=${csvText.split("\n").length}`);
+
+  // 11) 被停用的成员不能进团队（守卫校验 status===1）
+  const bDisabled = await call("GET", "/cam/team/info", undefined, b.token, teamSpaceId);
+  console.log("userB while disabled ->", bDisabled.code, "(期望 403101)");
+
+  // 12) 重新启用后可正常进入
+  await call("POST", "/cam/team/member/batch/status", { user_ids: [b.userId], status: 1 }, a.token, teamSpaceId);
+  const bInTeam = await call("GET", "/cam/team/info", undefined, b.token, teamSpaceId);
+  console.log("userB after re-enable ->", bInTeam.code, bInTeam.data?.name);
+
   const pass =
     created.code === 0 &&
     personal.data?.type === 1 &&
@@ -74,7 +120,15 @@ async function login(phone) {
     (mine.data?.list ?? []).some((t) => t.type === 2) &&
     // 业务错误按项目约定走 envelope（HTTP 200 + code），不是 HTTP 403
     intruder.code === 403101 &&
-    alloc.code === 745701;
+    alloc.code === 745701 &&
+    batch.code === 0 &&
+    batch.data?.added === 1 &&
+    batch.data?.failed === 1 &&
+    st.code === 0 &&
+    cg.code === 0 &&
+    csvOk &&
+    bDisabled.code === 403101 &&
+    bInTeam.code === 0;
   console.log(pass ? "\n✅ ALL PASS" : "\n❌ FAIL");
   process.exit(pass ? 0 : 1);
 })().catch((e) => { console.error("FATAL", e.message); process.exit(1); });

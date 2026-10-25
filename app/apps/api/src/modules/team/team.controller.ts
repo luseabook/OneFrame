@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
@@ -51,6 +52,28 @@ const bindProjectBody = z.object({
 const createTeamBody = z.object({
   name: z.string().min(1).max(40),
   max_seats: z.number().int().min(1).max(200).optional(),
+});
+const batchMembersBody = z.object({
+  members: z
+    .array(
+      z.object({
+        phone: z.string().regex(/^1\d{10}$/).optional(),
+        user_id: z.string().min(1).optional(),
+        role_code: z.string().min(1).optional(),
+        group_id: z.string().optional(),
+        nickname: z.string().max(40).optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+const batchStatusBody = z.object({
+  user_ids: z.array(z.string().min(1)).min(1).max(200),
+  status: z.number().int().min(1).max(3),
+});
+const changeGroupBody = z.object({
+  user_ids: z.array(z.string().min(1)).min(1).max(200),
+  group_id: z.string().nullable(),
 });
 
 @Controller("cam")
@@ -165,6 +188,41 @@ export class TeamController {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "remove member");
     return this.team.removeMember(c.spaceId, userId);
+  }
+
+  // ── 成员批量 ────────────────────────────────────────────
+  /** 批量添加成员（只接受已注册用户；未注册手机号逐条拒绝，不代建账号） */
+  @Post("team/member/batch")
+  async addMembers(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "add members");
+    return this.team.addMembers(c.spaceId, c.userId, parseOrThrow(batchMembersBody, body));
+  }
+
+  @Post("team/member/batch/status")
+  async batchStatus(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "change member status");
+    return this.team.batchMemberStatus(c.spaceId, parseOrThrow(batchStatusBody, body));
+  }
+
+  @Post("team/member/change-group")
+  async changeGroup(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "change member group");
+    return this.team.changeGroup(c.spaceId, parseOrThrow(changeGroupBody, body));
+  }
+
+  /** 成员 CSV 导出（对齐参照 member/export） */
+  @Get("team/member/export")
+  async exportMembers(@Req() req: AuthedRequest, @Res() res: FastifyReply) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "export members");
+    const csv = await this.team.membersCsv(c.spaceId);
+    res
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", 'attachment; filename="team-members.csv"')
+      .send(csv);
   }
 
   // ── 团队积分（成对记账）────────────────────────────────

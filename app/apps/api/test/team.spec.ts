@@ -301,4 +301,57 @@ describe("team (cam) e2e", () => {
     const personal = await inject("GET", "/cam/team/info", undefined, owner.token);
     expect(Number(personal.data?.credit_total ?? 0)).toBeLessThan(teamAfter);
   });
+
+  /**
+   * 批量添加成员：只接受已注册用户；未注册手机号逐条拒绝（不代建账号）。
+   * 这条是安全边界：代建账号需要验证码归属证明，否则任何人可把他人手机号拉进团队。
+   */
+  it("批量添加成员：已注册加入成功，未注册逐条拒绝，重复添加被识别", async () => {
+    const owner = await loginNewUser("81");
+    const invitee = await loginNewUser("82");
+    const { teamSpaceId } = await createTeam(owner.userId);
+    const { TeamService } = await import("../src/modules/team/team.service");
+    const svc = app.get(TeamService);
+
+    const res = await svc.addMembers(teamSpaceId, owner.userId, {
+      members: [
+        { user_id: invitee.userId, role_code: "animator" },
+        { phone: "13900000001" }, // 未注册
+      ],
+    });
+    expect(res.added).toBe(1);
+    expect(res.failed).toBe(1);
+    expect(res.items.find((i) => i.phone === "13900000001")?.reason).toBe("phone not registered");
+
+    const dup = await svc.addMembers(teamSpaceId, owner.userId, {
+      members: [{ user_id: invitee.userId }],
+    });
+    expect(dup.added).toBe(0);
+    expect(dup.items[0]?.reason).toBe("already a member");
+  });
+
+  it("批量改状态禁止停用 owner；批量换组与 CSV 导出可用", async () => {
+    const owner = await loginNewUser("83");
+    const m1 = await loginNewUser("84");
+    const { teamSpaceId } = await createTeam(owner.userId);
+    const { TeamService } = await import("../src/modules/team/team.service");
+    const svc = app.get(TeamService);
+    await svc.addMembers(teamSpaceId, owner.userId, { members: [{ user_id: m1.userId }] });
+
+    await expect(
+      svc.batchMemberStatus(teamSpaceId, { user_ids: [owner.userId], status: 2 }),
+    ).rejects.toMatchObject({ code: 400101 });
+
+    const st = await svc.batchMemberStatus(teamSpaceId, { user_ids: [m1.userId], status: 2 });
+    expect(st.updated).toBe(1);
+
+    const group = await svc.createGroup(teamSpaceId, { name: "动画组" });
+    const moved = await svc.changeGroup(teamSpaceId, { user_ids: [m1.userId], group_id: group.id });
+    expect(moved.updated).toBe(1);
+
+    const csv = await svc.membersCsv(teamSpaceId);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv.split("\n")[0]).toContain("role_code");
+    expect(csv.split("\n").length).toBeGreaterThanOrEqual(3); // header + owner + m1
+  });
 });

@@ -1,8 +1,18 @@
 import { Injectable } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { creditAccounts, creditFlows, spaceMembers, spaces, teamGroups, teamMemberProjects, teamRoles } from "@app/db";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import {
+  creditAccounts,
+  creditFlows,
+  identities,
+  spaceMembers,
+  spaces,
+  teamGroups,
+  teamMemberProjects,
+  teamRoles,
+} from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { hashPhone } from "../auth/crypto";
 
 /**
  * 团队（cam）域服务 —— F1 契约 §12.3 / ADR-010 / ADR-011
@@ -171,6 +181,168 @@ export class TeamService {
         role_code: r.roleCode,
       })),
     };
+  }
+
+  /**
+   * 批量添加成员（对齐参照 cam/team/member/batch）。
+   *
+   * 设计取舍（重要）：**只允许加入已注册用户**，不接受"代建账号"。
+   * 理由：① 代建账号需要手机号验证码归属证明，否则任何人可把他人手机号拉进团队；
+   * ② 参照产品的成员体系有独立账号+密码（member/credential），我方是手机号登录，
+   * 语义不同——强行对齐会引入账号接管风险。未注册手机号返回 400101 并说明原因。
+   */
+  async addMembers(
+    spaceId: string,
+    opUserId: string,
+    input: { members: Array<{ phone?: string; user_id?: string; role_code?: string; group_id?: string; nickname?: string }> },
+  ) {
+    if (!Array.isArray(input.members) || input.members.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "members required", { field: "members" });
+    }
+    if (input.members.length > 50) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "at most 50 members per batch", { field: "members" });
+    }
+
+    const results: Array<{ phone?: string; user_id?: string; ok: boolean; code?: number; reason?: string }> = [];
+    let added = 0;
+
+    for (const item of input.members) {
+      const phone = item.phone?.trim();
+      const rawUserId = item.user_id?.trim();
+      let targetUserId: bigint | null = null;
+
+      if (rawUserId) {
+        targetUserId = BigInt(rawUserId);
+      } else if (phone) {
+        if (!/^1\d{10}$/.test(phone)) {
+          results.push({ phone, ok: false, code: ErrorCode.INVALID_PARAM, reason: "invalid phone" });
+          continue;
+        }
+        const [identity] = await db
+          .select({ userId: identities.userId })
+          .from(identities)
+          .where(and(eq(identities.provider, "phone"), eq(identities.phoneHash, hashPhone(phone))));
+        if (!identity) {
+          results.push({ phone, ok: false, code: ErrorCode.INVALID_PARAM, reason: "phone not registered" });
+          continue;
+        }
+        targetUserId = identity.userId;
+      } else {
+        results.push({ ok: false, code: ErrorCode.INVALID_PARAM, reason: "phone or user_id required" });
+        continue;
+      }
+
+      const [exists] = await db
+        .select({ status: spaceMembers.status })
+        .from(spaceMembers)
+        .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, targetUserId)));
+      if (exists) {
+        results.push({ phone, user_id: String(targetUserId), ok: false, code: ErrorCode.INVALID_PARAM, reason: "already a member" });
+        continue;
+      }
+
+      // 逐个校验席位：批量里超出的部分逐条拒绝，而不是整批失败
+      try {
+        await this.assertSeatAvailable(spaceId);
+      } catch (e) {
+        const err = e as AppError;
+        results.push({ phone, user_id: String(targetUserId), ok: false, code: err.code, reason: "seat limit reached" });
+        continue;
+      }
+
+      const roleCode = item.role_code ?? "project_executor";
+      const [role] = await db
+        .select({ roleLevel: teamRoles.roleLevel })
+        .from(teamRoles)
+        .where(and(eq(teamRoles.spaceId, BigInt(spaceId)), eq(teamRoles.roleCode, roleCode)));
+
+      await db.insert(spaceMembers).values({
+        spaceId: BigInt(spaceId),
+        userId: targetUserId,
+        role: 3, // 空间归属 member；岗位由 role_code 表达
+        roleCode,
+        roleLevel: role?.roleLevel ?? null,
+        groupId: item.group_id ? BigInt(item.group_id) : null,
+        nickname: item.nickname ?? null,
+        status: 1,
+        invitedAt: new Date(),
+        joinedAt: new Date(),
+      });
+      void opUserId;
+      added += 1;
+      results.push({ phone, user_id: String(targetUserId), ok: true });
+    }
+
+    return { added, failed: results.filter((r) => !r.ok).length, items: results };
+  }
+
+  /** 批量改状态（启用/停用/待激活）；禁止批量停用 owner */
+  async batchMemberStatus(spaceId: string, input: { user_ids: string[]; status: number }) {
+    if (!Array.isArray(input.user_ids) || input.user_ids.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "user_ids required", { field: "user_ids" });
+    }
+    if (input.user_ids.length > 200) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "at most 200 per batch", { field: "user_ids" });
+    }
+    const owners = await db
+      .select({ userId: spaceMembers.userId })
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.role, 1)));
+    const ownerIds = new Set(owners.map((o) => String(o.userId)));
+    const blocked = input.user_ids.filter((id) => ownerIds.has(String(id)));
+    if (blocked.length > 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "cannot change owner status", { field: "user_ids", blocked });
+    }
+    await db
+      .update(spaceMembers)
+      .set({ status: input.status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(spaceMembers.spaceId, BigInt(spaceId)),
+          inArray(spaceMembers.userId, input.user_ids.map((id) => BigInt(id))),
+        ),
+      );
+    return { updated: input.user_ids.length };
+  }
+
+  /** 批量换组（group_id 传 null 表示移出分组） */
+  async changeGroup(spaceId: string, input: { user_ids: string[]; group_id: string | null }) {
+    if (!Array.isArray(input.user_ids) || input.user_ids.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "user_ids required", { field: "user_ids" });
+    }
+    if (input.group_id) {
+      const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, BigInt(input.group_id)));
+      if (!group || String(group.spaceId) !== spaceId) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "group not in this team", { field: "group_id" });
+      }
+    }
+    await db
+      .update(spaceMembers)
+      .set({ groupId: input.group_id ? BigInt(input.group_id) : null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(spaceMembers.spaceId, BigInt(spaceId)),
+          inArray(spaceMembers.userId, input.user_ids.map((id) => BigInt(id))),
+        ),
+      );
+    return { updated: input.user_ids.length };
+  }
+
+  /** 成员 CSV 导出（对齐参照 member/export） */
+  async membersCsv(spaceId: string): Promise<string> {
+    const data = await this.listMembers(spaceId, 1, 100, undefined, undefined, undefined);
+    const rows = data.list as Array<Record<string, unknown>>;
+    const header = ["user_id", "nickname", "account", "role_code", "group_id", "credits_quota", "status", "remark"];
+    const esc = (v: unknown): string => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push(header.map((h) => esc(r[h])).join(","));
+    }
+    // BOM：让 Excel 正确识别 UTF-8 中文
+    return `\uFEFF${lines.join("\n")}`;
   }
 
   /** 团队信息（含席位/统计） */
