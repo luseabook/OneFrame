@@ -9,9 +9,13 @@ import {
   portraitGenerateSchema,
   portraitRebindSchema,
   portraitSelectSchema,
+  projectAssetCreateSchema,
+  projectAssetKindSchema,
+  projectAssetPatchSchema,
   projectPatchSchema,
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
+  storyboardAssetsPutSchema,
   storyboardsGenerateSchema,
   storyboardPatchSchema,
 } from "@app/shared";
@@ -24,6 +28,9 @@ const parseScriptSchema = z.object({
   file_name: z.string().min(1).max(255),
   file_base64: z.string().min(1).max(12_000_000),
 });
+
+/** P2 项目资产列表过滤：kind 省略时返回该项目全部资产（含角色） */
+const projectAssetsQuerySchema = z.object({ kind: projectAssetKindSchema.optional() });
 
 @Controller()
 export class ScriptController {
@@ -243,6 +250,65 @@ export class ScriptController {
   @Post("projects/:id/characters/:cid/finalize")
   async finalize(@Req() req: AuthedRequest, @Param("id") id: string, @Param("cid") cid: string) {
     return this.script.finalizeCharacter(req.auth?.spaceId ?? "", id, cid);
+  }
+
+  // ── P2：项目资产（场景/道具/其他）CRUD + 分镜资产绑定 ──────────────────
+
+  /** 资产列表：kind=scene|prop|other|character；按 createdAt 升序，含 bound_shot_count */
+  @Get("projects/:id/assets")
+  async listProjectAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Query("kind") kind?: string,
+  ) {
+    const query = parseOrThrow(projectAssetsQuerySchema, { kind });
+    return this.script.listProjectAssets(req.auth?.spaceId ?? "", id, query.kind);
+  }
+
+  /** 新建场景/道具/其他资产（角色走 /characters/generate，kind=character → 400101） */
+  @Post("projects/:id/assets")
+  async createProjectAsset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(projectAssetCreateSchema, body);
+    return this.script.createProjectAsset(req.auth?.spaceId ?? "", id, input);
+  }
+
+  /** 更新资产：改名/描述/提示词/参考图/定稿状态（status=2 写 finalized_at，=1 清空） */
+  @Patch("projects/:id/assets/:assetId")
+  async patchProjectAsset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(projectAssetPatchSchema, body);
+    return this.script.patchProjectAsset(req.auth?.spaceId ?? "", id, assetId, input);
+  }
+
+  /** 删除资产：同事务解除 storyboard_assets 绑定 */
+  @Delete("projects/:id/assets/:assetId")
+  async deleteProjectAsset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+  ) {
+    return this.script.deleteProjectAsset(req.auth?.spaceId ?? "", id, assetId);
+  }
+
+  /** 分镜资产绑定：整体替换（入参含角色与场景/道具，0..20），返回落库顺序 */
+  @Put("projects/:id/episodes/:eid/storyboards/:sid/assets")
+  async replaceStoryboardAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("sid") sid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(storyboardAssetsPutSchema, body);
+    return this.script.replaceStoryboardAssets(req.auth?.spaceId ?? "", id, eid, sid, input.asset_ids);
   }
 
   @Post("projects/:id/episodes/:eid/exports")

@@ -6,6 +6,7 @@ import type {
   MatrixDto,
   MatrixShot,
   ModelDto,
+  ProjectAssetDto,
   ProjectDto,
   StoryboardDto,
   TaskDto,
@@ -449,6 +450,7 @@ onMounted(async () => {
     await loadModels();
     await loadMatrix();
     await loadMaterials();
+    await loadProjectAssets();
   });
   // 首次进入空项目时给一条可行动提示（PRD 增补 §3.2 空态引导）
   if (!episodes.value.length) {
@@ -645,7 +647,214 @@ watch(shots, (list) => {
 watch(selectedShotId, () => {
   void quoteSelectedShot();
 });
+// ══════════ P2：项目资产（场景 / 道具 / 其他）+ 分镜资产绑定 ══════════
+const projectAssets = ref<Record<"scene" | "prop" | "other", ProjectAssetDto[]>>({ scene: [], prop: [], other: [] });
+const assetFormOpen = ref(false);
+const assetFormId = ref<string | null>(null);
+const assetFormKind = ref<"scene" | "prop" | "other">("scene");
+const assetForm = ref({ name: "", description: "", prompt: "", ref_image_uri: "" });
+const uploading = ref(false);
+const drawerSaving = ref(false);
+const drawerSelection = ref<string[]>([]);
+
+const assetTabKind = computed<"scene" | "prop" | "other" | null>(() =>
+  assetTab.value === "character" ? null : assetTab.value,
+);
+const assetItemsNonCharacter = computed<ProjectAssetDto[]>(() => {
+  const kind = assetTabKind.value;
+  return kind ? (projectAssets.value[kind] ?? []) : [];
+});
+/** id → 资产（角色 + 场景/道具/其他），用于分镜素材区与抽屉反查 */
+const assetMap = computed(() => {
+  const map = new Map<string, ProjectAssetDto>();
+  for (const c of characters.value) {
+    map.set(c.id, {
+      id: c.id,
+      kind: "character",
+      name: c.name,
+      description: c.description,
+      prompt: c.prompt,
+      ref_image_uri: c.ref_image_uri,
+      portrait_asset_id: c.portrait_asset_id,
+      portrait_url: c.portrait_url,
+      status: c.status,
+    });
+  }
+  for (const kind of ["scene", "prop", "other"] as const) {
+    for (const a of projectAssets.value[kind] ?? []) map.set(a.id, a);
+  }
+  return map;
+});
+/** 当前分镜已绑定的资产（角色 + 场景/道具），供中列素材区与额度统计 */
+const boundAssets = computed<ProjectAssetDto[]>(() =>
+  (selectedShot.value?.character_ids ?? [])
+    .map((id) => assetMap.value.get(id))
+    .filter((a): a is ProjectAssetDto => Boolean(a)),
+);
+const boundImageCount = computed(() => boundAssets.value.filter((a) => assetImage(a)).length);
+
+async function loadProjectAssets(): Promise<void> {
+  try {
+    const kinds = ["scene", "prop", "other"] as const;
+    const lists = await Promise.all(
+      kinds.map((kind) => api.get<{ list: ProjectAssetDto[] }>(`/projects/${projectId.value}/assets?kind=${kind}`)),
+    );
+    projectAssets.value = {
+      scene: lists[0]?.list ?? [],
+      prop: lists[1]?.list ?? [],
+      other: lists[2]?.list ?? [],
+    };
+  } catch {
+    // 后端未就绪（P2 接口未上线）时不阻塞其它视图：保持空列表，UI 会走空态
+    projectAssets.value = { scene: [], prop: [], other: [] };
+  }
+}
+
+function assetImage(a: ProjectAssetDto): string | null {
+  return a.portrait_url ?? null;
+}
+
+function openAssetForm(kind: "scene" | "prop" | "other", asset?: ProjectAssetDto): void {
+  assetFormKind.value = kind;
+  assetFormId.value = asset?.id ?? null;
+  assetForm.value = {
+    name: asset?.name ?? "",
+    description: asset?.description ?? "",
+    prompt: asset?.prompt ?? "",
+    ref_image_uri: asset?.ref_image_uri ?? "",
+  };
+  assetFormOpen.value = true;
+}
+
+async function saveAssetForm(): Promise<void> {
+  if (!assetForm.value.name.trim()) {
+    error.value = "请填写资产名称";
+    return;
+  }
+  await run(assetFormId.value ? "保存资产" : "新建资产", async () => {
+    const body = {
+      name: assetForm.value.name.trim(),
+      description: assetForm.value.description,
+      prompt: assetForm.value.prompt,
+      ...(assetForm.value.ref_image_uri ? { ref_image_uri: assetForm.value.ref_image_uri } : {}),
+    };
+    if (assetFormId.value) {
+      await api.patch(`/projects/${projectId.value}/assets/${assetFormId.value}`, body);
+    } else {
+      await api.post(`/projects/${projectId.value}/assets`, { kind: assetFormKind.value, ...body });
+    }
+    assetFormOpen.value = false;
+    await loadProjectAssets();
+    info.value = "资产已保存";
+  });
+}
+
+async function patchProjectAsset(asset: ProjectAssetDto, body: Record<string, unknown>): Promise<void> {
+  await run("更新资产", async () => {
+    await api.patch(`/projects/${projectId.value}/assets/${asset.id}`, body);
+    await loadProjectAssets();
+    info.value = body.status === 2 ? `「${asset.name}」已定稿，可作为参考图注入分镜` : "已更新";
+  });
+}
+
+async function removeProjectAsset(asset: ProjectAssetDto): Promise<void> {
+  await run("删除资产", async () => {
+    await api.delete(`/projects/${projectId.value}/assets/${asset.id}`);
+    await loadProjectAssets();
+    await loadEpisode();
+    info.value = `已删除「${asset.name}」`;
+  });
+}
+
+/** 导入：先上传到空间资产库，再以返回的存储 uri 建项目资产（草稿） */
+async function onImportFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  const kind = assetTabKind.value;
+  if (!file || !kind) return;
+  if (file.size > 8 * 1024 * 1024) {
+    error.value = "图片需 ≤8MB";
+    return;
+  }
+  uploading.value = true;
+  error.value = "";
+  try {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.readAsDataURL(file);
+    });
+    const asset = await api.post<{ id: string; uri: string }>("/assets/upload", {
+      filename: file.name,
+      content_type: file.type,
+      data_base64: base64,
+    });
+    await api.post(`/projects/${projectId.value}/assets`, {
+      kind,
+      name: file.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 50) || "导入资产",
+      ref_image_uri: asset.uri,
+    });
+    await loadProjectAssets();
+    info.value = "已导入，定稿后会作为参考图注入分镜生成";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "导入失败";
+  } finally {
+    uploading.value = false;
+  }
+}
+
+/** 分镜 ↔ 资产绑定：整体替换（入参需含角色与场景/道具的全部 id） */
+async function setShotAssets(ids: string[]): Promise<void> {
+  const shot = selectedShot.value;
+  if (!shot || !selectedEpisodeId.value) return;
+  await run("更新素材", async () => {
+    const res = await api.put<{ asset_ids: string[] }>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}/assets`,
+      { asset_ids: ids },
+    );
+    shot.character_ids = res.asset_ids;
+    info.value = `素材已更新（${res.asset_ids.length} 个）`;
+  });
+}
+
+async function removeShotAsset(id: string): Promise<void> {
+  const shot = selectedShot.value;
+  if (!shot) return;
+  await setShotAssets(shot.character_ids.filter((x) => x !== id));
+}
+
+/** 抽屉：按当前 tab 列出可绑定资产 */
+const drawerAssets = computed<ProjectAssetDto[]>(() => {
+  if (assetTab.value === "character") {
+    return characters.value.map((c) => assetMap.value.get(c.id)).filter((a): a is ProjectAssetDto => Boolean(a));
+  }
+  return projectAssets.value[assetTab.value] ?? [];
+});
+function openDrawer(): void {
+  drawerSelection.value = [...(selectedShot.value?.character_ids ?? [])];
+  // 默认落在有内容的 tab：当前 kind 为空时回到「角色」（参照抽屉也以角色为主）
+  const kind = assetTab.value;
+  if (kind !== "character" && (projectAssets.value[kind] ?? []).length === 0) assetTab.value = "character";
+  assetDrawer.value = true;
+}
+function toggleDrawerAsset(id: string): void {
+  drawerSelection.value = drawerSelection.value.includes(id)
+    ? drawerSelection.value.filter((x) => x !== id)
+    : [...drawerSelection.value, id];
+}
+async function applyDrawerAssets(): Promise<void> {
+  drawerSaving.value = true;
+  try {
+    await setShotAssets(drawerSelection.value);
+    assetDrawer.value = false;
+  } finally {
+    drawerSaving.value = false;
+  }
+}
 </script>
+
 
 <template>
   <div class="episode">
@@ -753,7 +962,16 @@ watch(selectedShotId, () => {
           </button>
         </div>
         <div class="av-head__right">
-          <label class="inline-field">
+          <Button
+            v-if="assetTab !== 'character'"
+            size="sm"
+            variant="ghost"
+            :disabled="!!busy"
+            @click="openAssetForm(assetTabKind || 'scene')"
+          >
+            新建{{ assetTabLabel }}
+          </Button>
+          <label v-if="assetTab === 'character'" class="inline-field">
             定妆图
             <select v-model.number="portraitCount" class="mini-select">
               <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }} 张</option>
@@ -813,13 +1031,53 @@ watch(selectedShotId, () => {
         </div>
       </div>
 
-      <!-- 场景 / 道具 / 其他：我们后端尚无分类，明确空态 -->
-      <div v-else class="av-empty">
-        <EmptyState
-          :icon="assetTab === 'scene' ? '▣' : assetTab === 'prop' ? '◫' : '◇'"
-          :title="`暂无${assetTabLabel}`"
-          :description="`${assetTabLabel}资产需要「AI 提取资产」链路（P2）。当前版本的角色定妆图会作为参考素材注入分镜生成。`"
-        />
+      <!-- 场景 / 道具 / 其他：项目资产（P2 已接入 CRUD + 分镜绑定） -->
+      <div v-else class="pa-wrap">
+        <div v-if="assetItemsNonCharacter.length" class="pa-grid">
+          <article v-for="a in assetItemsNonCharacter" :key="a.id" class="pa-card">
+            <div class="pa-card__pic">
+              <img v-if="assetImage(a)" :src="assetImage(a) || ''" :alt="a.name" />
+              <i v-else />
+              <Tag class="pa-card__tag" :tone="a.status === 2 ? 'success' : 'warning'" size="sm" dot>
+                {{ a.status === 2 ? "已定稿" : "草稿" }}
+              </Tag>
+            </div>
+            <div class="pa-card__body">
+              <b>{{ a.name }}</b>
+              <p>{{ a.description || a.prompt || "—" }}</p>
+              <div class="pa-card__ops">
+                <Button size="sm" variant="ghost" :disabled="!!busy" @click="openAssetForm(assetTabKind || 'scene', a)">编辑</Button>
+                <Button v-if="a.status !== 2" size="sm" :disabled="!!busy" @click="patchProjectAsset(a, { status: 2 })">定稿</Button>
+                <Button v-else size="sm" variant="ghost" :disabled="!!busy" @click="patchProjectAsset(a, { status: 1 })">取消定稿</Button>
+                <button type="button" class="mini-btn" @click="removeProjectAsset(a)">删除</button>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="cta-rows">
+          <div class="cta-hero">
+            <div class="cta-hero__text">
+              <h3>AI 智能提取资产 <span class="free">首次免费</span></h3>
+              <p>AI 分析剧本，提取出镜的角色/场景/道具并生成资产提示词（提取链路 P3 接入；当前可先手动新建/导入）</p>
+              <button class="btn-white" type="button" disabled title="需要资产提取后端（P3）">✦ AI 智能提取资产</button>
+            </div>
+          </div>
+          <div class="cta-two">
+            <div class="cta-card">
+              <h3>新建{{ assetTabLabel }}</h3>
+              <p>手填名称/描述/提示词，可填参考图 uri；定稿后会作为参考图注入分镜生成</p>
+              <Button @click="openAssetForm(assetTabKind || 'scene')">新建{{ assetTabLabel }}</Button>
+            </div>
+            <div class="cta-card">
+              <h3>导入{{ assetTabLabel }}</h3>
+              <p>从本地导入一张图片作为参考图（jpg/png/webp，≤8MB），导入后为草稿态</p>
+              <label class="ctl ctl--picker import-btn">
+                {{ uploading ? "上传中…" : `导入${assetTabLabel}` }}
+                <input type="file" accept="image/jpeg,image/png,image/webp" hidden @change="onImportFile" />
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -877,14 +1135,18 @@ watch(selectedShotId, () => {
           />
 
           <div v-if="stageTab !== 'video'" class="mats">
-            <figure v-for="m in stageMaterials" :key="m.id" class="mat">
-              <img v-if="m.portrait_url" :src="m.portrait_url" :alt="m.name" />
+            <figure v-for="m in boundAssets" :key="m.id" class="mat">
+              <button type="button" class="mat__rm" title="移出本镜" @click="removeShotAsset(m.id)">✕</button>
+              <img v-if="assetImage(m)" :src="assetImage(m) || ''" :alt="m.name" />
               <i v-else />
-              <figcaption>{{ m.name }}</figcaption>
+              <figcaption>
+                {{ m.name }}
+                <em>{{ m.status === 2 ? "已定稿" : "草稿" }}</em>
+              </figcaption>
             </figure>
-            <p v-if="!stageMaterials.length" class="stage-empty">
+            <p v-if="!boundAssets.length" class="stage-empty">
               <span class="stage-empty__icon">▤</span>
-              暂无素材<br /><em>可从右侧「项目资产」选择角色图，或先去资产库上传</em>
+              暂无素材<br /><em>点右侧「项目资产」勾选角色/场景/道具作为本镜参考</em>
             </p>
           </div>
 
@@ -954,11 +1216,11 @@ watch(selectedShotId, () => {
             <button class="mini-link" type="button" disabled title="3D 导演台（P4）">3D导演台</button>
           </div>
           <p class="gen-quota">
-            已上传素材数：图片 {{ materials.length }}/30 · 视频 0/10 · 音频 0/10 · 总素材 {{ materials.length }}/50
+            已上传素材数：图片 {{ boundImageCount }}/30 · 视频 0/10 · 音频 0/10 · 总素材 {{ boundAssets.length }}/50
           </p>
 
           <div class="gen-cards">
-            <button type="button" class="gen-card" @click="assetDrawer = true"><span>+</span>项目资产</button>
+            <button type="button" class="gen-card" @click="openDrawer"><span>+</span>项目资产</button>
             <button type="button" class="gen-card" disabled title="更多素材源（P2）"><span>+</span>更多素材源</button>
           </div>
 
@@ -1125,30 +1387,49 @@ watch(selectedShotId, () => {
           </div>
           <input class="drawer__search" type="search" :placeholder="`搜索你想要的${assetTabLabel}`" />
           <p class="drawer__note">
-            角色定妆图会作为参考图注入该镜头的生成；场景/道具资产需要「AI 提取资产」链路（P2）。
+            勾选的资产会作为本镜参考图注入生成；仅「已定稿 + 有参考图」的资产会被后端采纳，否则该镜投递会被拒绝（400105）。
           </p>
-          <p class="block-label">全部素材</p>
-          <div v-if="characters.length && assetTab === 'character'" class="drawer__grid">
-            <figure v-for="c in characters" :key="c.id" class="drawer__item">
-              <img v-if="c.portrait_url" :src="c.portrait_url" :alt="c.name" />
+          <p class="block-label">全部素材（已选 {{ drawerSelection.length }}）</p>
+          <div v-if="drawerAssets.length" class="drawer__grid">
+            <button
+              v-for="a in drawerAssets"
+              :key="a.id"
+              type="button"
+              class="drawer__pick"
+              :class="{ on: drawerSelection.includes(a.id) }"
+              @click="toggleDrawerAsset(a.id)"
+            >
+              <img v-if="assetImage(a)" :src="assetImage(a) || ''" :alt="a.name" />
               <i v-else />
-              <figcaption>
-                {{ c.name }}
-                <Tag :tone="c.status === 2 ? 'success' : 'warning'" size="sm">{{ c.status === 2 ? "已定稿" : "待定稿" }}</Tag>
-              </figcaption>
-            </figure>
+              <span>{{ a.name }}</span>
+              <em>{{ a.status === 2 ? "已定稿" : "草稿" }}</em>
+            </button>
           </div>
           <div v-else class="drawer__empty">
             <span>▤</span>
             <p>未搜索到相关资源</p>
           </div>
           <div class="drawer__ops">
-            <button type="button" class="gen-card" @click="tab = 'characters'; assetDrawer = false"><span>✦</span>去生成</button>
-            <NuxtLink to="/assets" class="gen-card"><span>⤓</span>去导入</NuxtLink>
+            <Button variant="ghost" @click="assetDrawer = false">取消</Button>
+            <Button :disabled="drawerSaving" @click="applyDrawerAssets">{{ drawerSaving ? "保存中…" : "应用到当前分镜" }}</Button>
           </div>
         </aside>
       </div>
     </Teleport>
+    <!-- ── 资产编辑（场景/道具/其他）── -->
+    <Modal :open="assetFormOpen" :title="assetFormId ? '编辑资产' : `新建${assetTabLabel}`" width="520px" @close="assetFormOpen = false">
+      <div class="af-form">
+        <label class="af-row"><span>名称</span><input v-model="assetForm.name" maxlength="50" placeholder="例如：雨夜街头 / 旧怀表" /></label>
+        <label class="af-row"><span>描述</span><input v-model="assetForm.description" maxlength="500" placeholder="一句话说明外观与用途" /></label>
+        <label class="af-row"><span>提示词</span><textarea v-model="assetForm.prompt" maxlength="1000" rows="3" placeholder="生图提示词（可选）" /></label>
+        <label class="af-row"><span>参考图 uri</span><input v-model="assetForm.ref_image_uri" maxlength="500" placeholder="可留空；用「导入」上传会自动填" /></label>
+        <div class="af-ops">
+          <Button variant="ghost" @click="assetFormOpen = false">取消</Button>
+          <Button :disabled="!!busy" @click="saveAssetForm">保存</Button>
+        </div>
+      </div>
+    </Modal>
+
     <!-- ── 定妆图候选 ── -->
     <Modal :open="!!candidates" title="选择定妆图" width="720px" @close="candidates = null">
       <div class="cand-grid">
@@ -2414,4 +2695,162 @@ watch(selectedShotId, () => {
   padding: 8px;
   font-size: 12px;
   color: var(--text-3);
+}/* ═══════════ P2：项目资产（场景/道具/其他）══════════ */
+.pa-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+.pa-card {
+  border-radius: 12px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.pa-card__pic {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: #0d0d13;
+  display: grid;
+  place-items: center;
+}
+.pa-card__pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pa-card__tag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.pa-card__body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pa-card__body b {
+  font-size: 15px;
+  color: var(--text-1);
+}
+.pa-card__body p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pa-card__ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.import-btn {
+  cursor: pointer;
+}
+.mat {
+  position: relative;
+}
+.mat__rm {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  z-index: 1;
+}
+.mat figcaption em {
+  font-style: normal;
+  margin-left: 6px;
+  color: var(--text-5);
+  font-size: 10px;
+}
+.drawer__pick {
+  position: relative;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  text-align: left;
+}
+.drawer__pick.on {
+  border-color: var(--brand-500);
+  box-shadow: inset 0 0 0 1px var(--brand-500);
+}
+.drawer__pick img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+}
+.drawer__pick i {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #0d0d13;
+}
+.drawer__pick span {
+  display: block;
+  padding: 6px 8px 0;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer__pick em {
+  display: block;
+  padding: 2px 8px 6px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-5);
+}
+.af-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.af-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.af-row input,
+.af-row textarea {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.32);
+  color: var(--text-1);
+  font-size: 14px;
+  outline: none;
+  resize: vertical;
+}
+.af-row input:focus,
+.af-row textarea:focus {
+  border-color: var(--brand-500);
+}
+.af-ops {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }</style>

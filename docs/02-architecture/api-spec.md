@@ -302,6 +302,53 @@ POST /me/onboarded                                      // 标记新手引导已
 GET  /me                                                // 新增 onboarded 字段（false 时工作台展示引导条）
 ```
 
+## 8.2 项目资产（P2：场景/道具/其他 + 分镜资产绑定）
+
+> 角色与场景/道具共用 `project_assets` 表（`kind=character|scene|prop|other`）。角色沿用 §8 的
+> `characters/generate` / `portrait` / `finalize`（写入同一张表），本节只覆盖非角色资产的 CRUD 与
+> 分镜绑定；`storyboard_assets(storyboard_id, project_asset_id)` 为绑定表。
+> 定稿语义：`status=1` 草稿 / `status=2` 已定稿（写入 `finalized_at`，置回 1 清空）。
+> 生成视频时服务端从绑定读取 `ref_image_uri`，**要求每个被绑定资产 `status=2` 且 `ref_image_uri` 非空**，
+> 否则该镜返回 `400105`（逐镜失败，不整单失败）。
+
+```
+GET /projects/{id}/assets?kind=scene|prop|other|character
+  // kind 省略时返回该项目全部四类资产；按 created_at 升序（同秒按 id 升序）
+  ← {list:[{
+       id, kind, name, description, prompt, ref_image_uri,
+       portrait_asset_id, portrait_url,   // portrait_url = ref_image_uri 的预签名 URL（1h）
+       source_task_id, status,           // 1 草稿 / 2 已定稿
+       finalized_at,                     // ISO8601 或 null
+       bound_shot_count                  // 被本项目多少分镜引用（storyboard_assets 聚合）
+     }]}
+  // kind=character 时与 GET /projects/{id} 的 characters 字段同构（仅多 finalized_at / bound_shot_count）
+
+POST /projects/{id}/assets
+  {kind:"scene"|"prop"|"other", name:1..50, description?≤500, prompt?≤1000, ref_image_uri?≤500}
+  ← ProjectAssetDto（status=1 草稿，finalized_at=null，bound_shot_count=0）
+  // kind=character → 400101 + msg 提示走 /projects/{id}/characters/generate
+
+PATCH /projects/{id}/assets/{assetId}
+  {name?, description?, prompt?, ref_image_uri?, status?:1|2}   // 至少一个字段
+  // status=2 → 写 finalized_at（已定稿重复置 2 保留原值）；status=1 → 清空 finalized_at
+  // description/prompt/ref_image_uri 传 "" 或 null 表示清空
+  ← ProjectAssetDto
+
+DELETE /projects/{id}/assets/{assetId}
+  ← {ok:true}   // 同事务先删 storyboard_assets 绑定，再删资产（重复删除 → 400102）
+
+PUT /projects/{id}/episodes/{eid}/storyboards/{sid}/assets
+  {asset_ids: string[]}   // 0..20，含角色与场景/道具（角色也是 project_assets 行）
+  ← {asset_ids: string[]} // 落库后的绑定顺序 = 入参顺序（重复 id 按首次出现去重）
+  // 整体替换（同事务 delete + insert）；任一 id 不存在或不属于该项目 → 400101，不落库
+```
+
+**错误码**：`400101` 参数/枚举/长度非法、kind=character 走错端点、绑定含非法/跨项目 id；
+`400102` 项目或资产不存在（含跨 space 隔离）；`400105` 投递时绑定资产未定稿或缺少参考图。
+
+**跨 space**：`GET/POST/PATCH/DELETE /projects/{id}/assets/**` 与绑定接口先按 `findProject(space, project)`
+校验，项目不属于当前 space → `400102`（不泄露资产是否存在）。
+
 ## 9. assets
 
 ```

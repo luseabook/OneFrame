@@ -144,6 +144,21 @@ export interface CharacterDto {
   status: number;
 }
 
+/** 项目资产（P2）：kind=character 时来自 characters 接口，其余来自 /projects/:id/assets */
+export interface ProjectAssetDto {
+  id: string;
+  kind: string;
+  name: string;
+  description: string | null;
+  prompt: string | null;
+  ref_image_uri: string | null;
+  portrait_asset_id: string | null;
+  portrait_url?: string | null;
+  status: number;
+  finalized_at?: string | null;
+  bound_shot_count?: number;
+}
+
 export interface AssetDto {
   id: string;
   kind: string;

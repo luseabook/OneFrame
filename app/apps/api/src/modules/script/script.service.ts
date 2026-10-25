@@ -17,6 +17,7 @@ import {
   AppError,
   ErrorCode,
   LIMITS,
+  ProjectAssetStatus,
   TaskStatus,
   newId,
   type CharactersGenerateRequest,
@@ -24,6 +25,9 @@ import {
   type GenerationRequest,
   type OutlineConfirmRequest,
   type PortraitGenerateRequest,
+  type ProjectAssetCreateRequest,
+  type ProjectAssetKind,
+  type ProjectAssetPatchRequest,
   type ScriptDraftGenerateRequest,
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
@@ -101,6 +105,25 @@ function assetDto(row: ProjectAssetRow, portraitUrl: string | null = null) {
     source_task_id: row.sourceTaskId ? String(row.sourceTaskId) : null,
     status: row.status,
   };
+}
+
+/**
+ * P2 项目资产 DTO：在 assetDto 基础上补 finalized_at / bound_shot_count。
+ * kind=character 时与 GET /projects/{id} 的 characters 字段同构（仅多这两个字段）。
+ */
+function projectAssetDto(row: ProjectAssetRow, portraitUrl: string | null, boundShotCount: number) {
+  return {
+    ...assetDto(row, portraitUrl),
+    finalized_at: row.finalizedAt ? row.finalizedAt.toISOString() : null,
+    bound_shot_count: boundShotCount,
+  };
+}
+
+/** 可空文本归一：空白/空串 → null（PATCH 用空串表示清空） */
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 @Injectable()
@@ -873,6 +896,168 @@ export class ScriptService {
     };
   }
 
+  // ── P2：项目资产（场景/道具/其他）CRUD + 分镜资产绑定 ───────────────────
+
+  /** GET /projects/{id}/assets?kind=：按 createdAt 升序；kind 省略时返回全部四类（含角色） */
+  async listProjectAssets(spaceId: string, projectId: string, kind?: ProjectAssetKind) {
+    const project = await this.findProject(spaceId, projectId);
+    const rows = await db
+      .select()
+      .from(projectAssets)
+      .where(
+        kind
+          ? and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, kind))
+          : eq(projectAssets.projectId, project.id),
+      )
+      .orderBy(projectAssets.createdAt, projectAssets.id);
+    const counts = await this.boundShotCounts(rows.map((row) => row.id));
+    const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(row, counts)));
+    return { list };
+  }
+
+  /** POST /projects/{id}/assets：新建场景/道具/其他（角色必须走 characters/generate） */
+  async createProjectAsset(spaceId: string, projectId: string, input: ProjectAssetCreateRequest) {
+    const project = await this.findProject(spaceId, projectId);
+    if (input.kind === "character") {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        "character assets must be generated via POST /projects/{id}/characters/generate",
+        { field: "kind" },
+      );
+    }
+    const [row] = await db
+      .insert(projectAssets)
+      .values({
+        id: newId(),
+        projectId: project.id,
+        kind: input.kind,
+        name: input.name,
+        description: normalizeOptionalText(input.description),
+        prompt: normalizeOptionalText(input.prompt),
+        refImageUri: normalizeOptionalText(input.ref_image_uri),
+        status: ProjectAssetStatus.DRAFT,
+      })
+      .returning();
+    if (!row) throw new AppError(ErrorCode.INTERNAL, "failed to create project asset");
+    return this.projectAssetDtoOf(row);
+  }
+
+  /** PATCH /projects/{id}/assets/{assetId}：改名/描述/提示词/参考图/定稿状态 */
+  async patchProjectAsset(
+    spaceId: string,
+    projectId: string,
+    assetId: string,
+    input: ProjectAssetPatchRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    const patch: Partial<typeof projectAssets.$inferInsert> = { updatedAt: new Date() };
+    if (input.name !== undefined) patch.name = input.name;
+    if (input.description !== undefined) patch.description = normalizeOptionalText(input.description);
+    if (input.prompt !== undefined) patch.prompt = normalizeOptionalText(input.prompt);
+    if (input.ref_image_uri !== undefined) patch.refImageUri = normalizeOptionalText(input.ref_image_uri);
+    if (input.status !== undefined) {
+      patch.status = input.status;
+      // 定稿幂等：已定稿再次置 2 时保留原 finalized_at；置 1 清空
+      patch.finalizedAt =
+        input.status === ProjectAssetStatus.FINALIZED ? (asset.finalizedAt ?? new Date()) : null;
+    }
+    const [row] = await db
+      .update(projectAssets)
+      .set(patch)
+      .where(eq(projectAssets.id, asset.id))
+      .returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    return this.projectAssetDtoOf(row);
+  }
+
+  /** DELETE /projects/{id}/assets/{assetId}：同事务解除分镜绑定后删除资产 */
+  async deleteProjectAsset(spaceId: string, projectId: string, assetId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    await db.transaction(async (tx) => {
+      await tx.delete(storyboardAssets).where(eq(storyboardAssets.projectAssetId, asset.id));
+      await tx.delete(projectAssets).where(eq(projectAssets.id, asset.id));
+    });
+    return { ok: true };
+  }
+
+  /**
+   * PUT /projects/{id}/episodes/{eid}/storyboards/{sid}/assets：
+   * 整体替换该分镜的绑定（同事务 delete + insert），返回落库后的 id 顺序（=入参顺序，去重）。
+   */
+  async replaceStoryboardAssets(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    storyboardId: string,
+    assetIds: string[],
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    let sid: bigint;
+    try {
+      sid = BigInt(storyboardId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid storyboard id", { field: "sid" });
+    }
+    const [storyboard] = await db
+      .select()
+      .from(storyboards)
+      .where(and(eq(storyboards.id, sid), eq(storyboards.episodeId, episode.id)));
+    if (!storyboard) throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found");
+
+    // 规范化 id 并按入参顺序去重（"01" 与 "1" 视为同一资产）
+    const orderedIds: string[] = [];
+    const orderedBigints: bigint[] = [];
+    for (const raw of assetIds) {
+      let id: bigint;
+      try {
+        id = BigInt(raw);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, `invalid asset id: ${raw}`, {
+          field: "asset_ids",
+        });
+      }
+      const key = String(id);
+      if (orderedIds.includes(key)) continue;
+      orderedIds.push(key);
+      orderedBigints.push(id);
+    }
+    // 每个 id 都必须属于该项目且存在，否则 400101（不泄露其它项目资产是否存在）
+    if (orderedBigints.length > 0) {
+      const rows = await db
+        .select({ id: projectAssets.id })
+        .from(projectAssets)
+        .where(
+          and(
+            eq(projectAssets.projectId, project.id),
+            inArray(projectAssets.id, orderedBigints),
+          ),
+        );
+      if (rows.length !== orderedBigints.length) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "some asset ids do not exist in this project", {
+          field: "asset_ids",
+        });
+      }
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(storyboardAssets).where(eq(storyboardAssets.storyboardId, storyboard.id));
+      if (orderedBigints.length > 0) {
+        await tx
+          .insert(storyboardAssets)
+          .values(
+            orderedBigints.map((projectAssetId) => ({
+              storyboardId: storyboard.id,
+              projectAssetId,
+            })),
+          );
+      }
+    });
+    return { asset_ids: orderedIds };
+  }
+
   async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
@@ -971,11 +1156,14 @@ export class ScriptService {
     if (shots.length !== ids.length) throw new AppError(ErrorCode.NOT_FOUND, "some shots not found");
     const shotById = new Map(shots.map((s) => [String(s.id), s]));
 
-    const characters = await db
+    // P2：分镜绑定可包含角色 / 场景 / 道具 / 其他任意项目资产，统一按资产读参考图
+    // （仍要求每个被绑定资产 status=2 且 ref_image_uri 非空，否则该镜 400105）
+    const projectAssetRows = await db
       .select()
       .from(projectAssets)
-      .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "character"))).orderBy(projectAssets.createdAt, projectAssets.id);
-    const charById = new Map(characters.map((c) => [String(c.id), c]));
+      .where(eq(projectAssets.projectId, project.id))
+      .orderBy(projectAssets.createdAt, projectAssets.id);
+    const assetById = new Map(projectAssetRows.map((asset) => [String(asset.id), asset]));
     const links =
       shots.length > 0
         ? await db
@@ -1023,7 +1211,7 @@ export class ScriptService {
         items.push({ shot_id: shotId, task_id: null, submitted: false, code: ErrorCode.NOT_FOUND });
         continue;
       }
-      const linked = (linkMap.get(shotId) ?? []).map((id) => charById.get(id)).filter(Boolean);
+      const linked = (linkMap.get(shotId) ?? []).map((id) => assetById.get(id)).filter(Boolean);
       const refs = linked
         .filter((c) => c && c.status === 2 && c.refImageUri)
         .map((c) => c!.refImageUri!)
@@ -1374,6 +1562,46 @@ export class ScriptService {
       error: row.error,
       expires_at: row.expiresAt?.toISOString() ?? null,
     };
+  }
+
+  /** 单个项目资产的 DTO（预签名参考图 + 被分镜引用次数）；counts 可批量预取避免 N+1 */
+  private async projectAssetDtoOf(row: ProjectAssetRow, counts?: Map<string, number>) {
+    const boundCounts = counts ?? (await this.boundShotCounts([row.id]));
+    const portraitUrl = row.refImageUri
+      ? await this.storage.signDownload(row.refImageUri, 3600)
+      : null;
+    return projectAssetDto(row, portraitUrl, boundCounts.get(String(row.id)) ?? 0);
+  }
+
+  /** 聚合每个资产被多少分镜引用（storyboard_assets 计数；绑定表无 created_at，无需排序） */
+  private async boundShotCounts(assetIds: bigint[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (assetIds.length === 0) return counts;
+    const links = await db
+      .select()
+      .from(storyboardAssets)
+      .where(inArray(storyboardAssets.projectAssetId, assetIds));
+    for (const link of links) {
+      const key = String(link.projectAssetId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** 项目资产查找（任意 kind；必须属于该项目） */
+  private async findProjectAsset(projectId: bigint, assetId: string): Promise<ProjectAssetRow> {
+    let id: bigint;
+    try {
+      id = BigInt(assetId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid asset id", { field: "assetId" });
+    }
+    const [row] = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.id, id), eq(projectAssets.projectId, projectId)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    return row;
   }
 
   private async findCharacter(projectId: bigint, characterId: string): Promise<ProjectAssetRow> {

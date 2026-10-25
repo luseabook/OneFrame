@@ -43,6 +43,50 @@ export const characterSchema = z.object({
 });
 export type Character = z.infer<typeof characterSchema>;
 
+// ── P2：项目资产（场景/道具/其他）与分镜资产绑定 ───────────────────────
+// project_assets.kind 支持 character|scene|prop|other；本组接口只写非角色资产，
+// 角色走 POST /projects/{id}/characters/generate（同一张表，kind=character）。
+export const PROJECT_ASSET_KINDS = ["character", "scene", "prop", "other"] as const;
+export type ProjectAssetKind = (typeof PROJECT_ASSET_KINDS)[number];
+
+/** 单个分镜可绑定的项目资产上限（0..20） */
+export const STORYBOARD_ASSET_BIND_MAX = 20;
+
+export const projectAssetKindSchema = z.enum(PROJECT_ASSET_KINDS);
+
+export const projectAssetCreateSchema = z.object({
+  // kind=character 在服务端拒绝并提示走 characters/generate（400101）
+  kind: projectAssetKindSchema,
+  name: z.string().trim().min(1).max(50),
+  description: z.string().max(500).optional(),
+  prompt: z.string().max(1000).optional(),
+  ref_image_uri: z.string().max(500).optional(),
+});
+export type ProjectAssetCreateRequest = z.infer<typeof projectAssetCreateSchema>;
+
+export const projectAssetPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(50).optional(),
+    description: z.string().max(500).nullish(),
+    prompt: z.string().max(1000).nullish(),
+    ref_image_uri: z.string().max(500).nullish(),
+    // 1 草稿 / 2 定稿；status=2 写 finalized_at，status=1 清空
+    status: z
+      .union([z.literal(ProjectAssetStatus.DRAFT), z.literal(ProjectAssetStatus.FINALIZED)])
+      .optional(),
+  })
+  .refine((value) => Object.values(value).some((item) => item !== undefined), {
+    message: "至少需要一个可更新字段",
+  });
+export type ProjectAssetPatchRequest = z.infer<typeof projectAssetPatchSchema>;
+
+// PUT /projects/{id}/episodes/{eid}/storyboards/{sid}/assets：整体替换绑定
+// 入参含角色与场景/道具，同一分镜最多 20 个；返回顺序与入参一致
+export const storyboardAssetsPutSchema = z.object({
+  asset_ids: z.array(z.string().trim().min(1)).max(STORYBOARD_ASSET_BIND_MAX),
+});
+export type StoryboardAssetsPutRequest = z.infer<typeof storyboardAssetsPutSchema>;
+
 export const storyboardSchema = z.object({
   id: z.string(),
   shot_no: z.number().int().min(1),

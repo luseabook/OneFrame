@@ -236,3 +236,40 @@
 3. 图片生成 tab：当前后端只覆盖视频；需图像生成模型接入（Ark Seedream 适配器已在 model-adapters 侧具备，待接 registry）。
 4. 3D 导演台：three.js 场景 + 机位系统（P4）。
 5. 分镜多版本（参照 `storyboard/info-list`）、镜头评论、标签分组：需数据模型扩展（P2/P3）。
+
+---
+
+## 9. P2 实施记录：项目资产（场景/道具/其他）+ 分镜资产绑定（2026-10-25 落地）
+
+### 9.1 后端（无需迁移，数据模型早就位）
+
+| 端点 | 说明 |
+|---|---|
+| `GET /v1/projects/:id/assets?kind=scene\|prop\|other\|character` | 按 createdAt 升序；DTO 含 `finalized_at`、`bound_shot_count`、`portrait_url`（ref_image_uri 的 1h 预签名） |
+| `POST /v1/projects/:id/assets` | 建场景/道具/其他（`kind=character` 显式 400101，角色走 characters/generate） |
+| `PATCH /v1/projects/:id/assets/:assetId` | 改名/描述/prompt/参考图 uri；`status=2` 写 finalized_at（幂等）、`=1` 清空 |
+| `DELETE /v1/projects/:id/assets/:assetId` | 同事务先解绑 `storyboard_assets` 再删，重复删除 400102 |
+| `PUT /v1/projects/:id/episodes/:eid/storyboards/:sid/assets` | 0..20 整体替换绑定，非法/跨项目 id → 400101，返回入参顺序 |
+
+关键实现修正：`generate-videos` 原先把「只查 character 的查找表」用于 refs，scene/prop 绑定会被静默丢弃；P2 扩为「项目全部资产」，过滤语义（每个绑定资产必须 `status=2` 且 `ref_image_uri` 非空，否则该镜 400105）不变 → 角色行为零回归，且**场景/道具定稿后能真正进入 `reference_uris`**（有测试断言真实 tasks 行）。
+
+测试：新增 `apps/api/test/project-assets.spec.ts`（13 例）；`pnpm --filter @app/api test` → **186 passed**（基线 173，无回归）；api typecheck/lint/build 全绿。api-spec 已补 §8.2。
+
+### 9.2 前端（`pages/projects/[id].vue`）
+
+- 资产视图四个 tab 全部有内容：`角色`（characters 接口）、`场景/道具/其他`（新接口）；空态为参照式三卡（AI 提取资产〔disabled，P3〕/ 新建X / 导入X）。
+- 新建弹窗（名称/描述/提示词/参考图 uri）、编辑、定稿/取消定稿、删除；导入 = 先 `POST /assets/upload` 拿存储 uri，再建项目资产（草稿态）。
+- 项目资产抽屉：按 tab 列出可选资产，**多选勾选 → 「应用到当前分镜」** → `PUT .../assets`，返回的 `asset_ids` 直接覆盖 `shot.character_ids`；打开时默认落在有内容的 tab。
+- 分镜中列素材区：显示当前镜**全部绑定资产**（角色 + 场景/道具），带头像/参考图、定稿态、`✕` 移除；生成台额度按真实绑定数统计（图片 N/30、总素材 N/50）。
+
+### 9.3 验收
+
+- 端到端（`_acceptance/e2e-p2.cjs`，真实 UI + 真实 API）：新建场景「雨夜街头」→ 卡片出现 → 定稿（提示「已定稿，可作为参考图注入分镜」）→ 分镜 → 项目资产 → 场景 tab 勾选 → 应用 → 横幅「素材已更新（2 个）」→ 素材区两张、额度 `总素材 2/50`，全程无 pageerror。
+- 截图：`evidence/reelflow-impl/p2-{scene-empty,asset-form,drawer,scene-created,bound}.png`。
+- 提交流程语义不变：未定稿资产仍会被 400105 逐镜拒绝（P1 冒烟已覆盖）。
+
+### 9.4 P2 未做（下一轮）
+
+1. 场景/道具的「生成X」（AI 生图）：需把 Ark 图像适配器接进 registry（model-adapters 已有实现）。
+2. AI 提取资产（P3）：剧本 → 资产清单（角色/场景/道具 + 提示词）→ 校验页 → 批量生成。
+3. 「仅展示主体」开关（subject）、更多素材源、放大编辑。
