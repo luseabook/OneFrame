@@ -48,4 +48,7 @@ _acceptance/*
 !_acceptance/capture-authed.cjs
 !_acceptance/scrub-pii.cjs
 !_acceptance/probe-auth.cjs
+# 域级 HTTP 冒烟（可复跑，作为端到端回归文档）
+!_acceptance/smoke-team-http.cjs
+!_acceptance/smoke-team-topup.cjs
 !_acceptance/mcp-check.cjs
