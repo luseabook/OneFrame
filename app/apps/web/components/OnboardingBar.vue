@@ -38,9 +38,9 @@ const steps = [
   gap: var(--space-6);
   padding: var(--space-4) var(--space-5);
   margin-bottom: var(--space-5);
-  border: 1px solid var(--brand-200);
+  border: 1px solid var(--brand-border);
   border-radius: var(--radius-xl);
-  background: linear-gradient(120deg, var(--brand-50), transparent 70%), var(--bg-surface);
+  background: linear-gradient(120deg, var(--brand-soft), transparent 70%), var(--bg-surface);
 }
 .title {
   margin: 0 0 var(--space-3);
