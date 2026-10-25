@@ -31,6 +31,14 @@
   --brand-border: #9b46ff59; /* 品牌色描边（≈35%） */
   --brand-on-soft: #cf9fff; /* 品牌软底上的文字 */
 
+  /* ── 工作流内页面板（参照实测：rgba(194,204,241,0.08) 半透明，不是实体深色）── */
+  --panel-tint: rgba(194, 204, 241, 0.08);
+  --panel-tint-strong: rgba(194, 204, 241, 0.12);
+  --panel-line: rgba(194, 204, 241, 0.14);
+  --brand-40: rgba(155, 70, 255, 0.4);
+  --radius-panel: 20px;
+  --control-h: 40px;
+
   /* ── 语义色（竞品 dark-* 调色板）── */
   --success: #5fd08a;
   --success-bg: #0f2a1c;
