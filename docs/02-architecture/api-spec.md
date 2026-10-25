@@ -705,6 +705,41 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | 表格节点 | 2 | `.../table/import`、`.../confirm-sheet` | — |
 | Agent 技能卡 | ~~8~~ → **0（归 ops）** | `agent-recommend-cards`、`agent-skills/*` | 裁决 D3：内容库属运营 |
 
+#### 14.4.1 `canvas` 已实现端点（2026-10-26，迁移 0014）
+
+> 前缀 `/canvas`（参照为 `/web/v1/df/canvas/*`；按 ADR-009 保留域划分，空间由 `X-Space-Id` 表达）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/canvas/canvases` | 列表（分页）/ 创建 |
+| GET/PATCH/DELETE | `/canvas/canvases/{id}` | 详情（含节点/边/分组）/ 改名（带 version）/ 软删 |
+| POST | `/canvas/canvases/{id}/commit` | **整图提交**：乐观锁校验 → 整体替换 → version+1 → 写快照 |
+| GET | `/canvas/canvases/{id}/snapshots` `/{version}` | 历史版本列表 / 取某版本（恢复用） |
+| POST | `/canvas/canvases/{id}/nodes` | 建节点（`node_type` 11 种白名单） |
+| POST | `/canvas/canvases/{id}/nodes/batch` | 批量建 |
+| PATCH | `/canvas/canvases/{id}/nodes/{node_id}` | 改节点（节点级乐观锁，冲突 746002） |
+| POST | `/canvas/canvases/{id}/nodes/batch-edit` | 批量改（逐条校验，逐条返回结果） |
+| DELETE | `/canvas/canvases/{id}/nodes/{node_id}` | 软删（**同时清相关连线**，不留悬挂边） |
+| POST | `/canvas/canvases/{id}/nodes/batch-delete` | 批量软删 |
+| POST | `/canvas/canvases/{id}/nodes-recover` | 恢复软删节点 |
+| GET | `/canvas/canvases/{id}/nodes?node_type=` | 按类型取节点 |
+| POST | `/canvas/canvases/{id}/edges` | 建连线（**幂等**：重复创建返回同一条，`created:false`） |
+| POST | `/canvas/canvases/{id}/edges/batch` | 批量建（逐条返回） |
+| DELETE | `/canvas/canvases/{id}/edges/{edge_id}` | 删连线 |
+| POST | `/canvas/canvases/{id}/edges/batch-delete` | 批量删 |
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/lock\|unlock\|renew` | 节点锁（Redis TTL 30s；被他人持锁 746003） |
+| POST | `/canvas/canvases/{id}/heartbeat` | 画布级心跳（TTL 60s）+ 返回当前锁快照 |
+| POST | `/canvas/canvases/{id}/groups` | 建分组 |
+| DELETE | `/canvas/canvases/{id}/groups/{group_id}` | 删分组（有子组时拒绝） |
+| PUT | `/canvas/canvases/{id}/pinned-node` | 钉住节点（单选，`node_id=null` 取消） |
+
+**关键语义说明**：
+1. **提交通用整体替换**：画布编辑天然是整图操作（拖拽/批量/撤销），逐条 diff 的边界情况远多于收益；单画布百级节点下代价可接受。提交时若边引用了不存在的节点 → **400101 且事务回滚**（版本不推进）。
+2. **两层乐观锁**：画布级（`canvases.version`，提交/改名用）与节点级（`canvas_nodes.version`，单节点 PATCH 用），冲突一律 **746002**，绝不静默覆盖。
+3. **锁不落库**：`node_locks` 走 Redis（对齐 §7 既有决策）；`unlock` 只能由持锁者执行，否则 746003。
+
+**尚未实现（不暴露空壳）**：模板库（`canvas_templates` 表已建，端点未做）、素材（`canvas_materials`）、批注（`canvas_comment_nodes`/`canvas_comments`）、固定组（`canvas_pin_groups`）、节点派生任务（`nodes/{id}/video-parse` 等 9 个）、画布内对话/SSE（归 `agent` 域）。
+
 ### 14.5 `cam` 与 `film` 端点族要点
 
 | 域 | 要点 |

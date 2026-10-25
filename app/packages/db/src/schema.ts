@@ -778,3 +778,295 @@ export const userThirdKeys = pgTable(
   },
   (t) => [index("idx_user_third_keys_user").on(t.userId, t.provider)],
 );
+
+// ── canvas 画布域（F1 契约 §12.1，迁移 0014）──────────────
+// 内容型数据（节点/边/分组）全部 space_id 隔离；节点锁走 Redis 不落库；
+// 生成任务一律复用 tasks（canvas_nodes.task_id），禁止另造任务表。
+
+/** 画布（§7 占位补齐：所有权/软删/剧集映射/钉住/时间戳） */
+export const canvases = pgTable(
+  "canvases",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    title: text("title").notNull().default("未命名画布"),
+    /** 乐观锁版本；提交时必带，不匹配 → 746002 */
+    version: integer("version").notNull().default(1),
+    /** 1 制片工坊 2 无限画布（RE canvas.md:222） */
+    creationMode: smallint("creation_mode").notNull().default(2),
+    /** 剧集映射；前向外键（episodes 后建域），迁移末尾 ALTER 补加 */
+    episodeId: bigint("episode_id", { mode: "bigint" }),
+    ownerUserId: bigint("owner_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 「钉住节点」单选（routes.txt:402 为单值语义） */
+    pinnedNodeId: bigint("pinned_node_id", { mode: "bigint" }),
+    lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvases_space").on(t.spaceId, t.updatedAt.desc())],
+);
+
+/** 画布节点（11 种 node_type 是硬约束，见 §12.1.10） */
+export const canvasNodes = pgTable(
+  "canvas_nodes",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    /** text|image|video|audio|table|script|asset|clip|director|threeDWorld|group */
+    nodeType: text("node_type").notNull(),
+    name: text("name").notNull().default(""),
+    x: integer("x").notNull().default(0),
+    y: integer("y").notNull().default(0),
+    width: integer("width"),
+    height: integer("height"),
+    zIndex: integer("z_index").notNull().default(0),
+    /** 类型专属参数（image/video 的 mode + settings 等，见 §12.1.10） */
+    params: jsonb("params").notNull().default(sql`'{}'::jsonb`),
+    /** 该节点派生的生成任务（复用 tasks，禁止另造任务表） */
+    taskId: bigint("task_id", { mode: "bigint" }).references(() => tasks.id),
+    /** 1 就绪 2 生成中 3 失败 */
+    status: smallint("status").notNull().default(1),
+    /** 固定组成员（与 canvas_pin_groups.node_ids 反向冗余，须同事务双写） */
+    groupIds: bigint("group_ids", { mode: "bigint" }).array().notNull().default(sql`'{}'::bigint[]`),
+    version: integer("version").notNull().default(1),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_canvas_nodes_canvas").on(t.canvasId, t.zIndex),
+    index("idx_canvas_nodes_type").on(t.canvasId, t.nodeType),
+    index("idx_canvas_nodes_task").on(t.taskId),
+  ],
+);
+
+/** 画布连线（唯一约束 = "确保连线存在"的幂等语义） */
+export const canvasEdges = pgTable(
+  "canvas_edges",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    srcNodeId: bigint("src_node_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvasNodes.id),
+    dstNodeId: bigint("dst_node_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvasNodes.id),
+    /** pipeline|reference|sequence（node.md:366，默认 pipeline） */
+    semantic: text("semantic").notNull().default("pipeline"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_canvas_edges").on(t.canvasId, t.srcNodeId, t.dstNodeId, t.semantic),
+    index("idx_canvas_edges_src").on(t.srcNodeId),
+    index("idx_canvas_edges_dst").on(t.dstNodeId),
+  ],
+);
+
+/** 画布快照（按版本存 JSONB，用于恢复/自动保存） */
+export const canvasSnapshots = pgTable(
+  "canvas_snapshots",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    version: integer("version").notNull(),
+    /** 1 自动 2 手动 */
+    kind: smallint("kind").notNull().default(1),
+    payload: jsonb("payload").notNull(),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_canvas_snapshots").on(t.canvasId, t.version)],
+);
+
+/** 节点分组（树形） */
+export const canvasGroups = pgTable(
+  "canvas_groups",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    name: text("name"),
+    sort: integer("sort").notNull().default(0),
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_groups").on(t.canvasId, t.parentId, t.sort)],
+);
+
+/** 整画布模板库（与节点组模板不同物，勿混用） */
+export const canvasTemplates = pgTable(
+  "canvas_templates",
+  {
+    id: pk(),
+    /** 官方模板为 NULL（全局可见） */
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    /** 1 官方 2 团队 3 个人 */
+    tplScope: smallint("tpl_scope").notNull(),
+    /** 1 新手引导 2 官方画布模块 3 从剧本到成片 */
+    tplType: smallint("tpl_type").notNull().default(2),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    coverUri: text("cover_uri"),
+    /** 画布元素集合（结构待取证 A-02） */
+    payload: jsonb("payload").notNull(),
+    /** 1 草稿 2 已发布 3 已下架 */
+    status: smallint("status").notNull().default(1),
+    sort: integer("sort").notNull().default(100),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_templates_list").on(t.tplScope, t.tplType, t.status, t.sort)],
+);
+
+/** 节点组模板 */
+export const canvasGroupTemplates = pgTable(
+  "canvas_group_templates",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    groupId: bigint("group_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvasGroups.id),
+    name: text("name").notNull(),
+    payload: jsonb("payload").notNull(),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_group_templates").on(t.canvasId, t.groupId)],
+);
+
+/** 画布素材（上传/节点产出/资产库引用 三来源） */
+export const canvasMaterials = pgTable(
+  "canvas_materials",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    /** image|video|audio|file */
+    materialType: text("material_type").notNull(),
+    /** 1 上传 2 节点产出 3 资产库引用 */
+    source: smallint("source").notNull().default(1),
+    nodeId: bigint("node_id", { mode: "bigint" }).references(() => canvasNodes.id),
+    name: text("name").notNull().default(""),
+    objectKey: text("object_key"),
+    meta: jsonb("meta").notNull().default(sql`'{}'::jsonb`),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_materials").on(t.canvasId, t.materialType, t.createdAt.desc())],
+);
+
+/** 固定组（每画布 7 个槽位，成员整体替换） */
+export const canvasPinGroups = pgTable(
+  "canvas_pin_groups",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    name: text("name"),
+    color: text("color"),
+    /** 1..7 */
+    slot: smallint("slot").notNull(),
+    nodeIds: bigint("node_ids", { mode: "bigint" }).array().notNull().default(sql`'{}'::bigint[]`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_canvas_pin_groups").on(t.canvasId, t.slot)],
+);
+
+/** 批注锚点（画布坐标） */
+export const canvasCommentNodes = pgTable(
+  "canvas_comment_nodes",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    anchorX: integer("anchor_x").notNull(),
+    anchorY: integer("anchor_y").notNull(),
+    nodeId: bigint("node_id", { mode: "bigint" }).references(() => canvasNodes.id),
+    /** canvas|node */
+    scope: text("scope").notNull().default("canvas"),
+    resolved: boolean("resolved").notNull().default(false),
+    resolvedBy: bigint("resolved_by", { mode: "bigint" }).references(() => users.id),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdBy: bigint("created_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_comment_nodes").on(t.canvasId, t.resolved, t.createdAt.desc())],
+);
+
+/** 批注内容（不复用 content_reports：后者是公开举报） */
+export const canvasComments = pgTable(
+  "canvas_comments",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    commentNodeId: bigint("comment_node_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvasCommentNodes.id),
+    content: text("content").notNull(),
+    mentions: bigint("mentions", { mode: "bigint" }).array().notNull().default(sql`'{}'::bigint[]`),
+    createdBy: bigint("created_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_canvas_comments").on(t.commentNodeId, t.createdAt)],
+);

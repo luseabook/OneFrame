@@ -589,7 +589,7 @@ CREATE TABLE admin_users (
 | 任务 | **一律复用 §3 `tasks`**，四域不得新建任务表 | ADR-003、§3 |
 | 账本 | **一律复用 §4 `credit_accounts`/`credit_flows`**，四域不得新建账本 | ADR-011、§4 |
 
-### 12.1 `canvas` 画布域（9 张；其中 4 张补齐 §7 占位）
+### 12.1 `canvas` 画布域（11 张；其中 4 张补齐 §7 占位 + 7 张新增）
 
 #### 12.1.1 `canvases`（§7 占位补齐：+所有权/软删/剧集映射/钉住/时间戳）
 
@@ -1206,7 +1206,7 @@ CREATE TABLE film_recent_opens (
 );
 ```
 
-> **表数复核**：canvas 9（含 4 张占位补齐）+ agent 4 + cam 4 新表（另 ALTER 3 张既有表）+ film 13 = **30 张新表 + 3 张 ALTER**。
+> **表数复核**：canvas **11**（4 张占位补齐 + 7 张新增）+ agent 4 + cam 4（另 ALTER 3 张既有表）+ film 13 = **32 张新表 + 3 张 ALTER**。
 
 > ⚠️ **`is_unique_type` 反直觉点（实现红线）**：实测语义是「该 `field_type` 每表**至多一个**」，
 > **不是**「值唯一」。按"值唯一"实现会直接错（依据：bundle `_e(t,e)` 扫描其它字段是否已有同 type）。
@@ -1214,17 +1214,23 @@ CREATE TABLE film_recent_opens (
 > **关于导入（A11）**：`task-tables/import` 无对应状态查询端点（RE 侧未见），故**不建 `film_imports` 表**，
 > 导入按同步端点处理并在 F2 取证后决定是否补异步化。此为已登记的功能缺口，不是遗漏。
 
-### 12.5 迁移顺序（0013–0016）
+### 12.5 迁移顺序（0013–0016，**已按实际落地调整**）
 
 ```
-0013_canvas      -- canvases/canvas_nodes/canvas_edges/canvas_snapshots/canvas_groups/canvas_templates/
+0013_cam         -- ✅ 已落地 2026-10-26：ALTER spaces/space_members/credit_flows
+                 --   + team_groups/team_roles/team_member_projects/user_third_keys
+                 --   （cam 先落地，因为它是商业化前置且不依赖 canvas/agent/film）
+0014_canvas      -- canvases/canvas_nodes/canvas_edges/canvas_snapshots/canvas_groups/canvas_templates/
                  -- canvas_group_templates/canvas_materials/canvas_pin_groups/canvas_comment_nodes/canvas_comments
                  -- （canvases.episode_id 前向外键在本迁移末尾 ALTER 补加）
-0014_agent       -- agent_sessions/agent_messages/agent_message_node_bindings/agent_events
-0015_cam         -- ALTER spaces/space_members/credit_flows + team_groups/team_roles/team_member_projects/user_third_keys
-                 -- 回填 UPDATE：role=1→master、role=2→admin、role=3→project_executor
-0016_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0013 的画布）
+0015_agent       -- agent_sessions/agent_messages/agent_message_node_bindings/agent_events
+                 -- （agent_sessions.canvas_id 前向外键在 0014 建表后补加）
+0016_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
 ```
+
+> ⚠️ **与原计划的差异说明**：原计划是 `0013_canvas → 0014_agent → 0015_cam → 0016_film`，
+> 实际改为 **cam 先行（0013）**，因为 cam 是商业化前置、且不依赖其它三域；
+> canvas/agent/film 的编号整体后移。**编号以本节为准**（§12.4 与各域小节不再声明编号）。
 
 **顺序理由**：canvas/agent 只依赖既有 `tasks/assets/spaces`；cam 依赖 spaces/billing；
 film 同时依赖 canvas（画布绑定）+ cam（成员权限）+ tasks。前向外键一律在本迁移末尾 `ALTER` 补加，

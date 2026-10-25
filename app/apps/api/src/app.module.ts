@@ -16,6 +16,7 @@ import { ModerationModule } from "./modules/moderation/moderation.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { ScriptModule } from "./modules/script/script.module";
 import { TeamModule } from "./modules/team/team.module";
+import { CanvasModule } from "./modules/canvas/canvas.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -39,6 +40,7 @@ import { StorageModule } from "./storage/storage.module";
     TasksModule,
     ScriptModule,
     TeamModule,
+    CanvasModule,
     ReportsModule,
   ],
   controllers: [AppController, HealthController, MetricsController],
