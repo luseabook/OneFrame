@@ -117,18 +117,21 @@ onMounted(load);
 <template>
   <div class="works">
     <header class="head">
-      <div>
+      <div class="head-main">
         <h1>我的作品</h1>
         <p class="sub">以「剧」为单位查看成果；制作明细在任务中心。</p>
       </div>
-      <Button @click="router.push('/projects')">+ 新建作品</Button>
+      <div class="head-actions">
+        <Button @click="router.push('/projects')">+ 新建作品</Button>
+      </div>
     </header>
 
-    <nav class="filter">
+    <nav class="tabs">
       <button
         v-for="t in tabs"
         :key="t.key"
-        class="f-tab"
+        type="button"
+        class="tab"
         :class="{ on: filter === t.key }"
         @click="switchFilter(t.key)"
       >
@@ -192,14 +195,15 @@ onMounted(load);
         </article>
       </div>
 
-      <EmptyState
-        v-else
-        icon="▦"
-        title="还没有作品"
-        description="从一句话或一段小说开始，AI 帮你拆成 3~6 集并生成分镜，一集可出片。"
-      >
-        <Button @click="router.push('/projects')">新建第一部作品</Button>
-      </EmptyState>
+      <div v-else class="empty-wrap">
+        <EmptyState
+          icon="▦"
+          title="还没有作品"
+          description="从一句话或一段小说开始，AI 帮你拆成 3~6 集并生成分镜，一集可出片。"
+        >
+          <Button @click="router.push('/projects')">新建第一部作品</Button>
+        </EmptyState>
+      </div>
 
       <div v-if="total > pageSize" class="pager">
         <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
@@ -211,59 +215,83 @@ onMounted(load);
 </template>
 
 <style scoped>
+/* 页内容容器：与 home/tools 同一套 padding 节奏，最大宽度对齐 projects/index.vue */
 .works {
-  max-width: 1360px;
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 32px 72px 80px;
 }
 .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--space-5);
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.head-main {
+  min-width: 0;
 }
 .head h1 {
   font-size: var(--text-2xl);
   font-weight: 700;
+  color: var(--text-1);
 }
 .sub {
   margin: var(--space-1) 0 0;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
-
-.filter {
+.head-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  margin-bottom: var(--space-4);
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* tabs：沿用 projects/index.vue 的下划线范式（激活 2px brand + text-1） */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
   border-bottom: 1px solid var(--border-1);
-  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-6);
 }
-.f-tab {
-  background: none;
+.tab {
+  position: relative;
+  padding: 10px 2px 12px;
   border: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
 }
-.f-tab:hover {
-  background: var(--bg-hover);
+.tab:hover {
   color: var(--text-1);
 }
-.f-tab.on {
-  background: var(--brand-50);
-  color: var(--brand-700);
-  font-weight: 600;
+.tab.on {
+  color: var(--text-1);
+}
+.tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
 }
 .total {
   margin-left: auto;
   color: var(--text-4);
   font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .err {
+  margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--danger-bg);
   color: var(--danger);
@@ -276,19 +304,18 @@ onMounted(load);
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-4);
 }
+/* 卡片范式 C：实底面板 + 1px 白 8% 边框 + 16 圆角，hover 只提亮边框，不加投影光晕 */
 .work-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   transition:
     border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out),
     transform var(--duration-base) var(--ease-out);
 }
 .work-card:hover {
   border-color: var(--border-3);
-  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
 .cover {
@@ -333,7 +360,7 @@ onMounted(load);
   white-space: nowrap;
 }
 .title:hover {
-  color: var(--brand-600);
+  color: var(--brand-300);
 }
 .meta {
   margin: var(--space-1) 0 var(--space-2);
@@ -362,8 +389,40 @@ onMounted(load);
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  margin-top: var(--space-6);
+  margin-top: var(--space-8);
   color: var(--text-3);
   font-size: var(--text-sm);
+}
+/* 空态：复用 EmptyState，整块上下居中（参照项目页范式） */
+.empty-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 420px;
+}
+
+/* 窄屏：页内容左右留白降级（与 home/tools 一致） */
+@media (max-width: 1024px) {
+  .works {
+    padding: 24px;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+}
+@media (max-width: 768px) {
+  .works {
+    padding: 16px;
+  }
+  .head {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .tabs {
+    gap: 20px;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
 }
 </style>

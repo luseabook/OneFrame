@@ -840,15 +840,15 @@ onUnmounted(stopPoll);
   gap: var(--space-4);
   margin-top: var(--space-5);
   padding: var(--space-4) var(--space-5);
-  border: 1px solid var(--brand-200);
+  border: 1px solid var(--brand-border);
   border-radius: var(--radius-lg);
-  background: var(--brand-50);
+  background: var(--brand-soft);
 }
 .p-title {
   margin: 0 0 2px;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--brand-700);
+  color: var(--brand-on-soft);
 }
 .p-meta {
   margin: 0;
@@ -882,7 +882,7 @@ onUnmounted(stopPoll);
 .pay-a {
   display: inline-block;
   margin-top: var(--space-1);
-  color: var(--brand-700);
+  color: var(--brand-300);
   font-size: var(--text-sm);
   font-weight: 600;
   text-decoration: underline;

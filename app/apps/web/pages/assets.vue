@@ -125,13 +125,13 @@ onMounted(async () => {
 <template>
   <div class="assets">
     <header class="head">
-      <div>
+      <div class="head-main">
         <h1>{{ showDeleted ? "回收站" : "资产库" }}</h1>
         <p class="sub">
           共 {{ total }} 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。
         </p>
       </div>
-      <div class="actions">
+      <div class="head-actions">
         <Button variant="ghost" size="sm" @click="switchDeleted">
           {{ showDeleted ? "返回资产库" : "回收站" }}
         </Button>
@@ -189,44 +189,51 @@ onMounted(async () => {
         </article>
       </div>
 
-      <EmptyState
-        v-else
-        :icon="showDeleted ? '♻' : '▣'"
-        :title="showDeleted ? '回收站是空的' : '还没有资产'"
-        :description="
-          showDeleted
-            ? '删除的资产会保留 7 天，期间可从这里恢复。'
-            : '上传参考图，或从任务结果转存；角色定妆图转存后可在任意项目复用。'
-        "
-      >
-        <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">上传图片</Button>
-      </EmptyState>
+      <div v-else class="empty-wrap">
+        <EmptyState
+          :icon="showDeleted ? '♻' : '▣'"
+          :title="showDeleted ? '回收站是空的' : '还没有资产'"
+          :description="
+            showDeleted
+              ? '删除的资产会保留 7 天，期间可从这里恢复。'
+              : '上传参考图，或从任务结果转存；角色定妆图转存后可在任意项目复用。'
+          "
+        >
+          <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">上传图片</Button>
+        </EmptyState>
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+/* 页内容容器：与 home/tools 同一套 padding 节奏，最大宽度对齐 projects/index.vue */
 .assets {
-  max-width: 1360px;
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 32px 72px 80px;
 }
 .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.head-main {
+  min-width: 0;
 }
 .head h1 {
   font-size: var(--text-2xl);
   font-weight: 700;
+  color: var(--text-1);
 }
 .sub {
   margin: var(--space-1) 0 0;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
-.actions {
+.head-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -257,19 +264,23 @@ onMounted(async () => {
   color: var(--text-4);
   font-size: var(--text-xs);
 }
+/* 品牌软底：深色主题下用品牌 alpha 叠加，不用 --brand-50/100/200 亮色实体（否则白块） */
 .tag-chip {
   height: 22px;
   padding: 0 8px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--brand-200);
-  background: var(--brand-50);
-  color: var(--brand-700);
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-on-soft);
   font-size: 11px;
   cursor: pointer;
-  transition: background var(--duration-fast);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
 }
 .tag-chip:hover {
-  background: var(--brand-100);
+  background: var(--brand-soft-strong);
+  border-color: var(--brand-500);
 }
 .tag-chip.on {
   background: var(--brand-500);
@@ -278,6 +289,7 @@ onMounted(async () => {
 }
 
 .err {
+  margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--danger-bg);
   color: var(--danger);
@@ -288,20 +300,18 @@ onMounted(async () => {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
+/* 卡片范式 C：实底面板 + 1px 白 8% 边框 + 16 圆角，hover 只提亮边框，不加投影光晕 */
 .asset-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
-  transition:
-    border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out);
+  transition: border-color var(--duration-base) var(--ease-out);
 }
 .asset-card:hover {
   border-color: var(--border-3);
-  box-shadow: var(--shadow-md);
 }
 .thumb {
   aspect-ratio: 4 / 3;
@@ -338,5 +348,37 @@ onMounted(async () => {
 .ops {
   display: flex;
   justify-content: flex-end;
+}
+/* 空态：复用 EmptyState，整块上下居中（参照项目页范式） */
+.empty-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 420px;
+}
+
+/* 窄屏：页内容左右留白降级（与 home/tools 一致） */
+@media (max-width: 1024px) {
+  .assets {
+    padding: 24px;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+@media (max-width: 768px) {
+  .assets {
+    padding: 16px;
+  }
+  .head {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .head-actions {
+    flex-wrap: wrap;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
 }
 </style>

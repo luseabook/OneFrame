@@ -196,84 +196,86 @@ onMounted(() => {
   <ClientOnly>
     <div class="tasks">
       <header class="head">
-      <div>
-        <h1>任务中心</h1>
-        <p class="sub">按「次」查看执行状态；成果请到作品库按剧查看。</p>
-      </div>
-      <div class="actions">
-        <Button variant="ghost" size="sm" @click="batchDownload">批量下载 zip</Button>
-      </div>
-    </header>
-
-    <!-- 状态筛选 -->
-    <nav class="status-tabs">
-      <button
-        v-for="s in statusTabs"
-        :key="s.value"
-        class="s-tab"
-        :class="{ on: statusFilter === s.value }"
-        @click="statusFilter = s.value; page = 1; load()"
-      >
-        {{ s.label }}
-      </button>
-      <span class="total">共 {{ total }} 条</span>
-    </nav>
-
-    <p v-if="error" class="err">{{ error }}</p>
-    <p v-if="info" class="ok">{{ info }}</p>
-
-    <!-- 动态区（到期提醒 / 列表 / 分页）用 mounted 门控：
-         本页有 5s 轮询，若参与 SSR 会与 hydration 时的数据不一致 -->
-    <template v-if="mounted">
-      <p v-if="expiring.length > 0" class="warn">
-        <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
-        <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
-      </p>
-
-      <Skeleton v-if="loading" :rows="4" />
-
-      <template v-else>
-      <div v-if="list.length" class="task-table">
-        <div class="t-row t-head">
-          <span class="c-id">任务</span>
-          <span class="c-status">状态</span>
-          <span class="c-mode">模式</span>
-          <span class="c-credits">积分</span>
-          <span class="c-time">创建时间</span>
-          <span class="c-ops">操作</span>
+        <div class="head-main">
+          <h1>任务中心</h1>
+          <p class="sub">按「次」查看执行状态；成果请到作品库按剧查看。</p>
         </div>
-        <div v-for="item in list" :key="item.task_id" class="t-row">
-          <button class="id-link" @click="openDetail(item)">{{ item.task_id.slice(-8) }}</button>
-          <span class="c-status">
-            <Tag :tone="statusTone(item.status)" size="sm" dot>{{ statusLabel(item.status) }}</Tag>
-          </span>
-          <span class="c-mode mono">{{ item.mode }}</span>
-          <span class="c-credits mono">{{ item.credits_frozen }}</span>
-          <span class="c-time muted">{{ new Date(item.created_at).toLocaleString("zh-CN") }}</span>
-          <span class="c-ops ops">
-            <Button size="sm" variant="ghost" :disabled="item.status !== 3" @click="download(item)">下载</Button>
-            <Button size="sm" variant="text" :disabled="!canCancel(item)" @click="cancel(item)">取消</Button>
-            <Button size="sm" variant="text" :disabled="item.status !== 4" @click="retry(item)">重试</Button>
-          </span>
+        <div class="head-actions">
+          <Button variant="ghost" size="sm" @click="batchDownload">批量下载 zip</Button>
         </div>
-      </div>
+      </header>
 
-      <EmptyState
-        v-else
-        icon="◷"
-        title="暂无任务"
-        description="在工具箱或流水线投递后会出现在这里；可用顶部状态筛选查看。"
-      >
-        <Button @click="$router.push('/create/text-to-video')">去生成</Button>
-      </EmptyState>
+      <!-- 状态筛选：沿用 projects/index.vue 的下划线 tab 范式 -->
+      <nav class="tabs">
+        <button
+          v-for="s in statusTabs"
+          :key="s.value"
+          type="button"
+          class="tab"
+          :class="{ on: statusFilter === s.value }"
+          @click="statusFilter = s.value; page = 1; load()"
+        >
+          {{ s.label }}
+        </button>
+        <span class="total">共 {{ total }} 条</span>
+      </nav>
 
-      <div v-if="total > pageSize" class="pager">
-        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
-        <span class="muted">第 {{ page }} 页</span>
-        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
-      </div>
+      <p v-if="error" class="err">{{ error }}</p>
+      <p v-if="info" class="ok">{{ info }}</p>
+
+      <!-- 动态区（到期提醒 / 列表 / 分页）用 mounted 门控：
+           本页有 5s 轮询，若参与 SSR 会与 hydration 时的数据不一致 -->
+      <template v-if="mounted">
+        <p v-if="expiring.length > 0" class="warn">
+          <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
+          <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
+        </p>
+
+        <Skeleton v-if="loading" :rows="4" />
+
+        <template v-else>
+          <div v-if="list.length" class="task-table">
+            <div class="t-row t-head">
+              <span class="c-id">任务</span>
+              <span class="c-status">状态</span>
+              <span class="c-mode">模式</span>
+              <span class="c-credits">积分</span>
+              <span class="c-time">创建时间</span>
+              <span class="c-ops">操作</span>
+            </div>
+            <div v-for="item in list" :key="item.task_id" class="t-row">
+              <button class="id-link" @click="openDetail(item)">{{ item.task_id.slice(-8) }}</button>
+              <span class="c-status">
+                <Tag :tone="statusTone(item.status)" size="sm" dot>{{ statusLabel(item.status) }}</Tag>
+              </span>
+              <span class="c-mode mono">{{ item.mode }}</span>
+              <span class="c-credits mono">{{ item.credits_frozen }}</span>
+              <span class="c-time muted">{{ new Date(item.created_at).toLocaleString("zh-CN") }}</span>
+              <span class="c-ops ops">
+                <Button size="sm" variant="ghost" :disabled="item.status !== 3" @click="download(item)">下载</Button>
+                <Button size="sm" variant="text" :disabled="!canCancel(item)" @click="cancel(item)">取消</Button>
+                <Button size="sm" variant="text" :disabled="item.status !== 4" @click="retry(item)">重试</Button>
+              </span>
+            </div>
+          </div>
+
+          <div v-else class="empty-wrap">
+            <EmptyState
+              icon="◷"
+              title="暂无任务"
+              description="在工具箱或流水线投递后会出现在这里；可用顶部状态筛选查看。"
+            >
+              <Button @click="$router.push('/create/text-to-video')">去生成</Button>
+            </EmptyState>
+          </div>
+
+          <div v-if="total > pageSize" class="pager">
+            <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
+            <span class="muted">第 {{ page }} 页</span>
+            <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
+          </div>
+        </template>
       </template>
-    </template>
 
     <Modal :open="!!detail" title="任务详情" width="560px" @close="detail = null">
       <template v-if="detail">
@@ -321,63 +323,83 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 页内容容器：与 home/tools 同一套 padding 节奏，最大宽度对齐 projects/index.vue */
 .tasks {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 32px 72px 80px;
 }
 .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.head-main {
+  min-width: 0;
 }
 .head h1 {
   font-size: var(--text-2xl);
   font-weight: 700;
+  color: var(--text-1);
 }
 .sub {
   margin: var(--space-1) 0 0;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
-.actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.status-tabs {
+.head-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* tabs：沿用 projects/index.vue 的下划线范式（激活 2px brand + text-1） */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
   border-bottom: 1px solid var(--border-1);
-  padding-bottom: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
 }
-.s-tab {
-  background: none;
+.tab {
+  position: relative;
+  padding: 10px 2px 12px;
   border: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
 }
-.s-tab:hover {
-  background: var(--bg-hover);
+.tab:hover {
   color: var(--text-1);
 }
-.s-tab.on {
-  background: var(--brand-50);
-  color: var(--brand-700);
-  font-weight: 600;
+.tab.on {
+  color: var(--text-1);
+}
+.tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
 }
 .total {
   margin-left: auto;
   color: var(--text-4);
   font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .err {
+  margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--danger-bg);
   color: var(--danger);
@@ -385,6 +407,7 @@ onMounted(() => {
   font-size: var(--text-sm);
 }
 .ok {
+  margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--info-bg);
   color: var(--info);
@@ -401,7 +424,7 @@ onMounted(() => {
   border: 1px solid #6b4d12;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  margin-bottom: var(--space-3);
+  margin: 0 0 var(--space-4);
 }
 .warn a {
   color: var(--warning);
@@ -415,9 +438,10 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+/* 列表卡片范式 C：实底面板 + 1px 白 8% 边框 + 16 圆角，无投影光晕 */
 .task-table {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   background: var(--bg-surface);
 }
@@ -448,7 +472,7 @@ onMounted(() => {
   padding: 0;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  color: var(--brand-600);
+  color: var(--brand-300);
   cursor: pointer;
   text-align: left;
 }
@@ -472,7 +496,16 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  margin-top: var(--space-6);
+  margin-top: var(--space-8);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+/* 空态：复用 EmptyState，整块上下居中（参照项目页范式） */
+.empty-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 420px;
 }
 
 .kv-list {
@@ -528,7 +561,7 @@ onMounted(() => {
   outline: none;
 }
 .share-link {
-  color: var(--brand-600);
+  color: var(--brand-300);
   font-size: var(--text-sm);
 }
 .small {
@@ -552,6 +585,29 @@ onMounted(() => {
     display: none;
   }
   .ops .btn:not(:last-child) {
+    display: none;
+  }
+}
+/* 窄屏：页内容左右留白降级（与 home/tools 一致） */
+@media (max-width: 1024px) {
+  .tasks {
+    padding: 24px;
+  }
+}
+@media (max-width: 768px) {
+  .tasks {
+    padding: 16px;
+  }
+  .head {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .tabs {
+    gap: 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
     display: none;
   }
 }

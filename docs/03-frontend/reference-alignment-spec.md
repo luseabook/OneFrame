@@ -1041,3 +1041,64 @@
 ---
 
 *本文档为纯规格说明；所有「我们现状」均指本日（2026-10-25）`apps/web` 代码快照，行号可能随改动漂移，请以文件内容为准。*
+
+
+---
+
+## 14. 对齐实施进度（2026-10-25 第二轮，含证据）
+
+> 本节记录「规格 → 代码」的落地结果与**与规格的偏差口径**，避免后续再按旧规格改动。验收截图均在 `_acceptance/`（脚本同目录，可复跑）。
+
+### 14.1 已完成
+
+| 页面/模块 | 状态 | 代码 | 验收截图 | 备注 |
+|---|---|---|---|---|
+| 一手设计令牌 | ✅ | `apps/web/assets/css/tokens.css` | — | 新增 `--brand-soft` / `--brand-soft-strong` / `--brand-border` / `--brand-on-soft` 四个**深色主题软底**令牌 |
+| 壳层（侧栏+顶栏） | ✅ | `layouts/app.vue`、`layouts/tool.vue` | `align-home.png` | — |
+| 首页 | ✅ | `pages/home.vue` | `align-home.png`、`align-home-recent.png` | 「爆款案例」→「最近项目」（真实数据） |
+| 项目列表 | ✅ | `pages/projects/index.vue` | `align-projects.png` | tabs/空态/悬浮 CTA |
+| 新建项目弹窗 | ✅ | `components/CreateProjectModal.vue`、后端 `/projects/parse-script` | `project-modal.png` | 剧本解析支持 txt/md/csv/docx/xlsx |
+| 工具箱 | ✅ | `pages/tools.vue` | `align-tools.png` | 工具卡 84 高、无边框暗渐变 |
+| 视频生成工作台 | ✅ | `components/VideoGenWorkspace.vue` | `align-t2v.png`、`align-i2v.png` | 左面板 624px |
+| 定价 | ✅ | `pages/pricing.vue` | `align-pricing.png` | 三层结构 + 900×120 banner + 320 计划卡 |
+| **登录** | ✅ | `pages/login.vue` | `align-login.png`、`align-login-bubble.png`、`align-login-wechat.png` | 见 §14.2 |
+| **项目流水线详情** | ✅ | `pages/projects/[id].vue` | `align-pipeline-1..4-*.png` | 见 §14.3 |
+| **作品 / 任务 / 资产** | ✅ | `pages/works.vue`、`pages/tasks.vue`、`pages/assets.vue` | `align-works.png`、`align-tasks.png`、`align-assets.png` | 见 §14.4 |
+
+复跑脚本（需 3001 上跑最新构建、3000 上跑 API、Redis 6380 可写）：
+```bash
+cd E:\wanxing\_acceptance
+node shot-align-pipeline.cjs        # 流水线 4 步（PROJ=<项目id> 可覆盖）
+node shot-align-batch2.cjs          # 登录弹窗 + 作品/任务/资产
+```
+
+### 14.2 登录弹窗：实现与偏差
+
+实测结果（1440×900 视口，`align-login.png`）：弹窗 **400×644**、白底 `#FFFFFF`、圆角 12、水平居中（x=520）；三 tab、仅下边框输入行、内联「发送验证码」、`保持登录`、44 高 `#6D5BD0` 主按钮、`使用其他方式登录` 分割线、4×36px 圆形第三方按钮（disabled）、协议行 + 18+ 灰字、未勾选协议出深色气泡「请先同意并勾选上述协议」。
+
+| 项 | 规格 | 实现 | 原因 |
+|---|---|---|---|
+| 主按钮宽 | 322 | **320**（= 400 − 40×2 内距） | 参照截图实测为 320，规格 322 系取整 |
+| 弹窗高 | 617 | **644**（`min-height:617`） | 合规要求新增 11px「仅限 18 周岁以上用户使用」一行（≈20px）+ 间距 |
+| 气泡位置 | §8.2 文字写「协议复选框上方」 | **协议行下方、箭头朝上** | 以 `login-modal2.png` 截图为准，规格文字与截图矛盾 |
+| 第三方按钮 | 4 个可点 | 4 个 **disabled + title="即将开放"** | 未接入 OAuth，禁止伪造登录 |
+| 微信/密码 tab | 可登录 | 仅展示「即将开放，请使用验证码登录」 | 同上 |
+| 保持登录 | 影响会话持久化 | **纯视觉**（默认勾选，不改变 token 策略） | `useAuth().login` 无 persist 参数；refresh cookie 生命周期由服务端下发，需改 API 才能生效 → 列为后续项 |
+
+### 14.3 项目流水线详情：实现与偏差
+
+- 几何：容器 `max-width:1440px` + `padding:24/32/64`；页头 h1 24px/700、meta 13px；≤1100px 单列、≤760px 紧凑。
+- 步骤条：深色分段条（`--bg-surface` + 6px 内距 + `--radius-2xl`），激活态 `--brand-soft` + 白色文字 + `--brand-500` 序号球，已完成步骤绿色 ✓。
+- 层级：舞台/左栏 `--radius-2xl`；卡内嵌套块（大纲卡、角色卡、分镜表、矩阵、投递条）统一 `--bg-raised`（= 参照容器层 #1F1F2A），下沉块用 `--bg-sunken`。
+- 左栏分集标题去掉与序号重复的「第 N 集」前缀（仅展示层）。
+- **该页参照站无截图**（`/reelflow/edit/:projectId` 属 §9.6 无证据页），故只做「设计系统级对齐」，不做结构硬猜。
+
+### 14.4 作品 / 任务 / 资产：实现与偏差
+
+三页统一为：容器 `max-width:1280px; padding:32px 72px 80px`（≤1024→24、≤768→16）、页头 h1 24px/700 + 右侧操作区、下划线 tabs（激活 2px `--brand-500`）、卡片范式 C（`--bg-surface` + `--border-1` + `--radius-2xl`，hover 仅提亮边框、无投影）、空态居中（min-height 420）。
+
+> 这三页在参照站属 **§9.6 无截图**（`/task`、`/asset`、`/user-center`），因此按 §1 设计系统基线实现，未臆造具体布局；待补抓图后可再做一轮。
+
+### 14.5 本轮修掉的横切缺陷
+
+**「亮色实体令牌当深色背景」白块 bug**：`--brand-50/100/200` 是亮紫实体色，只适合浅色界面。此前多处深色页面用它做选中底/聚焦环（白块）。已统一替换为 §14.1 新增的软底令牌：选中底 `--brand-soft`、加深 `--brand-soft-strong`、描边 `--brand-border`、软底文字 `--brand-on-soft`。涉及：`projects/[id].vue`、`pricing.vue`、`works.vue`、`tasks.vue`、`assets.vue`。约定：**深色页面禁止再用 `--brand-50/100/200` 作背景或聚焦环。**

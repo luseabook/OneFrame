@@ -483,6 +483,14 @@ async function selectEpisode(id: string): Promise<void> {
   await loadEpisode();
 }
 
+/** 左栏分集标题：后端标题常以「第 N 集」开头，与序号重复，展示时去掉前缀 */
+function epShortTitle(ep: EpisodeDto): string {
+  const prefix = `第${ep.ep_no}集`;
+  const title = (ep.title ?? "").trim();
+  const rest = title.startsWith(prefix) ? title.slice(prefix.length).trim() : title;
+  return rest || "未命名";
+}
+
 </script>
 
 <template>
@@ -551,7 +559,7 @@ async function selectEpisode(id: string): Promise<void> {
             @click="selectEpisode(ep.id)"
           >
             <span class="ep-no">第{{ ep.ep_no }}集</span>
-            <span class="ep-title">{{ ep.title }}</span>
+            <span class="ep-title">{{ epShortTitle(ep) }}</span>
             <span class="ep-flag" :data-status="ep.status">{{ ep.status === 2 ? "已确认" : "草稿" }}</span>
           </li>
         </ul>
@@ -867,14 +875,15 @@ async function selectEpisode(id: string): Promise<void> {
 
 <style scoped>
 .pipeline {
-  max-width: 1360px;
+  max-width: 1440px;
   margin: 0 auto;
+  padding: 24px 32px 64px;
 }
 
 /* ── 页头 ── */
 .page-head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
   margin-bottom: var(--space-5);
@@ -883,19 +892,27 @@ async function selectEpisode(id: string): Promise<void> {
   min-width: 0;
 }
 .back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--text-3);
   font-size: var(--text-sm);
+  transition: color var(--duration-fast);
 }
 .back:hover {
-  color: var(--brand-600);
+  color: var(--text-1);
 }
 .titles h1 {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-2xl);
+  margin: 6px 0 0;
+  font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .meta {
-  margin: var(--space-1) 0 0;
+  margin: 6px 0 0;
   color: var(--text-3);
   font-size: var(--text-sm);
   display: flex;
@@ -908,17 +925,17 @@ async function selectEpisode(id: string): Promise<void> {
 .head-right {
   display: flex;
   gap: var(--space-2);
-  padding-top: var(--space-6);
+  flex-shrink: 0;
 }
 
-/* ── 步骤条 ── */
+/* ── 步骤条（参照 §1：深色分段条；选中态用品牌软底，不用亮色实体令牌）── */
 .steps {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  gap: 6px;
+  padding: 6px;
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   margin-bottom: var(--space-4);
   overflow-x: auto;
   scrollbar-width: none;
@@ -928,14 +945,14 @@ async function selectEpisode(id: string): Promise<void> {
 }
 .step {
   flex: 1;
-  min-width: 140px;
+  min-width: 148px;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: 10px var(--space-4);
   background: none;
   border: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   color: var(--text-3);
   font-size: var(--text-sm);
   cursor: pointer;
@@ -946,24 +963,26 @@ async function selectEpisode(id: string): Promise<void> {
   color: var(--text-1);
 }
 .step.active {
-  background: var(--brand-50);
-  color: var(--brand-700);
+  background: var(--brand-soft);
+  color: var(--text-1);
   font-weight: 600;
 }
 .step.done .idx {
   background: var(--success);
   border-color: var(--success);
-  color: #fff;
+  color: #0a0a0e;
 }
 .idx {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-2);
   display: grid;
   place-items: center;
   font-size: 11px;
+  font-weight: 600;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .step.active .idx {
   background: var(--brand-500);
@@ -1003,9 +1022,9 @@ async function selectEpisode(id: string): Promise<void> {
   border: 1px solid #6b4d12;
 }
 .banner.busy {
-  background: var(--brand-50);
-  color: var(--brand-700);
-  border: 1px solid var(--brand-200);
+  background: var(--brand-soft);
+  color: var(--brand-on-soft);
+  border: 1px solid var(--brand-border);
 }
 .banner-link {
   background: none;
@@ -1040,14 +1059,14 @@ async function selectEpisode(id: string): Promise<void> {
 /* ── 工作区 ── */
 .workspace {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 248px minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
 .episode-rail {
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   position: sticky;
   top: calc(var(--header-h) + var(--space-4));
@@ -1083,7 +1102,7 @@ async function selectEpisode(id: string): Promise<void> {
   background: var(--bg-hover);
 }
 .ep-item.active {
-  background: var(--brand-50);
+  background: var(--brand-soft);
 }
 .ep-no {
   font-size: var(--text-sm);
@@ -1091,7 +1110,7 @@ async function selectEpisode(id: string): Promise<void> {
   color: var(--text-1);
 }
 .ep-item.active .ep-no {
-  color: var(--brand-700);
+  color: var(--brand-on-soft);
 }
 .ep-title {
   grid-column: 2;
@@ -1113,9 +1132,9 @@ async function selectEpisode(id: string): Promise<void> {
 .stage {
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
-  padding: var(--space-6);
-  min-height: 420px;
+  border-radius: var(--radius-2xl);
+  padding: 24px;
+  min-height: 480px;
 }
 .stage-head {
   display: flex;
@@ -1148,14 +1167,14 @@ async function selectEpisode(id: string): Promise<void> {
 }
 .outline-card {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: var(--space-4);
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 .outline-card:focus-within {
-  border-color: var(--brand-300);
-  box-shadow: 0 0 0 3px var(--brand-50);
+  border-color: var(--brand-border);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 .card-top {
   display: flex;
@@ -1166,8 +1185,8 @@ async function selectEpisode(id: string): Promise<void> {
 .ep-chip {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--brand-700);
-  background: var(--brand-50);
+  color: var(--brand-on-soft);
+  background: var(--brand-soft);
   padding: 2px 8px;
   border-radius: var(--radius-full);
 }
@@ -1183,7 +1202,7 @@ async function selectEpisode(id: string): Promise<void> {
   outline: none;
 }
 .title-input:focus {
-  border-bottom-color: var(--brand-400);
+  border-bottom-color: var(--brand-500);
 }
 .synopsis-input {
   width: 100%;
@@ -1206,7 +1225,8 @@ async function selectEpisode(id: string): Promise<void> {
 }
 .character-card {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
   overflow: hidden;
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
@@ -1269,7 +1289,7 @@ async function selectEpisode(id: string): Promise<void> {
 .script-box {
   margin-bottom: var(--space-4);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: var(--space-3) var(--space-4);
   background: var(--bg-sunken);
 }
@@ -1289,7 +1309,8 @@ async function selectEpisode(id: string): Promise<void> {
 }
 .shot-table {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
   overflow: hidden;
 }
 .shot-row {
@@ -1336,16 +1357,16 @@ async function selectEpisode(id: string): Promise<void> {
   border-color: var(--border-2);
 }
 .cell-area:focus {
-  border-color: var(--brand-400);
-  background: var(--bg-surface);
-  box-shadow: 0 0 0 2px var(--brand-50);
+  border-color: var(--brand-500);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 2px var(--brand-soft);
 }
 .cell-num {
   width: 100%;
   height: 28px;
   border: 1px solid var(--border-2);
   border-radius: var(--radius-sm);
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   color: var(--text-1);
   font-size: var(--text-sm);
   padding: 0 6px;
@@ -1354,7 +1375,7 @@ async function selectEpisode(id: string): Promise<void> {
 }
 .cell-num:focus {
   border-color: var(--brand-500);
-  box-shadow: 0 0 0 2px var(--brand-100);
+  box-shadow: 0 0 0 2px var(--brand-soft-strong);
 }
 .c-char {
   font-size: var(--text-xs);
@@ -1368,9 +1389,9 @@ async function selectEpisode(id: string): Promise<void> {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   margin-bottom: var(--space-4);
 }
 .inline-field {
@@ -1384,7 +1405,7 @@ async function selectEpisode(id: string): Promise<void> {
   height: 28px;
   border: 1px solid var(--border-2);
   border-radius: var(--radius-sm);
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   color: var(--text-1);
   font-size: var(--text-sm);
   padding: 0 var(--space-2);
@@ -1399,7 +1420,7 @@ async function selectEpisode(id: string): Promise<void> {
   background: var(--border-2);
 }
 .link {
-  color: var(--brand-600);
+  color: var(--brand-300);
   font-size: var(--text-sm);
   text-decoration: underline;
 }
@@ -1441,7 +1462,8 @@ async function selectEpisode(id: string): Promise<void> {
 /* 矩阵 */
 .matrix {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
   padding: var(--space-4);
   margin-bottom: var(--space-4);
 }
@@ -1580,15 +1602,15 @@ async function selectEpisode(id: string): Promise<void> {
 .candidate {
   padding: 0;
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   overflow: hidden;
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   cursor: pointer;
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 .candidate:hover {
-  border-color: var(--brand-400);
-  box-shadow: 0 0 0 3px var(--brand-50);
+  border-color: var(--brand-border);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 .candidate img {
   width: 100%;
@@ -1604,6 +1626,9 @@ async function selectEpisode(id: string): Promise<void> {
 }
 
 @media (max-width: 1100px) {
+  .pipeline {
+    padding: 20px 24px 56px;
+  }
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -1621,6 +1646,9 @@ async function selectEpisode(id: string): Promise<void> {
   }
 }
 @media (max-width: 760px) {
+  .pipeline {
+    padding: 16px 16px 48px;
+  }
   .stage {
     padding: var(--space-4);
   }

@@ -24,6 +24,13 @@
   --accent-500: #af5fff; /* 竞品 pink-purple-60 */
   --accent-600: #8c4ccc;
 
+  /* ── 品牌软底（深色主题下的「浅紫底」唯一正确做法：品牌色 alpha 叠加，
+        绝不能用 --brand-50/100/200 这类亮色实体当背景，否则在深色页面上会变成白块）── */
+  --brand-soft: #9b46ff1f; /* 选中/高亮底（≈12% 品牌紫） */
+  --brand-soft-strong: #9b46ff33;
+  --brand-border: #9b46ff59; /* 品牌色描边（≈35%） */
+  --brand-on-soft: #cf9fff; /* 品牌软底上的文字 */
+
   /* ── 语义色（竞品 dark-* 调色板）── */
   --success: #5fd08a;
   --success-bg: #0f2a1c;
