@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 运营后台使用独立壳层（layouts/admin.vue）：不复用用户端菜单/积分/页脚
-definePageMeta({ ssr: false, layout: "admin" });
+// 运营后台控制台：独立登录页（/admin/login）+ 独立侧栏菜单（layouts/admin.vue）
+definePageMeta({ ssr: false, layout: "admin", middleware: "admin-auth" });
 
 interface Envelope<T> {
   code: number;
@@ -19,13 +19,9 @@ interface Dashboard {
 }
 
 const token = ref("");
-const username = ref("admin");
-const password = ref("");
 const error = ref("");
-const loading = ref(false);
-const tab = ref<
-  "dashboard" | "models" | "tasks" | "shares" | "reports" | "funnel" | "orders"
->("dashboard");
+// 菜单由 URL query 决定（layout 侧栏是唯一导航入口）
+const tab = useAdminTab();
 const dashboard = ref<Dashboard | null>(null);
 const models = ref<Array<Record<string, unknown>>>([]);
 const tasks = ref<Array<Record<string, unknown>>>([]);
@@ -66,24 +62,7 @@ async function api<T>(path: string, options: Record<string, unknown> = {}): Prom
   return res.data as T;
 }
 
-async function login(): Promise<void> {
-  error.value = "";
-  loading.value = true;
-  try {
-    const data = await api<{ token: string }>("/ops/admin/login", {
-      method: "POST",
-      body: { username: username.value, password: password.value },
-    });
-    token.value = data.token;
-    localStorage.setItem("admin_token", data.token);
-    await loadAll();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : "登录失败";
-  } finally {
-    loading.value = false;
-  }
-}
-
+// 登录在独立页面 /admin/login 完成；此处只消费 admin_token
 async function loadAll(): Promise<void> {
   const [d, m, t, s, r, f, tm, o] = await Promise.all([
     api<Dashboard>("/ops/admin/dashboard"),
@@ -180,51 +159,26 @@ async function resolveReport(report: Record<string, unknown>, action: "takedown"
   await loadAll();
 }
 
-function logout(): void {
-  token.value = "";
-  localStorage.removeItem("admin_token");
-}
-
 onMounted(async () => {
   const saved = localStorage.getItem("admin_token");
-  if (saved) {
-    token.value = saved;
-    try {
-      await loadAll();
-    } catch {
-      logout();
-    }
+  if (!saved) {
+    await navigateTo("/admin/login", { replace: true });
+    return;
+  }
+  token.value = saved;
+  try {
+    await loadAll();
+  } catch (e) {
+    // token 失效：回到独立登录页
+    localStorage.removeItem("admin_token");
+    await navigateTo("/admin/login", { replace: true });
   }
 });
 </script>
 
 <template>
-  <main class="page">
-    <div class="head">
-      <h1>运营后台</h1>
-      <span v-if="token" class="muted">已登录</span>
-    </div>
-
-    <section v-if="!token" class="login card">
-      <h2>管理员登录</h2>
-      <label class="field"><span class="label">用户名</span><input v-model="username" class="input" /></label>
-      <label class="field"><span class="label">密码</span><input v-model="password" type="password" class="input" @keyup.enter="login" /></label>
-      <p v-if="error" class="error">{{ error }}</p>
-      <Button :disabled="loading" @click="login">{{ loading ? "登录中…" : "登录" }}</Button>
-      <p class="muted small">非生产环境默认 admin / admin12345；生产必须通过 ADMIN_USERNAME/ADMIN_PASSWORD 配置。</p>
-    </section>
-
-    <template v-else>
-      <div class="tabs">
-        <button :class="{ active: tab === 'dashboard' }" @click="tab = 'dashboard'">概览</button>
-        <button :class="{ active: tab === 'models' }" @click="tab = 'models'">模型/价格</button>
-        <button :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">任务审计</button>
-        <button :class="{ active: tab === 'shares' }" @click="tab = 'shares'">分享管理</button>
-        <button :class="{ active: tab === 'reports' }" @click="tab = 'reports'">举报处置</button>
-        <button :class="{ active: tab === 'funnel' }" @click="tab = 'funnel'">流水线漏斗</button>
-        <button :class="{ active: tab === 'orders' }" @click="tab = 'orders'">订单/退款</button>
-        <button class="logout" @click="logout">退出</button>
-      </div>
+  <div class="page">
+    <p v-if="error" class="error banner">{{ error }}</p>
 
       <section v-if="tab === 'dashboard' && dashboard" class="cards">
         <div class="card"><span class="muted">用户</span><b>{{ dashboard.users }}</b></div>
@@ -357,17 +311,23 @@ onMounted(async () => {
         </div>
         <p v-if="orders.length === 0" class="muted">暂无订单。</p>
       </section>
-    </template>
-  </main>
+  </div>
 </template>
 
 <style scoped>
 .page {
-  flex: 1;
-  max-width: 1180px;
   width: 100%;
-  margin: 0 auto;
-  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12px;
 }
 .head {
   display: flex;

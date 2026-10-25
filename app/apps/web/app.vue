@@ -15,6 +15,7 @@ const workspacePaths = [
   "/pricing",
 ];
 const adminPaths = ["/admin"];
+const adminLoginPaths = ["/admin/login"];
 const toolPaths = ["/create"];
 
 function matchAny(paths: string[]): boolean {
@@ -22,6 +23,7 @@ function matchAny(paths: string[]): boolean {
 }
 
 const layoutName = computed(() => {
+  if (matchAny(adminLoginPaths)) return "admin-login";
   if (matchAny(adminPaths)) return "admin";
   if (matchAny(toolPaths)) return "tool";
   if (matchAny(workspacePaths)) return "app";
