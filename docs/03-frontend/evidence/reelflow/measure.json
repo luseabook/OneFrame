@@ -1,0 +1,1888 @@
+{
+  "workspace": {
+    "url": "https://www.reelmate.cn/series-manage/episode/1961032931695931421",
+    "viewport": [
+      1424,
+      805
+    ],
+    "controls": [
+      {
+        "text": "未开始",
+        "cls": "ep-status__trigger",
+        "rect": [
+          160,
+          12,
+          144,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "12px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "剧本",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          312,
+          12,
+          76,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "text": "会员订阅 1080P低至0.2元/秒",
+        "cls": "membership-promo-entry topbar-liquid-gla",
+        "rect": [
+          1063,
+          12,
+          219,
+          40
+        ],
+        "bg": "rgba(255, 255, 255, 0.04)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px 12px",
+        "border": "1px rgba(194, 204, 241, 0.08)"
+      },
+      {
+        "text": "0",
+        "cls": "credit-popup-trigger flex items-center g",
+        "rect": [
+          1304,
+          20,
+          35,
+          24
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "AI拆分镜",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          20,
+          76,
+          136,
+          32
+        ],
+        "bg": "rgba(155, 70, 255, 0.4)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "全部",
+        "cls": "material-filter__item text-sm is-active",
+        "rect": [
+          212,
+          92,
+          103,
+          34
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "8px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 4px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "图片",
+        "cls": "material-filter__item text-sm",
+        "rect": [
+          315,
+          92,
+          103,
+          34
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "8px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 4px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "视频",
+        "cls": "material-filter__item text-sm",
+        "rect": [
+          419,
+          92,
+          103,
+          34
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "8px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 4px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "匹配资产",
+        "cls": "prompt-asset-match-entry",
+        "rect": [
+          1206,
+          487,
+          82,
+          20
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "text": "立即生成",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          1296,
+          710,
+          96,
+          48
+        ],
+        "bg": "rgb(155, 70, 255)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "12px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 16px",
+        "border": "0px rgb(255, 255, 255)"
+      }
+    ],
+    "blocks": [
+      {
+        "cls": "",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0 AI拆分镜 首次免费 分",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative w-full h-full bg-(--background-base)",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0 AI拆分镜 首次免费 分",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgb(11, 11, 16)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "w-full h-full flex",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0 AI拆分镜 首次免费 分",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative size-full bg-(--background-base)",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0 AI拆分镜 首次免费 分",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgb(11, 11, 16)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "header-stack absolute top-0 left-0 z-[10] w-full flex fl",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "flex items-center justify-between w-full h-16 py-[11px] ",
+        "text": "未开始 剧本 会员订阅 1080P低至0.2元/秒 0",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "11px 24px 11px 16px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "episode size-full",
+        "text": "AI拆分镜 首次免费 分镜(2) 1 未定稿 2 未定稿 添加分镜 全部 图片 ",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "64px 8px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "right-content",
+        "text": "全部 图片 视频 分镜描述: 请填写分镜描述，记录分镜对应的画面内容 暂无素材 ",
+        "rect": [
+          176,
+          64,
+          1240,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "content-wrapper",
+        "text": "全部 图片 视频 分镜描述: 请填写分镜描述，记录分镜对应的画面内容 暂无素材 ",
+        "rect": [
+          176,
+          64,
+          1240,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "material-area-wrapper",
+        "text": "全部 图片 视频 分镜描述: 请填写分镜描述，记录分镜对应的画面内容 暂无素材 ",
+        "rect": [
+          176,
+          64,
+          592,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "material-content",
+        "text": "全部 图片 视频 分镜描述: 请填写分镜描述，记录分镜对应的画面内容 暂无素材 ",
+        "rect": [
+          176,
+          64,
+          592,
+          733
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "20px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "24px 32px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "empty-state flex-center flex-col gap-2",
+        "text": "暂无素材 或 本地上传",
+        "rect": [
+          208,
+          222,
+          528,
+          551
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.4)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.4)"
+      },
+      {
+        "cls": "generate-panel",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频 模型 为保证 See",
+        "rect": [
+          776,
+          64,
+          640,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "panel-content-wrapper",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频 模型 为保证 See",
+        "rect": [
+          776,
+          64,
+          640,
+          733
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "16px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "panel-body",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频 模型 为保证 See",
+        "rect": [
+          776,
+          120,
+          640,
+          677
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "panel-box-video relative h-full",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频 模型 为保证 See",
+        "rect": [
+          776,
+          120,
+          640,
+          677
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "12px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "template-panel",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频 模型 为保证 See",
+        "rect": [
+          776,
+          120,
+          640,
+          677
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "panel-header pb-3",
+        "text": "参考生视频 首帧生视频 文生视频 首尾帧生视频 AI改视频",
+        "rect": [
+          776,
+          120,
+          640,
+          65
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "20px 20px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "panel-content pt-3 scrollbar scrollbar-gutter-stable",
+        "text": "模型 为保证 Seedance 生成效果，请确保角色/含人物的图片均已保存为Se",
+        "rect": [
+          774,
+          185,
+          636,
+          511
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "12px 12px 24px 20px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "flex flex-col gap-5 flex-1 min-h-0",
+        "text": "模型 为保证 Seedance 生成效果，请确保角色/含人物的图片均已保存为Se",
+        "rect": [
+          794,
+          197,
+          600,
+          475
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "multi-image-ref-tab",
+        "text": "模型 为保证 Seedance 生成效果，请确保角色/含人物的图片均已保存为Se",
+        "rect": [
+          794,
+          197,
+          600,
+          475
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "tab-scroll-area",
+        "text": "模型 为保证 Seedance 生成效果，请确保角色/含人物的图片均已保存为Se",
+        "rect": [
+          794,
+          197,
+          600,
+          475
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "section-block",
+        "text": "模型 为保证 Seedance 生成效果，请确保角色/含人物的图片均已保存为Se",
+        "rect": [
+          794,
+          197,
+          600,
+          77
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "section-block",
+        "text": "选择素材 已上传素材数：图片 0/30，视频 0/10，音频 0/10，总素材数",
+        "rect": [
+          794,
+          294,
+          600,
+          173
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "material-picker",
+        "text": "选择素材 已上传素材数：图片 0/30，视频 0/10，音频 0/10，总素材数",
+        "rect": [
+          794,
+          294,
+          600,
+          173
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "empty-entry",
+        "text": "项目资产 更多素材源",
+        "rect": [
+          794,
+          323,
+          600,
+          144
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "section-block prompt-section",
+        "text": "提示词 匹配资产 放大编辑 上传并@一个或多个主体、图片，涵盖每个要素及其关系，",
+        "rect": [
+          794,
+          487,
+          600,
+          200
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "textarea-container w-full flex flex-col gap-2",
+        "text": "上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容",
+        "rect": [
+          794,
+          515,
+          600,
+          172
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "prompt-box relative gap-2 flex flex-col",
+        "text": "上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容",
+        "rect": [
+          794,
+          515,
+          600,
+          172
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "editor-border-wrapper",
+        "text": "上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容",
+        "rect": [
+          794,
+          515,
+          600,
+          172
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "editor-container sky-prompt-editor-container is-empty pr",
+        "text": "上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容",
+        "rect": [
+          794,
+          515,
+          600,
+          300
+        ],
+        "bg": "rgba(0, 0, 0, 0.32)",
+        "color": "rgba(255, 255, 255, 0.4)",
+        "radius": "12px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "1px rgba(0, 0, 0, 0)"
+      },
+      {
+        "cls": "editor",
+        "text": "",
+        "rect": [
+          795,
+          516,
+          598,
+          250
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.4)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "4px 0px 0px 8px",
+        "border": "0px rgba(255, 255, 255, 0.4)"
+      },
+      {
+        "cls": "tiptap ProseMirror leading-6 text-sm text-(--texticon-02",
+        "text": "",
+        "rect": [
+          803,
+          520,
+          586,
+          246
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "4px 4px 4px 0px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "cls": "editor-placeholder text-(--texticon-05assistant)",
+        "text": "上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容",
+        "rect": [
+          795,
+          516,
+          598,
+          298
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.4)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "6px 4px 0px 8px",
+        "border": "0px rgba(255, 255, 255, 0.4)"
+      },
+      {
+        "cls": "panel-footer",
+        "text": "1080P 优惠版 5秒 1个 立即生成 内容由AI生成，请仔细甄别",
+        "rect": [
+          776,
+          696,
+          640,
+          101
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "bottom-area-video",
+        "text": "1080P 优惠版 5秒 1个 立即生成 内容由AI生成，请仔细甄别",
+        "rect": [
+          776,
+          696,
+          640,
+          101
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "12px 24px",
+        "border": "1px 0px 0px rgba(194, 204, 241, 0.08) rgba(255, 255, 255, 0.6) rgba(255, 255, 255, 0.6)"
+      }
+    ]
+  },
+  "assets": {
+    "url": "https://www.reelmate.cn/asset",
+    "viewport": [
+      1424,
+      805
+    ],
+    "controls": [
+      {
+        "text": "状态",
+        "cls": "series-status__trigger is-default",
+        "rect": [
+          72,
+          12,
+          144,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "12px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "创作手册",
+        "cls": "creation-guide-trigger topbar-liquid-gla",
+        "rect": [
+          743,
+          12,
+          106,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "8px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "商务合作",
+        "cls": "cooperation-trigger topbar-liquid-glass ",
+        "rect": [
+          857,
+          12,
+          106,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "8px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "会员订阅 1080P低至0.2元/秒",
+        "cls": "membership-promo-entry topbar-liquid-gla",
+        "rect": [
+          1067,
+          12,
+          217,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "0",
+        "cls": "credit-popup-trigger flex items-center g",
+        "rect": [
+          1305,
+          20,
+          35,
+          24
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "剧本",
+        "cls": "component-menu-item cursor-pointer flex ",
+        "rect": [
+          13,
+          69,
+          56,
+          72
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "12px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "资产",
+        "cls": "component-menu-item cursor-pointer flex ",
+        "rect": [
+          13,
+          145,
+          56,
+          72
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "12px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "剧集",
+        "cls": "component-menu-item cursor-pointer flex ",
+        "rect": [
+          13,
+          221,
+          56,
+          72
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "12px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "角色",
+        "cls": "al-tab-slider__item is-active",
+        "rect": [
+          121,
+          155,
+          28,
+          28
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 0px 8px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "场景",
+        "cls": "al-tab-slider__item",
+        "rect": [
+          169,
+          155,
+          28,
+          28
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 0px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "道具",
+        "cls": "al-tab-slider__item",
+        "rect": [
+          217,
+          155,
+          28,
+          28
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 0px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "其他",
+        "cls": "al-tab-slider__item",
+        "rect": [
+          265,
+          155,
+          28,
+          28
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "0px 0px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "筛选",
+        "cls": "filter-trigger",
+        "rect": [
+          1091,
+          153,
+          100,
+          32
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "10px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "text": "AI 智能提取资产",
+        "cls": "ai-assets-empty__btn",
+        "rect": [
+          286,
+          417,
+          160,
+          40
+        ],
+        "bg": "rgb(255, 255, 255)",
+        "color": "rgb(10, 10, 12)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgb(10, 10, 12)"
+      },
+      {
+        "text": "生成角色",
+        "cls": "generate-characters-empty__btn",
+        "rect": [
+          286,
+          653,
+          160,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "text": "导入角色",
+        "cls": "import-resource-empty__btn",
+        "rect": [
+          952,
+          653,
+          160,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      }
+    ],
+    "blocks": [
+      {
+        "cls": "",
+        "text": "状态 创作手册 商务合作 会员订阅 1080P低至0.2元/秒 0 剧本 资产 ",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative w-full h-full bg-(--background-base)",
+        "text": "状态 创作手册 商务合作 会员订阅 1080P低至0.2元/秒 0 剧本 资产 ",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgb(11, 11, 16)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "header-stack absolute top-0 left-0 z-[10] w-full flex fl",
+        "text": "状态 创作手册 商务合作 会员订阅 1080P低至0.2元/秒 0",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "flex items-center justify-between w-full h-16 py-[11px] ",
+        "text": "状态 创作手册 商务合作 会员订阅 1080P低至0.2元/秒 0",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "11px 24px 11px 16px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "w-full h-full flex pt-0 series-body--with-header  px-2 p",
+        "text": "剧本 资产 剧集 资产 (0) 角色 场景 道具 其他 筛选 搜索 AI 智能提",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "64px 8px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative flex-1 h-full min-w-0 mr-1",
+        "text": "资产 (0) 角色 场景 道具 其他 筛选 搜索 AI 智能提取资产 首次免费 ",
+        "rect": [
+          80,
+          64,
+          1332,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "main-container w-full h-full overflow-y-auto border-cont",
+        "text": "资产 (0) 角色 场景 道具 其他 筛选 搜索 AI 智能提取资产 首次免费 ",
+        "rect": [
+          80,
+          64,
+          1332,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "8px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "1px rgba(194, 204, 241, 0.12)"
+      },
+      {
+        "cls": "material-board",
+        "text": "资产 (0) 角色 场景 道具 其他 筛选 搜索 AI 智能提取资产 首次免费 ",
+        "rect": [
+          81,
+          65,
+          1330,
+          731
+        ],
+        "bg": "rgb(10, 10, 14)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "24px 40px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "material-board__main",
+        "text": "资产 (0) 角色 场景 道具 其他 筛选 搜索 AI 智能提取资产 首次免费 ",
+        "rect": [
+          121,
+          89,
+          1250,
+          683
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "w-full mb-6",
+        "text": "资产 (0) 角色 场景 道具 其他 筛选 搜索",
+        "rect": [
+          121,
+          89,
+          1250,
+          96
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "asset-empty-state",
+        "text": "AI 智能提取资产 首次免费 AI分析剧本，提取出镜的角色/场景/道具，并生成出",
+        "rect": [
+          121,
+          209,
+          1250,
+          563
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "asset-empty-wrapper",
+        "text": "AI 智能提取资产 首次免费 AI分析剧本，提取出镜的角色/场景/道具，并生成出",
+        "rect": [
+          246,
+          263,
+          1000,
+          456
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "ai-assets-empty ai-assets-empty--asset ai-assets-empty-w",
+        "text": "AI 智能提取资产 首次免费 AI分析剧本，提取出镜的角色/场景/道具，并生成出",
+        "rect": [
+          246,
+          263,
+          1000,
+          260
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "24px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "ai-assets-empty__images",
+        "text": "",
+        "rect": [
+          676,
+          263,
+          570,
+          260
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "ai-assets-empty__gradient",
+        "text": "",
+        "rect": [
+          246,
+          263,
+          1000,
+          260
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "flex items-center gap-4",
+        "text": "生成角色 输入提示词通过生图模型生成角色图像 生成角色 导入角色 手动上传出镜该",
+        "rect": [
+          246,
+          539,
+          1000,
+          180
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "generate-characters-empty generate-empty--charecter",
+        "text": "生成角色 输入提示词通过生图模型生成角色图像 生成角色",
+        "rect": [
+          246,
+          539,
+          650,
+          180
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "24px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "generate-characters-empty__bg generate-empty__bg--charec",
+        "text": "",
+        "rect": [
+          576,
+          539,
+          320,
+          180
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      },
+      {
+        "cls": "import-resource-empty",
+        "text": "导入角色 手动上传出镜该剧本的角色形象 导入角色",
+        "rect": [
+          912,
+          539,
+          334,
+          180
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.92)",
+        "radius": "24px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.92)"
+      }
+    ]
+  },
+  "timeline": {
+    "url": "https://www.reelmate.cn/reelflow/edit/1961032931695931421",
+    "viewport": [
+      1424,
+      805
+    ],
+    "controls": [
+      {
+        "text": "返回分镜创作",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          16,
+          12,
+          108,
+          40
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.8)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.8)"
+      },
+      {
+        "text": "时间线导出",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          585,
+          12,
+          94,
+          40
+        ],
+        "bg": "rgba(155, 70, 255, 0.4)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "创作手册",
+        "cls": "creation-guide-trigger topbar-liquid-gla",
+        "rect": [
+          743,
+          12,
+          106,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "8px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "商务合作",
+        "cls": "cooperation-trigger topbar-liquid-glass ",
+        "rect": [
+          857,
+          12,
+          106,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "8px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "会员订阅 1080P低至0.2元/秒",
+        "cls": "membership-promo-entry topbar-liquid-gla",
+        "rect": [
+          1067,
+          12,
+          217,
+          40
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "3.35544e+07px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "0",
+        "cls": "credit-popup-trigger flex items-center g",
+        "rect": [
+          1305,
+          20,
+          35,
+          24
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "text": "保存",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          300,
+          16,
+          52,
+          40
+        ],
+        "bg": "rgb(155, 70, 255)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgb(255, 255, 255)"
+      },
+      {
+        "text": "更新分镜",
+        "cls": "genbtn base flex justify-center items-ce",
+        "rect": [
+          338,
+          641,
+          108,
+          32
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "10px",
+        "fs": "14px",
+        "fw": "700",
+        "pad": "0px 12px",
+        "border": "0px rgb(255, 255, 255)"
+      }
+    ],
+    "blocks": [
+      {
+        "cls": "",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative w-full h-full bg-(--background-base)",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgb(11, 11, 16)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "w-full h-full flex",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative size-full bg-(--background-base)",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgb(11, 11, 16)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "header-stack absolute top-0 left-0 z-[10] w-full flex fl",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "flex items-center justify-between w-full h-16 py-[11px] ",
+        "text": "返回分镜创作 时间线导出 创作手册 商务合作 会员订阅 1080P低至0.2元/",
+        "rect": [
+          0,
+          0,
+          1424,
+          64
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "11px 24px 11px 16px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "editor-page size-full flex pt-[64px] gap-2 pr-2",
+        "text": "剧集资产 全部 已定稿 分镜 1 分镜 2 暂无素材 加载时间线可能需要较长时间",
+        "rect": [
+          0,
+          0,
+          1424,
+          805
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "64px 8px 8px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "editor-assets",
+        "text": "剧集资产 全部 已定稿 分镜 1 分镜 2 暂无素材",
+        "rect": [
+          8,
+          64,
+          298,
+          733
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "20px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px 12px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "al-list-wrapper flex flex-col overflow-y-auto asset-list",
+        "text": "暂无素材",
+        "rect": [
+          20,
+          212,
+          274,
+          585
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "asset-list__empty",
+        "text": "暂无素材",
+        "rect": [
+          20,
+          212,
+          274,
+          101
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgb(153, 153, 153)",
+        "radius": "0px",
+        "fs": "14px",
+        "fw": "400",
+        "pad": "40px 20px",
+        "border": "0px rgb(153, 153, 153)"
+      },
+      {
+        "cls": "flex-1 flex flex-col gap-4 overflow-hidden",
+        "text": "加载时间线可能需要较长时间，请耐心等待... 更新分镜 00:00:00 / 0",
+        "rect": [
+          314,
+          64,
+          1102,
+          733
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "flex-1 flex flex-col",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          314,
+          64,
+          1102,
+          553
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative flex-1 flex-center min-h-[290px]",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          314,
+          120,
+          1102,
+          497
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "relative h-full w-fit aspect-video",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          423,
+          120,
+          884,
+          497
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "canvas-box relative w-full h-full",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          423,
+          120,
+          884,
+          497
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "absolute flex-center rounded-lg border-(--divider-8)",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          423,
+          120,
+          884,
+          497
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "8px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(194, 204, 241, 0.08)"
+      },
+      {
+        "cls": "canvas-loading transform-center z-10",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          423,
+          120,
+          884,
+          497
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "bg-(--fills-light-8) shrink-0 relative rounded-[16px] ov",
+        "text": "更新分镜 00:00:00 / 00:00:00 加载时间线可能需要较长时间，请",
+        "rect": [
+          314,
+          633,
+          1102,
+          164
+        ],
+        "bg": "rgba(194, 204, 241, 0.08)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "16px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      },
+      {
+        "cls": "timelineContainer relative flex-none overflow-x-scroll o",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          320,
+          681,
+          1096,
+          112
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "1px 0px 0px rgba(179, 192, 219, 0.1)"
+      },
+      {
+        "cls": "canvas-loading transform-center z-10",
+        "text": "加载时间线可能需要较长时间，请耐心等待...",
+        "rect": [
+          320,
+          682,
+          1090,
+          105
+        ],
+        "bg": "rgba(0, 0, 0, 0)",
+        "color": "rgba(255, 255, 255, 0.6)",
+        "radius": "0px",
+        "fs": "16px",
+        "fw": "400",
+        "pad": "0px",
+        "border": "0px rgba(255, 255, 255, 0.6)"
+      }
+    ]
+  }
+}
