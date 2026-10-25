@@ -270,3 +270,9 @@ readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSecond
 
 **排障串联**：每个 HTTP 响应都带 `x-request-id`，请求日志 `request_id` 与之同值（observability §1.1）——
 用户报障时先要响应头，即可在日志系统一次捞全该请求的鉴权身份、状态码、耗时与错误码。
+
+### 7.6 测试确定性与账本现状（2026-10-25）
+
+- **api 测试改为串行文件执行**：`apps/api/package.json` 的 test 脚本加 `--no-file-parallelism`。原因：多个测试文件并行时共用同一 Postgres/Redis，`project-assets.spec.ts` 的「绑定顺序 / 删除解绑」两条断言会偶发失败（单独跑该文件 13/13 全绿，并行全量跑时 2 例失败）。串行后 `pnpm --filter @app/api test` 稳定 **23 files / 215 passed**（约 30s）。
+- **本机 dev 库账本已修复**：按 §7.5 SOP 执行 `node _acceptance/ledger-repair.cjs --fix`，`repaired=61`，复跑 `--dry-run` 为 **不一致 0**（此前 40 个 watchdog 凭空解冻类 + 21 个测试脏数据类）。
+- **仍需注意**：`apps/api/test/refunds.spec.ts` 的退款守卫用例仍用直连 `update credit_accounts` 模拟「积分已消耗」，每跑一次全量测试会给 dev 库留下 1 个「有 recharge 流水但余额少 1000」的脏 space —— 生产代码无此问题，但会让账本告警长期有噪音。建议后续把该用例改成用真实 freeze/settle 流水模拟消耗（未做）。
