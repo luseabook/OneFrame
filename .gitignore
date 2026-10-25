@@ -55,3 +55,7 @@ _acceptance/*
 # 本地依赖启动（PG 55432 / Redis 6380；宿主重启后靠它恢复，
 # 避免"依赖没起"被误判成代码坏——本轮实际踩过）
 !_acceptance/start-local-stack.ps1
+
+# 本地依赖运行时数据（PG/Redis 数据目录，66MB+，绝不入库）
+.localstack/
+
