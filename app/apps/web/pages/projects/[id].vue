@@ -968,6 +968,8 @@ function hideBrokenImage(event: Event): void {
 }
 // ══════════ P3.5：项目资产参考图生成（generate-image → 轮询候选 → 选图定稿）══════════
 const assetCandidates = ref<{ assetId: string; taskId: string; list: Array<{ index: number; url: string }> } | null>(null);
+/** 3D 导演台（P8）：真实 three.js 场景 */
+const director3dOpen = ref(false);
 const assetImageBusyId = ref("");
 
 async function generateAssetImage(a: ProjectAssetDto): Promise<void> {
@@ -1878,7 +1880,7 @@ function kindLabel(kind: string): string {
 
           <div class="gen-row gen-row--between">
             <span class="gen-label">选择素材</span>
-            <button class="mini-link" type="button" disabled title="3D 导演台（P4）">3D导演台</button>
+            <button class="mini-link" type="button" title="打开 3D 导演台（three.js）" @click="director3dOpen = true">3D导演台</button>
           </div>
           <p class="gen-quota">
             已上传素材数：图片 {{ boundImageCount }}/30 · 视频 0/10 · 音频 0/10 · 总素材 {{ boundAssets.length }}/50
@@ -2274,6 +2276,15 @@ function kindLabel(kind: string): string {
         </aside>
       </div>
     </Teleport>
+    <!-- ── 3D 导演台（P8：three.js 场景 + 机位） ── -->
+    <Director3D
+      :open="director3dOpen"
+      :shot-id="selectedShot?.id ?? ''"
+      :shot-no="selectedShot?.shot_no ?? 1"
+      :actors="boundAssets.map((a) => ({ id: a.id, name: a.name, image: a.ref_image_uri }))"
+      @close="director3dOpen = false"
+    />
+
     <!-- ── 资产编辑（场景/道具/其他）── -->
     <Modal :open="assetFormOpen" :title="assetFormId ? '编辑资产' : `新建${assetTabLabel}`" width="520px" @close="assetFormOpen = false">
       <div class="af-form">
