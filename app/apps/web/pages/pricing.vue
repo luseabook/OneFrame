@@ -262,6 +262,14 @@ async function closeOrder(): Promise<void> {
 
 const yuan = (cents: number): string => (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
+// 参照产品定价页顶部：积分加购 / 兑换码 + 连续包月 / 按月购买
+const priceTab = ref<"credits" | "redeem">("credits");
+const billingCycle = ref<"monthly" | "once">("monthly");
+const redeemCode = ref("");
+function redeem(): void {
+  toast.info("兑换码功能即将上线，敬请期待");
+}
+
 onMounted(async () => {
   isMobile.value = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   await load();
@@ -271,13 +279,44 @@ onUnmounted(stopPoll);
 
 <template>
   <div class="pricing">
-    <header class="head">
-      <div>
-        <h1>价格透明，按量计费</h1>
-        <p class="sub">
-          10 积分 = 1 元 · 文生视频 5s/720p 低至 8 积分（0.8 元）· 失败与取消不扣积分
-        </p>
+    <nav class="price-tabs">
+      <button type="button" class="price-tab" :class="{ on: priceTab === 'credits' }" @click="priceTab = 'credits'">
+        积分加购
+      </button>
+      <button type="button" class="price-tab" :class="{ on: priceTab === 'redeem' }" @click="priceTab = 'redeem'">
+        兑换码
+      </button>
+    </nav>
+
+    <section v-if="priceTab === 'redeem'" class="redeem-card">
+      <h2>兑换码</h2>
+      <p class="sub">输入活动兑换码，兑换积分或会员权益。</p>
+      <div class="redeem-row">
+        <input v-model="redeemCode" class="redeem-input" placeholder="请输入兑换码" maxlength="64" />
+        <Button :disabled="!redeemCode.trim()" @click="redeem">兑换</Button>
       </div>
+      <p class="redeem-hint">兑换码功能即将上线，敬请期待。</p>
+    </section>
+
+    <template v-else>
+    <section class="promo-banner">
+      <p class="promo-title">算力积分补贴活动</p>
+      <p class="promo-text">
+        全模型通用积分，按实际消耗计费；生成失败自动返还。模型价格以任务报价为准，运营可热更。
+      </p>
+    </section>
+
+    <div class="mode-tabs">
+      <button type="button" class="mode-tab" :class="{ on: billingCycle === 'monthly' }" @click="billingCycle = 'monthly'">
+        团队购买
+      </button>
+      <button type="button" class="mode-tab" :class="{ on: billingCycle === 'once' }" @click="billingCycle = 'once'">
+        个人订阅
+      </button>
+    </div>
+    <p class="mode-note">ⓘ 团队积分购买后一次性发放，可叠加，有效期一年</p>
+
+    <header class="head">
       <div v-if="balance !== null" class="balance-chip">
         当前余额 <b>{{ balance }}</b> 积分
       </div>
@@ -307,7 +346,13 @@ onUnmounted(stopPoll);
       </div>
 
       <div v-if="skus.length" class="cards">
-        <article v-for="s in skus" :key="s.sku" class="card">
+        <article
+          v-for="(s, idx) in skus"
+          :key="s.sku"
+          class="card"
+          :class="{ featured: idx === skus.length - 1 }"
+        >
+          <span v-if="idx === skus.length - 1" class="ribbon">限时加赠 · 最高性价比</span>
           <div class="card-top">
             <p class="label">{{ s.label }}</p>
             <Tag v-if="s.cents_per_credit !== null" tone="neutral" size="sm">
@@ -317,13 +362,22 @@ onUnmounted(stopPoll);
           <p class="price">
             <span class="cur">¥</span>{{ yuan(s.price_cents) }}
           </p>
-          <p class="credits">{{ s.credits }} 积分</p>
-          <p class="unit">
-            约合 {{ Math.floor(s.credits / 8) }} 条 5s 视频（8 积分/条）
+          <p class="unit-line">
+            1积分 = ¥{{ s.credits > 0 ? (s.price_cents / s.credits / 100).toFixed(3) : "—" }}
           </p>
-          <Button block :loading="paying === s.sku" :disabled="!!paying" @click="buy(s)">
+          <p class="credits">✦ {{ s.credits }} 积分</p>
+          <Button class="buy-btn" block :loading="paying === s.sku" :disabled="!!paying" @click="buy(s)">
             {{ paying === s.sku ? "处理中" : "立即购买" }}
           </Button>
+          <p class="seconds">约可生成 {{ Math.floor(s.credits / 8) }} 条 5s/720p 视频</p>
+          <div class="perks">
+            <p class="perks-title">限时活动</p>
+            <ul>
+              <li>全模型通用，永久有效</li>
+              <li>生成失败/取消自动返还积分</li>
+              <li>支持微信 / 支付宝支付</li>
+            </ul>
+          </div>
         </article>
       </div>
 
@@ -370,6 +424,7 @@ onUnmounted(stopPoll);
         </ul>
       </section>
     </template>
+    </template>
   </div>
 </template>
 
@@ -378,12 +433,98 @@ onUnmounted(stopPoll);
   max-width: 1120px;
   margin: 0 auto;
 }
+.price-tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--border-1);
+  margin-bottom: 18px;
+}
+.price-tab {
+  position: relative;
+  padding: 10px 2px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.price-tab.on {
+  color: var(--text-1);
+}
+.price-tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
+}
+.cycle-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #0f0f12;
+}
+.cycle-toggle button {
+  height: 30px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  cursor: pointer;
+}
+.cycle-toggle button.on {
+  background: #26262c;
+  color: var(--text-1);
+  font-weight: 600;
+}
+.redeem-card {
+  max-width: 520px;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-1);
+  background: var(--bg-surface);
+}
+.redeem-card h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.redeem-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.redeem-input {
+  flex: 1;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-raised);
+  color: var(--text-1);
+  font-size: 13px;
+  outline: none;
+}
+.redeem-input:focus {
+  border-color: var(--brand-500);
+}
+.redeem-hint {
+  margin: 10px 0 0;
+  color: var(--text-4);
+  font-size: 12px;
+}
 .head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-4);
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-5);
 }
 .head h1 {
   font-size: var(--text-2xl);
@@ -472,65 +613,191 @@ onUnmounted(stopPoll);
   margin-left: var(--space-2);
 }
 
+.promo-banner {
+  margin: 0 0 18px;
+  padding: 14px 20px;
+  border-radius: 10px;
+  background: linear-gradient(100deg, #0d1f2a, #123c3a 45%, #1b2350);
+  border: 1px solid #ffffff10;
+}
+.promo-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #eef3ff;
+}
+.promo-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #ffffff9a;
+}
+.mode-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 56px;
+  border-bottom: 1px solid #ffffff0f;
+  margin-bottom: 10px;
+}
+.mode-tab {
+  position: relative;
+  padding: 10px 2px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mode-tab.on {
+  color: var(--text-1);
+}
+.mode-tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--text-1);
+}
+.mode-note {
+  margin: 0 0 16px;
+  text-align: center;
+  color: var(--text-4);
+  font-size: 12px;
+}
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
-  padding: var(--space-5);
+  position: relative;
+  overflow: hidden;
+  background: #121216;
+  border: 1px solid #ffffff12;
+  border-radius: 14px;
+  padding: 18px 18px 16px;
   display: flex;
   flex-direction: column;
   transition:
     border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out),
     transform var(--duration-base) var(--ease-out);
 }
 .card:hover {
-  border-color: var(--brand-300);
-  box-shadow: var(--shadow-md);
+  border-color: #ffffff2e;
   transform: translateY(-2px);
+}
+.card.featured {
+  border-color: #7e70ff;
+  box-shadow: 0 0 0 1px #7e70ff44, 0 18px 40px #7e70ff1f;
+}
+.ribbon {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 3px 10px;
+  border-bottom-left-radius: 10px;
+  background: linear-gradient(90deg, #7e70ff, #b06bff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
 }
 .card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-2);
+  margin-bottom: 12px;
 }
 .label {
   margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
 }
 .price {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-4xl);
+  margin: 0 0 6px;
+  font-size: 38px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.05;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
 }
 .cur {
-  font-size: var(--text-lg);
+  font-size: 18px;
   font-weight: 600;
-  margin-right: 2px;
-  color: var(--text-3);
+  margin-right: 3px;
+  color: var(--text-2);
+}
+.unit-line {
+  margin: 0 0 12px;
+  color: var(--text-4);
+  font-size: 11px;
 }
 .credits {
-  margin: 0 0 var(--space-2);
-  color: var(--brand-600);
-  font-size: var(--text-base);
+  margin: 0 0 12px;
+  color: #d9d2ff;
+  font-size: 17px;
+  font-weight: 700;
+}
+.buy-btn {
+  background: linear-gradient(90deg, #f1ecff, #c9b8ff);
+  border-color: transparent;
+  color: #33288f;
+  font-weight: 700;
+}
+.buy-btn:hover {
+  background: linear-gradient(90deg, #ffffff, #d8c9ff);
+}
+.seconds {
+  margin: 10px 0 12px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.perks {
+  border-top: 1px solid #ffffff0f;
+  padding-top: 10px;
+}
+.perks-title {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 12px;
   font-weight: 600;
 }
-.unit {
-  margin: 0 0 var(--space-4);
-  color: var(--text-4);
-  font-size: var(--text-xs);
-  flex: 1;
+.perks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.perks li {
+  position: relative;
+  padding-left: 14px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.perks li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: #8f86c8;
+}
+@media (max-width: 1100px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+  .mode-tabs {
+    gap: 28px;
+  }
 }
 
 .pending {
