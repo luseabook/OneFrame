@@ -1,10 +1,15 @@
 <script setup lang="ts">
 // 落地页：对齐竞品 ReelMate 首页信息架构（导航 → Hero → 双工作流入口 → 能力矩阵 → 流水线展示 → 页脚）
-definePageMeta({ layout: "default" });
+definePageMeta({ layout: false });
 useHead({ title: "一帧 · AI 漫剧工作台 — 30 分钟产出一集短剧" });
 
 const auth = useAuth();
 const isLogged = computed(() => !!auth.state.value.user);
+
+// 本页不走公共壳层（app.vue 对 "/" 不套 layout），登录态需自行 bootstrap
+onMounted(() => {
+  if (!auth.state.value.accessToken && !auth.state.value.user) void auth.bootstrap();
+});
 
 const flows = [
   {
@@ -188,8 +193,8 @@ const pipeline = [
 <style scoped>
 .landing {
   min-height: 100vh;
-  background: var(--dark-base);
-  color: var(--text-inverse);
+  background: var(--bg-app);
+  color: var(--text-2);
 }
 
 /* ── 导航 ── */
@@ -199,7 +204,7 @@ const pipeline = [
   z-index: var(--z-header);
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-inverse);
+  border-bottom: 1px solid var(--border-1);
 }
 .nav-inner {
   max-width: 1120px;
@@ -240,10 +245,10 @@ const pipeline = [
   display: flex;
   gap: var(--space-6);
   font-size: var(--text-sm);
-  color: var(--text-inverse-2);
+  color: var(--text-2);
 }
 .links a:hover {
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .nav-right {
   display: flex;
@@ -265,11 +270,11 @@ const pipeline = [
   background: var(--brand-600);
 }
 .ghost-sm {
-  color: var(--text-inverse-2);
+  color: var(--text-2);
   font-size: var(--text-sm);
 }
 .ghost-sm:hover {
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 
 /* ── Hero ── */
@@ -317,7 +322,7 @@ const pipeline = [
   position: relative;
   margin: 0 auto var(--space-8);
   max-width: 620px;
-  color: var(--text-inverse-2);
+  color: var(--text-2);
   font-size: var(--text-lg);
   line-height: 1.7;
 }
@@ -352,8 +357,8 @@ const pipeline = [
   background: var(--brand-600);
 }
 .btn-lg.ghost {
-  border: 1px solid var(--border-inverse-strong);
-  color: var(--text-inverse);
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
 }
 .btn-lg.ghost:hover {
   background: #ffffff0f;
@@ -361,7 +366,7 @@ const pipeline = [
 .hint-sm {
   position: relative;
   margin: var(--space-5) 0 0;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-xs);
 }
 
@@ -380,8 +385,8 @@ const pipeline = [
   gap: var(--space-4);
   padding: var(--space-5) var(--space-6);
   border-radius: var(--radius-2xl);
-  border: 1px solid var(--border-inverse);
-  background: linear-gradient(140deg, #1f1f1f, #0d0d10);
+  border: 1px solid var(--border-1);
+  background: linear-gradient(140deg, var(--bg-raised), #0c0c10);
   transition:
     border-color var(--duration-base) var(--ease-out),
     transform var(--duration-base) var(--ease-out);
@@ -411,11 +416,11 @@ const pipeline = [
 .flow-body h3 {
   margin: 0 0 4px;
   font-size: var(--text-base);
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .flow-body p {
   margin: 0;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-xs);
 }
 .flow-cta {
@@ -431,7 +436,7 @@ const pipeline = [
   padding: var(--space-16) var(--space-6);
 }
 .section.alt {
-  border-top: 1px solid var(--border-inverse);
+  border-top: 1px solid var(--border-1);
 }
 .sec-head {
   text-align: center;
@@ -441,11 +446,11 @@ const pipeline = [
   margin: 0 0 var(--space-3);
   font-size: clamp(22px, 3vw, 32px);
   font-weight: 700;
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .sec-head p {
   margin: 0;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-base);
 }
 
@@ -458,8 +463,8 @@ const pipeline = [
 .cap {
   padding: var(--space-5);
   border-radius: var(--radius-xl);
-  border: 1px solid var(--border-inverse);
-  background: #141414;
+  border: 1px solid var(--border-1);
+  background: var(--bg-surface);
   transition: border-color var(--duration-base) var(--ease-out);
 }
 .cap:hover {
@@ -479,11 +484,11 @@ const pipeline = [
 .cap h3 {
   margin: 0 0 var(--space-2);
   font-size: var(--text-base);
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .cap p {
   margin: 0;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-sm);
   line-height: 1.7;
 }
@@ -501,8 +506,8 @@ const pipeline = [
   position: relative;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border-inverse);
-  background: #141414;
+  border: 1px solid var(--border-1);
+  background: var(--bg-surface);
 }
 .pipe li:not(:last-child)::after {
   content: "→";
@@ -510,7 +515,7 @@ const pipeline = [
   right: -12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: 12px;
 }
 .num {
@@ -525,11 +530,11 @@ const pipeline = [
   display: block;
   margin-bottom: 4px;
   font-size: var(--text-sm);
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .pipe em {
   font-style: normal;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-xs);
   line-height: 1.6;
 }
@@ -538,22 +543,22 @@ const pipeline = [
 .final-cta {
   text-align: center;
   padding: var(--space-20) var(--space-6);
-  border-top: 1px solid var(--border-inverse);
+  border-top: 1px solid var(--border-1);
   background: radial-gradient(60% 80% at 50% 0%, #7e70ff1f, transparent 70%);
 }
 .final-cta h2 {
   margin: 0 0 var(--space-3);
   font-size: clamp(22px, 3vw, 30px);
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .final-cta p {
   margin: 0 0 var(--space-6);
-  color: var(--text-inverse-3);
+  color: var(--text-3);
 }
 
 /* 页脚 */
 .foot {
-  border-top: 1px solid var(--border-inverse);
+  border-top: 1px solid var(--border-1);
   padding: var(--space-8) var(--space-6) var(--space-10);
 }
 .foot-inner {
@@ -569,7 +574,7 @@ const pipeline = [
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--text-inverse-2);
+  color: var(--text-2);
   font-size: var(--text-sm);
 }
 .foot-links {
@@ -578,15 +583,15 @@ const pipeline = [
   font-size: var(--text-sm);
 }
 .foot-links a {
-  color: var(--text-inverse-3);
+  color: var(--text-3);
 }
 .foot-links a:hover {
-  color: var(--text-inverse);
+  color: var(--text-1);
 }
 .foot-note {
   max-width: 1120px;
   margin: 0 auto;
-  color: var(--text-inverse-3);
+  color: var(--text-3);
   font-size: var(--text-xs);
   text-align: center;
 }

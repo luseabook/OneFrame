@@ -1102,3 +1102,25 @@ node shot-align-batch2.cjs          # 登录弹窗 + 作品/任务/资产
 ### 14.5 本轮修掉的横切缺陷
 
 **「亮色实体令牌当深色背景」白块 bug**：`--brand-50/100/200` 是亮紫实体色，只适合浅色界面。此前多处深色页面用它做选中底/聚焦环（白块）。已统一替换为 §14.1 新增的软底令牌：选中底 `--brand-soft`、加深 `--brand-soft-strong`、描边 `--brand-border`、软底文字 `--brand-on-soft`。涉及：`projects/[id].vue`、`pricing.vue`、`works.vue`、`tasks.vue`、`assets.vue`。约定：**深色页面禁止再用 `--brand-50/100/200` 作背景或聚焦环。**
+
+### 14.6 第二批（收尾）：落地页 / 账号设置 / 积分 / 举报 / 协议 / 隐私 / 分享 / 404
+
+| 页面 | 代码 | 验收截图 | 修复的缺陷 |
+|---|---|---|---|
+| 落地页 `/` | `pages/index.vue`、`app.vue` | `align-landing.png` | **两层顶栏 + 两层页脚**（页面自带 nav/foot 与公共壳层重复）→ `app.vue` 对 `/` 不套 layout（`barePaths`），落地页自带导航/页脚并对登录取 `bootstrap`；**标题几乎不可见**（`--text-inverse`=#16171a 深底当浅字用）→ 全部换 `--text-1/2/3`；卡片底色 `#141414`/`#1f1f1f` 换 `--bg-surface`/`--bg-raised` |
+| 账号设置 `/settings` | `pages/settings.vue` | `align-settings.png` | 模板用了 `.card` 但样式里**根本没有 `.card` 规则**（区块无底无边）→ 补卡片范式 C；容器 960→1280 与其它页左对齐；h1 22→24px/700；硬编码红黄换 `--danger`/`--warning` |
+| 积分 `/credits` | `pages/credits.vue` | `align-credits.png` | 容器无内距（`max-width:1080` + 0 padding）→ `1280 + 32/72/80` + 窄屏降级；h1/圆角统一 |
+| 举报 `/report`、协议 `/terms`、隐私 `/privacy` | `pages/report.vue`、`terms.vue`、`privacy.vue` | `align-report.png`、`align-terms.png`、`align-privacy.png` | 旧令牌 13 处、无卡片分层 → 960 阅读宽容器 + 分块卡片 + 表单 `--bg-raised`/`--border-2`；**条款文案逐字未动** |
+| 分享 `/share/:token` | `pages/share/[token].vue` | `align-share.png` | 旧令牌 15 处 → 1040 容器 + 信息卡 + `--bg-sunken` 结果区；可用/撤销两态均验证 |
+| 404 | `error.vue`（新增） | `align-404.png` | 参照 §9.4：纯深色 + 页中央偏上胶囊「页面未找到」，无插画无页脚（胶囊可点回首页） |
+| 公共布局 | `layouts/default.vue` | `align-terms.png` 顶栏 | 已登录用户在 `/terms`、`/privacy` 整页刷新后顶栏仍显示「登录/立即登录」→ 挂载后 `bootstrap()` 恢复登录态；底色 `--dark-base`→`--bg-app` |
+| 轻提示 | `components/ToastHost.vue` | — | 深灰底(#333)+深色字(#16171a) 几乎不可见 → 文字改 `--text-1` |
+
+复跑：
+```bash
+cd E:\wanxing\_acceptance
+node shot-align-batch3.cjs   # 设置/积分/举报/协议/隐私/落地
+node shot-align-batch4.cjs   # 落地/设置/举报/协议/隐私/分享/404（SHARE_TOKEN 可覆盖）
+```
+
+> 至此参照站有证据的界面全部完成对齐；§9.6 列出的**无截图页面**（任务中心/资产库/个人中心/团队/画布/CLI 等）只做了「设计系统级对齐」，等补抓图后再做结构级复刻。

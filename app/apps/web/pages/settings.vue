@@ -84,48 +84,91 @@ async function deleteAccount(): Promise<void> {
 <style scoped>
 .page {
   flex: 1;
-  max-width: 720px;
+  max-width: 1280px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 32px;
+  padding: 32px 72px 80px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 h1 {
-  margin: 0;
-  font-size: 22px;
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-1);
 }
 h2 {
   margin: 0 0 8px;
   font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2xl);
+  padding: 20px 24px;
 }
 .muted {
+  margin: 0;
   color: var(--text-3);
   font-size: 13px;
   line-height: 1.7;
 }
+.muted + .muted {
+  margin-top: 4px;
+}
+.muted :deep(a) {
+  color: var(--brand-300);
+}
+.muted :deep(a:hover) {
+  color: var(--text-1);
+}
 .muted.small {
+  margin-top: 8px;
   font-size: 12px;
+  color: var(--text-4);
 }
 .info {
-  color: #fbbf24;
+  margin: 12px 0 0;
+  color: var(--warning);
   font-size: 12px;
 }
 .error {
-  color: #ff6b6b;
+  margin: 12px 0 0;
+  color: var(--danger);
   font-size: 12px;
 }
 .btn-danger {
-  background: #7f1d1d;
-  border: 1px solid #ef4444;
-  color: #fecaca;
+  margin-top: 12px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  color: var(--danger);
   border-radius: var(--radius-md);
   padding: 8px 16px;
   font-size: 13px;
   cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.btn-danger:hover:not(:disabled) {
+  background: #3d1a1a;
+}
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .card.danger {
-  border-color: #7f1d1d;
+  border-color: #6b2626;
+}
+@media (max-width: 1024px) {
+  .page {
+    padding: 24px 24px 64px;
+  }
+}
+@media (max-width: 768px) {
+  .page {
+    padding: 16px 16px 48px;
+  }
 }
 </style>

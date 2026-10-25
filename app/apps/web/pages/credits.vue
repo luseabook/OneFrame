@@ -127,15 +127,17 @@ onMounted(load);
 
 <style scoped>
 .credits {
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 32px 72px 80px;
 }
 .head h1 {
-  font-size: var(--text-2xl);
+  font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .sub {
-  margin: var(--space-1) 0 var(--space-5);
+  margin: 6px 0 24px;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
@@ -147,7 +149,7 @@ onMounted(load);
   padding: var(--space-5) var(--space-6);
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   margin-bottom: var(--space-5);
 }
 .stat {
@@ -185,7 +187,7 @@ onMounted(load);
 
 .flow-table {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   background: var(--bg-surface);
 }
@@ -232,7 +234,10 @@ onMounted(load);
   margin-top: var(--space-6);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
+  .credits {
+    padding: 24px 24px 64px;
+  }
   .summary {
     gap: var(--space-5);
     padding: var(--space-4);
@@ -242,6 +247,9 @@ onMounted(load);
   }
 }
 @media (max-width: 760px) {
+  .credits {
+    padding: 16px 16px 48px;
+  }
   .flow-row {
     grid-template-columns: 72px 72px 1fr;
   }

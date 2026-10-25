@@ -18,12 +18,15 @@ const workspacePaths = [
 const adminPaths = ["/admin"];
 const adminLoginPaths = ["/admin/login"];
 const toolPaths = ["/create"];
+// 落地页自带独立导航与页脚（含法务入口与 ICP），不再套公共壳层，避免出现两层顶栏/两层页脚
+const barePaths = ["/"];
 
 function matchAny(paths: string[]): boolean {
   return paths.some((p) => route.path === p || route.path.startsWith(`${p}/`));
 }
 
 const layoutName = computed(() => {
+  if (matchAny(barePaths)) return "";
   if (matchAny(adminLoginPaths)) return "admin-login";
   if (matchAny(adminPaths)) return "admin";
   if (matchAny(toolPaths)) return "tool";
@@ -34,9 +37,10 @@ const layoutName = computed(() => {
 
 <template>
   <div class="theme-dark">
-    <NuxtLayout :name="layoutName">
+    <NuxtLayout v-if="layoutName" :name="layoutName">
       <NuxtPage />
     </NuxtLayout>
+    <NuxtPage v-else />
     <ToastHost />
   </div>
 </template>
@@ -44,12 +48,12 @@ const layoutName = computed(() => {
 <style>
 html,
 body {
-  background: var(--dark-base);
+  background: var(--bg-app);
 }
 .theme-dark,
 .theme-dark body {
   min-height: 100vh;
-  background: var(--dark-base);
+  background: var(--bg-app);
   color: var(--text-1);
 }
 </style>

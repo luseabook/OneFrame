@@ -58,7 +58,7 @@ if (import.meta.client) {
   border-radius: var(--radius-lg);
   background: var(--dark-elevated);
   border: 1px solid #3f3f45;
-  color: var(--text-inverse);
+  color: var(--text-1);
   font-size: var(--text-sm);
   box-shadow: var(--shadow-lg);
   pointer-events: auto;

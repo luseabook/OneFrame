@@ -48,17 +48,19 @@ onMounted(async () => {
 
 <template>
   <main class="page">
-    <p v-if="loading" class="muted">加载中…</p>
-    <section v-else-if="error" class="card">
+    <p v-if="loading" class="loading">加载中…</p>
+    <section v-else-if="error" class="panel">
       <h1>分享不可用</h1>
       <p class="muted">{{ error }}</p>
-      <NuxtLink to="/" class="home">返回首页</NuxtLink>
+      <NuxtLink to="/" class="link">返回首页</NuxtLink>
     </section>
-    <section v-else-if="share" class="card">
-      <h1>作品分享</h1>
-      <p class="muted">
-        {{ share.mode }} · {{ statusLabel(share.status) }} · {{ new Date(share.created_at).toLocaleString() }}
-      </p>
+    <section v-else-if="share" class="panel">
+      <header class="head">
+        <h1>作品分享</h1>
+        <p class="meta">
+          {{ share.mode }} · {{ statusLabel(share.status) }} · {{ new Date(share.created_at).toLocaleString() }}
+        </p>
+      </header>
 
       <div v-if="share.results.length > 0" class="results">
         <div v-for="(item, index) in share.results" :key="index" class="result">
@@ -77,7 +79,7 @@ onMounted(async () => {
       <p class="muted small">链接有效期至 {{ new Date(share.expires_at).toLocaleString() }} · 内容由 AI 生成，请仔细甄别</p>
 
       <div class="report">
-        <button v-if="!reportOpen" class="report-btn" @click="reportOpen = true">举报内容</button>
+        <Button v-if="!reportOpen" variant="ghost" size="sm" @click="reportOpen = true">举报内容</Button>
         <div v-else class="report-form">
           <label class="field">
             <span class="label">举报类型</span>
@@ -99,130 +101,186 @@ onMounted(async () => {
             <input v-model="reportContact" class="input" maxlength="100" />
           </label>
           <div class="report-actions">
-            <button class="report-btn" :disabled="reporting" @click="submitReport">
+            <Button size="sm" :loading="reporting" @click="submitReport">
               {{ reporting ? "提交中…" : "提交举报" }}
-            </button>
-            <button class="report-btn ghost" @click="reportOpen = false">取消</button>
+            </Button>
+            <Button variant="ghost" size="sm" @click="reportOpen = false">取消</Button>
           </div>
         </div>
         <p v-if="reportMsg" class="info">{{ reportMsg }}</p>
       </div>
 
-      <NuxtLink to="/" class="home">AI 漫剧工作台</NuxtLink>
+      <NuxtLink to="/" class="link">AI 漫剧工作台</NuxtLink>
     </section>
   </main>
 </template>
 
 <style scoped>
+/* 页容器：分享页放宽到 1040，便于承载成片信息 */
 .page {
   flex: 1;
-  display: flex;
-  justify-content: center;
-  padding: 48px 24px;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 32px 32px 80px;
 }
-.card {
-  width: min(640px, 100%);
-  background: var(--dark-container);
-  border: 1px solid var(--border-inverse);
-  border-radius: var(--radius-xl);
-  padding: 28px;
+.loading {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+/* 卡片范式 C：成片信息区 */
+.panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6);
+}
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+}
+.meta {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
 }
 .results {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
+/* 成片/播放区域：下沉底 + 12 圆角 */
 .result {
-  border: 1px solid var(--border-inverse);
-  border-radius: var(--radius-md);
-  padding: 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  padding: var(--space-4);
 }
 .result pre {
   margin: 0;
   white-space: pre-wrap;
-  font-size: 12px;
-  color: var(--text-inverse-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 .download {
-  color: var(--brand-500);
-  font-size: 13px;
+  display: inline-block;
+  color: var(--brand-300);
+  font-size: var(--text-sm);
+  transition: color var(--duration-fast) var(--ease-out);
 }
-.home {
-  margin-top: 8px;
-  color: var(--text-inverse-3);
-  font-size: 12px;
+.download:hover {
+  color: var(--text-1);
 }
+.link {
+  display: inline-block;
+  color: var(--brand-300);
+  font-size: var(--text-sm);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.link:hover {
+  color: var(--text-1);
+}
+/* 举报区：与成片信息用 1px 分隔线分开 */
 .report {
-  border-top: 1px solid var(--border-inverse);
-  padding-top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.report-btn {
-  align-self: flex-start;
-  background: none;
-  border: 1px solid var(--border-inverse);
-  border-radius: var(--radius-sm);
-  color: var(--text-inverse-2);
-  font-size: 12px;
-  padding: 4px 12px;
-  cursor: pointer;
-}
-.report-btn.ghost {
-  color: var(--text-inverse-3);
+  align-items: flex-start;
+  gap: var(--space-3);
+  border-top: 1px solid var(--border-1);
+  padding-top: var(--space-4);
 }
 .report-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
+  width: 100%;
 }
 .report-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 .label {
-  color: var(--text-inverse-2);
-  font-size: 12px;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
+/* 表单控件：raised 底 + border-2 边 + radius-md，聚焦 brand-500 */
 .input {
-  background: var(--dark-container);
-  border: 1px solid var(--border-inverse);
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
-  color: var(--text-inverse);
-  padding: 6px 8px;
-  font-size: 12px;
+  color: var(--text-1);
+  padding: 8px var(--space-3);
+  font-size: var(--text-sm);
   outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+.input::placeholder {
+  color: var(--text-4);
+}
+.input:hover {
+  border-color: var(--border-3);
+}
+.input:focus {
+  border-color: var(--brand-500);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 .textarea {
-  min-height: 60px;
+  min-height: 88px;
+  line-height: 1.7;
   resize: vertical;
 }
+select.input {
+  cursor: pointer;
+}
 .info {
-  color: var(--text-inverse-2);
-  font-size: 12px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 .muted {
-  color: var(--text-inverse-3);
-  font-size: 12px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 .small {
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .error {
-  color: #ff6b6b;
-  font-size: 12px;
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+  .panel {
+    padding: var(--space-4);
+  }
 }
 </style>

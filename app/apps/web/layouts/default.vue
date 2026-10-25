@@ -4,6 +4,11 @@ const auth = useAuth();
 const route = useRoute();
 const user = computed(() => auth.state.value.user);
 const isLoginPage = computed(() => route.path === "/login");
+
+// 公共页整页刷新时也要恢复登录态，否则已登录用户在 /terms /privacy 等页会看到「登录/立即登录」
+onMounted(() => {
+  if (!auth.state.value.accessToken) void auth.bootstrap();
+});
 </script>
 
 <template>
@@ -46,7 +51,7 @@ const isLoginPage = computed(() => route.path === "/login");
 <style scoped>
 .marketing {
   min-height: 100vh;
-  background: var(--dark-base);
+  background: var(--bg-app);
   color: var(--text-1);
   display: flex;
   flex-direction: column;
