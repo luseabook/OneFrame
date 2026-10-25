@@ -316,6 +316,17 @@ onUnmounted(stopPoll);
     </div>
     <p class="mode-note">ⓘ 团队积分购买后一次性发放，可叠加，有效期一年</p>
 
+    <div class="cycle-row">
+      <div class="cycle-toggle">
+        <button type="button" :class="{ on: billingCycle === 'monthly' }" @click="billingCycle = 'monthly'">
+          连续包月
+        </button>
+        <button type="button" :class="{ on: billingCycle === 'once' }" @click="billingCycle = 'once'">
+          按月购买
+        </button>
+      </div>
+    </div>
+
     <header class="head">
       <div v-if="balance !== null" class="balance-chip">
         当前余额 <b>{{ balance }}</b> 积分
@@ -543,9 +554,9 @@ onUnmounted(stopPoll);
   gap: 5px;
   padding: 0 12px;
   border-radius: var(--radius-full);
-  background: var(--brand-50);
-  color: var(--brand-700);
-  border: 1px solid var(--brand-200);
+  background: var(--bg-raised);
+  color: var(--text-3);
+  border: 1px solid var(--border-1);
   font-size: var(--text-sm);
 }
 .balance-chip b {
@@ -590,13 +601,13 @@ onUnmounted(stopPoll);
     background var(--duration-base) var(--ease-out);
 }
 .ch-btn:hover:not(.disabled) {
-  border-color: var(--brand-300);
-  color: var(--brand-700);
+  border-color: var(--brand-400);
+  color: var(--text-1);
 }
 .ch-btn.active {
   border-color: var(--brand-500);
-  background: var(--brand-50);
-  color: var(--brand-700);
+  background: #2a1b4a;
+  color: #d9d2ff;
   font-weight: 600;
 }
 .ch-btn.disabled {
@@ -614,11 +625,18 @@ onUnmounted(stopPoll);
 }
 
 .promo-banner {
-  margin: 0 0 18px;
-  padding: 14px 20px;
+  width: 900px;
+  max-width: 100%;
+  min-height: 120px;
+  box-sizing: border-box;
+  margin: 0 auto 18px;
+  padding: 22px 24px;
   border-radius: 10px;
   background: linear-gradient(100deg, #0d1f2a, #123c3a 45%, #1b2350);
   border: 1px solid #ffffff10;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .promo-title {
   margin: 0 0 6px;
@@ -662,15 +680,23 @@ onUnmounted(stopPoll);
   background: var(--text-1);
 }
 .mode-note {
-  margin: 0 0 16px;
+  margin: 0 0 10px;
   text-align: center;
   color: var(--text-4);
   font-size: 12px;
 }
+.cycle-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 14px;
+}
 .cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(4, 320px);
+  justify-content: start;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
 }
 .card {
   position: relative;
@@ -718,17 +744,24 @@ onUnmounted(stopPoll);
 }
 .price {
   margin: 0 0 6px;
-  font-size: 38px;
+  font-size: 40px;
   font-weight: 700;
   line-height: 1.05;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, #eae4ff, #b9a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .cur {
   font-size: 18px;
   font-weight: 600;
   margin-right: 3px;
-  color: var(--text-2);
+  background: linear-gradient(180deg, #eae4ff, #b9a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .unit-line {
   margin: 0 0 12px;

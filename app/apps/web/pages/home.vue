@@ -245,9 +245,26 @@ async function dismissOnboarding(): Promise<void> {
 
 <style scoped>
 .page {
+  position: relative;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px 32px 64px;
+  padding: 40px 72px 80px;
+}
+/* 参照产品：左上紫色光晕 + 底部渐隐 */
+.page::before {
+  content: "";
+  position: absolute;
+  top: -120px;
+  left: -80px;
+  width: 520px;
+  height: 420px;
+  background: radial-gradient(50% 50% at 50% 50%, #7769ff2e, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+.page > * {
+  position: relative;
+  z-index: 1;
 }
 .hero-title {
   margin: 24px 0 36px;
@@ -260,7 +277,8 @@ async function dismissOnboarding(): Promise<void> {
 /* ── 双工作流入口卡 ── */
 .hero-cards {
   display: grid;
-  grid-template-columns: 3fr 2fr;
+  grid-template-columns: minmax(0, 640px) minmax(0, 480px);
+  justify-content: center;
   gap: 24px;
 }
 .flow-card,
@@ -269,9 +287,9 @@ async function dismissOnboarding(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 18px;
-  min-height: 150px;
-  padding: 28px 32px;
-  border-radius: var(--radius-2xl);
+  min-height: 160px;
+  padding: 40px 48px;
+  border-radius: 32px;
   overflow: hidden;
 }
 .flow-card {
@@ -353,15 +371,15 @@ async function dismissOnboarding(): Promise<void> {
 .tool-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 18px;
-  margin-top: 44px;
+  gap: 32px;
+  margin-top: 40px;
 }
 .tool-card {
   position: relative;
   display: grid;
   place-items: center;
-  height: 92px;
-  border-radius: var(--radius-2xl);
+  height: 96px;
+  border-radius: 16px;
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
   color: var(--text-1);
@@ -539,13 +557,13 @@ async function dismissOnboarding(): Promise<void> {
 }
 .case-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, 322px);
+  gap: 13px;
 }
 .case-card {
   position: relative;
   height: 170px;
-  border-radius: var(--radius-xl);
+  border-radius: 16px;
   border: 1px solid var(--border-1);
   overflow: hidden;
   display: flex;

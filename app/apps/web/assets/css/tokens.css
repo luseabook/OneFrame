@@ -13,13 +13,13 @@
   --brand-100: #e6e2ff;
   --brand-200: #d3ccff;
   --brand-300: #b8afff;
-  --brand-400: #9185ff;
-  --brand-500: #7e70ff; /* 竞品 --color-brand-solid-primary */
-  --brand-600: #6b5cff; /* 竞品 tech-purple-60 */
-  --brand-700: #5748e0;
-  --brand-800: #4133b8;
-  --brand-900: #33288f;
-  --brand-950: #1a1452;
+  --brand-400: #b07aff;
+  --brand-500: #9b46ff; /* 参照产品按钮主色（一手 CSS 实测 #9B46FF） */
+  --brand-600: #8a3ae6;
+  --brand-700: #732fc2;
+  --brand-800: #5c259b;
+  --brand-900: #451c74;
+  --brand-950: #2b1248;
   --accent-400: #cf9fff;
   --accent-500: #af5fff; /* 竞品 pink-purple-60 */
   --accent-600: #8c4ccc;
@@ -34,29 +34,30 @@
   --info: #63b3ff;
   --info-bg: #10243a;
 
-  /* ── 深色表面（营销页/播放区，竞品背景层）── */
-  --dark-base: #000000;
-  --dark-layout: #141414;
-  --dark-container: #1f1f1f;
+  /* ── 深色表面（营销页/播放区，参照产品一手 CSS）── */
+  --dark-base: #0a0a0e;
+  --dark-layout: #191a21;
+  --dark-container: #1f1f2a;
   --dark-elevated: #333333;
   --dark-overlay: #292929;
   --dark-spotlight: #3d3d3d;
-  --dark-brand-bg: #33288f;
+  --dark-brand-bg: #451c74;
 
-  /* ── 表面（竞品背景层，全站深色）── */
-  --bg-app: #000000; /* base */
-  --bg-surface: #141414; /* layout：面板/卡片 */
-  --bg-raised: #1f1f1f; /* container：容器/输入 */
-  --bg-sunken: #0d0d0d; /* 下沉区（表单底/表格头） */
+  /* ── 表面（参照产品一手 CSS：base #0A0A0E / layout #191A21 / container #1F1F2A）── */
+  --bg-app: #0a0a0e; /* base */
+  --bg-surface: #191a21; /* layout：面板/卡片 */
+  --bg-raised: #1f1f2a; /* container：容器/输入 */
+  --bg-sunken: #0c0c10; /* 下沉区（表单底/表格头） */
   --bg-hover: #ffffff0d; /* 悬停 = 白 5% */
   --bg-active: #ffffff1a; /* 按下 = 白 10% */
   --bg-inverse: #f5f5f7;
 
-  /* ── 文本（竞品前景白 alpha 阶）── */
-  --text-1: #ffffff; /* 标题 */
-  --text-2: #ffffffb8; /* 正文 */
-  --text-3: #ffffff8f; /* 次要 */
-  --text-4: #ffffff59; /* 占位/禁用 */
+  /* ── 文本（参照产品 #f5f8ff 五阶）── */
+  --text-1: #f5f8ff; /* 标题 */
+  --text-2: #f5f8ffcc; /* 正文 */
+  --text-3: #f5f8ff8f; /* 次要 */
+  --text-4: #f5f8ff66; /* 占位/说明 */
+  --text-5: #f5f8ff3d; /* 禁用 */
   --text-inverse: #16171a;
   --text-inverse-2: #ffffffb8;
   --text-inverse-3: #ffffff8f;
@@ -138,7 +139,7 @@
   --z-toast: 500;
 
   /* ── 布局 ── */
-  --header-h: 56px;
+  --header-h: 64px; /* 参照产品一手 CSS：header-height 64 */
   --sidebar-w: 240px; /* 竞品侧栏实测宽 */
   --content-max: 1440px;
 }

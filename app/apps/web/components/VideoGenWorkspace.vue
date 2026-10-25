@@ -28,6 +28,7 @@ const ratio = ref("9:16");
 const resolution = ref("720p");
 const duration = ref(5);
 const camera = ref("");
+const enableAudio = ref(false);
 
 const MODE_KEY: Record<GenMode, string> = {
   text2video: "text2video",
@@ -256,13 +257,12 @@ function removeImage(index: number): void {
 }
 
 function requestBody(): Record<string, unknown> {
-  const cfg = modeCfg.value;
   const options = {
     ratio: ratio.value,
     resolution: resolution.value,
     duration: duration.value,
     count: 1,
-    ...(cfg?.audio_video_support !== undefined ? { enable_audio: false } : {}),
+    ...(selected.value?.audio_video_support ? { enable_audio: enableAudio.value } : {}),
   };
   const input: Record<string, unknown> = { prompt: finalPrompt() };
   if (mode.value === "image2video") input.first_frame_uri = images.value[0]?.url ?? "";
@@ -520,6 +520,14 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div v-if="selected?.audio_video_support" class="field">
+          <span class="field-label">音频</span>
+          <label class="switch-row">
+            <input v-model="enableAudio" type="checkbox" />
+            <span>生成带音频的视频（支持模型）</span>
+          </label>
+        </div>
+
         <p v-if="error" class="error">{{ error }}</p>
       </div>
 
@@ -703,7 +711,7 @@ onUnmounted(() => {
 <style scoped>
 .video-gen {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 624px minmax(0, 1fr);
   gap: 12px;
   padding: 0 12px 12px;
   height: calc(100vh - 64px);
@@ -719,7 +727,7 @@ onUnmounted(() => {
 }
 
 .left-panel {
-  padding: 12px;
+  padding: 20px;
   gap: 12px;
 }
 
@@ -1058,6 +1066,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.switch-row input {
+  accent-color: var(--brand-500);
 }
 
 .setting-name {

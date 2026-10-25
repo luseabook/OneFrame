@@ -24,9 +24,9 @@ const tools: Tool[] = [
 
 const tabs = [
   { key: "all", label: "全部" },
-  { key: "video", label: "视频" },
-  { key: "image", label: "图片" },
-  { key: "audio", label: "音频" },
+  { key: "video", label: "AI视频" },
+  { key: "image", label: "AI图片" },
+  { key: "audio", label: "AI音频" },
 ] as const;
 const active = ref<(typeof tabs)[number]["key"]>("all");
 const shown = computed(() => (active.value === "all" ? tools : tools.filter((t) => t.cat === active.value)));
@@ -88,7 +88,7 @@ function openTool(t: Tool): void {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 56px);
+  min-height: calc(100vh - 64px);
   padding: 28px 32px 40px;
   box-sizing: border-box;
 }
@@ -102,7 +102,7 @@ function openTool(t: Tool): void {
 
 h1 {
   margin: 0;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
 }
 
@@ -153,7 +153,7 @@ h1 {
   align-items: center;
   padding: 0 18px;
   border-radius: 8px;
-  background: #7e70ff;
+  background: var(--brand-500);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
@@ -162,7 +162,7 @@ h1 {
 }
 
 .asset-btn:hover {
-  background: #6b5cff;
+  background: var(--brand-600);
 }
 
 .tabs {
@@ -196,9 +196,9 @@ h1 {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-content: space-evenly;
-  gap: 20px 24px;
-  padding: 8px 0 0;
+  align-content: start;
+  gap: 24px 32px;
+  padding: 24px 0 0;
 }
 
 .tool-card {
@@ -206,26 +206,26 @@ h1 {
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  min-height: 86px;
+  height: 84px;
   padding: 16px 22px;
-  border-radius: 10px;
-  border: 1px solid #ffffff0f;
-  background: #0b0b0d;
+  border-radius: 16px;
+  border: 0;
+  background: linear-gradient(180deg, #060608, #020203);
   text-align: left;
   text-decoration: none;
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: background 0.15s, transform 0.15s;
 }
 
 .tool-card:hover {
-  border-color: #ffffff2e;
-  background: #111114;
+  background: linear-gradient(180deg, #0d0d12, #050507);
+  transform: translateY(-1px);
 }
 
 h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-1);
 }
@@ -245,8 +245,8 @@ h3 {
 }
 
 .tool-card.muted:hover {
-  border-color: #ffffff0f;
-  background: #0b0b0d;
+  background: linear-gradient(180deg, #060608, #020203);
+  transform: none;
 }
 
 @media (max-width: 1100px) {
