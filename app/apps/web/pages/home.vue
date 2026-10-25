@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ProjectDto } from "~/types/api";
 // 工作台首页：1:1 对齐竞品 ReelMate App 首页（home.png）
 // 结构：居中大标题 → 双工作流入口卡 → 工具矩阵 → 活动轮播 → 案例墙
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
@@ -51,12 +52,29 @@ onUnmounted(() => {
   if (bannerTimer) clearInterval(bannerTimer);
 });
 
-const cases = [
-  { title: "雨夜来信 · EP01", tag: "精品漫剧", from: "#31244f", to: "#12101c" },
-  { title: "深海回声", tag: "热点二创", from: "#173a4a", to: "#0e1a20" },
-  { title: "长安食单", tag: "国风短篇", from: "#4a2a1a", to: "#20120c" },
-  { title: "午夜电台", tag: "悬疑连载", from: "#26313f", to: "#10151c" },
-];
+// 最近项目（替代参照产品的「爆款案例」静态位；展示真实数据）
+const api = useApi();
+const recentProjects = ref<ProjectDto[]>([]);
+const recentLoading = ref(true);
+const DRAMA_LABEL: Record<number, string> = { 1: "国内仿真人剧", 2: "海外仿真人剧", 3: "2D/3D动漫" };
+const DRAMA_GRADIENT: Record<number, string> = {
+  1: "linear-gradient(150deg, #3a2030, #12101c)",
+  2: "linear-gradient(150deg, #14303e, #0e161c)",
+  3: "linear-gradient(150deg, #2f1a44, #15101f)",
+};
+async function loadRecent(): Promise<void> {
+  try {
+    const data = await api.get<{ list: ProjectDto[]; total: number }>("/projects?page=1&page_size=4");
+    recentProjects.value = data.list.slice(0, 4);
+  } catch {
+    recentProjects.value = [];
+  } finally {
+    recentLoading.value = false;
+  }
+}
+onMounted(() => {
+  void loadRecent();
+});
 
 // 新手引导（PRD 增补 §3.2）：服务端记录是否已关闭，避免反复打扰
 const auth = useAuth();
@@ -191,16 +209,33 @@ async function dismissOnboarding(): Promise<void> {
 
     <section class="cases">
       <div class="cases-head">
-        <h3>爆款案例</h3>
-        <NuxtLink to="/tools" class="more">上划查看更多
+        <h3>最近项目</h3>
+        <NuxtLink to="/projects" class="more">查看全部
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
         </NuxtLink>
       </div>
-      <div class="case-grid">
-        <div v-for="c in cases" :key="c.title" class="case-card" :style="{ background: `linear-gradient(150deg, ${c.from}, ${c.to})` }">
-          <span class="case-tag">{{ c.tag }}</span>
-          <p class="case-title">{{ c.title }}</p>
-        </div>
+
+      <div v-if="recentLoading" class="recent-skeleton">加载中…</div>
+
+      <div v-else-if="recentProjects.length" class="case-grid">
+        <NuxtLink
+          v-for="p in recentProjects"
+          :key="p.id"
+          :to="`/projects/${p.id}`"
+          class="case-card recent-card"
+          :style="{ background: DRAMA_GRADIENT[p.drama_type] ?? DRAMA_GRADIENT[1] }"
+        >
+          <span class="case-tag">{{ DRAMA_LABEL[p.drama_type] ?? "短剧" }}</span>
+          <div class="recent-info">
+            <p class="case-title">{{ p.title }}</p>
+            <p class="case-meta">{{ p.ratio }} · {{ new Date(p.created_at).toLocaleDateString("zh-CN") }}</p>
+          </div>
+        </NuxtLink>
+      </div>
+
+      <div v-else class="recent-empty">
+        <p>还没有项目，创建第一个开始创作</p>
+        <button type="button" class="recent-create" @click="openCreate">创建项目</button>
       </div>
     </section>
   </main>
@@ -536,6 +571,56 @@ async function dismissOnboarding(): Promise<void> {
   font-size: 14px;
   font-weight: 600;
   color: #ffffffd9;
+}
+.recent-card {
+  text-decoration: none;
+  color: inherit;
+}
+.recent-info {
+  min-width: 0;
+}
+.case-meta {
+  margin: 4px 0 0;
+  color: #ffffff8f;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 170px;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--border-2);
+  color: var(--text-4);
+  font-size: 13px;
+}
+.recent-empty p {
+  margin: 0;
+}
+.recent-create {
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 0;
+  background: linear-gradient(90deg, #7e70ff, #a45fff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.recent-skeleton {
+  height: 170px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-1);
+  color: var(--text-4);
+  font-size: 13px;
 }
 
 @media (max-width: 1080px) {
