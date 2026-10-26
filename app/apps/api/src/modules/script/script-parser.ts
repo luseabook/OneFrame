@@ -189,21 +189,12 @@ export async function parseScriptFile(fileName: string, buffer: Buffer): Promise
   throw new AppError(ErrorCode.INVALID_PARAM, `不支持的文件格式：.${ext || "unknown"}`);
 }
 
-/** base64 → Buffer，并限制解码后大小（默认 8MB） */
-export function decodeBase64Upload(fileBase64: string, maxBytes = 8 * 1024 * 1024): Buffer {
-  const raw = fileBase64.includes(",") ? fileBase64.slice(fileBase64.indexOf(",") + 1) : fileBase64;
-  let buffer: Buffer;
-  try {
-    buffer = Buffer.from(raw, "base64");
-  } catch {
-    throw new AppError(ErrorCode.INVALID_PARAM, "文件内容不是有效的 base64");
-  }
-  if (buffer.length === 0) throw new AppError(ErrorCode.INVALID_PARAM, "文件内容为空");
-  if (buffer.length > maxBytes) {
-    throw new AppError(ErrorCode.INVALID_PARAM, `文件超过 ${Math.round(maxBytes / 1024 / 1024)}MB 限制`);
-  }
-  return buffer;
-}
+/**
+ * base64 → Buffer 的实现在 `common/base64.ts`（画布表格导入同样需要它，
+ * 而 canvas 域按契约不允许依赖 script 域）。
+ * 这里保留同名导出，避免既有调用点与测试改签名。
+ */
+export { decodeBase64Upload } from "../../common/base64";
 
 /** 解析结果统一裁剪到小说上限（与 createProjectSchema 的 source_text 限制一致） */
 export function clampToNovelLimit(text: string): { text: string; truncated: boolean } {

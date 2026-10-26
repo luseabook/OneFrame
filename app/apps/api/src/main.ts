@@ -15,6 +15,16 @@ async function bootstrap(): Promise<void> {
   const adapter = new FastifyAdapter({
     trustProxy: true,
     genReqId: () => randomUUID(), // request_id：日志/排障/响应头回传（observability §1）
+    /**
+     * 请求体上限 16MB。
+     *
+     * 为什么必须显式抬：Fastify 默认 1MB，而本项目有两条"文件走 base64 JSON"的
+     * 上传路径（`POST /projects/parse-script`、`POST /canvas/.../table/import`），
+     * 解码上限 8MB 的 xlsx/docx 转成 base64 是 ~11MB。默认值下真实文件会先被 413
+     * 拒掉，接口文档里写的 8MB 形同虚设（本轮实测发现）。
+     * 16MB = 8MB × 4/3 + 余量；仍远小于内存安全边界，且 zip 解压侧另有限制。
+     */
+    bodyLimit: 16 * 1024 * 1024,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {

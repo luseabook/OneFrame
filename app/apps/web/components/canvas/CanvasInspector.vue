@@ -2,6 +2,7 @@
 import type { CanvasEdgeDto, CanvasNodeDto, CanvasNodeType } from "~/types/canvas";
 import { NODE_STATUS, NODE_TYPE_META } from "~/types/canvas";
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
+import type { TableImportResult } from "~/composables/useCanvasApi";
 
 /**
  * 右侧检查器（画布域**唯一**负责参数编辑的组件）
@@ -293,6 +294,75 @@ const TABLE_SOURCE_OPTS: Opt[] = [
   { value: "excel_import", label: "Excel 导入" },
   { value: "project_episode_import", label: "剧集导入" },
 ];
+
+// ── 表格节点 Excel 导入（两步式：先列 Sheet，再显式确认）────────────
+// 为什么不在选到文件时就一口气导入：多 Sheet 的排期表自动选第一个 = 无声导错
+// （用户以为导了「镜头表」，实际存的是「角色表」）。所以必须让用户看见清单再点。
+const api = useCanvasApi();
+const toast = useToast();
+const tableFileInput = ref<HTMLInputElement | null>(null);
+const tableImporting = ref(false);
+const tableImportError = ref("");
+const tableImport = ref<TableImportResult | null>(null);
+const tableConfirming = ref("");
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("读取文件失败"));
+    // 去掉 "data:...;base64," 前缀：后端接受裸 base64，也接受带前缀，这里给最干净的一种
+    reader.onload = () => resolve(String(reader.result ?? "").replace(/^data:[^;]*;base64,/, ""));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function onTableFilePick(ev: Event): Promise<void> {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  // 立刻清空 value：否则"同一个文件再选一次"不会触发 change，用户会以为按钮坏了
+  input.value = "";
+  const n = selectedNode.value;
+  if (!file || !n) return;
+  if (!/\.xlsx$/i.test(file.name)) {
+    tableImportError.value = "只支持 .xlsx（旧版 .xls 请另存为 .xlsx）";
+    return;
+  }
+  tableImporting.value = true;
+  tableImportError.value = "";
+  tableImport.value = null;
+  try {
+    tableImport.value = await api.importTable(ed.canvasId.value, n.id, {
+      file_name: file.name,
+      file_base64: await readFileAsBase64(file),
+    });
+  } catch (err) {
+    tableImportError.value = (err as { message?: string }).message || "导入失败";
+  } finally {
+    tableImporting.value = false;
+  }
+}
+
+/** 确认某个 Sheet：后端写库并返回落库后的 table 参数，用它覆盖本地参数 */
+async function onConfirmSheet(sheetId: string): Promise<void> {
+  const n = selectedNode.value;
+  const token = tableImport.value?.import_token;
+  if (!n || !token) return;
+  tableConfirming.value = sheetId;
+  tableImportError.value = "";
+  try {
+    const res = await api.confirmTableSheet(ed.canvasId.value, n.id, {
+      import_token: token,
+      sheet_id: sheetId,
+    });
+    // 必须用后端返回值覆盖本地：只改本地的话，下一次 commit 会用旧参数把导入结果冲掉
+    setPP(["table"], res.table);
+    toast.success(`已导入「${res.sheet.name}」（${res.sheet.row_count} 行 × ${res.sheet.col_count} 列）`);
+  } catch (err) {
+    tableImportError.value = (err as { message?: string }).message || "确认失败";
+  } finally {
+    tableConfirming.value = "";
+  }
+}
 
 const VIDEO_RATIO_OPTS: Opt[] = [
   { value: "16:9", label: "16:9" },
@@ -1342,6 +1412,55 @@ function toggleSec(key: string): void {
 
           <!-- table -->
           <template v-else-if="nodeType === 'table'">
+            <div class="cv-field insp-field-table-import">
+              <label>
+                Excel 导入
+                <span v-if="sAt(['table', 'import', 'file_name'])" class="cv-tag">
+                  {{ sAt(["table", "import", "file_name"]) }}
+                </span>
+              </label>
+              <!-- 隐藏的 file input：样式无法可靠定制，用按钮代理点击 -->
+              <input
+                ref="tableFileInput"
+                class="insp-hidden-file"
+                type="file"
+                accept=".xlsx"
+                @change="onTableFilePick"
+              />
+              <Button
+                class="insp-table-pick"
+                variant="secondary"
+                size="sm"
+                :disabled="tableImporting"
+                @click="tableFileInput?.click()"
+              >
+                {{ tableImporting ? "解析中…" : "选择 .xlsx 文件" }}
+              </Button>
+              <p v-if="tableImportError" class="insp-json-err">{{ tableImportError }}</p>
+
+              <div v-if="tableImport" class="insp-sheets">
+                <p class="cv-hint">
+                  共 {{ tableImport.sheets.length }} 个工作表。请选择要写入节点的那个
+                  <strong>（不会自动选第一个）</strong>：
+                </p>
+                <ul class="insp-sheets__list">
+                  <li v-for="s in tableImport.sheets" :key="s.sheet_id" class="insp-sheets__item">
+                    <span class="insp-sheets__name">{{ s.name }}</span>
+                    <span class="insp-sheets__meta">{{ s.row_count }} 行 × {{ s.col_count }} 列</span>
+                    <Button
+                      class="insp-sheets__use"
+                      size="sm"
+                      :disabled="tableConfirming === s.sheet_id"
+                      @click="onConfirmSheet(s.sheet_id)"
+                    >
+                      {{ tableConfirming === s.sheet_id ? "写入中…" : "使用该表" }}
+                    </Button>
+                  </li>
+                </ul>
+                <p v-if="tableImport.warnings.length" class="cv-hint">{{ tableImport.warnings.join("；") }}</p>
+              </div>
+            </div>
+
             <div class="cv-field insp-field-sheetid">
               <label>当前 Sheet active_sheet_id</label>
               <input
@@ -2353,5 +2472,48 @@ function toggleSec(key: string): void {
   font-family: var(--font-mono);
   font-size: 10px;
   cursor: text;
+}
+/* 表格 Excel 导入：file input 无法可靠定制样式，隐藏后用按钮代理点击 */
+.insp-hidden-file {
+  display: none;
+}
+.insp-sheets {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.insp-sheets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.insp-sheets__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.insp-sheets__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.insp-sheets__meta {
+  color: var(--text-4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 </style>

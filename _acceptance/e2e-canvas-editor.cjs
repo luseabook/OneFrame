@@ -78,6 +78,122 @@ async function prepareUser() {
   return { phone, code: String(sms.data.debug_code) };
 }
 
+/**
+ * 造一个真 .xlsx（stored ZIP，不压缩）供「表格节点导入」用。
+ *
+ * 为什么不放一个二进制夹具文件、也不装 jszip：验收脚本要能自带自跑。
+ * xlsx 就是 zip + 几个固定 XML，stored 模式连 deflate 都不需要，
+ * 手写 60 行比引入依赖或提交不可读的二进制更划算。
+ */
+function crc32(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) {
+    let c = (crc ^ buf[i]) & 0xff;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipStore(files) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = Buffer.from(file.name, "utf8");
+    const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data, "utf8");
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8); // store
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    locals.push(local, name, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, name);
+
+    offset += local.length + name.length + data.length;
+  }
+  const centralBuf = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(centralBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20);
+  return Buffer.concat([...locals, centralBuf, eocd]);
+}
+
+/** 两个工作表的排期工作簿：角色表（共享字符串 + 内联）与镜头表（数值） */
+function buildXlsxBuffer() {
+  return zipStore([
+    {
+      name: "[Content_Types].xml",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="角色表" sheetId="1" r:id="rId1"/><sheet name="镜头表" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`,
+    },
+    {
+      name: "xl/sharedStrings.xml",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="4" uniqueCount="4"><si><t>角色</t></si><si><t>演员</t></si><si><t>林晚</t></si><si><t>顾沉</t></si></sst>`,
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="inlineStr"><is><t>张三</t></is></c></row><row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3" t="inlineStr"><is><t>李四</t></is></c></row></sheetData></worksheet>`,
+    },
+    {
+      name: "xl/worksheets/sheet2.xml",
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>镜号</t></is></c><c r="B1" t="inlineStr"><is><t>时长</t></is></c></row><row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>5</v></c></row><row r="3"><c r="A3"><v>2</v></c><c r="B3"><v>8</v></c></row></sheetData></worksheet>`,
+    },
+  ]);
+}
+
+
 (async () => {
   fs.mkdirSync(SHOT_DIR, { recursive: true });
   const user = await prepareUser();
@@ -801,6 +917,68 @@ async function prepareUser() {
         }
       }
       await page.screenshot({ path: path.join(SHOT_DIR, "14-agent-panel.png") });
+    }
+
+    // ══ S17 表格节点 Excel 导入（两步式）═══════════════════
+    // 验的是"多 Sheet 不自动选"这个容易做错的语义：先只列清单，点「使用该表」才写库。
+    console.log("[S17] 表格节点 Excel 导入");
+    {
+      const created = await api(
+        "POST",
+        `/canvas/canvases/${canvasId}/nodes`,
+        { node_type: "table", name: "排期表", x: 60, y: 60, params: {} },
+        token,
+      );
+      record("S17.1 表格节点已创建", created.code === 0);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector('.canvas-node[data-node-type="table"]', { timeout: 20_000 }).catch(() => {});
+      await sleep(600);
+
+      const tableNode = page.locator('.canvas-node[data-node-type="table"]').first();
+      if ((await tableNode.count()) > 0) {
+        await tableNode.locator(".canvas-node__head").click();
+        await sleep(500);
+        record("S17.2 检查器出现 Excel 导入入口", (await page.locator(".insp-table-pick").count()) > 0);
+
+        const before = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+        const beforeNode = (before.data.nodes || []).find((n) => n.name === "排期表");
+        record("S17.3 导入前无 active_sheet_id", !beforeNode?.params?.table?.active_sheet_id);
+
+        await page.locator(".insp-hidden-file").setInputFiles({
+          name: "排期.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: buildXlsxBuffer(),
+        });
+        await page.waitForSelector(".insp-sheets__item", { timeout: 20_000 }).catch(() => {});
+        const sheetCount = await page.locator(".insp-sheets__item").count();
+        record("S17.4 列出全部工作表（2 个）", sheetCount === 2, `sheets=${sheetCount}`);
+
+        // 关键语义：只列清单时不能写库，否则"自动选第一个"的错就回来了
+        const mid = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+        const midNode = (mid.data.nodes || []).find((n) => n.name === "排期表");
+        record("S17.5 仅列清单时不写库（真两步式）", !midNode?.params?.table?.active_sheet_id);
+
+        await page.locator(".insp-sheets__item", { hasText: "镜头表" }).locator(".insp-sheets__use").click();
+        await sleep(1500);
+
+        const after = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+        const node = (after.data.nodes || []).find((n) => n.name === "排期表");
+        const table = node?.params?.table || {};
+        const sheets = table.sheets || [];
+        record("S17.6 已写入所选 Sheet", table.active_sheet_id === "2", `active=${table.active_sheet_id}`);
+        record("S17.7 sheet_selection_required 置 false", table.sheet_selection_required === false);
+        const shots = sheets.find((s) => s.sheet_id === "2")?.rows || [];
+        record(
+          "S17.8 行数据已落库（含数值原样保留）",
+          sheets.length === 2 && shots.length === 3 && shots[1]?.[1] === "5",
+          `sheets=${sheets.length} rows=${shots.length}`,
+        );
+      } else {
+        for (const n of ["S17.2", "S17.3", "S17.4", "S17.5", "S17.6", "S17.7", "S17.8"]) {
+          record(`${n} 表格导入流程`, false, "表格节点未渲染");
+        }
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "15-table-import.png") });
     }
 
     // ══ 收尾：控制台错误 ═════════════════════════════════

@@ -8,6 +8,11 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
+> **v2.4 · 2026-10-26 · 表格节点 Excel 导入落地**：新增 §14.4.4（`table/import` + `table/confirm-sheet` 2 条），
+> 补齐 canvas 域最后一个"有明显 UX 空白"的节点类型；同时把 Fastify 请求体上限从默认 1MB 抬到 16MB
+> （base64 上传路径此前被默认值挡在 ~0.7MB，接口文档写的 8MB 形同虚设）。
+> 当前 canvas 只剩非核心派生族未做（`video-parse` 等 5 条、节点批量下载 3 条、`pinned-timelines` 3 条）。
+> 验收：`apps/api/test/canvas-table.spec.ts`（8 例）+ E2E S17（8 项）。
 > **v2.3 · 2026-10-26 · agent 域落地回写（迁移 0015）**：新增 §14.9 —— `agent` 本体 9 条 + 画布内对话 C7 族 11 条（共 20 条）
 > 与 SSE 实装结论；修正 §14.6 的 stream-token 形态（原设"一次性 60s"，实装为"120s 可复用 + 绑定会话"，理由见该节）；
 > §14.4 里"画布内对话/SSE 归 agent 域、尚未实现"改为已实现并指向 §14.9。
@@ -709,7 +714,7 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | 组/固定组 | 13 | `/groups`、`/pin-groups`、`pinned-node` | 每画布 7 槽位，`UK(canvas_id,slot)` |
 | 素材 | 6 | `/materials`、`/upload-file`、`node/batch-download` | object_key 走 files 域约定 |
 | 图像编辑 | 2 | `/clip`、`/crop` | 走 `tasks` + `sub_mode` |
-| 表格节点 | 2 | `.../table/import`、`.../confirm-sheet` | — |
+| 表格节点 | 2 | `.../table/import`、`.../confirm-sheet` | 两步式，不自动选第一个 Sheet（§14.4.4） |
 | Agent 技能卡 | ~~8~~ → **0（归 ops）** | `agent-recommend-cards`、`agent-skills/*` | 裁决 D3：内容库属运营 |
 
 #### 14.4.1 `canvas` 已实现端点（2026-10-26，迁移 0014）
@@ -749,8 +754,9 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：表格节点 Excel 导入（`table/import`、`table/confirm-sheet`，依赖 Excel 解析链路）、`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）。
+**尚未实现（不暴露空壳）**：`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）、节点批量下载族（3 条）、`pinned-timelines`（3 条）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
+**已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
 
 #### 14.4.3 `canvas` 第二批端点（2026-10-26，节点任务/模板/素材/批注/固定组）
 
@@ -870,10 +876,40 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | **批注** | 世界坐标飘点（跟随视口）+ 侧栏对话（回复/标记已解决/删除）+ 点哪落哪 |
 | **固定组** | 顶部芯片：点=选中成员并跳转视口；右键=替换/清空/删除；实时显示可归组数量 |
 
-**明确不做（对应端点未实现，只留入口 + 说明，不放假数据）**：表格 Excel 导入、图层树、画布内 Agent 对话（属 `agent` 域）。
+**明确不做（对应端点未实现，只留入口 + 说明，不放假数据）**：图层树。
 
 > 2026-10-26 更新：原先列入"明确不做"的**整画布模板 / 素材库 / 评论批注 / 固定组**已全部实现，
-> 见 §14.4.3；同时新增**节点派生任务**（画布可直接出片）与**节点组模板**。
+> 见 §14.4.3；**表格 Excel 导入**与**画布内 Agent 对话**也已补齐，见 §14.4.4 与 §14.9。
+
+#### 14.4.4 表格节点 Excel 导入（2026-10-26）
+
+| 方法 | 路径 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/table/import` | `{file_name, file_base64}` | `{import_token, sheets[{sheet_id,name,row_count,col_count,truncated}], preview[][], warnings[], limits}` | 0/400101/400102 |
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/table/confirm-sheet` | `{import_token, sheet_id}`（**必填，不自动选第一个**） | `{node{node_id,version}, sheet, sheets[], table}` | 0/400101/400102 |
+
+**为什么必须两步**（参照站实测 `node.md:392`「不会自动选第一个 Sheet」）：
+多 Sheet 的排期表若自动取第一个，用户会以为导了「镜头表」而实际存的是「角色表」——
+错得无声无息。所以第一步只回 Sheet 清单与 5×8 预览，第二步由用户显式确认才写节点。
+
+**实现约定（写清以免被"优化"掉）**：
+1. **路径差异**：参照站是 `/nodes/{node_id}/table/import`（不带 canvas）；我方统一挂
+   `canvases/{canvas_id}/nodes/{node_id}/...`，与本域所有节点写操作同形状，且一次校验
+   "节点属于该画布且属于该 space"。
+2. **解析器不复用剧本域的 `parseScriptFile`**：那个产物是扁平的制表符文本（服务"把小说读成
+   一段文本"），表格节点要的是按工作表/按行列的结构。两者输出契约不同，硬合并会让一方变形。
+   共享的只有 `common/base64.ts`（base64 上传解码）。
+3. **容量上限**（`TABLE_LIMITS`）：≤20 Sheet、每表 ≤2000 行 × 60 列、单元格 ≤500 字符、
+   全工作簿 ≤60000 单元格。理由：表格节点是"排期/台词清单"，不是数据仓库；不限量会把 JSONB
+   参数撑到几十 MB，之后每次整图 commit 都要搬它——拿画布主路径给导入擦屁股。
+4. **票据与落库**：解析结果暂存 Redis（`canvas:table:import:{token}`，TTL 30min），
+   confirm 时取；票据过期返回 **400102** 并提示重新导入（区别于"节点坏了"）。
+5. **写库时 `canvas_nodes.version + 1`**：这是服务端发起的内容变更，客户端若还持有旧 version，
+   后续单节点 PATCH 会被 **746002** 拦下而不是静默覆盖。但**不动 `canvases.version`**——
+   整图提交才是画布级变更，导入仍属"编辑态数据"。
+6. **前端必须用 confirm 的返回值覆盖本地参数**：否则下一次 commit 会用旧参数把导入结果冲掉。
+7. `confirm` 会把 `sheet_selection_required` 置 `false`；用户之后切 `active_sheet_id` 时，
+   全部 Sheet 的行数据都在 `table.sheets` 里（离线可切换，不需要重新导入）。
 
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 

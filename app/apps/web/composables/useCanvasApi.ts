@@ -237,8 +237,50 @@ export const useCanvasApi = () => {
         `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/pin-groups`,
         { group_ids: groupIds },
       ),
+
+    // ── 表格节点 Excel 导入（两步式）────────────────────────
+    /**
+     * 第一步：只解析并列出工作表，**不写入节点**。
+     * 参照站实测「不会自动选第一个 Sheet」——多 Sheet 排期表自动选第一个会静默导错。
+     */
+    importTable: (canvasId: string, nodeId: string, input: { file_name: string; file_base64: string }) =>
+      api.post<TableImportResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/table/import`,
+        input,
+      ),
+
+    /** 第二步：显式确认工作表 → 写入节点参数（后端会把 sheet_selection_required 置 false） */
+    confirmTableSheet: (
+      canvasId: string,
+      nodeId: string,
+      input: { import_token: string; sheet_id: string },
+    ) =>
+      api.post<{
+        node: { node_id: string; version: number };
+        sheet: TableSheetMeta;
+        sheets: TableSheetMeta[];
+        table: Record<string, unknown>;
+      }>(`${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/table/confirm-sheet`, input),
   };
 };
+
+/** 工作表的元信息（不含行数据：几十万行的表不能整表回给客户端） */
+export interface TableSheetMeta {
+  sheet_id: string;
+  name: string;
+  row_count: number;
+  col_count: number;
+  truncated: boolean;
+}
+
+export interface TableImportResult {
+  import_token: string;
+  file_name: string;
+  sheets: TableSheetMeta[];
+  preview: string[][];
+  warnings: string[];
+  limits: { max_sheets: number; max_rows_per_sheet: number; max_cols: number };
+}
 
 export interface NodeGeneratePayload {
   mode: string;
