@@ -42,7 +42,7 @@ const props = defineProps<{
   width: number;
 }>();
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; "download-created": [listId: string] }>();
 
 const ed = props.editor;
 
@@ -645,6 +645,32 @@ async function doBatchGenerate(): Promise<void> {
   await ed.generateSelected();
 }
 
+// ── 批量下载（产物打包）──────────────────────────────────
+const downloadPacking = ref(false);
+/** 只有真的"出过产物"的节点才值得打包：全选一堆空节点只会得到"无可下载内容" */
+const canBatchDownload = computed(() =>
+  selectedNodes.value.some((n) => {
+    const p = (n.params ?? {}) as Record<string, unknown>;
+    return Array.isArray(p.result_uris) || !!p.result_uri || !!n.task_id;
+  }),
+);
+
+async function doBatchDownload(): Promise<void> {
+  const ids = [...selectedIds.value];
+  if (ids.length === 0 || downloadPacking.value) return;
+  downloadPacking.value = true;
+  try {
+    const res = await api.batchDownloadNodes(ed.canvasId.value, ids);
+    toast.success(`已打包 ${res.file_count} 个文件（${res.node_count} 个节点）`);
+    // 交给页面打开"下载记录"抽屉：下载单是可复用凭证，用户应该能回头再取链接
+    emit("download-created", res.download_list_id);
+  } catch (err) {
+    toast.error((err as { message?: string }).message || "打包失败");
+  } finally {
+    downloadPacking.value = false;
+  }
+}
+
 // ── 多选批量操作 ────────────────────────────────────────
 /** 批量改状态走 setNodesField：批量改字段的脏标记/遍历逻辑都在 composable 里，别在这里重写一遍 */
 function batchStatus(status: number): void {
@@ -799,6 +825,28 @@ function toggleSec(key: string): void {
         <p class="cv-hint">
           只有带 mode + model 的节点能投递（image / video / audio / 3D 世界）。
           逐条独立：某条失败不会影响其它条，失败原因会写到节点上。
+        </p>
+      </section>
+
+      <section class="cv-section insp-sec-batch-download">
+        <div class="cv-section__head">
+          <span>批量下载</span>
+          <span class="cv-tag">{{ selectedIds.length }} 个选中</span>
+        </div>
+        <Button
+          size="sm"
+          block
+          variant="secondary"
+          class="insp-batch-download"
+          :disabled="!canBatchDownload"
+          :loading="downloadPacking"
+          @click="doBatchDownload"
+        >
+          打包选中节点的产物
+        </Button>
+        <p class="cv-hint">
+          只打包**已经有产物**的节点（图片/视频/音频），一次最多 50 个；会同时写入 manifest.json
+          说明每个文件来自哪个节点。打包完成后可在「下载记录」里反复取链接。
         </p>
       </section>
 

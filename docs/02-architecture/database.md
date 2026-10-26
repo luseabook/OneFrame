@@ -596,7 +596,11 @@ CREATE TABLE admin_users (
 | 任务 | **一律复用 §3 `tasks`**，四域不得新建任务表 | ADR-003、§3 |
 | 账本 | **一律复用 §4 `credit_accounts`/`credit_flows`**，四域不得新建账本 | ADR-011、§4 |
 
-### 12.1 `canvas` 画布域（11 张；其中 4 张补齐 §7 占位 + 7 张新增）
+### 12.1 `canvas` 画布域（12 张；其中 4 张补齐 §7 占位 + 8 张新增）
+
+> ✅ **迁移 0014**（11 张）+ **迁移 0016** 追加 `canvas_download_lists`（节点产物批量下载的"下载单"）。
+> 下载单必须落库：签名链接 24h 过期，而用户可以第二天才回来下载同一批文件；
+> 只返一次性 URL 的实现，过期后那些文件就再也拿不到了（详见 api-spec §14.4.5）。
 
 #### 12.1.1 `canvases`（§7 占位补齐：+所有权/软删/剧集映射/钉住/时间戳）
 
@@ -1243,7 +1247,11 @@ CREATE TABLE film_recent_opens (
 0015_agent       -- ✅ 已落地 2026-10-26：agent_sessions/agent_messages/agent_message_node_bindings/agent_events
                  --   + tasks ALTER（title/feedback，agent 域 PUT /agent/task/:id 的落点）
                  --   （agent_sessions.canvas_id 前向外键在 0014 建表后补加）
-0016_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
+0016_canvas_downloads
+                 -- ✅ 已落地 2026-10-26：canvas_download_lists（节点产物批量下载的下载单）
+                 --   ⚠️ 占用了原定给 film 的编号：film 尚未开始，而 canvas 的补齐先到，
+                 --   编号自然顺延；film 迁移编号改为 0017 起（开工时以实际为准）
+0017_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
 ```
 
 > ⚠️ **与原计划的差异说明**：原计划是 `0013_canvas → 0014_agent → 0015_cam → 0016_film`，

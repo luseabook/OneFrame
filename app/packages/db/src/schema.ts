@@ -1076,6 +1076,44 @@ export const canvasComments = pgTable(
   (t) => [index("idx_canvas_comments").on(t.commentNodeId, t.createdAt)],
 );
 
+/**
+ * 画布节点批量下载记录（迁移 0016）。
+ *
+ * 为什么要落库而不是"打包完直接返 URL"：参照站的批量下载是**两段式**——
+ * 先产生一个"下载单"（可反复取链接、可在列表里追溯），再由 `…/url` 现签一个
+ * 短时效链接。只返 URL 的话，链接过期后用户就再也拿不到同一批文件了。
+ */
+export const canvasDownloadLists = pgTable(
+  "canvas_download_lists",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    /** 参与打包的节点数（可能大于"有产物的节点数"） */
+    nodeCount: integer("node_count").notNull().default(0),
+    fileCount: integer("file_count").notNull().default(0),
+    /** 打包产物的存储 key（取下载链接时现签，不存 URL） */
+    objectKey: text("object_key").notNull(),
+    filename: text("filename").notNull(),
+    /** 1 打包中 2 就绪 3 失败 */
+    status: smallint("status").notNull().default(2),
+    error: jsonb("error"),
+    createdBy: bigint("created_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_canvas_download_lists_canvas").on(t.canvasId, t.createdAt.desc()),
+    index("idx_canvas_download_lists_space").on(t.spaceId, t.createdAt.desc()),
+  ],
+);
+
 // ── agent 对话域（F1 契约 §13，迁移 0015）────────────────────
 // 关键取舍（contract-draft-canvas-agent.md §2.3.0）：
 // 独立的创作 Agent（/agent/task/*）与画布内对话（/canvas/:id/chat/sessions/*）

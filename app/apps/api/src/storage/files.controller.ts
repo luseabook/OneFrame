@@ -6,11 +6,21 @@ import { StorageService } from "./storage.service";
 
 const CONTENT_TYPES: Record<string, string> = {
   mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   webp: "image/webp",
+  gif: "image/gif",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
   txt: "text/plain; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  // zip 必须有：画布批量下载的产物就是 zip。缺了会退化成 application/octet-stream，
+  // 浏览器不再按压缩包处理（部分浏览器直接内联展示乱码），用户以为下载坏了
+  zip: "application/zip",
 };
 
 @Controller()

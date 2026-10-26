@@ -89,6 +89,11 @@ $apiEnv = @{
   ADAPTER_MODE            = "mock"
   PAYMENT_LIVE            = "false"
   SMS_IP_HOURLY_LIMIT     = "100000"
+  # 存储签名链接的对外基址。**必须显式指到本项目 api**：
+  # 默认值是 http://127.0.0.1:3000/v1，而 3000 是另一个项目（E:\ecpm）的端口，
+  # 于是资产/下载链接全指向别人的服务（点开 404 或拿到别的响应），
+  # 而接口本身"成功返回了一个 URL"，测试也看不出来。
+  STORAGE_PUBLIC_BASE     = "http://127.0.0.1:$ApiPort/v1"
 }
 
 function Start-Api {

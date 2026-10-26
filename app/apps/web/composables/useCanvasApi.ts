@@ -261,8 +261,36 @@ export const useCanvasApi = () => {
         sheets: TableSheetMeta[];
         table: Record<string, unknown>;
       }>(`${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/table/confirm-sheet`, input),
+
+    // ── 节点产物批量下载（C13）──────────────────────────────
+    /** 打包选中节点的产物 → 产生一张"下载单"（后续可反复现签链接） */
+    batchDownloadNodes: (canvasId: string, nodeIds: string[]) =>
+      api.post<DownloadListDto>(`${base(canvasId)}/nodes/batch-download`, { node_ids: nodeIds }),
+
+    /** 下载记录：链接过期后仍能重新取（这也是下载单必须落库的原因） */
+    listDownloadLists: (canvasId: string, page = 1, pageSize = 20) =>
+      api.get<{ list: DownloadListDto[]; total: number; page: number; page_size: number }>(
+        `${base(canvasId)}/download-lists?page=${page}&page_size=${pageSize}`,
+      ),
+
+    /** 现签 24h 链接 */
+    downloadListUrl: (canvasId: string, listId: string) =>
+      api.post<{ url: string; filename: string; file_count: number; expires_in: number }>(
+        `${base(canvasId)}/download-lists/${encodeURIComponent(listId)}/url`,
+      ),
   };
 };
+
+/** 下载单（打包产物 + 文件数 + 就绪状态） */
+export interface DownloadListDto {
+  download_list_id: string;
+  canvas_id: string;
+  node_count: number;
+  file_count: number;
+  filename: string;
+  status: number;
+  created_at: string;
+}
 
 /** 工作表的元信息（不含行数据：几十万行的表不能整表回给客户端） */
 export interface TableSheetMeta {

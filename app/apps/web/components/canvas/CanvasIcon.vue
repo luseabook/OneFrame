@@ -86,6 +86,12 @@ withDefaults(defineProps<{ name: string; size?: number }>(), { size: 18 });
       <path d="M5 3h11l3 3v15H5z" />
       <path d="M8 3v6h7V3M8 14h8v7H8z" />
     </template>
+    <!-- 下载（批量下载 / 下载记录） -->
+    <template v-else-if="name === 'download'">
+      <path d="M12 4v10" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M5 19h14" />
+    </template>
     <!-- 重新加载 -->
     <template v-else-if="name === 'reload'">
       <path d="M20 12a8 8 0 1 1-2.3-5.6" />

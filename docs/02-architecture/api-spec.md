@@ -8,6 +8,11 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
+> **v2.5 · 2026-10-26 · 节点产物批量下载落地**：新增 §14.4.5（3 条：打包 / 下载单列表 / 现签链接）+ 迁移 0016
+> `canvas_download_lists`。同时修掉两个"接口成功、用户用不了"的缺陷：
+> 签名链接基址默认指向 3000（另一个项目的端口）、`.zip` 缺 content-type。
+> 当前 canvas 剩余：需新能力的派生族 10 条、`pinned-timelines` 4 条（待取证）、`group-recover` 1 条（需改软删）。
+> 验收：`apps/api/test/canvas-download.spec.ts`（5 例，含"签名链接真能下到 zip"）+ E2E S18（7 项）。
 > **v2.4 · 2026-10-26 · 表格节点 Excel 导入落地**：新增 §14.4.4（`table/import` + `table/confirm-sheet` 2 条），
 > 补齐 canvas 域最后一个"有明显 UX 空白"的节点类型；同时把 Fastify 请求体上限从默认 1MB 抬到 16MB
 > （base64 上传路径此前被默认值挡在 ~0.7MB，接口文档写的 8MB 形同虚设）。
@@ -754,9 +759,10 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）、节点批量下载族（3 条）、`pinned-timelines`（3 条）。
+**尚未实现（不暴露空壳）**：`video-parse` 等需要新能力（视频解析 / 文本类任务计价）的派生族（10 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 **已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
+**已实现**：节点产物批量下载（3 条）——2026-10-26，见 §14.4.5。
 
 #### 14.4.3 `canvas` 第二批端点（2026-10-26，节点任务/模板/素材/批注/固定组）
 
@@ -910,6 +916,32 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 6. **前端必须用 confirm 的返回值覆盖本地参数**：否则下一次 commit 会用旧参数把导入结果冲掉。
 7. `confirm` 会把 `sheet_selection_required` 置 `false`；用户之后切 `active_sheet_id` 时，
    全部 Sheet 的行数据都在 `table.sheets` 里（离线可切换，不需要重新导入）。
+
+#### 14.4.5 节点产物批量下载（2026-10-26，迁移 0016）
+
+| 方法 | 路径 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/batch-download` | `{node_ids[]}` ≤50 | `{download_list_id, node_count, file_count, filename, status}` | 0/400101/400102 |
+| GET | `/canvas/canvases/{id}/download-lists` | `?page&page_size` | `{list[], total, page, page_size}` | 0/400102 |
+| POST | `/canvas/canvases/{id}/download-lists/{list_id}/url` | — | `{url, filename, file_count, expires_in:86400}` | 0/400102 |
+
+**为什么要落"下载单"而不是直接返 URL**：签名链接 24h 过期，用户常常第二天才来下载；
+只返一次性链接的实现，过期后同一批文件就再也取不到了。下载单只存 `object_key`，
+每次 `…/url` 现签一条新的。
+
+**实现约定**：
+1. **路径差异**：参照站是 `/canvas/node/batch-download*`（不带 canvas）；我方挂
+   `canvases/{canvas_id}/...`，与本域写操作同形状，并一次校验节点归属。
+2. **产物来源两级**：节点 `params.result_uris`/`result_uri` 优先，缺失时回查 `tasks.results`
+   （老数据/service 只写了任务结果的场景）。两级都是真实数据，不做猜测。
+3. **假协议不入包**：`mock://` 这类非 http(s)、非存储 key 的 URI 直接跳过，
+   不塞空文件冒充；单个文件读不到也不阻断整包（`manifest.json` 里会缺该条）。
+4. **打包同步做**：用户已付费生成的文件只是收拢，同步做能把"某个文件读不到"当场反映到
+   manifest 里，而不是丢个后台任务让用户等一个可能永远不完成的下载单。
+5. **`manifest.json` 必带**：记录每个文件来自哪个节点（node_id/node_type/name），
+   否则用户拿到一堆 `image-108…-1.png` 无法回溯。
+6. **`.zip` 必须声明 `application/zip`**：`files/local` 的 content-type 表原先没有 zip，
+   会退化成 `application/octet-stream`，部分浏览器直接内联展示乱码。
 
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 

@@ -981,6 +981,100 @@ function buildXlsxBuffer() {
       await page.screenshot({ path: path.join(SHOT_DIR, "15-table-import.png") });
     }
 
+    // ══ S18 节点产物批量下载（下载单 + 现签链接）═════════════
+    // 用本地临时 HTTP 服提供"真实产物"：mock 适配器的结果 URI 是 mock://，打包时会被跳过
+    // （这是有意的，假协议不该进 zip）。若不用真 URL，就只能测到"无可下载内容"那条错误分支。
+    console.log("[S18] 节点产物批量下载");
+    {
+      const http = require("node:http");
+      const server = http.createServer((req, res) => {
+        const name = req.url.split("/").pop() || "file";
+        res.writeHead(200, { "content-type": "application/octet-stream" });
+        res.end(`ARTIFACT:${name}`);
+      });
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = server.address().port;
+      const artifactUrl = `http://127.0.0.1:${port}/shot-1.png`;
+      try {
+        const nodeRes = await api(
+          "POST",
+          `/canvas/canvases/${canvasId}/nodes`,
+          {
+            node_type: "image",
+            name: "可下载产物",
+            x: 120,
+            y: 120,
+            params: { result_uris: [artifactUrl] },
+          },
+          token,
+        );
+        record("S18.1 已备好带真实产物的节点", nodeRes.code === 0);
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForSelector(".canvas-node", { timeout: 20_000 }).catch(() => {});
+        await sleep(600);
+
+        const dlBtn = page.locator(".tool-downloads");
+        record("S18.2 工具栏有「下载记录」入口", (await dlBtn.count()) > 0);
+        if ((await dlBtn.count()) > 0) {
+          await dlBtn.first().click();
+          await sleep(700);
+          const empty = await page.locator(".canvas-downloads__empty").count();
+          record("S18.3 抽屉打开且空态有说明", (await page.locator(".canvas-downloads").count()) > 0 && empty > 0);
+          await page.locator(".canvas-downloads__head .cv-glass-btn").click();
+          await sleep(300);
+        } else {
+          record("S18.3 抽屉打开且空态有说明", false, "无入口");
+        }
+
+        // 批量区只在多选时渲染（与「批量生成」同一块区域）→ 用 Ctrl+A 全选
+        await page.locator(".canvas-stage").click({ position: { x: 200, y: 200 } }).catch(() => {});
+        await page.keyboard.press("Control+a");
+        await sleep(700);
+        const packBtn = page.locator(".insp-batch-download");
+        const packEnabled = (await packBtn.count()) > 0 && !(await packBtn.first().isDisabled());
+        record("S18.4 多选且含产物时「批量下载」可用", packEnabled);
+        if (packEnabled) {
+          await packBtn.first().click();
+          // 打包是同步的（真读文件 + 打 zip），给足时间
+          await page.waitForSelector(".canvas-downloads__list .dl-row", { timeout: 30_000 }).catch(() => {});
+          const rows = await page.locator(".canvas-downloads__list .dl-row").count();
+          record("S18.5 打包后抽屉里出现下载单", rows >= 1, `rows=${rows}`);
+
+          const getLink = page.locator(".canvas-downloads__list .dl-row__get").first();
+          if ((await getLink.count()) > 0) {
+            await getLink.click();
+            await page.waitForSelector(".canvas-downloads__list .dl-row__link", { timeout: 15_000 }).catch(() => {});
+            const href = await page
+              .locator(".canvas-downloads__list .dl-row__link")
+              .first()
+              .getAttribute("href")
+              .catch(() => null);
+            // 链接必须指向**本项目的 api**（STORAGE_PUBLIC_BASE）：默认值是 3000，
+            // 而 3000 是另一个项目的端口——接口"成功返回 URL"但用户点开是 404，
+            // 这种错只有把端口一起断言才抓得到
+            const apiOrigin = new URL(API).origin;
+            record(
+              "S18.6 能现签出指向本项目的下载链接",
+              !!href && href.length > 10 && href.startsWith(apiOrigin),
+              `${(href || "").slice(0, 48)}（api=${apiOrigin}）`,
+            );
+          } else {
+            record("S18.6 能现签出下载链接", false, "无取链接按钮");
+          }
+
+          // 下载单要能被 API 复核（抽屉不是本地状态拼出来的）
+          const checked = await api("GET", `/canvas/canvases/${canvasId}/download-lists`, undefined, token);
+          record("S18.7 下载单已落库（可反复取链接）", (checked?.data?.total ?? 0) >= 1, `total=${checked?.data?.total}`);
+        } else {
+          for (const n of ["S18.5", "S18.6", "S18.7"]) record(`${n} 批量下载流程`, false, "按钮不可用");
+        }
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "16-downloads.png") });
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(

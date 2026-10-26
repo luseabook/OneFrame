@@ -34,6 +34,8 @@ $env:PHONE_ENC_KEY = "wanxing-local-phone-enc-key"
 $env:COOKIE_SECURE = "false"; $env:AUTH_REQUIRE_INVITE = "false"; $env:GIFT_CREDITS = "80"
 $env:SEED_SAMPLE_PROJECT = "false"; $env:LLM_MODE = "mock"; $env:ADAPTER_MODE = "mock"
 $env:PAYMENT_LIVE = "false"; $env:SMS_IP_HOURLY_LIMIT = "100000"
+# 签名链接基址必须指向本项目 api（默认 3000 是另一个项目的端口）
+$env:STORAGE_PUBLIC_BASE = "http://127.0.0.1:$ApiPort/v1"
 
 Start-Process -FilePath "node" -ArgumentList "dist/main.js" `
   -WorkingDirectory (Join-Path $App "apps\api") `

@@ -33,6 +33,8 @@ const emit = defineEmits<{
   templates: [];
   /** 打开素材库 */
   materials: [];
+  /** 打开下载记录（批量下载产生的下载单，可反复取链接） */
+  downloads: [];
   /** 切换批注模式 */
   comments: [];
 }>();
@@ -149,6 +151,17 @@ function iconOf(t: CanvasNodeType): string {
       @click="emit('materials')"
     >
       <CanvasIcon name="node-image" :size="20" />
+    </button>
+
+    <!-- 下载记录：批量下载的下载单（链接 24h 过期，但下载单一直在） -->
+    <button
+      type="button"
+      class="tool-downloads cv-glass-btn cv-tip"
+      data-tip="下载记录"
+      aria-label="下载记录"
+      @click="emit('downloads')"
+    >
+      <CanvasIcon name="download" :size="20" />
     </button>
 
     <!-- 批注模式 -->

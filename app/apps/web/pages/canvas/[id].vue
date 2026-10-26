@@ -59,6 +59,15 @@ const materialOpen = ref(false);
  */
 const rightTab = ref<"inspector" | "agent">("inspector");
 const agentPanel = ref<{ bindLastAppliedNodes: (nodeIds: string[]) => void } | null>(null);
+/** 下载记录抽屉（批量下载产生的下载单，链接过期后仍可重新取） */
+const downloadOpen = ref(false);
+const freshDownloadId = ref<string | null>(null);
+
+/** 打包完成后打开抽屉并高亮这一条：否则用户拿不到"我刚打的那包在哪" */
+function onDownloadCreated(listId: string): void {
+  freshDownloadId.value = listId;
+  downloadOpen.value = true;
+}
 const commentLayer = ref<{ setPendingAnchor: (a: { x: number; y: number }) => void } | null>(null);
 const historyList = ref<Array<{ id: string; version: number; kind: number; created_at: string }>>([]);
 const historyLoading = ref(false);
@@ -852,6 +861,7 @@ onUnmounted(() => {
         @layers="toast.info('图层树待接入（当前可在右侧检查器查看节点）')"
         @templates="templateOpen = true"
         @materials="materialOpen = true"
+        @downloads="downloadOpen = true"
         @comments="editor.commentMode.value = !editor.commentMode.value"
       />
 
@@ -884,6 +894,14 @@ onUnmounted(() => {
 
       <!-- 素材库抽屉 -->
       <CanvasMaterialPanel v-if="materialOpen" :editor="editor" @close="materialOpen = false" />
+
+      <!-- 下载记录抽屉（批量下载的下载单） -->
+      <CanvasDownloadPanel
+        v-if="downloadOpen"
+        :editor="editor"
+        :highlight-id="freshDownloadId"
+        @close="downloadOpen = false"
+      />
 
       <!-- 批注层（飘点 + 对话） -->
       <CanvasCommentLayer ref="commentLayer" :editor="editor" :world-to-screen="worldToScreen" />
@@ -920,6 +938,7 @@ onUnmounted(() => {
           :editor="editor"
           :width="inspectorWidth"
           @close="inspectorOpen = false"
+          @download-created="onDownloadCreated"
         />
         <!-- v-if 而非 v-show：面板挂载即开会话列表与 SSE 流，
              用 v-show 会在页签不可见时仍挂一条后台连接 -->
