@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { canvasNodes, canvasTemplates, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
@@ -288,3 +288,4 @@ export class CanvasTemplateService {
     };
   }
 }
+

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasGroupTemplates, canvasGroups, canvasNodes, canvasPinGroups, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
@@ -340,3 +340,4 @@ export class CanvasGroupService {
     return { template_id: String(row.id), name: input.name ?? row.name };
   }
 }
+

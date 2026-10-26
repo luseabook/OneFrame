@@ -8,8 +8,9 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
-> **v2.1 · 2026-10-26 · canvas 前端落地回写**：§14.4.1 补 `commit` 的 `id_map` 语义（本地临时 id → 雪花 id；修正前非数字 id 直接 500，整图提交不可用）；
-> 新增 §14.4.2 记录画布前端已实现能力与"明确不做"清单。验收：`node _acceptance/e2e-canvas-editor.cjs`（23 项）。
+> **v2.2 · 2026-10-26 · canvas 第二批端点**：新增 §14.4.3（节点派生任务 4 / 整画布模板 6 / 素材 5 / 批注 10 / 固定组+组模板 10），画出"画布能出片"的完整链路。验收：`pwsh _acceptance/canvas-acceptance.ps1`（api 46 例 + 浏览器 E2E 56 项）。
+> **v2.1 · 2026-10-26 · canvas 前端落地回写**：§14.4.1 补 `commit` 的 `id_map` 语义（本地临时 id → 雪花 id；修正前非数字 id 直接 500，整图提交不可用）；新增 §14.4.2 记录画布前端已实现能力与"明确不做"清单。
+
 
 ## 1. 通用约定
 
@@ -744,12 +745,106 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：模板库（`canvas_templates` 表已建，端点未做）、素材（`canvas_materials`）、批注（`canvas_comment_nodes`/`canvas_comments`）、固定组（`canvas_pin_groups`）、节点派生任务（`nodes/{id}/video-parse` 等 9 个）、画布内对话/SSE（归 `agent` 域）。
+**尚未实现（不暴露空壳）**：表格节点 Excel 导入（`table/import`、`table/confirm-sheet`，依赖 Excel 解析链路）、画布内对话/SSE（归 `agent` 域，11 条）、`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）。
+
+#### 14.4.3 `canvas` 第二批端点（2026-10-26，节点任务/模板/素材/批注/固定组）
+
+> 第一批（§14.4.1）只做了"画布本体"。本批把画布接进生成链路、并补齐协作与复用能力。
+> **没有新增任何表**（表在迁移 0014 已建）；**没有新建任务表**（节点任务复用 `tasks`，ADR-003）。
+> 验收：`pwsh _acceptance/canvas-acceptance.ps1`（api 46 例 + 浏览器 E2E 56 项）。
+
+**A. 节点派生任务（C6）—— 复用 `tasks`，禁止另造任务表**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/generate` | 单节点投递：建 task + 回写 `node.task_id`、`status=2` |
+| POST | `/canvas/canvases/{id}/batch-node-tasks` | 批量投递（≤50），**逐条独立**（一条失败不连累其它） |
+| GET | `…/nodes/{node_id}/task/{task_id}` | 节点视角任务状态（校验 task 确属该节点，防越权查） |
+| POST | `…/nodes/sync-tasks` | 校正节点状态（防错过轮询后永远停在"生成中"） |
+
+三条硬语义：
+1. **默认参数取自模型目录**，不硬编码。图像模型分辨率档是 `1K/2K/4K`，视频是 `720p/1080p`——
+   写死 `720p` 会让图像节点首次投递 100% 失败（实测）。
+2. **必须过 `generationRequestSchema`**：裸传对象会跳过 options 默认值，
+   `credits.price()` 读 `options.resolution === undefined` 直接报错（实测第一版即如此）。
+3. **canvas mode → tasks.mode 收敛**，后处理子模式落 `options.sub_mode`：
+   `crop/panorama/story_grid_*/de_subtitle_*/frame_capture` 在 `tasks.mode` 枚举里不存在，
+   新增 mode 需同步补 `model_prices` 价格档（商业决策），故按契约用 `sub_mode` 承载。
+
+**worker 回写（`apps/worker/src/executor.ts`）**：任务终态写回 `canvas_nodes`——
+成功 → `status=3` + `params.result_uri/result_preview_uri/result_uris`；
+失败/审核拒绝 → `status=1` + `params.last_error={code,message}`（积分已退回）。
+**缺这一步画布会永远显示"生成中"**（此前只回写 `storyboards`）。
+
+**B. 整画布模板（C2）—— 6 端点，路径归一为 `/canvas/templates`**
+
+参照站有三组前缀（`canvas-tpls` / `canvas/:id/tpls` / `canvas/templates/*`）指同一实体，
+分三组会造三套权限与分页语义，故归一。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/canvas/templates` | 列表（官方 scope=1 全员 / 团队 2 同 space / 个人 3 仅创建者） |
+| GET | `/canvas/templates/personal?query=` | 个人模板按名称模糊搜索 |
+| GET | `/canvas/templates/{id}` | 详情（可见性校验；已下架等同不存在） |
+| GET | `/canvas/templates/{id}/instantiate` | 套用：返回待插入节点描述 |
+| POST | `/canvas/canvases/{id}/tpls` | 存为模板 |
+| POST | `/canvas/templates/{id}/sync-team` | 个人模板同步到团队 |
+| DELETE | `/canvas/templates/personal/{id}` | 删除（`status=3` 软下架） |
+
+关键：**payload 自包含**（存节点描述，不含雪花 id）——引用原画布 id 在目标画布不存在，套用必悬挂；
+**套用只改本地**，仍需用户点保存走 `commit` 乐观锁。
+
+**C. 素材（C8）—— 5 端点**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/canvas/canvases/{id}/materials` | 列表（`material_type`/`source`/`node_id` 筛选 + 分页） |
+| POST | `…/materials` | 挂载（三来源：上传/节点产出/资产库） |
+| POST | `…/materials/batch-delete` | 批量软删 |
+| POST | `…/upload-file` | 登记已上传对象（按扩展名猜类型） |
+| POST | `…/materials/batch-download` | 批量取 `object_key`（显式回报 `missing[]`） |
+
+**只存 `object_key`，不存 URL**：直链会过期，换存储驱动（local/S3/OSS）要洗库。
+`node_id` 必须属于同一画布（否则造出跨画布引用）。
+
+**D. 批注（C9）—— 10 端点**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/canvas/canvases/{id}/comment-nodes` | 列表（带 `comment_count`）/ 新建（**落点 + 首条内容一次完成**） |
+| GET/PUT/DELETE | `…/comment-nodes/{cn_id}` | 详情 / 移动锚点 / 删除（仅本人） |
+| GET/POST | `…/comment-nodes/{cn_id}/comments` | 消息列表 / 追加 |
+| PUT/DELETE | `…/comments/{comment_id}` | 改 / 删（仅本人） |
+| POST | `…/comment-nodes/{cn_id}/resolve` | 标记已解决 / 重新打开 |
+
+锚点存**世界坐标**（存屏幕坐标则平移缩放后批注会飘走）。**不复用 `content_reports`**——
+后者是公开举报，有独立频控与处置队列。
+
+**E. 固定组（C10）+ 节点组模板（C11）—— 10 端点**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/canvas/canvases/{id}/pin-groups` | 列表（含 `max_slots=7`） |
+| PUT | `…/pin-groups/{slot}` | **整体替换**某槽位（返回 `replaced`） |
+| DELETE | `…/pin-groups/{slot}` | 删组（同时清成员归属） |
+| DELETE | `…/pin-groups/{slot}/members` | 只清成员 |
+| PUT | `…/nodes/{node_id}/pin-groups` | 节点侧设置归属 |
+| GET | `…/group-templates` | 组模板列表 |
+| POST | `…/groups/{group_id}/templates` | 从分组存模板（空分组拒绝） |
+| PUT | `…/group-templates/{template_id}` | 改名 |
+
+**双写一致性是本节最关键的不变量**：`canvas_pin_groups.node_ids` 与
+`canvas_nodes.group_ids` 是同一事实的两份记录（组视角 / 节点视角），
+**必须同事务双写**。只写一边不会报错，只会静默腐化
+（固定栏有分组但节点不知道自己属于它，或反之）。
+连"整体替换后旧成员 `group_ids` 里不再有该组"都有测试锁住——
+**幽灵归属**正是替换场景下最容易漏的那一半。数组增删用 SQL `array_remove`/`array_agg(DISTINCT ...)`，
+避免"读-改-写"的并发丢更新。
 
 #### 14.4.2 `canvas` 前端已实现能力（2026-10-26）
 
 > 页面：`/canvas`（列表，裸壳布局）+ `/canvas/{id}`（编辑器）。
-> 端到端验收：`node _acceptance/e2e-canvas-editor.cjs`（23 项断言，真实浏览器 + API 交叉核对）。
+> 端到端验收：`pwsh _acceptance/canvas-acceptance.ps1`（api 46 例 + 浏览器 E2E 56 项，UI 与 API 双向核对）。
 
 | 能力 | 实现说明 |
 |---|---|
@@ -764,8 +859,16 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | 历史版本 | `GET /snapshots` 列表 → 载入某版本到本地（**仍需点保存**才落库，避免误触覆盖） |
 | 协作锁 | 选中即抢锁、20s 续期、15s 心跳刷新"他人编辑中"；锁仅提示，真实保护仍是 commit 乐观锁 |
 | 空态引导 | 复刻参照站：`双击画布 / 单击 Tab` + 两行 chip（8 类型）+ 新手引导入口 |
+| **生成投递** | 检查器「生成」区：缺 mode/model 有明确指引、失败原因带错误码、结果预览（图/视频）；多选「批量生成」+ Ctrl+Enter；节点卡片生成中骨架屏 |
+| **模板库** | 存为模板 / 全部·我的 / 搜索 / 套用 / 删除；缩略图按 payload 真实坐标画（不造假图） |
+| **素材库** | 类型筛选 / 多选批量移除 / 复制 object_key / 「把选中节点结果存入」 |
+| **批注** | 世界坐标飘点（跟随视口）+ 侧栏对话（回复/标记已解决/删除）+ 点哪落哪 |
+| **固定组** | 顶部芯片：点=选中成员并跳转视口；右键=替换/清空/删除；实时显示可归组数量 |
 
-**明确不做（对应端点未实现，只留入口 + 说明，不放假数据）**：模板库、素材库、历史素材、评论/批注、图层树、画布内 Agent 对话（属 `agent` 域）、固定组。
+**明确不做（对应端点未实现，只留入口 + 说明，不放假数据）**：表格 Excel 导入、图层树、画布内 Agent 对话（属 `agent` 域）。
+
+> 2026-10-26 更新：原先列入"明确不做"的**整画布模板 / 素材库 / 评论批注 / 固定组**已全部实现，
+> 见 §14.4.3；同时新增**节点派生任务**（画布可直接出片）与**节点组模板**。
 
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 
@@ -872,3 +975,8 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | film | 影视版任务表格**整体形态** | 仍待取证（需影视版内测账号；当前 `/film` 只有空壳） |
 | billing | ~~兑换码位置~~ | ✅ **已取证**：兑换码是 `/pricing` 的一个 tab（`订阅会员/积分加购/兑换码`），**不是独立页面** |
 | 全局 | `/setting` 渲染为资产页、`/creator-center` 加载失败 | 仍待取证（前者需交互探测，后者需创作者资质账号） |
+
+
+
+
+

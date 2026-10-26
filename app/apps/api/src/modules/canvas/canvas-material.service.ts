@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasCommentNodes, canvasComments, canvasMaterials, canvasNodes, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
@@ -468,3 +468,4 @@ function guessType(objectKey: string): string {
   if (["mp3", "wav", "aac", "m4a", "ogg", "flac"].includes(ext)) return "audio";
   return "file";
 }
+
