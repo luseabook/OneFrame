@@ -10,6 +10,8 @@ const mainNav: NavItem[] = [
   { key: "home", to: "/home", label: "首页", icon: "home" },
   { key: "create", to: "/projects?create=1", label: "剧本创作", icon: "script" },
   { key: "agent", to: "", label: "创作 Agent", icon: "wand", disabled: true },
+  // 2026-10-26：canvas 域后端已落地（27 路由 / 11 表），入口开放
+  { key: "canvas", to: "/canvas", label: "无限画布", icon: "folder" },
   { key: "projects", to: "/projects", label: "全部项目", icon: "folder" },
   { key: "tools", to: "/tools", label: "工具箱", icon: "wand" },
 ];

@@ -5,7 +5,11 @@ export default defineNuxtConfig({
   ssr: true,
   devtools: { enabled: false },
   typescript: { strict: true },
-  css: ["~/assets/css/tokens.css"],
+  // canvas.css 必须显式 import：它不是被任何组件 <style> 引用的，只是纯类名表，
+  // 不注册进全局 css 的话 .canvas-view/.cv-* 运行时全部不存在，画布组件会裸样式，
+  // 而 typecheck/lint 都发现不了（它们不检查"类名有没有被定义"）。
+  // 顺序放在 tokens.css 之后：canvas.css 里的 --cv-* 用 var() 引用了 tokens 的层二令牌。
+  css: ["~/assets/css/tokens.css", "~/assets/css/canvas.css"],
   runtimeConfig: {
     public: {
       // 空 = 同源 /v1（本地由 NUXT_API_PROXY 代理，生产由 nginx 反代）
@@ -35,6 +39,12 @@ export default defineNuxtConfig({
     "/settings": { ssr: false },
     "/tools": { ssr: false },
     "/admin": { ssr: false },
+    // 画布族（列表 + 编辑器）同样纯客户端渲染：数据来自登录态与 API，
+    // 且 definePageMeta({ssr:false}) 对直接 URL 访问不足以保证首帧一致
+    // （docs/03-frontend/conventions.md §1 已实测会 hydration mismatch），
+    // 所以必须在 routeRules 里也关掉 SSR。
+    "/canvas": { ssr: false },
+    "/canvas/**": { ssr: false },
   },
   app: {
     head: {

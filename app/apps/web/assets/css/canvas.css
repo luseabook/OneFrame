@@ -1,0 +1,247 @@
+/* ============================================================
+   画布编辑器令牌（cv-*）
+   来源：参照站 /canvas 实测 DOM/CSS 结构（_acceptance/ref-authed/canvas.html）
+   + 我方设计令牌层一/层二。**只引用层二语义令牌派生**，
+   不引入参照站品牌色（X1 去品牌化改造要求）。
+
+   为什么单开一个文件而不是塞进 tokens.css：
+   画布是全站唯一「全屏无侧栏 + 浮层 chrome」的界面，它的表面色
+   比工作台更深、边框更淡；混进全局令牌会污染其它页面。
+   ============================================================ */
+
+.canvas-view {
+  /* 画布底色：比 --bg-app(#0a0a0e) 略深，让浮层 chrome 有层次 */
+  --cv-canvas-bg: #08080b;
+  /* 点阵网格 */
+  --cv-dot-color: #ffffff14;
+  --cv-dot-size: 24px;
+
+  /* 浮层 chrome（顶栏/工具栏/底栏共用同一套玻璃质感） */
+  --cv-chrome-bg: #191a21f2;
+  --cv-chrome-border: #ffffff1a;
+  --cv-chrome-shadow: 0 8px 24px -8px #000000cc, 0 2px 8px -2px #00000099;
+
+  /* 节点卡片 */
+  --cv-node-bg: #1b1c24;
+  --cv-node-border: #ffffff1f;
+  --cv-node-border-hover: #ffffff3d;
+  --cv-node-selected: var(--brand-500);
+  --cv-node-radius: 12px;
+  --cv-node-shadow: 0 4px 16px -4px #000000b3;
+
+  /* 连线 */
+  --cv-edge: #8b93a7;
+  --cv-edge-active: var(--brand-400);
+
+  /* 检查器面板 */
+  --cv-panel-bg: #14151b;
+  --cv-panel-border: #ffffff14;
+
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--cv-canvas-bg);
+  color: var(--text-1);
+}
+
+/* 点阵背景层：与参照站一致，点距 24px、白 8% */
+.canvas-view__grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(var(--cv-dot-color) 1px, transparent 1px);
+  background-size: var(--cv-dot-size) var(--cv-dot-size);
+  z-index: 0;
+}
+
+/* ── 玻璃质感按钮（参照站 glass-icon-button 的四层结构简化版）── */
+.cv-glass-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.cv-glass-btn:hover:not(:disabled) {
+  background: #ffffff14;
+  color: var(--text-1);
+}
+.cv-glass-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.cv-glass-btn--active {
+  background: #ffffff1f;
+  color: var(--text-1);
+  border-color: #ffffff26;
+}
+
+/* ── 浮层容器通用样式 ── */
+.cv-chrome {
+  background: var(--cv-chrome-bg);
+  border: 1px solid var(--cv-chrome-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--cv-chrome-shadow);
+  backdrop-filter: blur(12px);
+}
+
+/* 工具提示（浮层按钮的 title 补充，纯 CSS 实现避免引第三方库） */
+.cv-tip {
+  position: relative;
+}
+.cv-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: #000000e6;
+  color: var(--text-1);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  z-index: 10;
+}
+.cv-tip:hover::after {
+  opacity: 1;
+}
+
+/* 节点卡片上的小型标签 */
+.cv-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: #ffffff14;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.cv-tag--brand {
+  background: var(--brand-soft);
+  color: var(--brand-on-soft);
+}
+.cv-tag--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.cv-tag--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+/* 检查器里的表单控件（画布是深色面板，需要比工作台更淡的边框） */
+.cv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-3);
+}
+.cv-field > label {
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+.cv-input,
+.cv-select,
+.cv-textarea {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--cv-panel-border);
+  border-radius: var(--radius-md);
+  background: #0e0f14;
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+.cv-input:focus,
+.cv-select:focus,
+.cv-textarea:focus {
+  border-color: var(--brand-500);
+}
+.cv-textarea {
+  min-height: 72px;
+  resize: vertical;
+  font-family: inherit;
+}
+.cv-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+.cv-hint {
+  font-size: 11px;
+  color: var(--text-4);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* 分段控件（mode 选择这类枚举，比 select 更快） */
+.cv-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cv-seg > button {
+  padding: 4px 8px;
+  border: 1px solid var(--cv-panel-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.cv-seg > button:hover {
+  border-color: var(--text-4);
+}
+.cv-seg > button.is-active {
+  background: var(--brand-soft);
+  border-color: var(--brand-border);
+  color: var(--brand-on-soft);
+}
+
+/* 可折叠分区 */
+.cv-section {
+  border-top: 1px solid var(--cv-panel-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+}
+.cv-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
