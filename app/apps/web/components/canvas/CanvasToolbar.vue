@@ -31,6 +31,10 @@ const emit = defineEmits<{
   layers: [];
   /** 打开模板库 */
   templates: [];
+  /** 打开素材库 */
+  materials: [];
+  /** 切换批注模式 */
+  comments: [];
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
@@ -134,6 +138,28 @@ function iconOf(t: CanvasNodeType): string {
       @click="emit('templates')"
     >
       <CanvasIcon name="copy" :size="20" />
+    </button>
+
+    <!-- 素材库 -->
+    <button
+      type="button"
+      class="tool-materials cv-glass-btn cv-tip"
+      data-tip="素材库"
+      aria-label="素材库"
+      @click="emit('materials')"
+    >
+      <CanvasIcon name="node-image" :size="20" />
+    </button>
+
+    <!-- 批注模式 -->
+    <button
+      type="button"
+      class="tool-comments cv-glass-btn cv-tip"
+      data-tip="批注"
+      aria-label="批注"
+      @click="emit('comments')"
+    >
+      <CanvasIcon name="node-text" :size="20" />
     </button>
 
     <!-- 类型选择浮层：8 个类型（TOOLBAR_NODE_TYPES）。

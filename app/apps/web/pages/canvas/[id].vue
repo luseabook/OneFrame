@@ -50,6 +50,8 @@ const inspectorWidth = ref(320);
 const minimapOpen = ref(true);
 const historyOpen = ref(false);
 const templateOpen = ref(false);
+const materialOpen = ref(false);
+const commentLayer = ref<{ setPendingAnchor: (a: { x: number; y: number }) => void } | null>(null);
 const historyList = ref<Array<{ id: string; version: number; kind: number; created_at: string }>>([]);
 const historyLoading = ref(false);
 const guideOpen = ref(false);
@@ -178,6 +180,13 @@ function onStagePointerDown(ev: PointerEvent): void {
     return;
   }
 
+  // 批注模式：点画布 = 在该位置放置批注锚点（不进入框选/平移）
+  if (editor.commentMode.value && ev.button === 0) {
+    const world = screenToWorld(ev.clientX, ev.clientY);
+    commentLayer.value?.setPendingAnchor(world);
+    return;
+  }
+
   // 中键、抓手模式、或按住空格 → 平移
   const wantPan = ev.button === 1 || mode.value === "pan" || spaceDown.value;
   if (wantPan) {
@@ -239,8 +248,7 @@ const marqueeStyle = computed(() => {
 });
 
 // ── 连线 ────────────────────────────────────────────────
-function handleConnectClick(nodeId: string): void {
-  const src = connectFrom.value;
+function handleConnectClick(nodeId: string): void {  const src = connectFrom.value;
   if (!src) {
     connectFrom.value = nodeId;
     toast.info("已选起点，再点目标节点完成连线");
@@ -374,6 +382,14 @@ function jumpToWorld(wx: number, wy: number): void {
     stageSize.value.w / 2 - wx * viewport.value.zoom,
     stageSize.value.h / 2 - wy * viewport.value.zoom,
   );
+}
+
+/** 世界坐标 → 屏幕坐标（批注飘点定位用，必须与画布 transform 一致） */
+function worldToScreen(x: number, y: number): { x: number; y: number } {
+  return {
+    x: x * viewport.value.zoom + viewport.value.x,
+    y: y * viewport.value.zoom + viewport.value.y,
+  };
 }
 
 // ── 节点增删 ────────────────────────────────────────────
@@ -794,6 +810,8 @@ onUnmounted(() => {
         @add="addNodeAtCenter"
         @layers="toast.info('图层树待接入（当前可在右侧检查器查看节点）')"
         @templates="templateOpen = true"
+        @materials="materialOpen = true"
+        @comments="editor.commentMode.value = !editor.commentMode.value"
       />
 
       <!-- 底部 dock -->
@@ -819,6 +837,12 @@ onUnmounted(() => {
 
       <!-- 模板库抽屉 -->
       <CanvasTemplatePanel v-if="templateOpen" :editor="editor" @close="templateOpen = false" />
+
+      <!-- 素材库抽屉 -->
+      <CanvasMaterialPanel v-if="materialOpen" :editor="editor" @close="materialOpen = false" />
+
+      <!-- 批注层（飘点 + 对话） -->
+      <CanvasCommentLayer ref="commentLayer" :editor="editor" :world-to-screen="worldToScreen" />
 
       <!-- 右侧检查器 -->
       <aside

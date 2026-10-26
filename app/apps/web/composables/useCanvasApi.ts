@@ -1,4 +1,7 @@
 import type {
+  CanvasMaterialDto,
+  CanvasCommentNodeDto,
+  CanvasCommentDto,
   CanvasDetail,
   CanvasListItem,
   CanvasSnapshot,
@@ -140,6 +143,76 @@ export const useCanvasApi = () => {
       api.post<{ template_id: string }>(`/canvas/templates/${encodeURIComponent(templateId)}/sync-team`, {
         team_space_id: teamSpaceId,
       }),
+
+    // ── 素材（C8）──────────────────────────────────────────
+    listMaterials: (
+      canvasId: string,
+      opts: { material_type?: string; source?: number; node_id?: string; page?: number; page_size?: number } = {},
+    ) => {
+      const q = new URLSearchParams();
+      if (opts.material_type) q.set("material_type", opts.material_type);
+      if (opts.source !== undefined) q.set("source", String(opts.source));
+      if (opts.node_id) q.set("node_id", opts.node_id);
+      q.set("page", String(opts.page ?? 1));
+      q.set("page_size", String(opts.page_size ?? 40));
+      return api.get<{ list: CanvasMaterialDto[]; total: number; page: number; page_size: number }>(
+        `${base(canvasId)}/materials?${q.toString()}`,
+      );
+    },
+
+    createMaterial: (
+      canvasId: string,
+      input: { object_key: string; material_type: string; name?: string; node_id?: string; source?: number },
+    ) => api.post<{ material_id: string }>(`${base(canvasId)}/materials`, input),
+
+    batchDeleteMaterials: (canvasId: string, materialIds: string[]) =>
+      api.post<{ deleted: number }>(`${base(canvasId)}/materials/batch-delete`, { material_ids: materialIds }),
+
+    registerUpload: (canvasId: string, objectKey: string) =>
+      api.post<{ file_id: string; uri: string }>(`${base(canvasId)}/upload-file`, { object_key: objectKey }),
+
+    batchDownloadMaterials: (canvasId: string, materialIds: string[]) =>
+      api.post<{
+        list: Array<{ material_id: string; object_key: string | null; material_type: string; name: string }>;
+        missing: string[];
+      }>(`${base(canvasId)}/materials/batch-download`, { material_ids: materialIds }),
+
+    // ── 批注（C9）──────────────────────────────────────────
+    listCommentNodes: (canvasId: string, opts: { scope?: string; resolved?: boolean; page?: number; page_size?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.scope) q.set("scope", opts.scope);
+      if (opts.resolved !== undefined) q.set("resolved", opts.resolved ? "1" : "0");
+      q.set("page", String(opts.page ?? 1));
+      q.set("page_size", String(opts.page_size ?? 100));
+      return api.get<{ list: CanvasCommentNodeDto[]; total: number; page: number; page_size: number }>(
+        `${base(canvasId)}/comment-nodes?${q.toString()}`,
+      );
+    },
+
+    createCommentNode: (
+      canvasId: string,
+      input: { anchor: { x: number; y: number }; node_id?: string; scope?: string; content: string },
+    ) => api.post<{ comment_node_id: string }>(`${base(canvasId)}/comment-nodes`, input),
+
+    updateCommentNode: (canvasId: string, cnId: string, input: { anchor?: { x: number; y: number }; scope?: string }) =>
+      api.put<{ ok: boolean }>(`${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}`, input),
+
+    deleteCommentNode: (canvasId: string, cnId: string) =>
+      api.delete<{ ok: boolean }>(`${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}`),
+
+    listComments: (canvasId: string, cnId: string) =>
+      api.get<{ list: CanvasCommentDto[] }>(`${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}/comments`),
+
+    addComment: (canvasId: string, cnId: string, content: string) =>
+      api.post<{ comment_id: string }>(`${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}/comments`, {
+        content,
+      }),
+
+    resolveCommentNode: (canvasId: string, cnId: string, resolved: boolean) =>
+      api.post<{ comment_node_id: string; resolved: boolean }>(
+        `${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}/resolve`,
+        { resolved },
+      ),
   };
 };
 
@@ -197,3 +270,5 @@ export interface TemplateNodeDraft {
   z_index: number;
   params: Record<string, unknown>;
 }
+
+

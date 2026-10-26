@@ -525,6 +525,121 @@ async function prepareUser() {
       record("S12.6 套用模板新增节点", false, "跳过");
     }
 
+    // ══ S13 批注 ═════════════════════════════════════════
+    console.log("\n[S13] 批注");
+    // 先关掉可能还开着的模板抽屉
+    await page.keyboard.press("Escape");
+    await sleep(400);
+    const cmtBtn = page.locator(".tool-comments").first();
+    record("S13.1 工具栏有批注入口", (await cmtBtn.count()) > 0);
+    if (await cmtBtn.count()) {
+      await cmtBtn.click();
+      await sleep(600);
+      // 点画布空白处放置锚点。
+      // 用 mouse.click 真实坐标（不走 locator.click）：批注层是绝对定位覆盖层，
+      // locator.click 的命中检测会被它判成"被遮挡"而无限重试。
+      const stage = await page.locator(".canvas-stage").boundingBox();
+      await page.mouse.click(stage.x + 300, stage.y + 260);
+      await sleep(800);
+      const draft = page.locator(".comment-draft");
+      record("S13.2 放置模式出现输入框", (await draft.count()) > 0);
+      const draftVisible = await draft.count();
+      // 关键：锚点必须真的落下（输入框从 disabled 变可编辑），否则"点哪落哪"是坏的
+      const enabled = draftVisible ? await draft.isEnabled() : false;
+      record("S13.2b 点画布后锚点已落下（输入框可编辑）", enabled, `enabled=${enabled}`);
+
+      if (draftVisible) {
+        await page.locator(".comment-draft").fill("E2E 批注：这里的镜头可以再长一点");
+        await page.locator(".comment-send").click();
+        await sleep(2500);
+
+        // API 核对
+        const cm = await api("GET", `/canvas/canvases/${canvasId}/comment-nodes`, undefined, token);
+        record("S13.3 批注已落库", (cm.data?.total ?? 0) > 0, `total=${cm.data?.total}`);
+
+        // 飘点可见
+        const pins = await page.locator(".comment-pin").count();
+        record("S13.4 画布上可见批注飘点", pins > 0, `pins=${pins}`);
+
+        // 打开对话并回复
+        if (pins > 0) {
+          await page.locator(".comment-pin").first().click();
+          await sleep(1200);
+          const reply = page.locator(".comment-reply").first();
+          if (await reply.count()) {
+            await reply.fill("E2E 回复");
+            await page.locator(".comment-send-reply").click();
+            await sleep(2000);
+            const cnId = await page.locator(".comment-pin").first().getAttribute("data-comment-id");
+            const cmts = await api(
+              "GET",
+              `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/comments`,
+              undefined,
+              token,
+            );
+            record("S13.5 回复已落库", (cmts.data?.list ?? []).length >= 2, `count=${(cmts.data?.list ?? []).length}`);
+
+            // 标记已解决
+            await page.locator(".comment-toggle-resolve").click();
+            await sleep(1800);
+            const cn2 = await api("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`, undefined, token);
+            record("S13.6 标记已解决生效", cn2.data?.comment_node?.resolved === true);
+          } else {
+            record("S13.5 回复已落库", false, "无回复框");
+            record("S13.6 标记已解决生效", false, "跳过");
+          }
+        } else {
+          record("S13.5 回复已落库", false, "无飘点");
+          record("S13.6 标记已解决生效", false, "跳过");
+        }
+      } else {
+        record("S13.3 批注已落库", false, "跳过");
+        record("S13.4 画布上可见批注飘点", false, "跳过");
+        record("S13.5 回复已落库", false, "跳过");
+        record("S13.6 标记已解决生效", false, "跳过");
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "11-comments.png") });
+    } else {
+      for (const n of ["S13.2", "S13.3", "S13.4", "S13.5", "S13.6"]) {
+        record(`${n} 批注流程`, false, "无入口");
+      }
+    }
+    await page.keyboard.press("Escape");
+    await sleep(300);
+
+    // ══ S14 素材库 ═══════════════════════════════════════
+    console.log("\n[S14] 素材库");
+    const matBtn = page.locator(".tool-materials").first();
+    record("S14.1 工具栏有素材库入口", (await matBtn.count()) > 0);
+    if (await matBtn.count()) {
+      await matBtn.click();
+      await page.waitForSelector(".canvas-materials", { timeout: 15_000 });
+      await sleep(1500);
+      record("S14.2 素材库打开", (await page.locator(".canvas-materials").count()) > 0);
+
+      // 空态或列表都应有说明文案（不能白屏）
+      const matBody = await page.locator(".canvas-materials").innerText();
+      record("S14.3 素材库有空态/列表说明", matBody.length > 10, `len=${matBody.length}`);
+
+      // 通过 API 直接挂一条素材，再刷新列表验证 UI 能显示
+      await api(
+        "POST",
+        `/canvas/canvases/${canvasId}/materials`,
+        { object_key: "canvas/e2e/mat.png", material_type: "image", name: "E2E素材" },
+        token,
+      );
+      // 关闭重开以触发 loadMaterials
+      await page.locator(".canvas-materials .cv-glass-btn").first().click();
+      await sleep(500);
+      await matBtn.click();
+      await sleep(2000);
+      const cards = await page.locator(".mat-card").count();
+      record("S14.4 素材列表显示已挂载素材", cards > 0, `cards=${cards}`);
+      await page.screenshot({ path: path.join(SHOT_DIR, "12-materials.png") });
+    } else {
+      for (const n of ["S14.2", "S14.3", "S14.4"]) record(`${n} 素材流程`, false, "无入口");
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(
@@ -566,6 +681,7 @@ async function prepareUser() {
     process.exit(1);
   }
 })();
+
 
 
 

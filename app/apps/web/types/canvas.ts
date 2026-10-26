@@ -162,3 +162,42 @@ export const CANVAS_ERR = {
   VERSION_CONFLICT: 746002,
   NODE_LOCKED: 746003,
 } as const;
+
+// ── 素材 / 批注（C8/C9）────────────────────────────────────
+// 放这里而不是 useCanvasApi.ts：类型是跨组件共享的契约，
+// 让组件只依赖 types/canvas 一个入口，避免 import 互相缠绕。
+
+export interface CanvasMaterialDto {
+  id: string;
+  material_type: string;
+  /** 1 上传 2 节点产出 3 资产库引用 */
+  source: number;
+  node_id: string | null;
+  name: string;
+  /** 只存 object_key，不存 URL（直链会过期，换存储驱动还要洗库） */
+  object_key: string | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CanvasCommentNodeDto {
+  id: string;
+  anchor: { x: number; y: number };
+  node_id: string | null;
+  scope: string;
+  resolved: boolean;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  comment_count?: number;
+}
+
+export interface CanvasCommentDto {
+  id: string;
+  comment_node_id: string;
+  content: string;
+  mentions: string[];
+  created_by: string | null;
+  created_at: string;
+}

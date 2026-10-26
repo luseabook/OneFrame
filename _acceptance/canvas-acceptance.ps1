@@ -7,7 +7,7 @@
     1) typecheck（web + api）
     2) lint（只对 canvas 相关文件断言 0 error 0 warning）
     3) api 单测（含 canvas 域 12 例，含 2 条 id_map 回归）
-    4) 真实浏览器 E2E（37 项断言，含持久化/版本冲突/节点投递/模板）
+    4) 真实浏览器 E2E（48 项断言，含持久化/版本冲突/节点投递/模板）
 
   前置：
     pwsh _acceptance/start-local-stack.ps1      # PG 55432 / Redis 6380
@@ -78,7 +78,7 @@ if (-not $SkipLint) {
 }
 
 # ── 3. api 单测（canvas 域）──────────────────────────────
-Step "api 单测（canvas.spec，26 例含节点任务与模板）" {
+Step "api 单测（canvas.spec，38 例含节点任务/模板/素材/批注）" {
   Push-Location $App
   try {
     $out = & pnpm --filter @app/api test -- canvas.spec 2>&1
@@ -129,7 +129,7 @@ if (-not $SkipE2E) {
     if (-not $ready) { throw "web dev 重启后未就绪，见 _acceptance/web-e2e.log" }
   }
 
-  Step "浏览器 E2E（37 项断言）" {
+  Step "浏览器 E2E（48 项断言）" {
     Push-Location (Join-Path $Root "_acceptance")
     try {
       & node e2e-canvas-editor.cjs
@@ -148,6 +148,8 @@ foreach ($k in $results.Keys) {
 Write-Host ""
 Write-Host "产物：_acceptance/canvas-e2e/（截图 + result.json）" -ForegroundColor DarkGray
 Write-Host "✅ 画布域验收全部通过" -ForegroundColor Green
+
+
 
 
 

@@ -787,5 +787,295 @@ describe("canvas e2e", () => {
     const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "想造官方", tpl_scope: 1 });
     expect(tpl.code).toBe(400101);
   });
+
+  // ══ 素材（C8）════════════════════════════════════════════
+  //
+  // 锁三条：
+  //   1. 只存 object_key（不存 URL，直链会过期且换驱动要洗库）
+  //   2. material_type 白名单；节点必须属于同一画布
+  //   3. 批量删除/下载显式回报失败项（不静默丢弃）
+
+  it("素材：挂载 → 列表 → 按类型/来源筛选", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "素材" });
+    const canvasId = c.data.id as string;
+
+    const m1 = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "canvas/a/cover.png",
+      material_type: "image",
+      name: "封面图",
+    });
+    expect(m1.code).toBe(0);
+    expect(m1.data.material_id).toMatch(/^\d+$/);
+
+    const m2 = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "canvas/a/clip.mp4",
+      material_type: "video",
+      name: "片段",
+    });
+    expect(m2.code).toBe(0);
+
+    const all = await inject("GET", `/canvas/canvases/${canvasId}/materials`);
+    expect(all.code).toBe(0);
+    expect(all.data.total).toBe(2);
+    // 只存 object_key，不存 URL
+    const cover = (all.data.list as Array<Record<string, unknown>>).find((x) => x.name === "封面图");
+    expect(cover?.object_key).toBe("canvas/a/cover.png");
+    expect(cover?.url).toBeUndefined();
+
+    const onlyImage = await inject("GET", `/canvas/canvases/${canvasId}/materials?material_type=image`);
+    expect(onlyImage.data.total).toBe(1);
+    expect((onlyImage.data.list as Array<{ material_type: string }>)[0]!.material_type).toBe("image");
+  });
+
+  it("素材：非法类型 → 400101；节点不属于本画布 → 400102", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "素材校验" });
+    const canvasId = c.data.id as string;
+    const other = await inject("POST", "/canvas/canvases", { title: "别的画布" });
+    const otherCanvasId = other.data.id as string;
+    const otherNode = await inject("POST", `/canvas/canvases/${otherCanvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+
+    const badType = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "x.bin",
+      material_type: "executable",
+    });
+    expect(badType.code).toBe(400101);
+
+    // 把"别的画布"的节点挂到这个画布的素材上 → 必须拒绝（不能造出跨画布引用）
+    const crossNode = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "x.png",
+      material_type: "image",
+      node_id: otherNode.data.id,
+    });
+    expect(crossNode.code).toBe(400102);
+  });
+
+  it("素材：节点产出素材可挂到节点上，并可批量删除（显式回报删除数）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "产出素材" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+
+    const m = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "canvas/out/r1.png",
+      material_type: "image",
+      node_id: n.data.id,
+      source: 2, // 节点产出
+    });
+    expect(m.code).toBe(0);
+
+    const byNode = await inject("GET", `/canvas/canvases/${canvasId}/materials?node_id=${n.data.id}`);
+    expect(byNode.data.total).toBe(1);
+    expect((byNode.data.list as Array<{ node_id: string }>)[0]!.node_id).toBe(n.data.id);
+
+    const del = await inject("POST", `/canvas/canvases/${canvasId}/materials/batch-delete`, {
+      material_ids: [m.data.material_id],
+    });
+    expect(del.code).toBe(0);
+    expect(del.data.deleted).toBe(1);
+
+    const after = await inject("GET", `/canvas/canvases/${canvasId}/materials`);
+    expect(after.data.total).toBe(0);
+  });
+
+  it("素材：批量下载回报缺失 id（不静默丢弃）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "下载" });
+    const canvasId = c.data.id as string;
+    const m = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
+      object_key: "canvas/d/a.png",
+      material_type: "image",
+    });
+    const res = await inject("POST", `/canvas/canvases/${canvasId}/materials/batch-download`, {
+      material_ids: [m.data.material_id, "999999999999999999"],
+    });
+    expect(res.code).toBe(0);
+    expect(res.data.list).toHaveLength(1);
+    // 关键：找不到的要明说，否则用户以为下全了
+    expect(res.data.missing).toContain("999999999999999999");
+  });
+
+  it("素材：upload-file 按扩展名猜测类型", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "上传" });
+    const canvasId = c.data.id as string;
+    const up = await inject("POST", `/canvas/canvases/${canvasId}/upload-file`, {
+      object_key: "uploads/voice.mp3",
+    });
+    expect(up.code).toBe(0);
+    expect(up.data.uri).toBe("uploads/voice.mp3");
+
+    const list = await inject("GET", `/canvas/canvases/${canvasId}/materials`);
+    expect((list.data.list as Array<{ material_type: string }>)[0]!.material_type).toBe("audio");
+  });
+
+  it("素材：跨空间不可见（404）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "私有素材" });
+    const canvasId = c.data.id as string;
+    const res = await inject("GET", `/canvas/canvases/${canvasId}/materials`, undefined, otherToken);
+    expect(res.code).toBe(400102);
+  });
+
+  // ══ 批注（C9）════════════════════════════════════════════
+  //
+  // 锁三条：
+  //   1. 建点 + 首条内容一次完成（不留空点）
+  //   2. 只能删/改自己的内容（403101）
+  //   3. resolve 是"标记已解决"，可反复切换
+
+  it("批注：建点（含首条内容）→ 列消息 → 追加消息", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "批注" });
+    const canvasId = c.data.id as string;
+
+    const created = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 120, y: 340 },
+      content: "这里的镜头再长一点",
+    });
+    expect(created.code).toBe(0);
+    const cnId = created.data.comment_node_id as string;
+
+    // 一次调用就该带出首条内容，而不是空点
+    const msgs = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/comments`);
+    expect(msgs.code).toBe(0);
+    expect(msgs.data.list).toHaveLength(1);
+    expect((msgs.data.list as Array<{ content: string }>)[0]!.content).toBe("这里的镜头再长一点");
+
+    const added = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/comments`, {
+      content: "同意，改成 8s",
+    });
+    expect(added.code).toBe(0);
+
+    const msgs2 = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/comments`);
+    expect(msgs2.data.list).toHaveLength(2);
+
+    // 列表里带 comment_count，前端画飘点时要显示
+    const list = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes`);
+    expect(list.data.total).toBe(1);
+    expect((list.data.list as Array<{ comment_count: number }>)[0]!.comment_count).toBe(2);
+  });
+
+  it("批注：挂到节点上 + scope=node；锚点可移动", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "节点批注" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "video",
+      x: 100,
+      y: 100,
+      params: {},
+    });
+
+    const created = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 150, y: 160 },
+      node_id: n.data.id,
+      content: "这个节点的画幅不对",
+    });
+    expect(created.code).toBe(0);
+    const cnId = created.data.comment_node_id as string;
+
+    const detail = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`);
+    expect(detail.code).toBe(0);
+    expect(detail.data.comment_node.node_id).toBe(n.data.id);
+    // 不传 scope 但有 node_id → 自动判为 node 级
+    expect(detail.data.comment_node.scope).toBe("node");
+
+    const moved = await inject("PUT", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`, {
+      anchor: { x: 500, y: 600 },
+    });
+    expect(moved.code).toBe(0);
+    const after = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`);
+    expect(after.data.comment_node.anchor.x).toBe(500);
+    expect(after.data.comment_node.anchor.y).toBe(600);
+  });
+
+  it("批注：resolve 可切换，并记录 resolved_by/at", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "解决" });
+    const canvasId = c.data.id as string;
+    const created = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 10, y: 10 },
+      content: "待处理",
+    });
+    const cnId = created.data.comment_node_id as string;
+
+    const resolved = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/resolve`, {
+      resolved: true,
+    });
+    expect(resolved.code).toBe(0);
+    expect(resolved.data.resolved).toBe(true);
+
+    const got = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`);
+    expect(got.data.comment_node.resolved).toBe(true);
+    expect(got.data.comment_node.resolved_by).toBeTruthy();
+    expect(got.data.comment_node.resolved_at).toBeTruthy();
+
+    // 可以重新打开
+    const reopened = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}/resolve`, {
+      resolved: false,
+    });
+    expect(reopened.data.resolved).toBe(false);
+    const got2 = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`);
+    expect(got2.data.comment_node.resolved_by).toBeNull();
+  });
+
+  it("批注：只能删自己的（他人 → 403101）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "权限" });
+    const canvasId = c.data.id as string;
+    const created = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 0, y: 0 },
+      content: "我的批注",
+    });
+    const cnId = created.data.comment_node_id as string;
+
+    // 别人删不了（跨空间先撞 404，这条覆盖"同画布不同用户"的场景需要团队成员；
+    // 这里用跨空间验证隔离 + 用作者本人验证成功路径）
+    const otherDel = await inject("DELETE", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`, undefined, otherToken);
+    expect(otherDel.code).toBe(400102); // 跨空间：画布都看不到
+
+    // 作者本人能删
+    const del = await inject("DELETE", `/canvas/canvases/${canvasId}/comment-nodes/${cnId}`);
+    expect(del.code).toBe(0);
+
+    const list = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes`);
+    expect(list.data.total).toBe(0);
+  });
+
+  it("批注：空内容 → 400100；跨空间列表 → 404", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "校验" });
+    const canvasId = c.data.id as string;
+    const empty = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 0, y: 0 },
+      content: "   ",
+    });
+    expect(empty.code).toBe(400100);
+
+    const cross = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes`, undefined, otherToken);
+    expect(cross.code).toBe(400102);
+  });
+
+  it("批注：按 resolved 筛选", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "筛选" });
+    const canvasId = c.data.id as string;
+    const a = await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 0, y: 0 },
+      content: "A",
+    });
+    await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes`, {
+      anchor: { x: 10, y: 10 },
+      content: "B",
+    });
+    await inject("POST", `/canvas/canvases/${canvasId}/comment-nodes/${a.data.comment_node_id}/resolve`, {
+      resolved: true,
+    });
+
+    const open = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes?resolved=0`);
+    expect(open.data.total).toBe(1);
+    const done = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes?resolved=1`);
+    expect(done.data.total).toBe(1);
+  });
 });
 

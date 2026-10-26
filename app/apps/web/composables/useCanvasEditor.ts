@@ -1,7 +1,10 @@
 import type {
+  CanvasCommentDto,
+  CanvasCommentNodeDto,
   CanvasDetail,
   CanvasEdgeDto,
   CanvasGroupDto,
+  CanvasMaterialDto,
   CanvasNodeDto,
   CanvasNodeType,
 } from "~/types/canvas";
@@ -646,6 +649,174 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     pollTimers.clear();
   }
 
+  // ── 素材 + 批注（C8/C9）──────────────────────────────────
+  const materials = ref<CanvasMaterialDto[]>([]);
+  const materialsLoading = ref(false);
+  const commentNodes = ref<CanvasCommentNodeDto[]>([]);
+  const commentsLoading = ref(false);
+  /** 批注模式：开启后点画布空白处 = 在该位置落一个批注点 */
+  const commentMode = ref(false);
+  const activeCommentId = ref<string | null>(null);
+  const activeComments = ref<CanvasCommentDto[]>([]);
+
+  async function loadMaterials(): Promise<void> {
+    materialsLoading.value = true;
+    try {
+      const res = await api.listMaterials(canvasId.value, { page_size: 60 });
+      materials.value = res.list;
+    } catch {
+      /* 素材读取失败不该阻塞画布编辑 */
+    } finally {
+      materialsLoading.value = false;
+    }
+  }
+
+  /**
+   * 挂一张素材到画布（含"从节点结果保存为素材"的常用路径）。
+   * 只登记 object_key；URL 由存储层签，避免直链过期。
+   */
+  async function addMaterial(input: {
+    object_key: string;
+    material_type: string;
+    name?: string;
+    node_id?: string;
+    source?: number;
+  }): Promise<boolean> {
+    try {
+      await api.createMaterial(canvasId.value, input);
+      await loadMaterials();
+      toast.success("已加入素材库");
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "加入素材库失败");
+      return false;
+    }
+  }
+
+  /** 把某个节点的生成结果存进素材库（画布里最高频的"素材沉淀"动作） */
+  async function saveNodeResultAsMaterial(nodeId: string): Promise<boolean> {
+    const node = nodes.value.find((n) => n.id === nodeId);
+    if (!node) return false;
+    if (nodeId.startsWith("local_")) {
+      toast.error("请先保存画布");
+      return false;
+    }
+    const uri = typeof node.params?.result_uri === "string" ? node.params.result_uri : "";
+    if (!uri) {
+      toast.error("这个节点还没有生成结果");
+      return false;
+    }
+    // 结果是完整 URL，素材库存的是 object_key；取 URL 的 pathname 作为 key 兜底
+    let key = uri;
+    try {
+      const u = new URL(uri);
+      key = u.pathname.replace(/^\//, "");
+    } catch {
+      /* 相对路径直接用 */
+    }
+    const type =
+      node.node_type === "video" ? "video" : node.node_type === "audio" ? "audio" : "image";
+    return addMaterial({
+      object_key: key,
+      material_type: type,
+      name: node.name || "节点产出",
+      node_id: nodeId,
+      source: 2,
+    });
+  }
+
+  async function removeMaterials(ids: string[]): Promise<void> {
+    try {
+      await api.batchDeleteMaterials(canvasId.value, ids);
+      await loadMaterials();
+      toast.success("已移除素材");
+    } catch (e) {
+      toast.error((e as Error).message || "移除失败");
+    }
+  }
+
+  async function loadCommentNodes(): Promise<void> {
+    commentsLoading.value = true;
+    try {
+      const res = await api.listCommentNodes(canvasId.value, { page_size: 100 });
+      commentNodes.value = res.list;
+    } catch {
+      /* 忽略 */
+    } finally {
+      commentsLoading.value = false;
+    }
+  }
+
+  /** 在画布坐标处新建批注点（带首条内容，避免留空点） */
+  async function createComment(anchor: { x: number; y: number }, content: string, nodeId?: string): Promise<boolean> {
+    if (!content.trim()) {
+      toast.error("先写点什么再发");
+      return false;
+    }
+    try {
+      const res = await api.createCommentNode(canvasId.value, {
+        anchor: { x: Math.round(anchor.x), y: Math.round(anchor.y) },
+        content,
+        ...(nodeId && !nodeId.startsWith("local_") ? { node_id: nodeId } : {}),
+      });
+      await loadCommentNodes();
+      activeCommentId.value = res.comment_node_id;
+      await loadComments(res.comment_node_id);
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "新建批注失败");
+      return false;
+    }
+  }
+
+  async function loadComments(cnId: string): Promise<void> {
+    activeCommentId.value = cnId;
+    try {
+      const res = await api.listComments(canvasId.value, cnId);
+      activeComments.value = res.list;
+    } catch {
+      activeComments.value = [];
+    }
+  }
+
+  async function replyComment(cnId: string, content: string): Promise<boolean> {
+    if (!content.trim()) return false;
+    try {
+      await api.addComment(canvasId.value, cnId, content);
+      await loadComments(cnId);
+      await loadCommentNodes(); // 刷新计数
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "回复失败");
+      return false;
+    }
+  }
+
+  async function toggleCommentResolved(cnId: string, resolved: boolean): Promise<void> {
+    try {
+      await api.resolveCommentNode(canvasId.value, cnId, resolved);
+      await loadCommentNodes();
+      const target = commentNodes.value.find((c) => c.id === cnId);
+      if (target) target.resolved = resolved;
+    } catch (e) {
+      toast.error((e as Error).message || "操作失败");
+    }
+  }
+
+  async function deleteComment(cnId: string): Promise<void> {
+    try {
+      await api.deleteCommentNode(canvasId.value, cnId);
+      if (activeCommentId.value === cnId) {
+        activeCommentId.value = null;
+        activeComments.value = [];
+      }
+      await loadCommentNodes();
+      toast.success("批注已删除");
+    } catch (e) {
+      toast.error((e as Error).message || "删除失败");
+    }
+  }
+
   /**
    * 打开画布时校正一次节点任务状态。
    * 存在的意义：用户可能关掉页面错过了任务完成，重新打开时画布不该永远显示"生成中"。
@@ -997,6 +1168,24 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     // 模板（C2）
     saveAsTemplate,
     applyTemplate,
+    // 素材 / 批注（C8/C9）
+    materials,
+    materialsLoading,
+    loadMaterials,
+    addMaterial,
+    saveNodeResultAsMaterial,
+    removeMaterials,
+    commentNodes,
+    commentsLoading,
+    commentMode,
+    activeCommentId,
+    activeComments,
+    loadCommentNodes,
+    createComment,
+    loadComments,
+    replyComment,
+    toggleCommentResolved,
+    deleteComment,
     // 生命周期
     startTimers,
     stopTimers,
