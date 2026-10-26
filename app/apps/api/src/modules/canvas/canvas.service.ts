@@ -42,6 +42,24 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
 const LOCK_TTL_S = 30;
 const HEARTBEAT_TTL_S = 60;
 
+/**
+ * 把客户端传来的 id 解析成雪花 bigint；不是合法雪花 id 时返回 null。
+ *
+ * 为什么需要它：画布是"本地编辑 + 整图提交"，客户端会用 `local_xxx` 这类
+ * 临时 id 表示"刚建还没落库"的节点。旧实现直接 `BigInt(id)`，
+ * 非数字 id 抛 SyntaxError 变成 500——整图提交在"先加节点再保存"这条
+ * 最常见的路径上必然失败。语义上"不是雪花 id" = "这是新东西"，应当新分配。
+ */
+function asSnowflake(v: string | null | undefined): bigint | null {
+  if (!v) return null;
+  if (!/^\d{1,20}$/.test(v)) return null;
+  try {
+    return BigInt(v);
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class CanvasService {
   constructor(@Inject(RedisService) private readonly redis: RedisService) {}
@@ -530,13 +548,26 @@ export class CanvasService {
     const nextVersion = canvas.version + 1;
     const canvasIdBig = canvas.id;
 
+    /**
+     * 客户端提交的 id 可能是"本地临时 id"（画布上刚建、还没落库的节点）。
+     * 原实现直接 `BigInt(n.id)`：非数字 id 会抛 SyntaxError → 500，
+     * 前端每次"先本地加节点再整图提交"都会 500，等于整图提交不可用。
+     * 语义上"不是雪花 id"就等于"这是个新节点"，应当新分配 id 而不是报错。
+     * 返回 id_map，让前端把本地 id 换成真实 id（否则再保存会重复建节点）。
+     */
+    const idMap: Record<string, string> = {};
+
     await db.transaction(async (tx) => {
       // 1) 分组整体替换
       await tx.delete(canvasGroups).where(eq(canvasGroups.canvasId, canvasIdBig));
       const groupIdMap = new Map<string, bigint>();
       for (const g of input.groups ?? []) {
-        const gid = g.id ? BigInt(g.id) : newId();
-        if (g.id) groupIdMap.set(g.id, gid);
+        const existing = asSnowflake(g.id);
+        const gid = existing ?? newId();
+        if (g.id) {
+          groupIdMap.set(g.id, gid);
+          if (!existing) idMap[g.id] = String(gid);
+        }
         await tx.insert(canvasGroups).values({
           id: gid,
           spaceId: BigInt(spaceId),
@@ -564,8 +595,12 @@ export class CanvasService {
 
       const nodeIdMap = new Map<string, bigint>();
       for (const n of input.nodes) {
-        const nid = n.id ? BigInt(n.id) : newId();
-        if (n.id) nodeIdMap.set(n.id, nid);
+        const existing = asSnowflake(n.id);
+        const nid = existing ?? newId();
+        if (n.id) {
+          nodeIdMap.set(n.id, nid);
+          if (!existing) idMap[n.id] = String(nid);
+        }
         await tx.insert(canvasNodes).values({
           id: nid,
           spaceId: BigInt(spaceId),
@@ -578,9 +613,10 @@ export class CanvasService {
           height: n.height ?? null,
           zIndex: n.z_index ?? 0,
           params: (n.params ?? {}) as Record<string, unknown>,
-          taskId: n.task_id ? BigInt(n.task_id) : null,
+          taskId: asSnowflake(n.task_id),
           status: n.status ?? 1,
-          groupIds: (n.group_ids ?? []).map((g) => BigInt(g)),
+          // group_ids 里非雪花的值直接丢弃（可能是客户端的本地组 id）
+          groupIds: (n.group_ids ?? []).map((g) => asSnowflake(g)).filter((g): g is bigint => g !== null),
         });
       }
 
@@ -620,7 +656,14 @@ export class CanvasService {
       });
     });
 
-    return { version: nextVersion, nodes: input.nodes.length, edges: input.edges.length };
+    // id_map：本地临时 id → 真实雪花 id。前端保存后必须用它把本地 id 换掉，
+    // 否则下次提交会把同一批节点当成新节点再建一遍（重复节点）。
+    return {
+      version: nextVersion,
+      nodes: input.nodes.length,
+      edges: input.edges.length,
+      id_map: idMap,
+    };
   }
 
   /** 快照列表（用于"历史版本"） */

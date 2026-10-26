@@ -359,4 +359,77 @@ describe("canvas e2e", () => {
     expect(unpin.code).toBe(0);
     expect(unpin.data.pinned_node_id).toBeNull();
   });
+
+  /**
+   * 回归：整图提交必须接受"本地临时 id"。
+   *
+   * 背景（真实踩坑）：画布编辑器是"本地加节点 → 整图提交"，
+   * 新节点的 id 是客户端临时值（`local_xxx`）。旧实现直接 `BigInt(n.id)`，
+   * 非数字 id 抛 SyntaxError → 500，等于"先加节点再保存"这条最主流的路径
+   * 100% 失败。修复后：非雪花 id 视为新节点、分配真实 id，并在 id_map 里回传，
+   * 让前端把本地 id 换掉（否则下次提交会重复建节点）。
+   */
+  it("整图提交接受本地临时 id，并在 id_map 回传真实 id", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "本地id" });
+    const canvasId = c.data.id as string;
+
+    const committed = await inject("POST", `/canvas/canvases/${canvasId}/commit`, {
+      version: 1,
+      nodes: [
+        { id: "local_1700000000_aaa", node_type: "text", name: "本地文本", x: 10, y: 20, params: { prompt: "hi" } },
+        { node_type: "video", name: "无id视频", x: 300, y: 20, params: {} },
+      ],
+      // 自环边：src/dst 都指向同一个本地 id，两处都必须能映射到真实 id
+      edges: [{ src_node_id: "local_1700000000_aaa", dst_node_id: "local_1700000000_aaa" }],
+    });
+    expect(committed.code).toBe(0);
+    expect(committed.data.version).toBe(2);
+    expect(committed.data.nodes).toBe(2);
+    expect(committed.data.id_map["local_1700000000_aaa"]).toMatch(/^\d+$/);
+
+    const detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    expect(detail.data.nodes).toHaveLength(2);
+    const textNode = detail.data.nodes.find((n: { node_type: string }) => n.node_type === "text");
+    expect(textNode.id).toBe(committed.data.id_map["local_1700000000_aaa"]);
+    expect(textNode.params.prompt).toBe("hi");
+    // 边必须指向真实 id，不能残留本地 id
+    expect(detail.data.edges).toHaveLength(1);
+    expect(detail.data.edges[0].src_node_id).toBe(textNode.id);
+    expect(detail.data.edges[0].dst_node_id).toBe(textNode.id);
+  });
+
+  /**
+   * 回归：整图提交是"整体替换"，带真实 id 重复提交不产生重复节点。
+   * 前端拿到 id_map 后会把本地 id 换掉，所以第二次提交带的是真实 id；
+   * 这里验证同一个 id 是"更新"而不是"再建一个"。
+   */
+  it("整图提交是整体替换：带真实 id 重复提交不产生重复节点", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "替换" });
+    const canvasId = c.data.id as string;
+
+    const first = await inject("POST", `/canvas/canvases/${canvasId}/commit`, {
+      version: 1,
+      nodes: [{ node_type: "image", name: "图", x: 0, y: 0, params: {} }],
+      edges: [],
+    });
+    expect(first.code).toBe(0);
+    let detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    const realId = detail.data.nodes[0].id as string;
+
+    const second = await inject("POST", `/canvas/canvases/${canvasId}/commit`, {
+      version: first.data.version,
+      nodes: [
+        { id: realId, node_type: "image", name: "图改名", x: 50, y: 50, params: {} },
+        { node_type: "audio", name: "新增音频", x: 300, y: 0, params: {} },
+      ],
+      edges: [],
+    });
+    expect(second.code).toBe(0);
+
+    detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    expect(detail.data.nodes).toHaveLength(2); // 不是 3
+    const same = detail.data.nodes.find((n: { id: string }) => n.id === realId);
+    expect(same.name).toBe("图改名"); // 同一个节点被更新而非重建
+    expect(same.x).toBe(50);
+  });
 });
