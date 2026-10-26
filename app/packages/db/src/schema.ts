@@ -291,6 +291,11 @@ export const tasks = pgTable(
     creditsSettled: integer("credits_settled").notNull().default(0),
     idempotencyKey: text("idempotency_key"),
     dedupeKey: text("dedupe_key"),
+    /** 任务标题：用户改名的落点（agent 域 PUT /agent/task/:id），空则前端按 mode 派生显示 */
+    title: text("title"),
+    /** 用户反馈 {reaction:"like"|"dislike", comment?}；曾列 PRD 非目标，但 agent 域已提供该写口，
+     *  落库才能读回，否则就是"接口收下就丢"的空壳 */
+    feedback: jsonb("feedback"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     expireAt: timestamp("expire_at", { withTimezone: true }), // 结果保留 90 天
     createdAt: createdAt(),
@@ -1069,4 +1074,129 @@ export const canvasComments = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index("idx_canvas_comments").on(t.commentNodeId, t.createdAt)],
+);
+
+// ── agent 对话域（F1 契约 §13，迁移 0015）────────────────────
+// 关键取舍（contract-draft-canvas-agent.md §2.3.0）：
+// 独立的创作 Agent（/agent/task/*）与画布内对话（/canvas/:id/chat/sessions/*）
+// 是**同一台对话引擎的两种作用域**，故合一张 agent_sessions 用 scope 区分，
+// 消息/事件/绑定三张子表完全共享——否则要维护两套并行实现，且流式协议会分叉。
+
+/** 对话会话（scope 1 独立创作 / 2 画布内） */
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 1 独立创作 Agent 2 画布内对话（scope=2 时 canvas_id 必填，应用层校验） */
+    scope: smallint("scope").notNull().default(1),
+    canvasId: bigint("canvas_id", { mode: "bigint" }).references(() => canvases.id),
+    title: text("title").notNull().default(""),
+    /** 1 活跃 2 已结束 3 已归档 */
+    status: smallint("status").notNull().default(1),
+    /** 未读数游标：用户最后读到的消息 seq（→ /chat/sessions/:id/read） */
+    lastReadSeq: integer("last_read_seq").notNull().default(0),
+    createdBy: bigint("created_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_agent_sessions_space").on(t.spaceId, t.scope, t.lastActiveAt.desc()),
+    index("idx_agent_sessions_canvas").on(t.canvasId, t.lastActiveAt.desc()),
+  ],
+);
+
+/** 对话消息（seq 为会话内单调展示序，独立于 agent_events 的续传序） */
+export const agentMessages = pgTable(
+  "agent_messages",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    sessionId: bigint("session_id", { mode: "bigint" })
+      .notNull()
+      .references(() => agentSessions.id),
+    /** 1 user 2 assistant 3 system */
+    role: smallint("role").notNull(),
+    content: text("content").notNull().default(""),
+    /** 1 text 2 card 3 plan 4 hitl（卡片/计划/HITL 的结构放 payload） */
+    contentType: smallint("content_type").notNull().default(1),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    /** 该消息触发的生成任务（复用 tasks，禁止另造 agent_tasks 表） */
+    taskId: bigint("task_id", { mode: "bigint" }).references(() => tasks.id),
+    /** 会话内单调序号；与 session_id 组成唯一键，分页游标按它走 */
+    seq: integer("seq").notNull(),
+    /** 0 无 1 赞 2 踩 3 已取消（reaction 端点写这里） */
+    reaction: smallint("reaction").notNull().default(0),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_agent_messages_seq").on(t.sessionId, t.seq),
+    index("idx_agent_messages_session").on(t.sessionId, t.seq),
+  ],
+);
+
+/** SSE 事件日志：断线续传的唯一依据（没有它就无法实现 last_stream_id 重放） */
+export const agentEvents = pgTable(
+  "agent_events",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    sessionId: bigint("session_id", { mode: "bigint" })
+      .notNull()
+      .references(() => agentSessions.id),
+    /** SSE 帧 id: 的值，客户端回传 last_stream_id 时按它定位游标 */
+    streamId: text("stream_id").notNull(),
+    /** 会话内单调递增；重放条件是 seq > cursor.seq */
+    seq: bigint("seq", { mode: "bigint" }).notNull(),
+    type: text("type").notNull(),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    taskId: bigint("task_id", { mode: "bigint" }).references(() => tasks.id),
+    /** 与 database.md §10 数据生命周期对齐（7 天，同分享 token 级），过期后游标失效 → 746004 */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_agent_events_stream").on(t.sessionId, t.streamId),
+    index("idx_agent_events_replay").on(t.sessionId, t.seq),
+    index("idx_agent_events_expire").on(t.expiresAt),
+  ],
+);
+
+/** 消息 ↔ 画布节点绑定（区分产出/引用/修改，且要能按节点反查"谁给我做的"） */
+export const agentMessageBindings = pgTable(
+  // 表名以 database.md §12.2 为准（草案里曾简写为 agent_message_bindings）
+  "agent_message_node_bindings",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    messageId: bigint("message_id", { mode: "bigint" })
+      .notNull()
+      .references(() => agentMessages.id),
+    nodeId: bigint("node_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvasNodes.id),
+    /** 1 产出 2 引用 3 修改 */
+    bindingKind: smallint("binding_kind").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_agent_msg_binding").on(t.messageId, t.nodeId),
+    index("idx_agent_bindings_node").on(t.nodeId),
+  ],
 );

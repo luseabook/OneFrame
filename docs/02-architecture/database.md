@@ -13,7 +13,12 @@
 > 迁移规划 0013–0016；团队复用 `spaces(type=2)` 不另建表（ADR-010）、账本复用 `credit_flows` 不另起（ADR-011）、
 > 任务一律复用 `tasks` 不另造（ADR-003）。逐字段证据见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`。
 >
-> **迁移执行顺序（本文件 DDL 按依赖而非章节顺序执行）**：§1 users/identities/spaces → §4 credit_accounts/credit_flows → §8 admin_users → §1.5 invite_* → §2 models/model_prices → §5 assets → §6 script_projects/episodes/storyboards/project_assets → §3 tasks/task_events/idempotency_records/exports/task_shares → §7 canvas_* → §8 configs → **§12 F1 四新域（canvas 0013 → agent 0014 → cam 0015 → film 0016）**。跨节前向外键（tasks.episode_id/shot_id、exports.episode_id、invite_redemptions.flow_id、invite_codes.created_by、canvases.episode_id）在目标表建好后用文件内标注的 `ALTER TABLE` 补加，禁止直接按本文件从上到下执行。
+> **v2.1 · 2026-10-26 · agent 域落地回写（迁移 0015）**：§12.2 四张表按实际迁移定稿，并补 3 处实现必需的增量列
+> （`agent_sessions.last_read_seq`、`agent_messages.reaction`、`tasks.title`/`tasks.feedback`）；
+> `agent_messages` 去掉设计稿里的 `turn_no/status`（轮次进行态由 Redis 在途标记 + SSE 事件表达，
+> 不落消息行，避免第二套状态机）。表名严格采用本文件既定的 `agent_message_node_bindings`。
+>
+> **迁移执行顺序（本文件 DDL 按依赖而非章节顺序执行）**：§1 users/identities/spaces → §4 credit_accounts/credit_flows → §8 admin_users → §1.5 invite_* → §2 models/model_prices → §5 assets → §6 script_projects/episodes/storyboards/project_assets → §3 tasks/task_events/idempotency_records/exports/task_shares → §7 canvas_* → §8 configs → **§12 F1 四新域（cam 0013 → canvas 0014 → agent 0015 → film 0016）**。跨节前向外键（tasks.episode_id/shot_id、exports.episode_id、invite_redemptions.flow_id、invite_codes.created_by、canvases.episode_id）在目标表建好后用文件内标注的 `ALTER TABLE` 补加，禁止直接按本文件从上到下执行。
 
 ## ER 总览
 
@@ -245,6 +250,8 @@ CREATE TABLE tasks (
   idempotency_key  TEXT,                           -- 仅记录来源请求键(审计用)，幂等判定见 idempotency_records
   dedupe_key       TEXT,                           -- 任务级去重键(P0-04)：服务端按 f(request_key, shot_id) 派生；
                                                    -- 重试任务按 f(origin_task_id, attempt_no) 派生，前端不参与
+  title            TEXT,                           -- 用户可改的任务名（agent 域 PUT /agent/task/:id，迁移 0015）
+  feedback         JSONB,                          -- {reaction:"like"|"dislike"|"none",comment,at}（迁移 0015）
   finished_at      TIMESTAMPTZ,
   expire_at        TIMESTAMPTZ                     -- 结果保留90天
 );
@@ -810,16 +817,23 @@ CREATE INDEX idx_canvas_comments ON canvas_comments(comment_node_id, created_at)
 
 ### 12.2 `agent` 对话式创作域（4 张）
 
+> ✅ **已落地**：迁移 `0015_agent`（2026-10-26）。落地时相对本节设计稿有 3 处**增量**列
+> （都是实现必需、且不改变既有语义）：`agent_sessions.last_read_seq`（未读数游标）、
+> `agent_messages.reaction`（赞/踩，`/chat/sessions/:id/messages/:mid/reaction` 的落点）、
+> `tasks.title` + `tasks.feedback`（`PUT /agent/task/:id` 的落点，见 §3 `tasks` DDL）。
+> 消息序采用 `seq`（会话内单调），**没有**额外的 `turn_no/status`：一轮对话的进行态由
+> Redis 在途标记 + SSE 事件表达，不落消息行——否则"轮次"会变成第二套状态机。
+
 > 设计取舍：`/agent/task/*`（独立创作 Agent，可无画布）与 `/df/canvas/:id/chat/sessions/*`（画布内对话）
 > 是**同一台对话引擎的两种作用域**（CLI `agent session create NAME [--canvas CANVAS_ID]`，`--canvas` 可选），
 > 故合为一张 `agent_sessions`，用 `scope` 区分。
 
 | 表 | 用途 | 关键列 | 索引/约束 |
 |---|---|---|---|
-| `agent_sessions` | 会话 | `space_id, scope(1独立2画布), canvas_id?, title, status(1活跃2结束3归档), created_by, last_active_at, deleted_at` | `idx(space_id,scope,last_active_at DESC)`；`scope=2` 时 `canvas_id` 必填（应用层） |
-| `agent_messages` | 消息 | `space_id, session_id, role(user\|assistant\|system), content, payload JSONB, turn_no, status` | `idx(session_id,turn_no)` |
-| `agent_message_node_bindings` | 消息→画布节点绑定 | `space_id, message_id, canvas_id, node_id` | `UK(message_id,node_id)` |
-| `agent_events` | **SSE 事件落库（续传必需）** | `space_id, session_id, stream_id BIGINT, type TEXT, payload JSONB, expires_at` | `UK(session_id,stream_id)`；`idx(expires_at)` |
+| `agent_sessions` | 会话 | `space_id, scope(1独立2画布), canvas_id?, title, status(1活跃2结束3归档), created_by, last_active_at, last_read_seq, deleted_at` | `idx(space_id,scope,last_active_at DESC)`；`scope=2` 时 `canvas_id` 必填（应用层） |
+| `agent_messages` | 消息 | `space_id, session_id, role(user\|assistant\|system), content, content_type, payload JSONB, task_id?, seq, reaction` | `UK(session_id, seq)`；`idx(session_id,seq)` |
+| `agent_message_node_bindings` | 消息→画布节点绑定 | `space_id, message_id, node_id, binding_kind` | `UK(message_id,node_id)`；`idx(node_id)` |
+| `agent_events` | **SSE 事件落库（续传必需）** | `space_id, session_id, stream_id TEXT, seq BIGINT, type TEXT, payload JSONB, task_id?, expires_at` | `UK(session_id,stream_id)`；`idx(session_id,seq)`；`idx(expires_at)` |
 
 > **`agent_events` 为什么必须落库**：草案从 bundle 逆出客户端用 `?last_stream_id=` 做增量续传
 > （`queryNames:["last_stream_id"]` 已证），若事件不持久化则续传不可能实现。
@@ -835,6 +849,7 @@ CREATE TABLE agent_sessions (
   canvas_id      BIGINT REFERENCES canvases(id),-- scope=2 必填（应用层校验）
   title          TEXT NOT NULL DEFAULT '',
   status         SMALLINT NOT NULL DEFAULT 1,   -- 1活跃 2已结束 3已归档
+  last_read_seq  INT NOT NULL DEFAULT 0,        -- 未读数游标：用户已读到的消息 seq（0015 落地新增）
   created_by     BIGINT NOT NULL REFERENCES users(id),
   last_active_at TIMESTAMPTZ,
   deleted_at     TIMESTAMPTZ,
@@ -854,6 +869,7 @@ CREATE TABLE agent_messages (
   payload      JSONB NOT NULL DEFAULT '{}', -- 卡片/计划/HITL 结构
   task_id      BIGINT REFERENCES tasks(id), -- 消息触发的生成任务（复用 tasks）
   seq          INT NOT NULL,                -- 会话内单调序号（展示序）
+  reaction     SMALLINT NOT NULL DEFAULT 0, -- 0无 1赞 2踩 3已取消（0015 落地新增）
   created_by   BIGINT REFERENCES users(id), -- assistant/system 为空
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -892,7 +908,8 @@ CREATE TABLE agent_message_node_bindings (
 CREATE INDEX idx_agent_bindings_node ON agent_message_node_bindings(node_id);
 ```
 
-> 表名定稿为 `agent_message_node_bindings`（草案内曾写 `agent_message_bindings`，此处以本文件为准）。
+> 表名定稿为 `agent_message_node_bindings`（草案内曾写 `agent_message_bindings`，此处以本文件为准；
+> 迁移 `0015_agent` 已按本文件的名字落地，未沿用草案简写）。
 > 不建 `agent_tasks` / `canvas_node_tasks`：任务一律 `tasks`，节点与任务为 1:1（`canvas_nodes.task_id`）。
 
 ### 12.3 `cam` 团队域（4 张新表 + 3 张既有表 ALTER）
@@ -1223,8 +1240,9 @@ CREATE TABLE film_recent_opens (
 0014_canvas      -- canvases/canvas_nodes/canvas_edges/canvas_snapshots/canvas_groups/canvas_templates/
                  -- canvas_group_templates/canvas_materials/canvas_pin_groups/canvas_comment_nodes/canvas_comments
                  -- （canvases.episode_id 前向外键在本迁移末尾 ALTER 补加）
-0015_agent       -- agent_sessions/agent_messages/agent_message_node_bindings/agent_events
-                 -- （agent_sessions.canvas_id 前向外键在 0014 建表后补加）
+0015_agent       -- ✅ 已落地 2026-10-26：agent_sessions/agent_messages/agent_message_node_bindings/agent_events
+                 --   + tasks ALTER（title/feedback，agent 域 PUT /agent/task/:id 的落点）
+                 --   （agent_sessions.canvas_id 前向外键在 0014 建表后补加）
 0016_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
 ```
 

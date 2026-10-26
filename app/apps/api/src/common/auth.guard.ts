@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { spaceMembers, spaces, users } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { IS_PUBLIC_KEY } from "./public.decorator";
+import { verifyStreamToken } from "./stream-token";
 import type { AuthedRequest } from "./auth.types";
 import { TokenService } from "../modules/auth/token.service";
 import { db } from "../db/database";
@@ -24,16 +25,37 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<AuthedRequest>();
     const header = request.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
-      throw new AppError(ErrorCode.UNAUTHORIZED, "missing bearer token");
+    let userId: string;
+    let tokenSpaceId: string;
+    let jti: string;
+    if (header?.startsWith("Bearer ")) {
+      const payload = this.tokens.verifyAccess(header.slice(7));
+      await this.tokens.assertAccessActive(payload.jti);
+      userId = payload.sub;
+      tokenSpaceId = payload.sid;
+      jti = payload.jti;
+    } else {
+      /**
+       * SSE 通道：浏览器 `EventSource` 不能设置请求头，只能把凭据放查询参数。
+       * 这里接受短时效 `stream_token`（ADR-012），其 audience 与 access token
+       * 不同，两套令牌互不可用（见 common/stream-token.ts）。
+       */
+      const query = request.query as Record<string, unknown> | undefined;
+      const raw = query?.stream_token;
+      const provided = typeof raw === "string" ? raw : Array.isArray(raw) ? String(raw[0]) : undefined;
+      // 两个凭据都没带时保持历史文案：普通请求缺头不该被误报成"SSE 令牌问题"
+      if (!provided) throw new AppError(ErrorCode.UNAUTHORIZED, "missing bearer token");
+      const streamPayload = verifyStreamToken(provided);
+      userId = streamPayload.sub;
+      tokenSpaceId = streamPayload.sid;
+      // stream token 没有 jti（不能用于普通请求），日志侧标记来源即可
+      jti = "stream";
     }
-    const payload = this.tokens.verifyAccess(header.slice(7));
-    await this.tokens.assertAccessActive(payload.jti);
     // 账号已注销/封禁 → token 立即失效
     const [user] = await db
       .select({ status: users.status, deletedAt: users.deletedAt })
       .from(users)
-      .where(eq(users.id, BigInt(payload.sub)));
+      .where(eq(users.id, BigInt(userId)));
     if (!user || user.status !== 1 || user.deletedAt) {
       throw new AppError(ErrorCode.UNAUTHORIZED, "account disabled");
     }
@@ -41,7 +63,7 @@ export class AuthGuard implements CanActivate {
     // ── 空间切换（ADR-010：团队成员的所有请求都带团队 space_id）──
     // token 里的 sid 是登录时的个人空间；团队场景由 `X-Space-Id` 指定目标空间。
     // 安全性：必须校验请求者确实是该空间成员，否则 403——不能只信客户端头。
-    let spaceId = payload.sid;
+    let spaceId = tokenSpaceId;
     const rawSpace = request.headers["x-space-id"];
     const requested = Array.isArray(rawSpace) ? rawSpace[0] : rawSpace;
     if (requested && String(requested).trim() !== "" && String(requested) !== spaceId) {
@@ -55,7 +77,7 @@ export class AuthGuard implements CanActivate {
       const [membership] = await db
         .select({ status: spaceMembers.status })
         .from(spaceMembers)
-        .where(and(eq(spaceMembers.spaceId, targetId), eq(spaceMembers.userId, BigInt(payload.sub))));
+        .where(and(eq(spaceMembers.spaceId, targetId), eq(spaceMembers.userId, BigInt(userId))));
       if (!membership || membership.status !== 1) {
         throw new AppError(ErrorCode.FORBIDDEN, "not a member of requested space", {
           reason: "not_member",
@@ -71,7 +93,7 @@ export class AuthGuard implements CanActivate {
       spaceId = target;
     }
 
-    request.auth = { userId: payload.sub, spaceId, jti: payload.jti };
+    request.auth = { userId, spaceId, jti };
     return true;
   }
 }

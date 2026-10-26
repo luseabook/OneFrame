@@ -90,7 +90,7 @@ export class LlmService {
         })),
       });
     }
-    const result = await this.complete<OutlineResult>(
+    const result = await this.completeJson<OutlineResult>(
       "你是短剧编剧。把用户提供的素材拆成分集大纲。只输出 JSON：{\"episodes\":[{\"ep_no\":1,\"title\":\"\",\"synopsis\":\"\"}]}，3~6 集，每集梗概 50~150 字。",
       sourceText.slice(0, 12_000),
       outlineSchema,
@@ -109,7 +109,7 @@ export class LlmService {
         })),
       });
     }
-    return this.complete<CharactersResult>(
+    return this.completeJson<CharactersResult>(
       `你是短剧角色设计师。从素材中抽取不超过 ${count} 个角色。只输出 JSON：{"characters":[{"name":"","description":"","prompt":"用于文生图的中文提示词"}]}。`,
       sourceText.slice(0, 12_000),
       charactersSchema,
@@ -130,7 +130,7 @@ export class LlmService {
         ].join("\n"),
       });
     }
-    return this.complete<ScriptDraftResult>(
+    return this.completeJson<ScriptDraftResult>(
       "你是短剧编剧。根据大纲写一集可拍摄剧本（场景/动作/对白）。只输出 JSON：{\"script_text\":\"\"}。",
       JSON.stringify(input),
       scriptDraftSchema,
@@ -155,7 +155,7 @@ export class LlmService {
       }));
       return storyboardsSchema.parse({ storyboards: shots });
     }
-    return this.complete<StoryboardsResult>(
+    return this.completeJson<StoryboardsResult>(
       `你是分镜师。把剧本拆成恰好 ${input.shotCount} 个镜头；角色名单：${(input.characterNames ?? []).join("、") || "无"}。只输出 JSON：{"storyboards":[{"shot_no":1,"shot_desc":"","video_prompt":"","duration_s":5,"ratio":"9:16","resolution":"720p","character_names":[]}]}。`,
       JSON.stringify(input).slice(0, 20_000),
       storyboardsSchema,
@@ -207,7 +207,7 @@ export class LlmService {
       maxScenes: input.maxScenes ?? 6,
       maxProps: input.maxProps ?? 6,
     }).slice(0, 20_000);
-    return this.complete<AssetExtractResult>(
+    return this.completeJson<AssetExtractResult>(
       '你是短剧制片与美术指导。从剧本内容中提取可复用的「场景」与「道具」，并可选提取主要「角色」。' +
         '只输出 JSON：{"scenes":[{"name":"","description":"","prompt":""}],"props":[{"name":"","description":"","prompt":""}],"characters":[{"name":"","description":"","prompt":""}]}。' +
         'name 简洁不超过 50 字（如「雨夜街头」「旧怀表」）；description 一句话；prompt 为中文文生图提示词（含构图/光线/质感），不要输出 JSON 之外的任何文字。',
@@ -216,7 +216,7 @@ export class LlmService {
     );
   }
 
-  private async complete<T>(system: string, user: string, schema: z.ZodTypeAny): Promise<T> {
+  async completeJson<T>(system: string, user: string, schema: z.ZodTypeAny): Promise<T> {
     if (!this.deepseek) throw new AppError(ErrorCode.INTERNAL, "LLM not configured");
     const { text } = await this.deepseek.chat(
       [

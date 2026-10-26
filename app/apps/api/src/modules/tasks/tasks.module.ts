@@ -9,5 +9,8 @@ import { TasksService } from "./tasks.service";
   imports: [CreditsModule, ModelsModule],
   controllers: [TasksController, TaskShareController, PublicShareController],
   providers: [TasksService],
+  // agent 域要做"任务标题/反馈"写入与批量下载，统一经 TasksService
+  // （禁止跨模块直查 tasks 表，见 system-design §2）
+  exports: [TasksService],
 })
 export class TasksModule {}

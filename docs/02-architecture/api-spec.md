@@ -8,6 +8,10 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
+> **v2.3 · 2026-10-26 · agent 域落地回写（迁移 0015）**：新增 §14.9 —— `agent` 本体 9 条 + 画布内对话 C7 族 11 条（共 20 条）
+> 与 SSE 实装结论；修正 §14.6 的 stream-token 形态（原设"一次性 60s"，实装为"120s 可复用 + 绑定会话"，理由见该节）；
+> §14.4 里"画布内对话/SSE 归 agent 域、尚未实现"改为已实现并指向 §14.9。
+> 验收：`apps/api/test/agent.spec.ts`（13 例）+ `pwsh _acceptance/canvas-acceptance.ps1`。
 > **v2.2 · 2026-10-26 · canvas 第二批端点**：新增 §14.4.3（节点派生任务 4 / 整画布模板 6 / 素材 5 / 批注 10 / 固定组+组模板 10），画出"画布能出片"的完整链路。验收：`pwsh _acceptance/canvas-acceptance.ps1`（api 46 例 + 浏览器 E2E 56 项）。
 > **v2.1 · 2026-10-26 · canvas 前端落地回写**：§14.4.1 补 `commit` 的 `id_map` 语义（本地临时 id → 雪花 id；修正前非数字 id 直接 500，整图提交不可用）；新增 §14.4.2 记录画布前端已实现能力与"明确不做"清单。
 
@@ -745,7 +749,8 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：表格节点 Excel 导入（`table/import`、`table/confirm-sheet`，依赖 Excel 解析链路）、画布内对话/SSE（归 `agent` 域，11 条）、`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）。
+**尚未实现（不暴露空壳）**：表格节点 Excel 导入（`table/import`、`table/confirm-sheet`，依赖 Excel 解析链路）、`video-parse` 等剩余派生子族（4 条核心已实现，见 §14.4.3）。
+**已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 
 #### 14.4.3 `canvas` 第二批端点（2026-10-26，节点任务/模板/素材/批注/固定组）
 
@@ -937,9 +942,14 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | 退避 | 指数退避 `maxAttempts=5 / base=1s / max=30s` |
 | 与轮询关系 | **SSE 是通知加速器，不是状态存储**；结果以 `tasks.results` 为准；无条件回退 5s 轮询（ADR-012） |
 | 落库 | `agent_events` **必须持久化**（否则续传不可实现），默认保留 7 天 |
+| 首连不重放 | 无 `last_stream_id` 时只推"从现在起"的新事件：消息已由 `GET …/messages` 拉全量，重放会造成重复 |
+| 服务端收尾 | 任务流进终态（3/4/5/7）后服务端 `end()`，避免前端挂一条永不断的连接 |
 
-> **待补端点**：`POST /stream-tokens {scope, session_id?}` → `{token, expires_in≤60s}`，一次性。
-> 理由：EventSource 语义下无法自定义请求头；用短时效 token 避免 access token 进 URL 日志。**本端点为契约新增，F2 实现时需同步补测试**。
+> **`POST /agent/stream-token` 实装形态（2026-10-26）**：`{token, expires_at, ttl_s}`，TTL **120s**，
+> 只用查询参数 `?stream_token=` 或普通 Bearer 二选一（`AuthGuard` 统一校验，audience=`agent-stream`）。
+> **偏离原设计的点**：原写"一次性 ≤60s"。一次性会让**每一次断线重连都必然 401**，而 ADR-012 明确要求
+> 断线可回落、可重连；故改为短 TTL 可复用 + 可选绑定 `session_id`（签令牌前校验会话归属，
+> 防止拿 A 会话的令牌去连 B）。令牌与 access token 的 audience 不同，两套互不可用。
 
 ### 14.7 限流（四域新增基线）
 
@@ -975,6 +985,67 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | film | 影视版任务表格**整体形态** | 仍待取证（需影视版内测账号；当前 `/film` 只有空壳） |
 | billing | ~~兑换码位置~~ | ✅ **已取证**：兑换码是 `/pricing` 的一个 tab（`订阅会员/积分加购/兑换码`），**不是独立页面** |
 | 全局 | `/setting` 渲染为资产页、`/creator-center` 加载失败 | 仍待取证（前者需交互探测，后者需创作者资质账号） |
+
+### 14.9 `agent` 端点族（对话式创作，2026-10-26，迁移 0015）
+
+> 归属按裁决 D3：`agent-skills` 8 条属 `ops` 内容运营，**不计入本域**。
+> 本节记录**已实现**的 20 条：`agent` 本体 9 条 + 画布内对话（C7）11 条。
+> 与参照站 `routes.txt:123–134`（12 条）的差值见 §14.9.3「未实现与理由」。
+
+#### 14.9.1 `agent` 本体（`/v1/agent`，9 条已实现）
+
+| 方法 | 路径 | 权限 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|---|
+| POST | `/agent/task/create-check` | U,S | 同 `generations` 请求体 | `{ok, credits_estimate, blockers[], normalized_options}` | 0/400101/745701 |
+| POST | `/agent/task/create` | U,S | 同 `generations` + `session_id?`；需 `Idempotency-Key` | `{task_id, status, credits_estimate, session_id?}` | 0/400100/400101/745701/745702/745703/745801 |
+| GET | `/agent/task/{task_id}` | U,S | — | `{…task, input, options, task_events[]}` | 0/400102 |
+| PUT | `/agent/task/{task_id}` | U,S | `{title?, feedback?{reaction,comment}}` | `{…task, title, feedback}` | 0/400102/400101 |
+| POST | `/agent/task/chat` | U,S | `{session_id?, content, content_type?, wait?}` | `{message_id, stream_id, queued}` | 0/400100/400102/746005 |
+| POST | `/agent/task/chat-end` | U,S | `{session_id}` | `{ok, session{status:2}}` | 0/400102 |
+| GET | `/agent/task/stream` | U,S | `?task_id=` | **`text/event-stream`**（§14.6） | 0/400102/400101 |
+| POST | `/agent/task/batch-download` | U,S | `{task_ids[] ≤50}` | 同 `/tasks/batch-download` | 0/400101 |
+| POST | `/agent/stream-token` | U,S | `{session_id?}` | `{token, expires_at, ttl_s}` | 0/400102 |
+
+#### 14.9.2 画布内对话（C7，11 条已实现）
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/canvas/canvases/{id}/chat/sessions` | `?page&page_size` | `{list[{session_id,title,status,scope,message_count,last_message_preview,…}],total,page,page_size}` |
+| POST | `/canvas/canvases/{id}/chat/sessions` | `{title?}` | `{session}` |
+| PATCH | `/canvas/canvases/{id}/chat/sessions/{sid}` | `{title?, status?}` | `{session}` |
+| DELETE | `/canvas/canvases/{id}/chat/sessions/{sid}` | — | `{ok:true}`（软删） |
+| GET | `/canvas/canvases/{id}/chat/sessions/{sid}/messages` | `?after_event_id&page_size` | `{list[], next_event_id, has_more}` |
+| POST | `/canvas/canvases/{id}/chat/sessions/{sid}/messages` | `{content?, content_type?, reference_node_ids?, decision?, wait?}` | `{message_id, stream_id, queued}` |
+| GET | `/canvas/canvases/{id}/chat/writing-outputs` | `?page&page_size` | 历史产出（助手给过可落地节点的消息） |
+| POST | `/canvas/chat/sessions/{sid}/read` | `{last_read_seq}` | `{unread_count}` |
+| GET | `/canvas/chat/sessions/{sid}/stream` | `?last_stream_id` | **`text/event-stream`** |
+| POST | `/canvas/chat/sessions/{sid}/messages/{mid}/reaction` | `{reaction:like\|dislike\|none}` | `{ok:true}` |
+| POST | `/canvas/chat/sessions/{sid}/messages/{mid}/node-binding` | `{node_ids[], binding_kind?}` | `{bound}` |
+
+**四条实现约定（写清以免被"优化"掉）**：
+
+1. **`after_event_id` 是不透明游标**：值就是"上一批最后一条消息的 `seq`"。
+   参照站的参数名指向事件 id，但消息与事件并非 1:1；把游标定义成消息 seq 既保持了参数名对齐，
+   又不必为分页引入映射表。SSE 续传走的是真实的 `last_stream_id`，两者互不干扰。
+2. **消息与事件是两次写入**（非同一事务）：ADR-012 规定 REST 是权威、SSE 只是加速器，
+   漏一帧可由 `GET …/messages` 补齐；把两张表塞进一个事务会让事件表承担消息表的锁竞争。
+3. **seq 用 `pg_advisory_xact_lock` 串行分配**：`MAX(seq)+1` 并发下会撞唯一键并抛 500——
+   那是把并发问题丢给用户。消息序与事件序是两条独立的单调轴。
+4. **决策（HITL）允许空正文**：`{content:"", decision:{…}}` 合法。点"同意"不该凭空造一句
+   用户台词写进会话记录；落库时记为 `[approve]`/`[reject]` 前缀 + 可选补充说明。
+
+#### 14.9.3 未实现与理由（**不暴露空壳**）
+
+| 端点 | 处置 | 理由 |
+|---|---|---|
+| `GET /agent/home/resource/{info,recommend,sse}`（3） | **不实现** | 属首页内容流（假设项 A-05），依赖内容运营表，RE 只有端点名无响应体；为"可能不存在的内容模型"设计表 = 凭空造数据 |
+| `GET /agent/stt-token`（1） | **不实现** | 需要 STT 供应商凭据与适配器；当前无 STT 能力，返回假 token 会让前端"看起来能用" |
+| `GET /agent/task/share/{share_id}/sse`（1） | **待接** | 公开分享流可复用 `tasks.publicShare` + 同一 SSE 通道，但需先定"分享者订阅他人任务进度"的权限语义（当前无证据），故未仓促放开 |
+| `GET /agent/task/stream` 的 POST+raw 形态 | **改为 GET `?task_id=`** | 参照站 bundle 声明为 POST+raw，但 body 内容未取证（A-05/G-12）；SSE 用 GET 才有原生 `Last-Event-ID` 语义。差异已登记，若后续取证到必要的 body 再改 |
+
+**实现落点**：`apps/api/src/modules/agent/`（7 service + 2 controller，模块依赖方向见该目录 `agent.module.ts` 头注释）；
+LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mock 为**规则式路由**而非假 AI）；
+任务一律经 `generations`/`tasks` 服务，**不碰 billing、不另造任务表**。
 
 
 

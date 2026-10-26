@@ -41,6 +41,10 @@ export interface TaskDto {
   credits_settled: number;
   created_at: string;
   finished_at: string | null;
+  /** 用户可改的任务名（agent 域 PUT /agent/task/:id） */
+  title?: string | null;
+  /** 用户反馈 {reaction, comment?} */
+  feedback?: unknown;
 }
 
 @Injectable()
@@ -67,7 +71,30 @@ export class TasksService {
       credits_settled: row.creditsSettled,
       created_at: row.createdAt.toISOString(),
       finished_at: row.finishedAt ? row.finishedAt.toISOString() : null,
+      title: row.title ?? null,
+      feedback: row.feedback ?? null,
     };
+  }
+
+  /**
+   * 用户可改的任务元信息（标题 / 反馈）。
+   *
+   * 为什么必须落在 tasks 服务里而不是让 agent 直接 UPDATE：
+   * `tasks` 承载冻结/结算与幂等（ADR-003、system-design §2「禁止跨模块直查表」），
+   * 跨模块直写会绕过归属校验；这里统一做 space 归属校验后再写。
+   */
+  async updateMeta(
+    spaceId: string,
+    id: string,
+    input: { title?: string | null; feedback?: unknown },
+  ): Promise<TaskDto> {
+    const row = await this.findTask(spaceId, id);
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.title !== undefined) patch.title = input.title === null ? null : String(input.title).slice(0, 120);
+    if (input.feedback !== undefined) patch.feedback = input.feedback;
+    const [updated] = await db.update(tasks).set(patch).where(eq(tasks.id, row.id)).returning();
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
+    return this.toDto(updated);
   }
 
   async getMany(spaceId: string, ids: string[]): Promise<TaskDto[]> {
