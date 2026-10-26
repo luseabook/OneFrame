@@ -73,5 +73,127 @@ export const useCanvasApi = () => {
     /** 钉住节点（单选；node_id=null 取消） */
     pinNode: (canvasId: string, nodeId: string | null) =>
       api.put<{ ok: boolean }>(`${base(canvasId)}/pinned-node`, { node_id: nodeId }),
+
+    // ── 节点派生任务（C6，复用 tasks 体系）──────────────────
+    /** 单节点投递：建任务 + 回写 node.task_id/status */
+    generateNode: (canvasId: string, nodeId: string, payload: NodeGeneratePayload) =>
+      api.post<NodeGenerateResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/generate`,
+        payload,
+      ),
+
+    /** 批量投递（≤50，逐条独立） */
+    batchNodeTasks: (canvasId: string, items: Array<{ node_id: string } & NodeGeneratePayload>) =>
+      api.post<{
+        submitted: number;
+        results: Array<{ node_id: string; task_id?: string; submitted: boolean; code?: number; msg?: string; credits_estimate?: number }>;
+        total_credits: number;
+      }>(`${base(canvasId)}/batch-node-tasks`, { items }),
+
+    /** 节点任务状态（含结果） */
+    nodeTaskStatus: (canvasId: string, nodeId: string, taskId: string) =>
+      api.get<NodeTaskStatusResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/task/${encodeURIComponent(taskId)}`,
+      ),
+
+    /** 校正一批节点的任务状态（打开画布时调一次，避免永远停在"生成中"） */
+    syncNodeTasks: (canvasId: string, nodeIds: string[]) =>
+      api.post<{ nodes: Array<{ id: string; status: number; task_id: string | null; task_status: number | null }> }>(
+        `${base(canvasId)}/nodes/sync-tasks`,
+        { node_ids: nodeIds },
+      ),
+
+    // ── 整画布模板（C2）────────────────────────────────────
+    listTemplates: (opts: { tpl_type?: number; page?: number; page_size?: number; mine?: boolean } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.tpl_type !== undefined) q.set("tpl_type", String(opts.tpl_type));
+      q.set("page", String(opts.page ?? 1));
+      q.set("page_size", String(opts.page_size ?? 20));
+      if (opts.mine) q.set("mine", "1");
+      return api.get<{ list: CanvasTemplateDto[]; total: number; page: number; page_size: number }>(
+        `/canvas/templates?${q.toString()}`,
+      );
+    },
+
+    searchPersonalTemplates: (query: string, page = 1, pageSize = 20) =>
+      api.get<{ list: CanvasTemplateDto[]; total: number; page: number; page_size: number }>(
+        `/canvas/templates/personal?query=${encodeURIComponent(query)}&page=${page}&page_size=${pageSize}`,
+      ),
+
+    getTemplate: (templateId: string) =>
+      api.get<{ template: CanvasTemplateDto }>(`/canvas/templates/${encodeURIComponent(templateId)}`),
+
+    /** 套用模板：返回待插入的节点描述（前端合并进本地画布后走正常 commit） */
+    instantiateTemplate: (templateId: string, offset?: { dx?: number; dy?: number }) =>
+      api.get<{ nodes: TemplateNodeDraft[]; total: number; template: CanvasTemplateDto }>(
+        `/canvas/templates/${encodeURIComponent(templateId)}/instantiate?dx=${offset?.dx ?? 0}&dy=${offset?.dy ?? 0}`,
+      ),
+
+    /** 把当前画布存成模板 */
+    saveAsTemplate: (canvasId: string, input: { name: string; tpl_scope?: number; description?: string }) =>
+      api.post<{ template_id: string }>(`${base(canvasId)}/tpls`, input),
+
+    deleteTemplate: (templateId: string) =>
+      api.delete<{ ok: boolean }>(`/canvas/templates/personal/${encodeURIComponent(templateId)}`),
+
+    syncTemplateToTeam: (templateId: string, teamSpaceId: string) =>
+      api.post<{ template_id: string }>(`/canvas/templates/${encodeURIComponent(templateId)}/sync-team`, {
+        team_space_id: teamSpaceId,
+      }),
   };
 };
+
+export interface NodeGeneratePayload {
+  mode: string;
+  model: string;
+  input?: { prompt?: string; reference_uris?: string[]; first_frame_uri?: string | null; last_frame_uri?: string | null };
+  options?: Record<string, unknown>;
+  quote_id?: string;
+}
+
+export interface NodeGenerateResult {
+  task_id: string;
+  status: number;
+  credits_estimate: number;
+  node: { id: string; status: number; task_id: string | null };
+}
+
+export interface NodeTaskStatusResult {
+  task: {
+    task_id: string;
+    status: number;
+    progress: number;
+    results: Array<{ uri?: string; preview_uri?: string; [k: string]: unknown }>;
+    error: { code?: number; kind?: string; message?: string } | null;
+  };
+  node: { id: string; status: number; task_id: string | null };
+}
+
+export interface CanvasTemplateDto {
+  id: string;
+  /** 1 官方 2 团队 3 个人 */
+  tpl_scope: number;
+  tpl_type: number;
+  name: string;
+  description: string;
+  cover_uri: string | null;
+  payload: { nodes?: unknown[]; edges?: unknown[]; groups?: unknown[] } | null;
+  status: number;
+  sort: number;
+  space_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 模板套用返回的"待插入节点描述"（无 id，前端自己生成本地 id） */
+export interface TemplateNodeDraft {
+  node_type: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  z_index: number;
+  params: Record<string, unknown>;
+}

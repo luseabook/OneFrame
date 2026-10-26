@@ -29,6 +29,8 @@ const emit = defineEmits<{
   add: [type: CanvasNodeType];
   /** 图层树（本迭代未实现，页面会弹 toast 说明） */
   layers: [];
+  /** 打开模板库 */
+  templates: [];
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
@@ -121,6 +123,17 @@ function iconOf(t: CanvasNodeType): string {
     >
       <CanvasIcon name="node-group" :size="20" />
       <span v-if="activeCount > 0" class="tool-layers__badge">{{ activeCount }}</span>
+    </button>
+
+    <!-- 模板库：存为模板 / 套用模板 -->
+    <button
+      type="button"
+      class="tool-templates cv-glass-btn cv-tip"
+      data-tip="模板库"
+      aria-label="模板库"
+      @click="emit('templates')"
+    >
+      <CanvasIcon name="copy" :size="20" />
     </button>
 
     <!-- 类型选择浮层：8 个类型（TOOLBAR_NODE_TYPES）。

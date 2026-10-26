@@ -111,8 +111,17 @@ const statusTag = computed(() => {
 const thumbUrl = computed(() => {
   const t = props.node.node_type;
   if (t !== "image" && t !== "video" && t !== "threeDWorld") return "";
-  const u = p("result_url") ?? p("cover_url");
+  // worker 成功后回写 result_uri / result_preview_uri（见 executor.ts）
+  const u = p("result_preview_uri") ?? p("result_uri") ?? p("result_url") ?? p("cover_url");
   return typeof u === "string" ? u : "";
+});
+
+/** 最近一次失败的错误（worker 失败时写 params.last_error，含错误码） */
+const lastErrorText = computed(() => {
+  const e = p("last_error");
+  if (!e || typeof e !== "object") return "";
+  const obj = e as Record<string, unknown>;
+  return obj.code ? `[${String(obj.code)}] ${String(obj.message ?? obj.kind ?? "")}` : String(obj.message ?? "");
 });
 </script>
 
@@ -149,11 +158,17 @@ const thumbUrl = computed(() => {
     </header>
 
     <!-- 缩略图（有生成结果时） -->
-    <div v-if="thumbUrl" class="canvas-node__thumb">
+    <div v-if="thumbUrl" class="canvas-node__thumb" :class="{ 'is-running': node.status === NODE_STATUS.RUNNING }">
       <img :src="thumbUrl" :alt="node.name" loading="lazy" />
       <span v-if="node.node_type === 'video'" class="canvas-node__play">
         <CanvasIcon name="play" :size="16" />
       </span>
+    </div>
+
+    <!-- 生成中占位：没有结果时也要让"正在生成"可见，否则用户以为没反应 -->
+    <div v-else-if="node.status === NODE_STATUS.RUNNING" class="canvas-node__thumb is-placeholder">
+      <span class="canvas-node__spinner" aria-hidden="true" />
+      <span class="canvas-node__thumb-label">生成中…</span>
     </div>
 
     <!-- 标题 -->
@@ -162,6 +177,9 @@ const thumbUrl = computed(() => {
     <!-- 摘要：空参数时给一句"该填什么"的提示，而不是留白 -->
     <p v-if="summary" class="canvas-node__summary">{{ summary }}</p>
     <p v-else class="canvas-node__summary is-empty">{{ meta.hint }}</p>
+
+    <!-- 失败原因：带错误码，用户能自己对照文档排查，也方便他判断要不要重投 -->
+    <p v-if="lastErrorText" class="canvas-node__error" :title="lastErrorText">{{ lastErrorText }}</p>
 
     <!-- 尾部：任务/分组标记 -->
     <footer v-if="node.task_id || node.group_ids.length" class="canvas-node__foot">
@@ -277,6 +295,57 @@ const thumbUrl = computed(() => {
   place-items: center;
   color: #fff;
   background: #0000004d;
+}
+
+/* 生成中占位：脉冲底 + 旋转圈，让"在跑"这件事一眼可见 */
+.canvas-node__thumb.is-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(100deg, #1b1c24 30%, #24263a 50%, #1b1c24 70%);
+  background-size: 240% 100%;
+  animation: cv-node-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes cv-node-shimmer {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -40% 0;
+  }
+}
+.canvas-node__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ffffff2e;
+  border-top-color: var(--node-accent);
+  border-radius: var(--radius-full);
+  animation: cv-node-spin 0.8s linear infinite;
+}
+@keyframes cv-node-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.canvas-node__thumb-label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+/* 缩略图生成中也保持半透明叠加，指示"这还不是最终结果" */
+.canvas-node__thumb.is-running img {
+  opacity: 0.55;
+}
+
+.canvas-node__error {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-node__name {

@@ -380,6 +380,151 @@ async function prepareUser() {
     }
     await page.screenshot({ path: path.join(SHOT_DIR, "07-params.png") });
 
+    // ══ S10 节点投递生成（C6）：画布真正连到生成链路 ══════
+    console.log("\n[S10] 节点投递生成");
+    // 新建一个图像节点，配好 mode+model，点「生成」
+    await page.locator(".tool-add, .canvas-toolbar button[aria-label='添加节点']").first().click();
+    await sleep(500);
+    await page.locator(".canvas-toolbar button:has-text('图像'), .tool-menu button:has-text('图像')").first().click();
+    await page.waitForFunction(() => document.querySelectorAll('.canvas-node[data-node-type="image"]').length >= 1, null, {
+      timeout: 20_000,
+    });
+    await sleep(900);
+    // 选中新图像节点
+    await page.locator('.canvas-node[data-node-type="image"]').first().locator(".canvas-node__head").click();
+    await sleep(1000);
+
+    // 投递区应出现（image 是可生成类型）
+    const genBtn = page.locator(".insp-generate").first();
+    record("S10.1 图像节点显示投递区", (await genBtn.count()) > 0);
+
+    // 未填 model 时按钮禁用 + 给出指引（不能"点了没反应"）
+    const needModel = await page.locator(".insp-gen-need-model, .insp-gen-need-mode").count();
+    record("S10.2 缺 mode/model 时有明确指引", needModel > 0);
+
+    // 填 model（tgi-2 支持 text2image）
+    const modelInput = page.locator(".insp-field-model input, .canvas-inspector input[placeholder*='模型']").first();
+    if (await modelInput.count()) {
+      await modelInput.fill("tgi-2");
+      await modelInput.blur();
+      await sleep(500);
+    }
+    const promptBox2 = page.locator(".insp-prompt textarea").first();
+    if (await promptBox2.count()) {
+      await promptBox2.fill("E2E 投递测试：海边日出");
+      await promptBox2.blur();
+      await sleep(400);
+    }
+    // 保存（后端 generate 读库里的节点，未保存会被拒）
+    await saveBtn.click();
+    await sleep(3000);
+
+    // 现在按钮应可用
+    const disabledNow = await genBtn.isDisabled();
+    record("S10.3 填好 mode/model 后投递按钮可用", !disabledNow, `disabled=${disabledNow}`);
+
+    if (!disabledNow) {
+      await genBtn.click();
+      // 等"已投递"提示或节点转"生成中"
+      await page.waitForFunction(
+        () => {
+          const t = document.body.innerText;
+          return t.includes("已投递") || t.includes("生成中") || !!document.querySelector(".insp-gen-running");
+        },
+        null,
+        { timeout: 30_000 },
+      ).catch(() => {});
+      await sleep(1500);
+
+      // API 交叉核对：节点上应该挂上了 task_id
+      const detail3 = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+      const imgNode = detail3.data?.nodes?.find((n) => n.node_type === "image");
+      record(
+        "S10.4 投递后节点挂上 task_id",
+        !!imgNode?.task_id,
+        `task_id=${imgNode?.task_id ?? "null"} status=${imgNode?.status}`,
+      );
+      record("S10.5 节点进入生成中（status=2）", imgNode?.status === 2, `status=${imgNode?.status}`);
+
+      // 节点卡片应有"生成中"可见状态（不能只靠后端字段）
+      const runningVisible = await page.locator(".canvas-node__thumb.is-placeholder, .canvas-node__spinner").count();
+      record("S10.6 节点卡片可见生成中状态", runningVisible > 0, `found=${runningVisible}`);
+      await page.screenshot({ path: path.join(SHOT_DIR, "08-generating.png") });
+    } else {
+      record("S10.4 投递后节点挂上 task_id", false, "按钮不可用，跳过");
+      record("S10.5 节点进入生成中（status=2）", false, "跳过");
+      record("S10.6 节点卡片可见生成中状态", false, "跳过");
+    }
+
+    // ══ S11 批量投递：逐条独立 ═══════════════════════════
+    console.log("\n[S11] 批量投递");
+    await page.keyboard.press("Escape");
+    await page.locator(".canvas-stage").click({ position: { x: 200, y: 200 } }).catch(() => {});
+    await page.keyboard.press("Control+a");
+    await sleep(700);
+    const batchBtn = page.locator(".insp-batch-generate").first();
+    const hasBatch = (await batchBtn.count()) > 0;
+    record("S11.1 多选时出现批量投递入口", hasBatch);
+    if (hasBatch) {
+      const batchDisabled = await batchBtn.isDisabled();
+      // 选中里含不可生成的（text）+ 可生成的（image）→ 按钮应可用且只投可投的
+      record("S11.2 批量投递按钮可用（只投可生成节点）", !batchDisabled, `disabled=${batchDisabled}`);
+    } else {
+      record("S11.2 批量投递按钮可用（只投可生成节点）", false, "未找到批量按钮");
+    }
+    await page.screenshot({ path: path.join(SHOT_DIR, "09-batch.png") });
+
+    // ══ S12 模板库：存为模板 → 套用 ══════════════════════
+    console.log("\n[S12] 模板库");
+    // 打开模板库（工具栏模板按钮）
+    const tplBtn = page.locator(".tool-templates").first();
+    record("S12.1 工具栏有模板库入口", (await tplBtn.count()) > 0);
+    if (await tplBtn.count()) {
+      await tplBtn.click();
+      await page.waitForSelector(".canvas-templates", { timeout: 15_000 });
+      await sleep(1200);
+      record("S12.2 模板库打开", (await page.locator(".canvas-templates").count()) > 0);
+
+      // 存为模板：先保存画布 → 命名 → 存
+      const tplName = `E2E模板${Date.now()}`;
+      await page.locator(".tpl-save-name").fill(tplName);
+      await page.locator(".tpl-save-btn").click();
+      await sleep(3500);
+      const bodyAfterSave = await page.locator("body").innerText();
+      record(
+        "S12.3 存为模板成功",
+        bodyAfterSave.includes("已存为模板") || bodyAfterSave.includes(tplName),
+        bodyAfterSave.includes("已存为模板") ? "已提示" : "未见提示",
+      );
+
+      // API 交叉核对：模板列表里应有这个模板，且 payload 自包含（无 id）
+      const tplList = await api("GET", "/canvas/templates?page=1&page_size=50", undefined, token);
+      const created = (tplList.data?.list ?? []).find((t) => t.name === tplName);
+      record("S12.4 模板已落库", !!created, created ? `id=${created.id}` : "未找到");
+      if (created) {
+        const payloadNodes = created.payload?.nodes ?? [];
+        const noId = payloadNodes.every((n) => n.id === undefined);
+        record("S12.5 模板 payload 自包含（不含雪花 id）", noId && payloadNodes.length > 0, `nodes=${payloadNodes.length} noId=${noId}`);
+
+        // 套用：把当前画布节点数记下来，套用后应增加
+        const before = await page.locator(".canvas-node").count();
+        await page.locator(".tpl-apply").first().click();
+        await sleep(3500);
+        const after = await page.locator(".canvas-node").count();
+        record("S12.6 套用模板新增节点", after > before, `${before} → ${after}`);
+      } else {
+        record("S12.5 模板 payload 自包含（不含雪花 id）", false, "跳过");
+        record("S12.6 套用模板新增节点", false, "跳过");
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "10-templates.png") });
+    } else {
+      record("S12.2 模板库打开", false, "无入口");
+      record("S12.3 存为模板成功", false, "跳过");
+      record("S12.4 模板已落库", false, "跳过");
+      record("S12.5 模板 payload 自包含（不含雪花 id）", false, "跳过");
+      record("S12.6 套用模板新增节点", false, "跳过");
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(

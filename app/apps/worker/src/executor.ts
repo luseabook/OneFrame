@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { assets, models, projectAssets, settleCredits, storyboards, taskEvents, tasks, unfreezeCredits } from "@app/db";
+import { assets, canvasNodes, models, projectAssets, settleCredits, storyboards, taskEvents, tasks, unfreezeCredits } from "@app/db";
 import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
@@ -166,6 +166,44 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
       .set({ status: 4, updatedAt: new Date() })
       .where(eq(storyboards.imageTaskId, fresh.id));
 
+    /**
+     * 画布节点回写：任务成功 → 节点 status=3（就绪/完成），并把结果第一个 URI
+     * 写进 params.result_uri，让画布节点能直接渲染缩略图/播放。
+     *
+     * 为什么必须在这里做：画布节点的 task_id 是"派生任务"的引用，
+     * 任务终态如果不回写节点，画布上会永远显示"生成中"——
+     * 用户只能刷新页面才看到结果，且刷新也还是生成中（因为没人写这个字段）。
+     * 失败路径同理（见 fail()）。
+     */
+    const canvasNodeRows = await tx
+      .select()
+      .from(canvasNodes)
+      .where(eq(canvasNodes.taskId, fresh.id));
+    for (const cn of canvasNodeRows) {
+      const first = labeled[0];
+      const nextParams = {
+        ...(cn.params as Record<string, unknown>),
+        ...(first?.uri
+          ? {
+              result_uri: first.uri,
+              result_preview_uri: first.preview_uri ?? first.uri,
+              // 保留整批结果，便于画布节点做多候选切换
+              result_uris: labeled.map((l) => l.uri).filter(Boolean),
+            }
+          : {}),
+      };
+      await tx
+        .update(canvasNodes)
+        .set({ status: 3, params: nextParams, updatedAt: new Date() })
+        .where(eq(canvasNodes.id, cn.id));
+      await tx.insert(taskEvents).values({
+        id: newId(),
+        taskId: fresh.id,
+        type: "canvas.node.completed",
+        payload: { node_id: String(cn.id), results: labeled.length },
+      });
+    }
+
     await tx.insert(taskEvents).values({
       id: newId(),
       taskId: fresh.id,
@@ -205,6 +243,27 @@ async function fail(
       .update(storyboards)
       .set({ status: 2, updatedAt: new Date() })
       .where(eq(storyboards.videoTaskId, task.id));
+
+    // 画布节点回写：失败 → 节点回到 status=1（就绪），并把错误码写进 params.last_error，
+    // 让画布上能显示失败原因并允许重投。积分已在上方 unfreeze 退回，用户不会白付。
+    const canvasNodeRows = await tx.select().from(canvasNodes).where(eq(canvasNodes.taskId, task.id));
+    for (const cn of canvasNodeRows) {
+      await tx
+        .update(canvasNodes)
+        .set({
+          status: 1,
+          params: { ...(cn.params as Record<string, unknown>), last_error: { code: errorCode, ...error } },
+          updatedAt: new Date(),
+        })
+        .where(eq(canvasNodes.id, cn.id));
+      await tx.insert(taskEvents).values({
+        id: newId(),
+        taskId: fresh.id,
+        type: "canvas.node.failed",
+        payload: { node_id: String(cn.id), code: errorCode },
+      });
+    }
+
     await tx.insert(taskEvents).values({
       id: newId(),
       taskId: fresh.id,

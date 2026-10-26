@@ -468,6 +468,270 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     }
   }
 
+  // ── 节点派生任务（C6）────────────────────────────────────
+  const taskSubmitting = ref<string[]>([]);
+
+  function isSubmitting(nodeId: string): boolean {
+    return taskSubmitting.value.includes(nodeId);
+  }
+
+  /**
+   * 投递单个节点的生成任务。
+   *
+   * 为什么必须先保存再投递：后端 `generate` 读的是**库里的节点**（params/task_id），
+   * 如果本地刚改完参数没保存就投递，投出去的是旧参数——
+   * 用户会觉得"我明明改了提示词，生成的还是老图"。
+   * 所以这里强制先 commit（有脏改动时），再投递。
+   */
+  async function generateNode(nodeId: string, override?: { mode?: string; model?: string }): Promise<boolean> {
+    const node = nodes.value.find((n) => n.id === nodeId);
+    if (!node) return false;
+    if (nodeId.startsWith("local_")) {
+      toast.error("请先保存画布，再投递生成（新节点还没有服务端 id）");
+      return false;
+    }
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+
+    const params = node.params ?? {};
+    const mode = override?.mode ?? String(params.mode ?? "");
+    const model = override?.model ?? String(params.model ?? "");
+    if (!mode) {
+      toast.error("这个节点还没选生成模式（mode）");
+      return false;
+    }
+    if (!model) {
+      toast.error("请先在右侧选择模型（model）");
+      return false;
+    }
+
+    taskSubmitting.value = [...taskSubmitting.value, nodeId];
+    try {
+      const res = await api.generateNode(canvasId.value, nodeId, {
+        mode,
+        model,
+        input: {
+          prompt: typeof params.prompt === "string" ? params.prompt : "",
+        },
+      });
+      // 回写本地状态：让节点立刻显示"生成中"，并记下 task_id（轮询用）
+      node.status = res.node.status;
+      node.task_id = res.node.task_id;
+      toast.success(`已投递，冻结 ${res.credits_estimate} 积分`);
+      startTaskPolling(nodeId, res.task_id);
+      return true;
+    } catch (e) {
+      const err = e as { code?: number; message: string };
+      // 余额不足/预算触顶给出可操作提示，而不是只显示错误码
+      if (err.code === 745701) toast.error("积分不足，请先充值或调整参数");
+      else if (err.code === 745703) toast.error("超出预算上限，请调整批量或预算");
+      else if (err.code === 745801) toast.error("提示词未通过内容审核");
+      else toast.error(err.message || "投递失败");
+      return false;
+    } finally {
+      taskSubmitting.value = taskSubmitting.value.filter((x) => x !== nodeId);
+    }
+  }
+
+  /** 批量投递当前选中的、可生成的节点 */
+  async function generateSelected(): Promise<void> {
+    const targets = selectedNodes.value.filter(
+      (n) => !n.id.startsWith("local_") && n.params?.mode && n.params?.model,
+    );
+    if (targets.length === 0) {
+      toast.error("选中的节点里没有可投递的（需要 mode + model）");
+      return;
+    }
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return;
+    }
+    try {
+      const res = await api.batchNodeTasks(
+        canvasId.value,
+        targets.map((n) => ({
+          node_id: n.id,
+          mode: String(n.params.mode),
+          model: String(n.params.model),
+          input: { prompt: typeof n.params.prompt === "string" ? n.params.prompt : "" },
+        })),
+      );
+      // 逐项回写：成功的置"生成中"，失败的带出错误码（不吞掉，否则用户不知道哪条没投出去）
+      for (const r of res.results) {
+        const n = nodes.value.find((x) => x.id === r.node_id);
+        if (!n) continue;
+        if (r.submitted && r.task_id) {
+          n.status = 2;
+          n.task_id = r.task_id;
+          startTaskPolling(n.id, r.task_id);
+        } else if (r.code) {
+          n.params = { ...n.params, last_error: { code: r.code, message: r.msg ?? "" } };
+        }
+      }
+      const failed = res.results.filter((r) => !r.submitted).length;
+      if (failed === 0) toast.success(`已投递 ${res.submitted} 个节点，共冻结 ${res.total_credits} 积分`);
+      else toast.info(`成功 ${res.submitted} 个 / 失败 ${failed} 个，共冻结 ${res.total_credits} 积分`);
+    } catch (e) {
+      toast.error((e as Error).message || "批量投递失败");
+    }
+  }
+
+  // ── 任务轮询（节点状态 → 结果回填）──────────────────────
+  const pollTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+  /**
+   * 轮询节点任务状态。
+   *
+   * 为什么画布必须自己轮询：worker 在任务终态会回写 canvas_nodes（见 executor.ts），
+   * 但浏览器不知道什么时候回写完；不轮询就只能靠用户手动刷新。
+   * 5s 一次、最多 10 分钟（对齐 useTaskPolling 的节奏），到点自动停，避免泄漏定时器。
+   */
+  function startTaskPolling(nodeId: string, taskId: string): void {
+    if (pollTimers.has(nodeId)) return;
+    let ticks = 0;
+    const timer = setInterval(async () => {
+      ticks++;
+      if (ticks > 120) {
+        stopTaskPolling(nodeId);
+        return;
+      }
+      try {
+        const res = await api.nodeTaskStatus(canvasId.value, nodeId, taskId);
+        const node = nodes.value.find((n) => n.id === nodeId);
+        if (!node) {
+          stopTaskPolling(nodeId);
+          return;
+        }
+        node.status = res.node.status;
+        const st = res.task.status;
+        // 3=成功 → 回填结果 URI；4/7=失败/审核拒绝 → 记错误（积分已由后端退回）
+        if (st === 3) {
+          const first = res.task.results?.[0];
+          const uris = (res.task.results ?? []).map((r) => r.uri).filter((u): u is string => !!u);
+          node.params = {
+            ...node.params,
+            ...(first?.uri ? { result_uri: first.uri, result_preview_uri: first.preview_uri ?? first.uri } : {}),
+            ...(uris.length ? { result_uris: uris } : {}),
+          };
+          delete (node.params as Record<string, unknown>).last_error;
+          stopTaskPolling(nodeId);
+          toast.success("生成完成");
+        } else if (st === 4 || st === 7) {
+          node.params = {
+            ...node.params,
+            last_error: res.task.error ?? { message: st === 7 ? "内容审核未通过" : "生成失败" },
+          };
+          stopTaskPolling(nodeId);
+          toast.error(st === 7 ? "输出未通过内容审核（积分已退回）" : "生成失败（积分已退回）");
+        }
+      } catch {
+        // 单次失败不打断轮询（网络抖动很常见），到上限自然停
+      }
+    }, 5000);
+    pollTimers.set(nodeId, timer);
+  }
+
+  function stopTaskPolling(nodeId: string): void {
+    const t = pollTimers.get(nodeId);
+    if (t) {
+      clearInterval(t);
+      pollTimers.delete(nodeId);
+    }
+  }
+
+  function stopAllPolling(): void {
+    for (const t of pollTimers.values()) clearInterval(t);
+    pollTimers.clear();
+  }
+
+  /**
+   * 打开画布时校正一次节点任务状态。
+   * 存在的意义：用户可能关掉页面错过了任务完成，重新打开时画布不该永远显示"生成中"。
+   */
+  async function syncNodeTasks(): Promise<void> {
+    const inFlight = nodes.value.filter((n) => n.task_id && (n.status === 2 || n.status === 1));
+    if (inFlight.length === 0) return;
+    try {
+      const res = await api.syncNodeTasks(canvasId.value, inFlight.map((n) => n.id));
+      for (const row of res.nodes) {
+        const n = nodes.value.find((x) => x.id === row.id);
+        if (n) n.status = row.status;
+      }
+    } catch {
+      /* 校正失败不影响编辑 */
+    }
+  }
+
+  // ── 模板（C2）────────────────────────────────────────────
+  /**
+   * 把当前画布存成模板。
+   *
+   * 为什么先强制保存：模板是"从库里的画布快照"，本地未保存的改动不在库里。
+   * 不先保存就存模板，用户会得到"少了刚加的几个节点"的模板，且完全无从理解。
+   */
+  async function saveAsTemplate(name: string, scope: 2 | 3 = 3): Promise<boolean> {
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+    try {
+      await api.saveAsTemplate(canvasId.value, { name, tpl_scope: scope });
+      toast.success(`已存为模板「${name}」`);
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "存模板失败");
+      return false;
+    }
+  }
+
+  /**
+   * 套用模板到当前画布：把模板里的节点描述**追加**到本地画布。
+   *
+   * 只改本地、不直接落库——必须由用户点保存（走 commit 乐观锁）才写库，
+   * 否则会绕开版本校验，出现"别人正在编辑时被模板悄悄覆盖"。
+   */
+  async function applyTemplate(templateId: string, offset?: { dx?: number; dy?: number }): Promise<number> {
+    try {
+      const res = await api.instantiateTemplate(templateId, offset);
+      if (res.total === 0) {
+        toast.info("这个模板里没有节点");
+        return 0;
+      }
+      pushHistory();
+      const created: string[] = [];
+      for (const draft of res.nodes) {
+        const node: CanvasNodeDto = {
+          id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          node_type: draft.node_type,
+          name: draft.name ?? "",
+          x: Math.round(draft.x),
+          y: Math.round(draft.y),
+          width: draft.width,
+          height: draft.height,
+          z_index: nodes.value.length,
+          params: { ...(draft.params ?? {}) },
+          task_id: null,
+          // 套用过来的节点不该继承"生成中"状态，一律重置为就绪
+          status: 1,
+          group_ids: [],
+          version: 1,
+        };
+        nodes.value.push(node);
+        created.push(node.id);
+      }
+      selectedIds.value = created;
+      dirty.value = true;
+      nextTick(() => fitView());
+      toast.success(`已套用模板（新增 ${created.length} 个节点），点保存后生效`);
+      return created.length;
+    } catch (e) {
+      toast.error((e as Error).message || "套用模板失败");
+      return 0;
+    }
+  }
+
   /** 嵌套参数（settings/table/exportSettings 等 JSON 字段） */
   function setNodeParamPath(nodeId: string, path: string[], value: unknown): void {
     const n = nodes.value.find((x) => x.id === nodeId);
@@ -652,6 +916,7 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
   }
 
   async function dispose(): Promise<void> {
+    stopAllPolling();
     stopTimers();
     if (selectedId.value) await releaseLock(selectedId.value);
   }
@@ -720,6 +985,18 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     lockHolder,
     heartbeat,
     setPinned,
+    // 节点派生任务（C6）
+    taskSubmitting,
+    isSubmitting,
+    generateNode,
+    generateSelected,
+    startTaskPolling,
+    stopTaskPolling,
+    stopAllPolling,
+    syncNodeTasks,
+    // 模板（C2）
+    saveAsTemplate,
+    applyTemplate,
     // 生命周期
     startTimers,
     stopTimers,

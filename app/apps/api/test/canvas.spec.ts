@@ -432,4 +432,360 @@ describe("canvas e2e", () => {
     expect(same.name).toBe("图改名"); // 同一个节点被更新而非重建
     expect(same.x).toBe(50);
   });
+
+  // ══ 节点派生任务（C6）：画布真正连到生成链路 ══════════════
+  //
+  // 这一组锁的是"画布能出片"的核心语义：
+  //   1. 节点投递 → 建 tasks 行 + 回写 node.task_id + status=2（不新建任务表）
+  //   2. 默认参数来自**模型目录**而不是硬编码（图像 1K / 视频 720p 不同）
+  //   3. canvas mode → tasks.mode 收敛（后处理子模式落 sub_mode，不新增 mode）
+  //   4. 类型/模式错配拒绝；跨空间拒绝；批量逐条独立（一条失败不连累其它）
+
+  it("节点投递：建任务 + 回写 node.task_id 与 status=2，且默认值取自模型目录", async () => {
+    // 先给这个用户充点积分（新用户默认 80，够用；这里只是确认余额存在）
+    const c = await inject("POST", "/canvas/canvases", { title: "节点任务" });
+    const canvasId = c.data.id as string;
+
+    // tgi-2 的 text2image 分辨率档是 1K/2K/4K（不是 720p）——
+    // 节点 params 里**故意不写 resolution**，看后端能否从目录取默认 1K
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      name: "封面",
+      x: 0,
+      y: 0,
+      params: { mode: "text2image", prompt: "海边日出", model: "tgi-2", settings: { ratio: "16:9" } },
+    });
+    expect(n.code).toBe(0);
+    const nodeId = n.data.id as string;
+
+    const gen = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${nodeId}/generate`, {
+      mode: "text2image",
+      model: "tgi-2",
+      input: { prompt: "海边日出" },
+    });
+    expect(gen.code).toBe(0);
+    expect(gen.data.task_id).toMatch(/^\d+$/);
+    expect(gen.data.credits_estimate).toBeGreaterThan(0);
+    // 回写：节点进入"生成中"
+    expect(gen.data.node.status).toBe(2);
+    expect(gen.data.node.task_id).toBe(gen.data.task_id);
+
+    // 详情里也能看到 task_id 与 status
+    const detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    const node = detail.data.nodes.find((x: { id: string }) => x.id === nodeId);
+    expect(String(node.task_id)).toBe(gen.data.task_id);
+    expect(node.status).toBe(2);
+
+    // 节点任务状态端点：task 必须真的属于这个节点
+    const st = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}/task/${gen.data.task_id}`);
+    expect(st.code).toBe(0);
+    expect(st.data.task.task_id).toBe(gen.data.task_id);
+    expect(st.data.node.status).toBe(2);
+
+    // 换个节点查同一个 task → 必须 400102（防越权看别人的任务状态）
+    const n2 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 300,
+      y: 0,
+      params: {},
+    });
+    const wrong = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${n2.data.id}/task/${gen.data.task_id}`);
+    expect(wrong.code).toBe(400102);
+  });
+
+  it("节点投递：类型与 mode 错配 → 400101（文本节点不能跑 text2video）", async () => {
+    const c = await inject("POST", "/canvas/canvases", {});
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "text",
+      x: 0,
+      y: 0,
+      params: { prompt: "台词" },
+    });
+    const gen = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/generate`, {
+      mode: "text2video",
+      model: "sky-media-2.0",
+      input: { prompt: "台词" },
+    });
+    expect(gen.code).toBe(400101);
+  });
+
+  it("节点投递：模型不支持该 mode → 400101（不静默降级换模型）", async () => {
+    const c = await inject("POST", "/canvas/canvases", {});
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: { mode: "text2image", prompt: "x" },
+    });
+    // sky-media-2.0 是视频模型，没有 text2image
+    const gen = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/generate`, {
+      mode: "text2image",
+      model: "sky-media-2.0",
+      input: { prompt: "x" },
+    });
+    expect(gen.code).toBe(400101);
+  });
+
+  it("节点投递：不存在的 canvas mode → 400101（不猜测）", async () => {
+    const c = await inject("POST", "/canvas/canvases", {});
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+    const gen = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/generate`, {
+      mode: "no_such_mode",
+      model: "tgi-2",
+      input: { prompt: "x" },
+    });
+    expect(gen.code).toBe(400101);
+  });
+
+  it("批量节点投递：逐条独立，一条失败不连累其它（且带逐项错误码）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "批量" });
+    const canvasId = c.data.id as string;
+    const ok1 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: { mode: "text2image", prompt: "a", model: "tgi-2" },
+    });
+    const bad = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "text",
+      x: 200,
+      y: 0,
+      params: { prompt: "b" },
+    });
+    const ok2 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 400,
+      y: 0,
+      params: { mode: "text2image", prompt: "c", model: "tgi-2" },
+    });
+
+    const res = await inject("POST", `/canvas/canvases/${canvasId}/batch-node-tasks`, {
+      items: [
+        { node_id: ok1.data.id, mode: "text2image", model: "tgi-2", input: { prompt: "a" } },
+        // 中间这条故意错配（text 节点跑 text2image）
+        { node_id: bad.data.id, mode: "text2image", model: "tgi-2", input: { prompt: "b" } },
+        { node_id: ok2.data.id, mode: "text2image", model: "tgi-2", input: { prompt: "c" } },
+      ],
+    });
+    expect(res.code).toBe(0);
+    // 关键：接口整体 200，逐项里有成功有失败
+    expect(res.data.submitted).toBe(2);
+    expect(res.data.results).toHaveLength(3);
+    expect(res.data.results[0].submitted).toBe(true);
+    expect(res.data.results[1].submitted).toBe(false);
+    expect(res.data.results[1].code).toBe(400101);
+    expect(res.data.results[2].submitted).toBe(true);
+    expect(res.data.total_credits).toBeGreaterThan(0);
+  });
+
+  it("批量节点投递：超过 50 条 → 400101（不静默截断）", async () => {
+    const c = await inject("POST", "/canvas/canvases", {});
+    const canvasId = c.data.id as string;
+    const items = Array.from({ length: 51 }, () => ({
+      node_id: "1",
+      mode: "text2image",
+      model: "tgi-2",
+      input: {},
+    }));
+    const res = await inject("POST", `/canvas/canvases/${canvasId}/batch-node-tasks`, { items });
+    expect(res.code).toBe(400101);
+  });
+
+  it("跨空间：他人画布的节点不可投递（404 而非 403，不泄漏存在性）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "私有" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+    const gen = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${n.data.id}/generate`,
+      { mode: "text2image", model: "tgi-2", input: {} },
+      otherToken,
+    );
+    expect(gen.code).toBe(400102);
+  });
+
+  it("sync-tasks：任务终态后能把节点状态校正回来（避免永久停在生成中）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "同步" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      x: 0,
+      y: 0,
+      params: { mode: "text2image", prompt: "x", model: "tgi-2" },
+    });
+    const gen = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/generate`, {
+      mode: "text2image",
+      model: "tgi-2",
+      input: { prompt: "x" },
+    });
+    expect(gen.code).toBe(0);
+
+    // 刚投递完：节点是 2（生成中）
+    const sync1 = await inject("POST", `/canvas/canvases/${canvasId}/nodes/sync-tasks`, {
+      node_ids: [n.data.id],
+    });
+    expect(sync1.code).toBe(0);
+    expect(sync1.data.nodes[0].status).toBe(2);
+    expect(sync1.data.nodes[0].task_status).toBe(1); // pending
+
+    // 手工把任务置为成功（模拟 worker 完成），sync 应把节点校正为 3
+    const { pool: testPool } = await import("../src/db/database");
+    await testPool.query("update tasks set status = 3 where id = $1", [gen.data.task_id]);
+    const sync2 = await inject("POST", `/canvas/canvases/${canvasId}/nodes/sync-tasks`, {
+      node_ids: [n.data.id],
+    });
+    expect(sync2.code).toBe(0);
+    expect(sync2.data.nodes[0].status).toBe(3);
+    expect(sync2.data.nodes[0].task_status).toBe(3);
+  });
+
+  // ══ 整画布模板（C2）══════════════════════════════════════
+  //
+  // 锁三条语义：
+  //   1. 模板 payload 必须**自包含**（不带雪花 id），否则套用到别的画布必悬挂
+  //   2. 可见性三层：官方(1) 全员 / 团队(2) 同 space / 个人(3) 仅创建者
+  //   3. 套用只返回"待插入描述"，不直接写库（否则绕开乐观锁）
+
+  it("存为模板 → payload 自包含（不含雪花 id）→ 可套用出新节点", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "模板源" });
+    const canvasId = c.data.id as string;
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "text",
+      name: "剧本",
+      x: 0,
+      y: 0,
+      params: { prompt: "开场白" },
+    });
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      name: "封面",
+      x: 300,
+      y: 0,
+      params: { mode: "text2image", prompt: "封面图" },
+    });
+
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "我的两节点模板" });
+    expect(tpl.code).toBe(0);
+    const templateId = tpl.data.template_id as string;
+    expect(templateId).toMatch(/^\d+$/);
+
+    // 详情：payload 里节点描述**不应带 id 字段**（自包含）
+    const detail = await inject("GET", `/canvas/templates/${templateId}`);
+    expect(detail.code).toBe(0);
+    const payloadNodes = detail.data.template.payload.nodes as Array<Record<string, unknown>>;
+    expect(payloadNodes).toHaveLength(2);
+    for (const n of payloadNodes) {
+      expect(n.id).toBeUndefined(); // 关键：模板不能带雪花 id
+      expect(typeof n.node_type).toBe("string");
+      expect(typeof n.x).toBe("number");
+    }
+
+    // 套用：返回待插入描述（带偏移），节点数一致
+    const inst = await inject("GET", `/canvas/templates/${templateId}/instantiate?dx=500&dy=100`);
+    expect(inst.code).toBe(0);
+    expect(inst.data.nodes).toHaveLength(2);
+    expect(inst.data.nodes[0].x).toBe(500); // 0 + 500
+    expect(inst.data.nodes[1].x).toBe(800); // 300 + 500
+    // 套用结果本身也不得带 id（前端合并时自己生成本地 id）
+    expect(inst.data.nodes[0].id).toBeUndefined();
+  });
+
+  it("模板可见性：别人的个人模板看不到（404，不泄漏存在性）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "私有模板源" });
+    const canvasId = c.data.id as string;
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "text",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "私有模板", tpl_scope: 3 });
+    const templateId = tpl.data.template_id as string;
+
+    // 自己能看到
+    const mine = await inject("GET", `/canvas/templates/${templateId}`);
+    expect(mine.code).toBe(0);
+
+    // 别人（另一个 space/user）看不到
+    const other = await inject("GET", `/canvas/templates/${templateId}`, undefined, otherToken);
+    expect(other.code).toBe(400102);
+  });
+
+  it("模板列表：包含官方 + 自己的；没有别人的个人模板", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "列表测试" });
+    const canvasId = c.data.id as string;
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "列表内模板" });
+    const myTemplateId = tpl.data.template_id as string;
+
+    const list = await inject("GET", "/canvas/templates?page=1&page_size=100");
+    expect(list.code).toBe(0);
+    const ids = (list.data.list as Array<{ id: string }>).map((x) => x.id);
+    expect(ids).toContain(myTemplateId);
+
+    // 别人的列表里不含我的个人模板
+    const otherList = await inject("GET", "/canvas/templates?page=1&page_size=100", undefined, otherToken);
+    const otherIds = (otherList.data.list as Array<{ id: string }>).map((x) => x.id);
+    expect(otherIds).not.toContain(myTemplateId);
+  });
+
+  it("个人模板搜索：只搜自己的，且按名称模糊匹配", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "搜索测试" });
+    const canvasId = c.data.id as string;
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+    const marker = `独特标记${Date.now()}`;
+    await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: marker });
+
+    const hit = await inject("GET", `/canvas/templates/personal?query=${encodeURIComponent("独特标记")}`);
+    expect(hit.code).toBe(0);
+    expect((hit.data.list as Array<{ name: string }>).some((t) => t.name === marker)).toBe(true);
+
+    const miss = await inject("GET", "/canvas/templates/personal?query=绝对不存在的名字xyz");
+    expect(miss.code).toBe(0);
+    expect(miss.data.list).toHaveLength(0);
+  });
+
+  it("删除个人模板：只能删自己的；删后不在列表里（软下架）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "删除测试" });
+    const canvasId = c.data.id as string;
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "待删模板" });
+    const templateId = tpl.data.template_id as string;
+
+    // 别人删不了
+    const otherDel = await inject("DELETE", `/canvas/templates/personal/${templateId}`, undefined, otherToken);
+    expect(otherDel.code).toBe(403101);
+
+    // 自己能删
+    const del = await inject("DELETE", `/canvas/templates/personal/${templateId}`);
+    expect(del.code).toBe(0);
+
+    // 删后列表里没有；按 id 取也应 404（status=3 已下架）
+    const list = await inject("GET", "/canvas/templates?page=1&page_size=100");
+    expect((list.data.list as Array<{ id: string }>).map((x) => x.id)).not.toContain(templateId);
+    const after = await inject("GET", `/canvas/templates/${templateId}`);
+    expect(after.code).toBe(400102);
+  });
+
+  it("模板非法 scope → 400101（不允许造官方模板）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "scope 测试" });
+    const canvasId = c.data.id as string;
+    // tpl_scope=1 是官方，普通用户不能创建
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/tpls`, { name: "想造官方", tpl_scope: 1 });
+    expect(tpl.code).toBe(400101);
+  });
 });
+

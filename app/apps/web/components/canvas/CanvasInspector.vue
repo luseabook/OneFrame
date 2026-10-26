@@ -502,6 +502,79 @@ function reload(): void {
   void ed.load();
 }
 
+// ── 生成投递（C6）──────────────────────────────────────────
+/**
+ * 哪些节点类型可以投递生成。
+ * `group`/`director`/`clip` 是"组织/编排"类节点，本身不出图，
+ * 给它们放生成按钮会让用户以为能直接生成——所以不显示。
+ * （clip 的合成走独立链路，不在本期）
+ */
+const GENERATABLE_TYPES = ["image", "video", "audio", "threeDWorld"];
+const canGenerate = computed(() => GENERATABLE_TYPES.includes(nodeType.value));
+
+function genMode(): string {
+  const v = rawAt(["mode"]);
+  return typeof v === "string" ? v : "";
+}
+function genModel(): string {
+  const v = rawAt(["model"]);
+  return typeof v === "string" ? v : "";
+}
+function nodeStatus(): number {
+  return selectedNode.value?.status ?? NODE_STATUS.IDLE;
+}
+/** 本地临时 id 还没落库，后端 generate 会 404 —— 按钮直接禁用并说明原因 */
+function isLocalNode(): boolean {
+  return (selectedNode.value?.id ?? "").startsWith("local_");
+}
+function resultUri(): string | null {
+  const v = rawAt(["result_uri"]) ?? rawAt(["result_preview_uri"]);
+  return typeof v === "string" && v ? v : null;
+}
+function isImageResult(): boolean {
+  const t = nodeType.value;
+  return t === "image" || t === "threeDWorld";
+}
+function lastError(): unknown {
+  return rawAt(["last_error"]);
+}
+function lastErrorText(): string {
+  const e = lastError();
+  if (!e) return "";
+  if (typeof e === "string") return e;
+  const obj = e as Record<string, unknown>;
+  const code = obj.code;
+  const msg = obj.message ?? obj.kind ?? "";
+  return code ? `[${String(code)}] ${String(msg)}` : String(msg);
+}
+
+async function doGenerate(): Promise<void> {
+  const n = selectedNode.value;
+  if (!n) return;
+  await ed.generateNode(n.id);
+}
+
+/**
+ * 多选里"真正可投递"的节点：类型可生成 + 已填 mode/model + 已落库（非 local_ id）。
+ * 用 computed 而不是点击时过滤，是为了让按钮上的数字与禁用态实时反映可投递数量——
+ * 用户点之前就知道会投几个，不会出现"点了说没东西可投"。
+ */
+const generatableSelected = computed(() =>
+  selectedNodes.value.filter(
+    (n) =>
+      !n.id.startsWith("local_") &&
+      GENERATABLE_TYPES.includes(n.node_type) &&
+      typeof n.params?.mode === "string" &&
+      !!n.params.mode &&
+      typeof n.params?.model === "string" &&
+      !!n.params.model,
+  ),
+);
+
+async function doBatchGenerate(): Promise<void> {
+  await ed.generateSelected();
+}
+
 // ── 多选批量操作 ────────────────────────────────────────
 /** 批量改状态走 setNodesField：批量改字段的脏标记/遍历逻辑都在 composable 里，别在这里重写一遍 */
 function batchStatus(status: number): void {
@@ -637,6 +710,26 @@ function toggleSec(key: string): void {
           <button class="insp-act" type="button" @click="alignSelection('bottom')">底对齐</button>
         </div>
         <p class="cv-hint">以选区外接框为基准对齐；只用「垂直居中」可以快速把一行节点排到同一水平线。</p>
+      </section>
+
+      <section class="cv-section insp-sec-batch-gen">
+        <div class="cv-section__head">
+          <span>批量生成</span>
+          <span class="cv-tag">{{ generatableSelected.length }} 个可投递</span>
+        </div>
+        <Button
+          size="sm"
+          block
+          class="insp-batch-generate"
+          :disabled="generatableSelected.length === 0"
+          @click="doBatchGenerate"
+        >
+          投递选中的 {{ generatableSelected.length }} 个节点
+        </Button>
+        <p class="cv-hint">
+          只有带 mode + model 的节点能投递（image / video / audio / 3D 世界）。
+          逐条独立：某条失败不会影响其它条，失败原因会写到节点上。
+        </p>
       </section>
 
       <section class="cv-section insp-sec-batch-danger">
@@ -1727,6 +1820,48 @@ function toggleSec(key: string): void {
 
       <!-- 底部操作 -->
       <footer class="insp-foot">
+        <!--
+          投递区：画布的价值就在"节点能出片"。
+          放在底部操作之上而不是塞进各类型的参数面板里——所有可生成类型
+          （image/video/audio/3D）都需要它，塞进各自面板会重复 4 遍，
+          且用户换类型后按钮位置会跳。
+        -->
+        <section v-if="canGenerate" class="cv-section insp-sec-generate">
+          <div class="cv-section__head">
+            <span>生成</span>
+            <span v-if="nodeStatus() === 2" class="cv-tag cv-tag--brand insp-gen-running">生成中…</span>
+            <span v-else-if="nodeStatus() === 3" class="cv-tag cv-tag--success">已完成</span>
+          </div>
+
+          <!-- 缺 mode/model 时给出明确指引，而不是让按钮"点了没反应" -->
+          <p v-if="!genMode()" class="cv-hint insp-gen-need-mode">先在「参数」里选一个 mode（如 text2image）。</p>
+          <p v-else-if="!genModel()" class="cv-hint insp-gen-need-model">先在「参数」里填模型名（model）。</p>
+
+          <!-- 上一次失败的错误：带错误码，便于对照文档排查 -->
+          <p v-if="lastError()" class="cv-hint insp-gen-error">上次失败：{{ lastErrorText() }}</p>
+
+          <!-- 结果预览：有 result_uri 就显示，让用户确认"这张就是刚生成的" -->
+          <div v-if="resultUri()" class="insp-gen-result">
+            <img v-if="isImageResult()" :src="resultUri()!" :alt="selectedNode?.name ?? '生成结果'" loading="lazy" />
+            <video v-else :src="resultUri()!" controls preload="metadata" />
+            <p class="cv-hint">最近一次生成结果</p>
+          </div>
+
+          <Button
+            size="sm"
+            block
+            class="insp-generate"
+            :loading="ed.isSubmitting(selectedNode?.id ?? '')"
+            :disabled="!genMode() || !genModel() || nodeStatus() === 2 || isLocalNode()"
+            @click="doGenerate"
+          >
+            {{ nodeStatus() === 2 ? "生成中…" : "生成" }}
+          </Button>
+          <p v-if="isLocalNode()" class="cv-hint insp-gen-local">
+            未保存的新节点不能投递，请先点顶栏「保存」。
+          </p>
+        </section>
+
         <div class="insp-foot__row">
           <Button
             variant="ghost"

@@ -49,6 +49,7 @@ const inspectorOpen = ref(true);
 const inspectorWidth = ref(320);
 const minimapOpen = ref(true);
 const historyOpen = ref(false);
+const templateOpen = ref(false);
 const historyList = ref<Array<{ id: string; version: number; kind: number; created_at: string }>>([]);
 const historyLoading = ref(false);
 const guideOpen = ref(false);
@@ -527,6 +528,16 @@ async function save(): Promise<void> {
   await editor.save();
 }
 
+// ── 生成投递（C6）───────────────────────────────────────
+/** 批量投递选中的节点（Ctrl+Enter）；实际逻辑在 composable，这里只管入口 */
+async function generateSelection(): Promise<void> {
+  if (selectedIds.value.length === 0) {
+    toast.info("先选中要生成的节点（可 Shift 多选）");
+    return;
+  }
+  await editor.generateSelected();
+}
+
 // ── 快捷键 ──────────────────────────────────────────────
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -566,6 +577,12 @@ function onKeyDown(ev: KeyboardEvent): void {
   if (mod && ev.key.toLowerCase() === "a") {
     ev.preventDefault();
     editor.selectAll();
+    return;
+  }
+  // Ctrl+Enter：批量投递选中的节点（与「生成」单节点投递区分开）
+  if (mod && ev.key === "Enter") {
+    ev.preventDefault();
+    void generateSelection();
     return;
   }
   if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -644,6 +661,9 @@ function startResize(ev: PointerEvent): void {
 onMounted(async () => {
   await Promise.all([editor.load(), editor.loadMe()]);
   editor.startTimers();
+  // 打开画布先校正一次节点任务状态：用户可能上次关页面时任务还没跑完，
+  // 不校正的话画布会永远显示"生成中"（worker 已回写，但前端不知道）。
+  void editor.syncNodeTasks();
   measureStage();
   doFitView();
   if (typeof ResizeObserver !== "undefined" && stageEl.value) {
@@ -773,6 +793,7 @@ onUnmounted(() => {
         @update:mode="mode = $event"
         @add="addNodeAtCenter"
         @layers="toast.info('图层树待接入（当前可在右侧检查器查看节点）')"
+        @templates="templateOpen = true"
       />
 
       <!-- 底部 dock -->
@@ -795,6 +816,9 @@ onUnmounted(() => {
         :stage="stageSize"
         @jump="jumpToWorld"
       />
+
+      <!-- 模板库抽屉 -->
+      <CanvasTemplatePanel v-if="templateOpen" :editor="editor" @close="templateOpen = false" />
 
       <!-- 右侧检查器 -->
       <aside
