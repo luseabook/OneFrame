@@ -64,7 +64,8 @@ fixtures/
 5. 分享链接创建→公开预览→撤销→404；导出含 manifest，缺失镜有标注；
 6. 抽验视频/图片：显式水印可见 + 元数据含 AI 标识字段（缺一即阻断发布）；
 7. 单点工具：`/create/*` **直接打开/刷新**不白屏（`routeRules` 必须关 SSR，仅 `definePageMeta` 不够）、
-   文生图/图生图提交后任务 `mode` 与 `reference_uris` 正确（`pwsh _acceptance/tools-acceptance.ps1`）。
+   文生图/图生图提交后任务 `mode` 与 `reference_uris` 正确、视频续写上传源视频后 `mode=video_extend`
+   且带 `reference_uris`（`pwsh _acceptance/tools-acceptance.ps1`）。
 
 ## 共享实例串行约束（2026-10-26）
 

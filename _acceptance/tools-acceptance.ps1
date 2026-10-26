@@ -7,7 +7,7 @@
     1) typecheck（web + api）
     2) lint（工具箱/工具页相关文件断言 0 error 0 warning）
     3) model-adapters 单测（mock 结果形状：图像 png / 视频 mp4 / 文本同步）
-    4) 真实浏览器 E2E（20 项断言：Tab 文案/卡片集/文生图/图生图/参考生视频）
+    4) 真实浏览器 E2E（26 项断言：Tab/卡片集/文生图/图生图/参考生视频/视频续写/视频参考）
 
   前置：
     pwsh _acceptance/start-local-stack.ps1      # PG 55432 / Redis 6380
@@ -119,7 +119,7 @@ if (-not $SkipE2E) {
     if (-not $ready) { throw "web dev 重启后未就绪，见 _acceptance/web-e2e.log" }
   }
 
-  Step "浏览器 E2E（20 项断言，含 Tab/卡片集/文生图/图生图/参考生视频）" {
+  Step "浏览器 E2E（26 项断言，含 Tab/卡片集/文生图/图生图/参考生视频/视频续写）" {
     Push-Location (Join-Path $Root "_acceptance")
     try {
       & node e2e-tools.cjs
@@ -139,3 +139,4 @@ foreach ($k in $results.Keys) {
 Write-Host ""
 Write-Host "产物：_acceptance/tools-e2e/（截图 + result.json）" -ForegroundColor DarkGray
 Write-Host "✅ 工具箱验收全部通过" -ForegroundColor Green
+

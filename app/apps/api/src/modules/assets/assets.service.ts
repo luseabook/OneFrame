@@ -7,12 +7,23 @@ import { StorageService } from "../../storage/storage.service";
 
 type AssetRow = typeof assets.$inferSelect;
 
+/**
+ * 上传白名单：图片（8MB）+ 视频（32MB）。
+ *
+ * 视频是给「视频续写/编辑/参考」这类工具用的：它们必须有视频源才能工作。
+ * MVP 走 base64（没有 OSS 直传），32MB 上限对应 base64 约 43M 字符，
+ * Fastify bodyLimit 已同步抬到 48MB；真实生产应换预签名直传（见 api-spec §9）。
+ */
 const EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
 };
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 32 * 1024 * 1024;
 
 @Injectable()
 export class AssetsService {
@@ -20,8 +31,14 @@ export class AssetsService {
 
   async upload(spaceId: string, input: AssetUploadRequest) {
     const data = Buffer.from(input.data_base64, "base64");
-    if (data.byteLength === 0 || data.byteLength > MAX_BYTES) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "image too large (max 8MB)", { field: "data_base64" });
+    const isVideo = input.content_type.startsWith("video/");
+    const maxBytes = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+    if (data.byteLength === 0 || data.byteLength > maxBytes) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        isVideo ? "video too large (max 32MB)" : "image too large (max 8MB)",
+        { field: "data_base64", max_bytes: maxBytes },
+      );
     }
     const id = newId();
     const ext = EXT[input.content_type] ?? "bin";
@@ -32,7 +49,9 @@ export class AssetsService {
       .values({
         id,
         spaceId: BigInt(spaceId),
-        kind: "image",
+        // kind 跟着内容走：视频工具要把这个 asset 当视频源用，
+        // 一律写 image 会让资产库筛选/播放器都拿错类型
+        kind: isVideo ? "video" : "image",
         uri: key,
         name: input.filename,
         tags: [],

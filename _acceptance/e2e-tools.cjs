@@ -6,12 +6,13 @@
  * 「选模型 → 报价 → 提交 → 任务真的建出来」这条链在浏览器里能用，
  * 并且提交的任务 mode / 参数与界面选择一致（API 交叉核对）。
  *
- * 覆盖 5 个场景：
+ * 覆盖 6 个场景：
  *   S1 工具箱页：Tab 文案（AI视频/AI图片/AI音频）、卡片集、图片 Tab、点卡进文生图
  *   S2 文生图：模型来自目录、报价出现、提交后任务 mode=text2image
  *   S3 图生图：上传参考图 → 提交后任务 mode=image2image 且 reference_uris 非空
  *   S4 参考生视频：工作台进入「参考生视频」模式且目录里有支持 universal_reference 的模型
- *   S5 收尾：控制台零错误
+ *   S5 视频后期工具：续写页上传源视频 → 任务 mode=video_extend 且带 reference_uris；参考页模式正确
+ *   S6 收尾：控制台零错误
  *
  * 用法：
  *   pwsh _acceptance/start-wanxing-stack.ps1     # api:3002 / web:3003
@@ -269,11 +270,86 @@ const PNG_1PX = Buffer.from(
     record("S4.3 工具页无工作台侧栏（独立布局）", (await page.locator(".sidebar").count()) === 0);
     await page.screenshot({ path: path.join(SHOT_DIR, "04-reference-to-video.png") });
 
-    // ══ S5 收尾 ════════════════════════════════════════════
+    // ══ S5 视频后期工具（续写 / 参考）═══════════════════════
+    console.log("[S5] 视频续写：上传源视频 → 提交 → task.mode=video_extend");
+    await page.goto(`${WEB}/create/video-extend`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".mg-prompt", { timeout: 25_000 });
+    await sleep(1200);
+    const mgTabs = await page.locator(".mg-mode-tab").evaluateAll((els) =>
+      els.map((e) => ({ text: (e.textContent || "").trim(), on: e.classList.contains("on") })),
+    );
+    record(
+      "S5.1 视频续写页默认模式为「视频续写」",
+      (mgTabs.find((t) => t.on)?.text ?? "").includes("视频续写"),
+      JSON.stringify(mgTabs),
+    );
+
+    // 用仓库里真实的 mp4（lavfi 色板，ftyp 合法）：假字节会让 <video> 解码失败，
+    // 反而把"上传成功"这个断言变脆
+    const sampleMp4 = fs.readFileSync(path.join(__dirname, "timeline-export-sample.mp4"));
+    await page.setInputFiles(".mg-upload", {
+      name: "source.mp4",
+      mimeType: "video/mp4",
+      buffer: sampleMp4,
+    });
+    await sleep(3000);
+    record("S5.2 源视频上传成功并出现缩略图", (await page.locator(".mg-thumb").count()) >= 1);
+
+    const marker3 = `E2E视频续写${Date.now()}`;
+    await page.fill(".mg-prompt", `${marker3}：镜头继续向前推进，人物走出画面`);
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector(".mg-quote");
+        return !!el && /积分/.test(el.textContent || "") && !/—/.test(el.textContent || "");
+      },
+      null,
+      { timeout: 12_000 },
+    ).catch(() => {});
+    record(
+      "S5.3 出现预计消耗（报价来自 /credits/quote）",
+      /积分/.test((await page.locator(".mg-quote").innerText().catch(() => "")).trim()),
+    );
+
+    await page.locator(".mg-submit").click();
+    await sleep(3000);
+    const mgStatus = await page.locator(".mg-status").innerText().catch(() => "");
+    record("S5.4 提交后进入排队/生成中", /排队|生成/.test(mgStatus), mgStatus);
+
+    const vlist = await api("GET", "/tasks?page=1&page_size=10&capability=video", undefined, token);
+    // 列表接口不保证带 input，所以先按 mode 找任务，再用详情核对 prompt 与参考源
+    const extendTask = (vlist.data?.list || []).find((t) => t.mode === "video_extend");
+    const extendDetail = extendTask
+      ? await api("GET", `/tasks/${extendTask.task_id}`, undefined, token)
+      : null;
+    const extendRefs = extendDetail?.data?.input?.reference_uris ?? [];
+    record(
+      "S5.5 任务 mode=video_extend 且带源视频",
+      !!extendDetail &&
+        Array.isArray(extendRefs) &&
+        extendRefs.length >= 1 &&
+        String(extendDetail.data?.input?.prompt ?? "").includes(marker3),
+      `refs=${extendRefs.length}`,
+    );
+    await page.screenshot({ path: path.join(SHOT_DIR, "05-video-extend.png") });
+
+    await page.goto(`${WEB}/create/video-refer`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".mg-mode-tab", { timeout: 25_000 });
+    await sleep(1000);
+    const referTabs = await page.locator(".mg-mode-tab").evaluateAll((els) =>
+      els.map((e) => ({ text: (e.textContent || "").trim(), on: e.classList.contains("on") })),
+    );
+    record(
+      "S5.6 视频参考页默认模式为「视频参考」",
+      (referTabs.find((t) => t.on)?.text ?? "").includes("视频参考"),
+      JSON.stringify(referTabs),
+    );
+    await page.screenshot({ path: path.join(SHOT_DIR, "06-video-refer.png") });
+
+    // ══ S6 收尾 ════════════════════════════════════════════
     const realErrors = consoleErrors.filter(
       (e) => !/favicon|Failed to load resource.*404|ResizeObserver loop/i.test(e),
     );
-    record("S5.1 无未预期的控制台错误", realErrors.length === 0, realErrors.slice(0, 3).join(" | ") || "clean");
+    record("S6.1 无未预期的控制台错误", realErrors.length === 0, realErrors.slice(0, 3).join(" | ") || "clean");
   } catch (e) {
     // 不能把异常吞进 finally：否则 process.exit 会先执行，失败原因什么都不剩
     console.error("\nE2E 异常：", e);

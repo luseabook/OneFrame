@@ -16,6 +16,7 @@ let app: NestFastifyApplication;
 const phone = `13${String(Math.floor(Math.random() * 900000000) + 100000000)}`;
 let token = "";
 let assetId = "";
+let videoAssetUrl = "";
 let userId = "";
 let spaceId = "";
 
@@ -70,8 +71,29 @@ describe("assets upload/list/delete", () => {
     expect(res.data.url).toContain("/files/local");
   });
 
-  it("lists the asset and quotes image2video with its URL", async () => {
-    const list = await inject("GET", "/assets");
+  it("uploads a video and marks kind=video（视频续写/编辑/参考的视频源）", async () => {
+    const res = await inject("POST", "/assets/upload", {
+      filename: "clip.mp4",
+      content_type: "video/mp4",
+      data_base64: Buffer.from("fake-mp4-bytes-for-upload").toString("base64"),
+    });
+    expect(res.code).toBe(0);
+    expect(res.data.kind).toBe("video");
+    expect(res.data.url).toContain("/files/local");
+    videoAssetUrl = res.data.url as string;
+
+    // 视频工具的核心链路：上传得到的 URL 直接作为 video_extend 的参考源
+    const quote = await inject("POST", "/credits/quote", {
+      mode: "video_extend",
+      model: "seedance-2.5",
+      input: { prompt: "延续这个镜头，动作自然接上", reference_uris: [videoAssetUrl] },
+      options: { ratio: "9:16", resolution: "720p", duration: 5, count: 1 },
+    });
+    expect(quote.code).toBe(0);
+    expect(quote.data.credits).toBeGreaterThan(0);
+  });
+
+  it("lists the asset and quotes image2video with its URL", async () => {    const list = await inject("GET", "/assets");
     expect(list.code).toBe(0);
     expect(list.data.total).toBeGreaterThan(0);
     const asset = list.data.list.find((a: { id: string }) => a.id === assetId);

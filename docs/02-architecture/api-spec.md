@@ -482,6 +482,7 @@ GET /projects/{id}/episodes/{eid}/timeline/export/{exportId}
 
 ```
 GET    /assets?kind=&folder_id=&tag=&page=&page_size=&deleted=true      // deleted=true 查回收站
+POST   /assets/upload        {filename, content_type, data_base64}   // 图片 8MB / 视频 32MB
 POST   /assets              {object_key, kind, name, tags[]}   // 也可从任务结果转存
 POST   /assets/from-task    {task_id, index?}   // 任务结果一键转存(幂等：同 task+uri 复用)
 PATCH  /assets/{id}         {name?, tags?, folder_id?}
@@ -494,6 +495,12 @@ GET    /assets/expiring-tasks  // 7 天内到期且未转存的结果任务 → 
 
 > 说明：目录/标签/回收站/到期提醒在 v1.0 已落地（实现路径与本节一致）；
 > `kind` 过滤暂由 `folder_id`/`tag`/`deleted` 覆盖，UI 侧用目录+标签检索。
+>
+> **上传白名单与上限（v2.5 起）**：`content_type ∈ {image/jpeg,image/png,image/webp}`（≤8MB）
+> 或 `{video/mp4,video/quicktime,video/webm}`（≤32MB）；`kind` 由 content_type 决定
+> （视频写 `video`，供视频续写/编辑/参考当源素材）。**偏离说明（技术）**：视频也走
+> base64 JSON 是 MVP 临时方案（Fastify bodyLimit 已抬到 48MB），单请求内存会到几十 MB；
+> 真实生产应换 OSS 预签名直传，届时本契约的请求体形态会变更（`data_base64` → `object_key`）。
 
 ## 9.1 project 素材与矩阵
 
