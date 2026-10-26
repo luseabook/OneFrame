@@ -582,6 +582,55 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     }
   }
 
+  /**
+   * 文本类派生：剧本优化 / 拆解分镜。
+   *
+   * 与媒体生成共用同一条链路（落 `tasks` → 节点挂 `task_id` → 轮询 → 回填），
+   * 区别只在参数来源：文本能力不要求用户手选 mode/model，由**模型目录**决定用哪个
+   * LLM、由**价目表**决定扣多少——前端不参与定价，也不写死金额。
+   */
+  async function deriveText(
+    nodeId: string,
+    kind: "script_optimization" | "storyboard_parse",
+    extraPrompt?: string,
+  ): Promise<boolean> {
+    const node = nodes.value.find((n) => n.id === nodeId);
+    if (!node) return false;
+    if (nodeId.startsWith("local_")) {
+      toast.error("请先保存画布，再发起派生（新节点还没有服务端 id）");
+      return false;
+    }
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+
+    taskSubmitting.value = [...taskSubmitting.value, nodeId];
+    try {
+      const payload = { prompt: extraPrompt };
+      const res =
+        kind === "script_optimization"
+          ? await api.scriptOptimization(canvasId.value, nodeId, payload)
+          : await api.storyboardParse(canvasId.value, nodeId, payload);
+      node.status = res.node.status;
+      node.task_id = res.node.task_id;
+      toast.success(
+        `已发起${kind === "script_optimization" ? "剧本优化" : "拆解分镜"}，冻结 ${res.credits_estimate} 积分`,
+      );
+      startTaskPolling(nodeId, res.task_id);
+      return true;
+    } catch (e) {
+      const err = e as { code?: number; message: string };
+      if (err.code === 745701) toast.error("积分不足，请先充值");
+      else if (err.code === 745801) toast.error("原文未通过内容审核");
+      else if (err.code === 400104) toast.error("原文超过 5 万字，请分段处理");
+      else toast.error(err.message || "发起失败");
+      return false;
+    } finally {
+      taskSubmitting.value = taskSubmitting.value.filter((id) => id !== nodeId);
+    }
+  }
+
   // ── 任务轮询（节点状态 → 结果回填）──────────────────────
   const pollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -614,10 +663,16 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
         if (st === 3) {
           const first = res.task.results?.[0];
           const uris = (res.task.results ?? []).map((r) => r.uri).filter((u): u is string => !!u);
+          const texts = (res.task.results ?? [])
+            .map((r) => (r as { text?: string }).text)
+            .filter((t): t is string => !!t);
           node.params = {
             ...node.params,
             ...(first?.uri ? { result_uri: first.uri, result_preview_uri: first.preview_uri ?? first.uri } : {}),
             ...(uris.length ? { result_uris: uris } : {}),
+            // 文本类派生（剧本优化 / 拆解分镜）没有 uri 只有 text：不写这一段的话，
+            // 任务成功了节点上也看不到内容，用户会以为没跑成功
+            ...(texts.length ? { result_text: texts[0], result_texts: texts } : {}),
           };
           delete (node.params as Record<string, unknown>).last_error;
           stopTaskPolling(nodeId);
@@ -1251,6 +1306,7 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     taskSubmitting,
     isSubmitting,
     generateNode,
+    deriveText,
     generateSelected,
     startTaskPolling,
     stopTaskPolling,

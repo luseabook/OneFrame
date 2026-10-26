@@ -13,6 +13,7 @@ import { CanvasMaterialService } from "./canvas-material.service";
 import { CanvasGroupService } from "./canvas-group.service";
 import { CanvasTableService } from "./canvas-table.service";
 import { CanvasDownloadService } from "./canvas-download.service";
+import { CanvasDeriveService } from "./canvas-derive.service";
 import { CreditsModule } from "../credits/credits.module";
 import { GenerationsModule } from "../generations/generations.module";
 import { ModelsModule } from "../models/models.module";
@@ -39,6 +40,7 @@ import { TasksModule } from "../tasks/tasks.module";
     CanvasGroupService,
     CanvasTableService,
     CanvasDownloadService,
+    CanvasDeriveService,
   ],
   exports: [
     CanvasService,
@@ -48,6 +50,7 @@ import { TasksModule } from "../tasks/tasks.module";
     CanvasGroupService,
     CanvasTableService,
     CanvasDownloadService,
+    CanvasDeriveService,
   ],
 })
 export class CanvasModule {}

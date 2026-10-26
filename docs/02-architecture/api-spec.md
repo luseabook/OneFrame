@@ -8,6 +8,11 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
+> **v2.6 · 2026-10-26 · 文本类能力 + 后台定价可写**：新增 §14.4.6（剧本优化 / 拆解分镜 2 条），
+> 把 `TextMode` 进 `tasks.mode` 枚举（按次计价）；后台补 `POST/DELETE /ops/admin/model-prices`，
+> 让"新能力上架定价"不必改代码。同时修掉计费缺陷：`duration_s IS NULL` 的档位原先不受唯一键约束，
+> 同一档位可重复插入、扣费金额不确定（补部分唯一索引 `uq_model_prices_per_call`，迁移 0017）。
+> 验收：`apps/api/test/canvas-derive.spec.ts`（5 例，含"改价后报价立刻变"）+ E2E S19（4 项）。
 > **v2.5 · 2026-10-26 · 节点产物批量下载落地**：新增 §14.4.5（3 条：打包 / 下载单列表 / 现签链接）+ 迁移 0016
 > `canvas_download_lists`。同时修掉两个"接口成功、用户用不了"的缺陷：
 > 签名链接基址默认指向 3000（另一个项目的端口）、`.zip` 缺 content-type。
@@ -627,8 +632,12 @@ worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至�
 GET  /ops/config/{key}?module=&lang=      // 公开(公告/横幅/定价页文案)
 PUT  /ops/admin/config/{key}              // 管理端
 GET  /ops/admin/dashboard                 // 失败率/队列深度/adapter 延迟
-PUT  /ops/admin/models/{id}               // 上下架/排序
-PUT  /ops/admin/model-prices/{id}
+GET  /ops/admin/models                    // 模型目录（含 modes / capabilities）
+PATCH /ops/admin/models/{id}              // 上下架/排序
+GET  /ops/admin/model-prices?model_id=    // 价目列表
+POST /ops/admin/model-prices              // **新增价目**（档位必须已存在于模型目录的 modes）
+PATCH /ops/admin/model-prices/{id}        // 改金额 / active=false 下架
+DELETE /ops/admin/model-prices/{id}       // 删除误配档位（追溯用下架，不用删除）
 GET  /ops/admin/task-metrics              // 失败率 + 错误码分布 + adapter avg/p95 延迟
 GET  /ops/admin/failed-tasks.csv          // 失败任务清单导出(CSV, ≤1000 行)
 GET  /ops/admin/funnel                    // 流水线漏斗：建项→大纲→角色定稿→分镜→批量→成功(含转化率)
@@ -638,6 +647,12 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 ```
 
 > 鉴权：/ops/admin/* 需 admin_users 独立 JWT；无凭证 → 401101，携带普通用户 token → **403101**。
+
+> **定价可写是硬要求（2026-10-26）**：`PATCH` 只能改已存在的行；模型目录里加了新模式
+> （如文本类 `script_optimization`）之后，如果控制台只能改不能建，运营就只能等发版才能上架定价，
+> "价格后台可调、不写死"就是空话。因此补 `POST`/`DELETE`，并做**档位合法性校验**
+> （mode 必须在该模型的 `modes` 里、resolution/duration 必须取自该 mode 声明的档位）；
+> 金额本身完全由运营决定，代码里不出现任何能力单价常量。
 
 ## 12. 版本与废弃策略
 
@@ -759,7 +774,7 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：`video-parse` 等需要新能力（视频解析 / 文本类任务计价）的派生族（10 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
+**尚未实现（不暴露空壳）**：`video-parse` / `asset-extraction` / `storyboard-asset-match` 等派生族（8 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 **已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
 **已实现**：节点产物批量下载（3 条）——2026-10-26，见 §14.4.5。
@@ -942,6 +957,32 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    否则用户拿到一堆 `image-108…-1.png` 无法回溯。
 6. **`.zip` 必须声明 `application/zip`**：`files/local` 的 content-type 表原先没有 zip，
    会退化成 `application/octet-stream`，部分浏览器直接内联展示乱码。
+
+#### 14.4.6 文本类派生（剧本优化 / 拆解分镜，2026-10-26）
+
+| 方法 | 路径 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/script-optimization` | `{source_text?, prompt?, model?}` | `{task_id, status, credits_estimate, node}` | 0/400101/400104/745701/745801 |
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/storyboard-parse` | 同上 | 同上 | 同上 |
+
+**能力模型（为什么能落地而不写死价格）**：
+- 新增两个 `tasks.mode`（`TextMode`：`script_optimization` / `storyboard_parse`），
+  模型目录里 `deepseek-v4-pro.modes` 声明它们，`resolution_options` 用 **`per_call`**
+  表示"按次计价"（不是分辨率）；
+- 价目在 `model_prices`：`resolution='per_call'`、`duration_s=NULL`、`credits` 由运营在
+  `/ops/admin/model-prices` **新增/修改**；代码只发 mode 与计价单位，**不出现金额常量**；
+- 执行：模型 `adapter_code=deepseek:chat` 是**同步**适配器，worker 收到 `sync_results`
+  直接置成功；mock 模式同样返回文本（按 mode 给不同结构），不会返回 `.mp4` 的假结果；
+- 结果回写：worker → `canvas_nodes.params.result_text`；前端轮询到成功即显示，
+  与图片/视频节点的回写路径一致（不搞第二套）。
+
+**四条实现约定**：
+1. **原文来源**：`params.sourceText`（剧本节点检查器里的字段）优先；不传 `source_text` 就用节点原文——
+   前端不要把正文再搬一遍，否则会出现"节点改了、请求里还是旧的"。
+2. **`prompt` 是"额外要求"不是原文**：混用会导致用户写一句"镜头少一点"，系统把这句话当剧本送去优化。
+3. **超 5 万字 → 400104**（契约既定码）。zod 只挡明显异常的巨型请求（20 万字符），
+   同一条规则不能有两个错误码。
+4. **只允许 script/text/director 节点**：其他节点没有"原文"这个概念，400101。
 
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 

@@ -343,8 +343,33 @@ const MODEL_SEED: ModelSeed[] = [
     needVip: false,
     audioVideoSupport: false,
     sort: 200,
-    modeOrder: {},
-    modes: {},
+    modeOrder: { script_optimization: 1, storyboard_parse: 2 },
+    /**
+     * 文本类模式（LLM 步骤）。
+     *
+     * `resolution: "per_call"` 不是"分辨率"，而是**计价单位**：LLM 按次收费，
+     * 与图像/视频的按档位×时长定价不同。价格来自 `model_prices`（下方 PRICE_SEED
+     * 只为新库给一个初始值），**运营在 /ops/admin/model-prices 随时改**，代码不写死
+     * 任何金额——这是 owner 明确的定价策略（seed.ts:7 既有约定）。
+     */
+    modes: {
+      script_optimization: {
+        endpoint: "chat",
+        resolution_options: [{ value: "per_call", label: "按次" }],
+        resolutions: ["per_call"],
+        default_resolution: "per_call",
+        counts: [1],
+        default_count: 1,
+      },
+      storyboard_parse: {
+        endpoint: "chat",
+        resolution_options: [{ value: "per_call", label: "按次" }],
+        resolutions: ["per_call"],
+        default_resolution: "per_call",
+        counts: [1],
+        default_count: 1,
+      },
+    },
     sceneModes: {},
   },
 ];
@@ -380,6 +405,27 @@ for (const model of MODEL_SEED) {
     } else if (model.capability === "image") {
       for (const r of cfg.resolution_options) {
         const credits = r.value === "1K" ? 2 : r.value === "2K" ? 4 : 8;
+        PRICE_SEED.push({
+          id: BigInt(++priceSeq),
+          modelId: model.id,
+          mode,
+          resolution: r.value,
+          durationS: null,
+          credits,
+          strikeCredits: credits + 1,
+        });
+      }
+    } else if (model.capability === "text") {
+      /**
+       * 文本模式：按次计价（resolution 存计价单位 `per_call`，duration_s 为 NULL）。
+       *
+       * ⚠️ 这里的金额只是**新库的初始值**，不是业务定价：owner/运营通过
+       * `PATCH /ops/admin/model-prices/:id` 随时调整，也可以用
+       * `POST /ops/admin/model-prices` 给新模型/新模式补价。代码里不出现任何
+       * 「某能力固定 N 积分」的常量——那会把定价策略焊死在发布里。
+       */
+      for (const r of cfg.resolution_options ?? []) {
+        const credits = 2;
         PRICE_SEED.push({
           id: BigInt(++priceSeq),
           modelId: model.id,

@@ -13,6 +13,11 @@
 > 迁移规划 0013–0016；团队复用 `spaces(type=2)` 不另建表（ADR-010）、账本复用 `credit_flows` 不另起（ADR-011）、
 > 任务一律复用 `tasks` 不另造（ADR-003）。逐字段证据见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`。
 >
+> **v2.3 · 2026-10-26 · 文本类能力 + 价目约束（迁移 0017）**：§2 `model_prices` 补一条**部分唯一索引**
+> `uq_model_prices_per_call(model_id, mode, resolution) WHERE duration_s IS NULL`。
+> 原因：原唯一键含 `duration_s`，而 PostgreSQL 认为 NULL 彼此不相等，于是"按次计价"（文本类）
+> 的同一档位可被重复插入，`credits.price()` 取到哪一条是随机的 → **扣费金额不确定**。
+> 迁移 0017 内含去重修复语句（保留 id 最小的一条），否则索引在已有数据的库上会创建失败。
 > **v2.1 · 2026-10-26 · agent 域落地回写（迁移 0015）**：§12.2 四张表按实际迁移定稿，并补 3 处实现必需的增量列
 > （`agent_sessions.last_read_seq`、`agent_messages.reaction`、`tasks.title`/`tasks.feedback`）；
 > `agent_messages` 去掉设计稿里的 `turn_no/status`（轮次进行态由 Redis 在途标记 + SSE 事件表达，
@@ -1250,8 +1255,13 @@ CREATE TABLE film_recent_opens (
 0016_canvas_downloads
                  -- ✅ 已落地 2026-10-26：canvas_download_lists（节点产物批量下载的下载单）
                  --   ⚠️ 占用了原定给 film 的编号：film 尚未开始，而 canvas 的补齐先到，
-                 --   编号自然顺延；film 迁移编号改为 0017 起（开工时以实际为准）
-0017_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
+                 --   编号自然顺延
+0017_model_prices_per_call
+                 -- ✅ 已落地 2026-10-26：model_prices 补部分唯一索引 uq_model_prices_per_call
+                 --   （duration_s IS NULL 的档位原先不受唯一键约束 → 同一档位可重复、扣费不确定）
+                 --   迁移内含去重修复语句（保留 id 最小的一条）
+0018_film        -- 13 张 film_* 表（依赖 0015 的成员/角色与 0014 的画布）
+                 --   ⚠️ film 仍未开工，编号继续顺延；开工时以实际为准
 ```
 
 > ⚠️ **与原计划的差异说明**：原计划是 `0013_canvas → 0014_agent → 0015_cam → 0016_film`，

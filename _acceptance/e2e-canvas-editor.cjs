@@ -1075,6 +1075,64 @@ function buildXlsxBuffer() {
       await page.screenshot({ path: path.join(SHOT_DIR, "16-downloads.png") });
     }
 
+    // ══ S19 剧本节点的文本派生（优化剧本）══════════════════
+    // 栈里没跑 worker，所以这里只断言到"投递成功 + 节点进入生成中"这一段：
+    // 完成态的回填由 api/worker 单测覆盖（worker 侧 executor 走 sync_results）。
+    console.log("[S19] 剧本文本派生");
+    {
+      // 放到"现有节点下方"再适配视图：否则会被已有节点压住，Playwright 报
+      // "另一个 canvas-node 拦截点击"——这是画布类页面的常见测试坑（节点会重叠）
+      const snapshot = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+      const bottom = Math.max(0, ...(snapshot.data.nodes || []).map((n) => (n.y ?? 0) + (n.height ?? 120)));
+      const created = await api(
+        "POST",
+        `/canvas/canvases/${canvasId}/nodes`,
+        {
+          node_type: "script",
+          name: "可优化剧本",
+          x: 0,
+          y: bottom + 240,
+          params: { sourceText: "场景一 · 夜 · 内\n林晚：这件事没那么简单。" },
+        },
+        token,
+      );
+      record("S19.1 剧本节点已创建", created.code === 0);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector('.canvas-node[data-node-type="script"]', { timeout: 20_000 }).catch(() => {});
+      await sleep(500);
+      // 适配视图：把所有节点收进视口，新节点在最下方、不会被压住
+      await page.locator(".dock-fit").click().catch(() => {});
+      await sleep(800);
+
+      const scriptNode = page.locator('.canvas-node[data-node-type="script"]', { hasText: "可优化剧本" }).first();
+      if ((await scriptNode.count()) > 0) {
+        await scriptNode.locator(".canvas-node__head").click();
+        await sleep(400);
+        const optBtn = page.locator(".insp-derive-optimize");
+        record("S19.2 检查器出现「优化剧本」入口", (await optBtn.count()) > 0);
+        if ((await optBtn.count()) > 0) {
+          await optBtn.first().click();
+          await sleep(2000);
+          const detail = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+          const node = (detail.data.nodes || []).find((n) => n.name === "可优化剧本");
+          record("S19.3 节点已挂 task_id 并进入生成中", !!node?.task_id && node?.status === 2, `status=${node?.status}`);
+          if (node?.task_id) {
+            const task = await api("GET", `/agent/task/${node.task_id}`, undefined, token);
+            // mode 必须是文本模式（走 tasks 脊柱，而不是另造一套）
+            record("S19.4 任务 mode=script_optimization", task?.data?.mode === "script_optimization", task?.data?.mode);
+          } else {
+            record("S19.4 任务 mode=script_optimization", false, "无 task_id");
+          }
+        } else {
+          record("S19.3 节点已挂 task_id 并进入生成中", false, "无入口");
+          record("S19.4 任务 mode=script_optimization", false, "无入口");
+        }
+      } else {
+        for (const n of ["S19.2", "S19.3", "S19.4"]) record(`${n} 文本派生`, false, "剧本节点未渲染");
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "17-derive.png") });
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(

@@ -6,8 +6,8 @@
   一条命令跑完四层门禁：
     1) typecheck（web + api）
     2) lint（只对 canvas 相关文件断言 0 error 0 warning）
-    3) api 单测（canvas 46 + agent 13 + canvas-table 8 + canvas-download 5 = 72 例）
-    4) 真实浏览器 E2E（83 项断言，含持久化/版本冲突/节点投递/模板/固定组/Agent 面板/表格导入/批量下载）
+    3) api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 5 = 77 例）
+    4) 真实浏览器 E2E（87 项断言，含持久化/版本冲突/节点投递/模板/固定组/Agent 面板/表格导入/批量下载/文本派生）
 
   前置：
     pwsh _acceptance/start-local-stack.ps1      # PG 55432 / Redis 6380
@@ -78,11 +78,11 @@ if (-not $SkipLint) {
 }
 
 # ── 3. api 单测（canvas 域）──────────────────────────────
-Step "api 单测（canvas 46 + agent 13 + canvas-table 8 + canvas-download 5 = 72 例）" {
+Step "api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 5 = 77 例）" {
   Push-Location $App
   try {
     # agent.spec 与 canvas.spec 共享 canvas 域夹具（会话挂在画布上），一起跑才覆盖"面板 → 后端"整链
-    $out = & pnpm --filter @app/api test -- canvas.spec agent.spec canvas-table.spec canvas-download.spec 2>&1
+    $out = & pnpm --filter @app/api test -- canvas.spec agent.spec canvas-table.spec canvas-download.spec canvas-derive.spec 2>&1
     if ($LASTEXITCODE -ne 0) { throw "canvas/agent 单测失败" }
     $text = ($out | Out-String)
     # 断言两个 spec 都真的跑了（只匹配文件名不够：0 例也会打印 passed）
@@ -90,6 +90,7 @@ Step "api 单测（canvas 46 + agent 13 + canvas-table 8 + canvas-download 5 = 7
     if ($text -notmatch 'agent\.spec\.ts \((\d+) tests?\)') { throw "未找到 agent.spec 结果行" }
     if ($text -notmatch 'canvas-table\.spec\.ts \((\d+) tests?\)') { throw "未找到 canvas-table.spec 结果行" }
     if ($text -notmatch 'canvas-download\.spec\.ts \((\d+) tests?\)') { throw "未找到 canvas-download.spec 结果行" }
+    if ($text -notmatch 'canvas-derive\.spec\.ts \((\d+) tests?\)') { throw "未找到 canvas-derive.spec 结果行" }
     if ($text -match 'failed') { throw "canvas/agent 单测有失败：`n$($text.Substring([Math]::Max(0,$text.Length-1500)))" }
   } finally { Pop-Location }
 }
@@ -133,7 +134,7 @@ if (-not $SkipE2E) {
     if (-not $ready) { throw "web dev 重启后未就绪，见 _acceptance/web-e2e.log" }
   }
 
-  Step "浏览器 E2E（83 项断言，含 Agent/表格导入/批量下载）" {
+  Step "浏览器 E2E（87 项断言，含 Agent/表格/下载/文本派生）" {
     Push-Location (Join-Path $Root "_acceptance")
     try {
       & node e2e-canvas-editor.cjs

@@ -273,6 +273,29 @@ export const useCanvasApi = () => {
         `${base(canvasId)}/download-lists?page=${page}&page_size=${pageSize}`,
       ),
 
+    // ── 文本类派生（按次计价；价目由后台配置）──────────────
+    /** 剧本优化：不传 source_text 就用节点自身原文 */
+    scriptOptimization: (
+      canvasId: string,
+      nodeId: string,
+      input: { source_text?: string; prompt?: string; model?: string } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/script-optimization`,
+        input,
+      ),
+
+    /** 拆解分镜（结果由 worker 回写到节点 params.result_text） */
+    storyboardParse: (
+      canvasId: string,
+      nodeId: string,
+      input: { source_text?: string; prompt?: string; model?: string } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/storyboard-parse`,
+        input,
+      ),
+
     /** 现签 24h 链接 */
     downloadListUrl: (canvasId: string, listId: string) =>
       api.post<{ url: string; filename: string; file_count: number; expires_in: number }>(
@@ -367,3 +390,11 @@ export interface TemplateNodeDraft {
 
 
 
+
+/** 文本类派生的返回（任务 id + 节点状态 + 报价） */
+export interface DeriveResult {
+  task_id: string;
+  status: number;
+  credits_estimate: number;
+  node: { id: string; status: number; task_id: string };
+}

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { reportResolveSchema } from "@app/shared";
@@ -27,6 +27,28 @@ const modelPatchSchema = z.object({
 
 const pricePatchSchema = z.object({
   credits: z.number().int().min(0).optional(),
+  strikeCredits: z.number().int().min(0).optional(),
+  memberCredits: z.number().int().min(0).nullable().optional(),
+  timeLimitedCredits: z.number().int().min(0).nullable().optional(),
+  /** 下架某档价目（不删行，保留可追溯性） */
+  active: z.boolean().optional(),
+});
+
+/**
+ * 新增价目。
+ *
+ * 为什么必须有写口：`PATCH` 只能改**已存在**的行。模型目录里加了新模式
+ * （例如文本类 `script_optimization`）之后，如果控制台只能改不能建，
+ * 运营就只能等发版/改 seed 才能上架定价——"价格后台可调、不写死"就成空话。
+ * 这里只做**档位合法性**校验（mode 必须在模型目录里、resolution/duration 必须在该
+ * mode 声明的档位内），金额本身完全由运营决定。
+ */
+const priceCreateSchema = z.object({
+  model_id: z.string().min(1).max(32),
+  mode: z.string().min(1).max(64),
+  resolution: z.string().max(32).default(""),
+  duration_s: z.number().int().min(1).max(600).nullable().optional(),
+  credits: z.number().int().min(0),
   strikeCredits: z.number().int().min(0).optional(),
   memberCredits: z.number().int().min(0).nullable().optional(),
   timeLimitedCredits: z.number().int().min(0).nullable().optional(),
@@ -124,6 +146,18 @@ export class AdminController {
   @Patch("model-prices/:id")
   updatePrice(@Param("id") id: string, @Body() body: unknown) {
     return this.admin.updatePrice(id, parseOrThrow(pricePatchSchema, body));
+  }
+
+  /** 新增价目（模型目录里必须已有该 mode；金额由运营定） */
+  @Post("model-prices")
+  createPrice(@Body() body: unknown) {
+    return this.admin.createPrice(parseOrThrow(priceCreateSchema, body));
+  }
+
+  /** 删除价目（用于误配档位；只想下架请用 PATCH active=false 保留追溯） */
+  @Delete("model-prices/:id")
+  deletePrice(@Param("id") id: string) {
+    return this.admin.deletePrice(id);
   }
 
   @Get("tasks")

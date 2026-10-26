@@ -15,7 +15,7 @@ import {
   tasks,
   users,
 } from "@app/db";
-import { AppError, ErrorCode } from "@app/shared";
+import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
 
@@ -211,7 +211,13 @@ export class AdminService {
 
   async updatePrice(
     id: string,
-    input: { credits?: number; strikeCredits?: number; memberCredits?: number | null; timeLimitedCredits?: number | null },
+    input: {
+      credits?: number;
+      strikeCredits?: number;
+      memberCredits?: number | null;
+      timeLimitedCredits?: number | null;
+      active?: boolean;
+    },
   ) {
     const [row] = await db
       .update(modelPrices)
@@ -219,7 +225,120 @@ export class AdminService {
       .where(eq(modelPrices.id, BigInt(id)))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "price not found");
-    return { id: String(row.id), credits: row.credits, strike_credits: row.strikeCredits };
+    return {
+      id: String(row.id),
+      credits: row.credits,
+      strike_credits: row.strikeCredits,
+      active: row.active,
+    };
+  }
+
+  /**
+   * 新增价目。
+   *
+   * 只校验**档位合法性**，金额完全由运营定（"价格后台可调、不写死"的落点）：
+   * - `mode` 必须在该模型的 `modes` 目录里，否则会造出"一调用就失败"的价目；
+   * - mode 声明了 `resolution_options` 时，resolution 必须取自其中；
+   * - mode 声明了 `durations` 时，duration_s 必须落在档位内（按秒计价的视频）；
+   * - 按次计价的模式（如文本类）不允许带 duration_s，否则会凭空多出"5s 文本"档。
+   * 同 (model, mode, resolution, duration) 已存在 → 400101（唯一键冲突不该冒成 500）。
+   */
+  async createPrice(input: {
+    model_id: string;
+    mode: string;
+    resolution: string;
+    duration_s?: number | null;
+    credits: number;
+    strikeCredits?: number;
+    memberCredits?: number | null;
+    timeLimitedCredits?: number | null;
+  }) {
+    let modelId: bigint;
+    try {
+      modelId = BigInt(input.model_id);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid model_id", { field: "model_id" });
+    }
+    const [model] = await db.select().from(models).where(eq(models.id, modelId));
+    if (!model) throw new AppError(ErrorCode.NOT_FOUND, "model not found", { model_id: input.model_id });
+
+    const modes = (model.modes ?? {}) as Record<
+      string,
+      { resolution_options?: Array<{ value: string }>; durations?: number[] }
+    >;
+    const modeCfg = modes[input.mode];
+    if (!modeCfg) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `model ${model.name} has no mode ${input.mode}`, {
+        field: "mode",
+      });
+    }
+    const allowedResolutions = (modeCfg.resolution_options ?? []).map((item) => item.value);
+    if (allowedResolutions.length > 0 && !allowedResolutions.includes(input.resolution)) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `resolution must be one of ${allowedResolutions.join(",")}`,
+        { field: "resolution" },
+      );
+    }
+    const durations = modeCfg.durations ?? [];
+    if (durations.length > 0) {
+      if (input.duration_s == null || !durations.includes(input.duration_s)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, `duration_s must be one of ${durations.join(",")}`, {
+          field: "duration_s",
+        });
+      }
+    } else if (input.duration_s != null) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `mode ${input.mode} is priced per call, duration_s must be null`,
+        { field: "duration_s" },
+      );
+    }
+
+    try {
+      const [row] = await db
+        .insert(modelPrices)
+        .values({
+          id: newId(),
+          modelId,
+          mode: input.mode,
+          resolution: input.resolution,
+          durationS: input.duration_s ?? null,
+          credits: input.credits,
+          strikeCredits: input.strikeCredits ?? null,
+          memberCredits: input.memberCredits ?? null,
+          timeLimitedCredits: input.timeLimitedCredits ?? null,
+        })
+        .returning();
+      return {
+        id: String(row!.id),
+        model_id: String(row!.modelId),
+        mode: row!.mode,
+        resolution: row!.resolution,
+        duration_s: row!.durationS,
+        credits: row!.credits,
+      };
+    } catch (error) {
+      // Postgres 唯一键冲突（23505）：同一档位重复定价，属于参数问题而不是 500
+      if ((error as { code?: string }).code === "23505") {
+        throw new AppError(ErrorCode.INVALID_PARAM, "price for this tier already exists", {
+          field: "mode",
+        });
+      }
+      throw error;
+    }
+  }
+
+  async deletePrice(id: string) {
+    let priceId: bigint;
+    try {
+      priceId = BigInt(id);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid price id", { field: "id" });
+    }
+    const [row] = await db.delete(modelPrices).where(eq(modelPrices.id, priceId)).returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "price not found");
+    return { ok: true, id: String(row.id) };
   }
 
   async listTasks(page?: number, pageSize?: number, status?: number) {

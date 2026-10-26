@@ -645,6 +645,27 @@ async function doBatchGenerate(): Promise<void> {
   await ed.generateSelected();
 }
 
+// ── 文本类派生（剧本优化 / 拆解分镜）────────────────────
+const deriveSubmitting = ref(false);
+
+/**
+ * 发起派生。
+ *
+ * `prompt` 只作为"对产出的额外要求"传过去，原文由后端从节点 `sourceText` 取——
+ * 前端不要把两者混在一起（混了就等于"用户写一句要求，我们把这句话当剧本送去优化"）。
+ */
+async function doDerive(kind: "script_optimization" | "storyboard_parse"): Promise<void> {
+  const n = selectedNode.value;
+  if (!n || deriveSubmitting.value) return;
+  deriveSubmitting.value = true;
+  try {
+    const extra = typeof n.params?.prompt === "string" ? n.params.prompt : undefined;
+    await ed.deriveText(n.id, kind, extra);
+  } finally {
+    deriveSubmitting.value = false;
+  }
+}
+
 // ── 批量下载（产物打包）──────────────────────────────────
 const downloadPacking = ref(false);
 /** 只有真的"出过产物"的节点才值得打包：全选一堆空节点只会得到"无可下载内容" */
@@ -1617,6 +1638,49 @@ function toggleSec(key: string): void {
                 @input="setP('shotCount', clampInt(onNum($event), 1))"
               />
             </div>
+
+            <!-- 文本类派生：剧本优化 / 拆解分镜（按次计价，金额由后台价目表决定） -->
+            <section class="cv-section insp-sec-derive">
+              <div class="cv-section__head">
+                <span>文本派生</span>
+                <span class="cv-tag">按次计价</span>
+              </div>
+              <div class="insp-derive-row">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="insp-derive-optimize"
+                  :disabled="deriveSubmitting"
+                  :loading="deriveSubmitting"
+                  @click="doDerive('script_optimization')"
+                >
+                  优化剧本
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="insp-derive-storyboard"
+                  :disabled="deriveSubmitting"
+                  @click="doDerive('storyboard_parse')"
+                >
+                  拆解分镜
+                </Button>
+              </div>
+              <p class="cv-hint">
+                用节点里的「原文 sourceText」作为输入；产出写回节点（结果在下方）。
+                单价由后台价目表控制，不在此写死。
+              </p>
+              <div v-if="sAt(['result_text'])" class="cv-field insp-field-resulttext">
+                <label>
+                  派生结果 result_text
+                  <span class="cv-tag">{{ sAt(["result_text"]).split("\n").length }} 行</span>
+                </label>
+                <textarea class="cv-textarea insp-result-text" readonly :value="sAt(['result_text'])" />
+              </div>
+              <p v-else-if="ed.selectedNode.value?.status === 2" class="cv-hint insp-derive-running">
+                正在运行…（完成后自动回填）
+              </p>
+            </section>
 
             <button class="insp-sec-toggle" type="button" @click="toggleSec('adv')">
               <CanvasIcon :name="secOpen.adv ? 'chevron-down' : 'chevron-right'" :size="13" />

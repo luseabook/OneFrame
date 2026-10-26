@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { CanvasNodeTasksService } from "./canvas-node-tasks.service";
+import { CanvasDeriveService } from "./canvas-derive.service";
 
 /**
  * 画布节点派生任务端点（F1 契约 §14.4 C6 / draft §3.4）
@@ -44,9 +45,27 @@ const batchBody = z.object({
 
 const syncBody = z.object({ node_ids: z.array(z.string().min(1)).max(500).default([]) });
 
+/**
+ * 文本类派生入参。
+ *
+ * `source_text` 可选：不传就用节点自身的原文（剧本/文本节点的 params）。
+ * 也就是说，正常路径是"选中节点点按钮"，而不是让前端把正文再搬一遍——
+ * 正文搬一遍就会出现"节点里改了、请求里还是旧的"这种不一致。
+ */
+const deriveBody = z.object({
+  // zod 只挡明显异常的巨型请求；"超 5 万字"的业务错误码（400104）由 service 给。
+  // 若 zod 也卡 50000，同一条规则会冒出两个码，前端没法统一处理。
+  source_text: z.string().max(200_000).optional(),
+  prompt: z.string().max(2_000).optional(),
+  model: z.string().min(1).optional(),
+});
+
 @Controller("canvas")
 export class CanvasNodeTasksController {
-  constructor(@Inject(CanvasNodeTasksService) private readonly svc: CanvasNodeTasksService) {}
+  constructor(
+    @Inject(CanvasNodeTasksService) private readonly svc: CanvasNodeTasksService,
+    @Inject(CanvasDeriveService) private readonly derive: CanvasDeriveService,
+  ) {}
 
   private ctx(req: AuthedRequest): { spaceId: string; userId: string } {
     if (!req.auth) {
@@ -120,5 +139,31 @@ export class CanvasNodeTasksController {
   async running(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string, @Query("status") _status?: string) {
     const c = this.ctx(req);
     return this.svc.syncNodeTaskStates(c.spaceId, canvasId, []);
+  }
+
+  /** 剧本优化（文本类派生，按次计价，价目由后台配置） */
+  @Post("canvases/:canvas_id/nodes/:node_id/script-optimization")
+  async scriptOptimization(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(deriveBody, body ?? {});
+    return this.derive.derive(c, canvasId, nodeId, "script_optimization", input);
+  }
+
+  /** 拆解分镜（文本类派生；结果由 worker 回写到节点 params.result_text） */
+  @Post("canvases/:canvas_id/nodes/:node_id/storyboard-parse")
+  async storyboardParse(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(deriveBody, body ?? {});
+    return this.derive.derive(c, canvasId, nodeId, "storyboard_parse", input);
   }
 }

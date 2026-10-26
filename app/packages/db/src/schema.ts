@@ -255,6 +255,17 @@ export const modelPrices = pgTable(
   },
   (t) => [
     uniqueIndex("uq_model_prices").on(t.modelId, t.mode, t.resolution, t.durationS),
+    /**
+     * 按次计价的档位单独约束。
+     *
+     * 为什么必须补这一条：`uq_model_prices` 含 `duration_s`，而 **PostgreSQL 把 NULL
+     * 视为互不相同**，所以 `duration_s IS NULL`（按次计价，如文本类）的同一档位可以被
+     * 重复插入任意多行；`credits.price()` 用 `limit` 之外没有排序，取到哪一条是随机的
+     * ——等于扣费金额不确定。部分索引才真正锁住"同一档位只有一条价"。
+     */
+    uniqueIndex("uq_model_prices_per_call")
+      .on(t.modelId, t.mode, t.resolution)
+      .where(sql`${t.durationS} is null`),
     index("idx_model_prices_model").on(t.modelId, t.mode),
   ],
 );

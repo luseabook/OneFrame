@@ -54,7 +54,20 @@ export const ImageMode = [
 ] as const;
 export const SpeechMode = ["tts", "voice_clone"] as const;
 
-export const GenerationMode = [...VideoMode, ...ImageMode, ...SpeechMode] as const;
+/**
+ * 文本模式（LLM 步骤，按次计价）。
+ *
+ * 为什么放进 mode 枚举而不是走 `scene`/`options`：这两个能力是**独立的任务形态**
+ * （输入一段文本、产出一段文本、按次计费），与"同一个 mode 换参数"的后处理
+ * （crop/panorama → sub_mode）不同。它们也需要进入 `tasks.mode` 才能在任务列表/
+ * 后台/对账里被单独统计。
+ *
+ * 计价单位：`model_prices.resolution` 存 `per_call`、`duration_s` 为 NULL；
+ * 金额由运营在 `/ops/admin/model-prices` 配置，**代码不写死任何金额**。
+ */
+export const TextMode = ["script_optimization", "storyboard_parse"] as const;
+
+export const GenerationMode = [...VideoMode, ...ImageMode, ...SpeechMode, ...TextMode] as const;
 export type GenerationMode = (typeof GenerationMode)[number];
 
 // 流水线 scene 键（api-spec §5）：仅两个；studio_asset_image 是 mode，不是 scene 键

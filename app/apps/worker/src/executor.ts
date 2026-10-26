@@ -191,6 +191,16 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
               result_uris: labeled.map((l) => l.uri).filter(Boolean),
             }
           : {}),
+        /**
+         * 文本类派生（剧本优化 / 拆解分镜）没有 uri，只有 text。
+         * 不写这一段的话，任务成功了但节点上什么都不显示——用户以为没跑成功。
+         */
+        ...(first?.text
+          ? {
+              result_text: first.text,
+              result_texts: labeled.map((l) => l.text).filter(Boolean),
+            }
+          : {}),
       };
       await tx
         .update(canvasNodes)

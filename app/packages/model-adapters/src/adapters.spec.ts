@@ -91,3 +91,43 @@ describe("MockAdapter", () => {
     expect((await rejected.poll(submitted.vendor_task_id!)).status).toBe("review_rejected");
   });
 });
+
+describe("MockAdapter 文本分支", () => {
+  /**
+   * LLM 适配器是同步的（`deepseek:chat` 的 submit 直接返回 sync_results）。
+   * mock 必须照同一形状返回文本：否则本地/E2E 里"剧本优化"会拿到一个 .mp4 的
+   * mock 结果——形状错了，前端要文本却收到视频 URI，看起来像功能坏了。
+   */
+  const textRequest = (mode: string): NormalizedGenRequest => ({
+    task_id: "t-text",
+    model: { name: "deepseek-v4-pro", vendor: "deepseek", adapter_code: "deepseek:chat" },
+    request: {
+      mode: mode as NormalizedGenRequest["request"]["mode"],
+      model: "deepseek-v4-pro",
+      scene: null,
+      input: { prompt: "场景一 · 夜 · 内\n林晚：这件事没那么简单。", reference_uris: [] },
+      options: { ratio: "9:16", resolution: "per_call", duration: 5, count: 1 },
+    },
+  });
+
+  it("同步返回文本结果（无 vendor_task_id），且按 mode 给出不同结构", async () => {
+    const mock = new MockAdapter();
+    const optimized = await mock.submit(textRequest("script_optimization"));
+    expect(optimized.vendor_task_id).toBeUndefined();
+    expect(optimized.sync_results?.[0]?.text).toContain("优化后的剧本");
+    expect(optimized.sync_results?.[0]?.uri).toBe("");
+
+    const storyboard = await mock.submit(textRequest("storyboard_parse"));
+    expect(storyboard.sync_results?.[0]?.text).toContain("分镜清单");
+  });
+
+  it("媒体类仍走异步 mock（返回 vendor_task_id 而不是同步结果）", async () => {
+    const mock = new MockAdapter();
+    const submitted = await mock.submit({
+      ...textRequest("text2image"),
+      model: { name: "tgi-2", vendor: "volcengine", adapter_code: "volcengine:image" },
+    });
+    expect(submitted.vendor_task_id).toBeTruthy();
+    expect(submitted.sync_results).toBeUndefined();
+  });
+});
