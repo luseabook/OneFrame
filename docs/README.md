@@ -109,6 +109,45 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v1.7 · agent 对话域落地 · 2026-10-26）
+
+**范围**：按迁移顺序（`cam 0013 → canvas 0014 → agent 0015`）推进到 `agent` 域。
+把"画布能出片"再推进一步：**画布内 Agent 对话面板**（参照站右侧那一整块此前缺失）+ 对话式投递。
+
+| 交付 | 内容 | 规模 |
+|---|---|---|
+| 后端 | 迁移 `0015_agent`（4 表 + `tasks` 两列）、`agent` 域 7 service / 2 controller | 20 端点 |
+| 后端 | SSE 通道实装：事件落库 + `last_stream_id` 增量重放 + 心跳 + 任务流自动收尾 | 2 条流 |
+| 后端 | `stream-token`（EventSource 无法带头）+ `@SkipEnvelope` 信封闭环 | 1 端点 |
+| 前端 | 右侧 dock 改为页签（属性 / Agent）；`CanvasAgentPanel` + `useCanvasAgent` | 3 文件 |
+| 验收 | `apps/api/test/agent.spec.ts` 13 例（含真实 SSE 连接断言） | +13 |
+
+| 文档 | 版本 | 变更摘要 |
+|---|---|---|
+| 02-architecture/api-spec.md | v2.3 | 新增 §14.9（`agent` 本体 9 + C7 族 11，含"未实现与理由"）；§14.6 修正 stream-token 形态 |
+| 02-architecture/database.md | v2.1 | §12.2 按实际迁移定稿（3 处增量列 + 去掉 `turn_no/status` 的理由）；§12.5 标 0015 已落地 |
+| README.md | v1.7 | 本条变更登记 |
+
+**本批的 4 个设计判断（值得留档）**：
+1. **`agent_sessions` 合表**：独立创作 Agent 与画布内对话是同一台对话引擎的两种作用域，
+   用 `scope` 区分而不是两套表/两套流式协议——分叉的流式协议最后一定会行为不一致。
+2. **SSE 是加速器不是状态存储**（ADR-012）：消息与事件都落库，REST 永远是权威；
+   正因如此"消息与事件两次写入"的窗口是可接受的，不必为此把两张表塞进一个事务。
+3. **游标语义自己定义**：`after_event_id` 做成不透明游标（=`seq`），保持参数名与参照站对齐，
+   同时避免为分页引入映射表；SSE 续传另用真实 `stream_id`。
+4. **stream-token 从"一次性"改为"120s 可复用 + 绑定会话"**：一次性会让每次断线重连必然 401，
+   与 ADR-012 的"可重连、可降级"直接冲突；偏离处已在 §14.6 写明原因。
+
+**本批修掉的真实缺陷**：
+1. `generationRequestSchema` 默认 `resolution: "720p"`（视频档位）→ Agent 投递图像模型必报
+   `resolution 720p not supported`；改为**从模型目录纠正档位**（与 canvas 节点任务同一个坑）。
+2. `AuthGuard` 加 stream-token 分支时最初把"普通请求缺头"也报成 `missing stream token`，
+   会让既有契约文案漂移（已改回 `missing bearer token`）。
+3. `agent_message_bindings` 与 docs 定稿名 `agent_message_node_bindings` 不一致 →
+   **回滚 0015、按文档名重新生成**（文档是契约源，不能反向将就实现）。
+4. HITL 决策按钮最初要求 `content` 非空 → 前端只能伪造一句"同意"写进会话记录；
+   改为 `decision` 可单独提交、正文可空。
+
 ## 变更登记（v1.6 · canvas 域逐项补齐 · 2026-10-26）
 
 **范围**：把 `/canvas` 从"能摆节点、能保存"推进到"能出片、能复用、能协作"。
