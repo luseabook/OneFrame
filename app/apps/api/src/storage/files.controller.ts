@@ -18,6 +18,9 @@ const CONTENT_TYPES: Record<string, string> = {
   m4a: "audio/mp4",
   txt: "text/plain; charset=utf-8",
   json: "application/json; charset=utf-8",
+  // csv 必须有：团队流水导出走现签链接下载。缺了会退化成 application/octet-stream，
+  // 浏览器可能内联展示乱码或另存成 `.csv.txt`，用户以为导出坏了
+  csv: "text/csv; charset=utf-8",
   // zip 必须有：画布批量下载的产物就是 zip。缺了会退化成 application/octet-stream，
   // 浏览器不再按压缩包处理（部分浏览器直接内联展示乱码），用户以为下载坏了
   zip: "application/zip",

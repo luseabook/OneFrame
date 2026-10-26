@@ -75,6 +75,25 @@ const changeGroupBody = z.object({
   user_ids: z.array(z.string().min(1)).min(1).max(200),
   group_id: z.string().nullable(),
 });
+const teamEditBody = z.object({
+  name: z.string().min(1).max(40).optional(),
+  max_seats: z.number().int().min(1).max(200).optional(),
+  film_enabled: z.boolean().optional(),
+  agent_whitelist: z.boolean().optional(),
+});
+const nicknameBody = z.object({ nickname: z.string().min(1).max(40) });
+const batchAllocateBody = z.object({
+  items: z
+    .array(
+      z.object({
+        user_id: z.string().min(1),
+        amount: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(50),
+  memo: z.string().max(200).optional(),
+});
 
 @Controller("cam")
 export class TeamController {
@@ -107,6 +126,19 @@ export class TeamController {
   @Get("team/info")
   async info(@Req() req: AuthedRequest) {
     return this.team.info((await this.ctx(req)).spaceId);
+  }
+
+  /**
+   * 改团队设置（对齐参照 team/edit）。
+   *
+   * 只有团队空间能改；席位不能低于现有成员数（两条约束都在 service 里，
+   * 控制器只做"是不是管理员"这一层）。
+   */
+  @Patch("team/info")
+  async updateInfo(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "edit team");
+    return this.team.updateTeam(c.spaceId, parseOrThrow(teamEditBody, body ?? {}));
   }
 
   /** 权限探测（对齐参照 cam/permission/user）：返回当前用户的角色与特权 */
@@ -149,6 +181,13 @@ export class TeamController {
     return this.team.deleteGroup(c.spaceId, groupId);
   }
 
+  /** 分组统计：成员数 / 任务数 / 已消耗 / 已分配（对齐参照 group/stats） */
+  @Get("team/group/:group_id/stats")
+  async groupStats(@Req() req: AuthedRequest, @Param("group_id") groupId: string) {
+    const c = await this.ctx(req);
+    return this.team.groupStats(c.spaceId, groupId);
+  }
+
   // ── 角色 ────────────────────────────────────────────────
   @Get("role/list")
   async roles(@Req() req: AuthedRequest) {
@@ -181,6 +220,22 @@ export class TeamController {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "update member");
     return this.team.updateMember(c.spaceId, userId, parseOrThrow(memberUpdate, body));
+  }
+
+  /** 单成员详情（对齐参照 member/:id） */
+  @Get("team/member/:user_id")
+  async memberDetail(@Req() req: AuthedRequest, @Param("user_id") userId: string) {
+    const c = await this.ctx(req);
+    return this.team.memberDetail(c.spaceId, userId);
+  }
+
+  /** 改成员昵称：本人可改自己，管理员可改任一成员 */
+  @Patch("team/member/:user_id/name")
+  async updateMemberName(@Req() req: AuthedRequest, @Param("user_id") userId: string, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    if (c.userId !== userId) this.team.requirePrivilege(c, "rename member");
+    const input = parseOrThrow(nicknameBody, body);
+    return this.team.updateMemberNickname(c.spaceId, userId, input.nickname);
   }
 
   @Delete("team/member/:user_id")
@@ -240,6 +295,14 @@ export class TeamController {
     return this.team.recover(c.spaceId, c.userId, parseOrThrow(recoverBody, body));
   }
 
+  /** 批量分配（≤50，逐条独立；一条余额不足不连累其它） */
+  @Post("team/batch-points-allocation")
+  async batchAllocate(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "allocate points");
+    return this.team.batchAllocate(c.spaceId, c.userId, parseOrThrow(batchAllocateBody, body));
+  }
+
   @Get("team/points-flow/list")
   async pointsFlows(
     @Req() req: AuthedRequest,
@@ -265,6 +328,27 @@ export class TeamController {
   async ranking(@Req() req: AuthedRequest, @Query("limit") limit?: string) {
     const c = await this.ctx(req);
     return this.team.pointsRanking(c.spaceId, Number(limit ?? 20));
+  }
+
+  /**
+   * 流水导出（CSV，对齐参照 points-flow/export）：返回现签链接，1h 有效。
+   * 筛选参数与 list 完全一致（`kind`/`target_user_id`/`group_id`/`op_user_id`）。
+   */
+  @Get("team/points-flow/export")
+  async exportPointsFlows(
+    @Req() req: AuthedRequest,
+    @Query("kind") kind?: string,
+    @Query("target_user_id") targetUserId?: string,
+    @Query("group_id") groupId?: string,
+    @Query("op_user_id") opUserId?: string,
+  ) {
+    const c = await this.ctx(req);
+    return this.team.exportPointsFlows(c.spaceId, {
+      kind,
+      target_user_id: targetUserId,
+      group_id: groupId,
+      op_user_id: opUserId,
+    });
   }
 
   // ── 成员↔项目 ───────────────────────────────────────────

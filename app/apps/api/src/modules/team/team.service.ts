@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   creditAccounts,
@@ -6,6 +6,7 @@ import {
   identities,
   spaceMembers,
   spaces,
+  tasks,
   teamGroups,
   teamMemberProjects,
   teamRoles,
@@ -13,6 +14,7 @@ import {
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { hashPhone } from "../auth/crypto";
+import { StorageService } from "../../storage/storage.service";
 
 /**
  * 团队（cam）域服务 —— F1 契约 §12.3 / ADR-010 / ADR-011
@@ -66,6 +68,8 @@ export interface TeamContext {
 
 @Injectable()
 export class TeamService {
+  constructor(@Inject(StorageService) private readonly storage: StorageService) {}
+
   /** 解析并校验"当前用户在该 space 的团队身份"；非成员→403 */
   async requireMember(spaceId: string, userId: string): Promise<TeamContext> {
     const [row] = await db
@@ -375,6 +379,51 @@ export class TeamService {
     };
   }
 
+  // ── 团队设置（对齐参照 team/edit）──────────────────────────
+  /**
+   * 改团队名 / 席位上限 / 功能开关。
+   *
+   * 两条硬约束：
+   * 1. **只有团队空间能改**：个人空间（type=1）也走 `/cam/team/info` 读，
+   *    但改名/席位对它没有意义；不挡住就会出现"把个人空间改成 5 席位团队"的脏数据。
+   * 2. **席位不能低于现有成员数**：否则下一次邀请会被自己的配置锁死，
+   *    而且列表里"已用 4 / 上限 3"是自相矛盾的状态。
+   */
+  async updateTeam(
+    spaceId: string,
+    input: { name?: string; max_seats?: number; film_enabled?: boolean; agent_whitelist?: boolean },
+  ) {
+    const [space] = await db.select().from(spaces).where(eq(spaces.id, BigInt(spaceId)));
+    if (!space) throw new AppError(ErrorCode.NOT_FOUND, "space not found");
+    if (space.type !== 2) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "not a team space", { field: "space_id" });
+    }
+    if (input.max_seats !== undefined) {
+      const [cnt] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(spaceMembers)
+        .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.status, 1)));
+      const used = cnt?.n ?? 0;
+      if (input.max_seats < used) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "max_seats cannot be lower than current members", {
+          field: "max_seats",
+          used,
+        });
+      }
+    }
+    await db
+      .update(spaces)
+      .set({
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.max_seats !== undefined ? { maxSeats: input.max_seats } : {}),
+        ...(input.film_enabled !== undefined ? { filmEnabled: input.film_enabled ? 1 : 0 } : {}),
+        ...(input.agent_whitelist !== undefined ? { agentWhitelist: input.agent_whitelist ? 1 : 0 } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(spaces.id, space.id));
+    return this.info(spaceId);
+  }
+
   // ── 分组 ────────────────────────────────────────────────
   async listGroups(spaceId: string) {
     const rows = await db
@@ -455,6 +504,54 @@ export class TeamService {
     return { ok: true };
   }
 
+  /**
+   * 分组统计（对齐参照 group/stats）：成员数 / 任务数 / 已消耗 / 已分配。
+   *
+   * `points_used` 用该组成员在**本团队空间**下已结算的任务积分之和——
+   * 不用个人空间的余额，否则"组消耗"会把成员自己在别处的花费算进来。
+   */
+  async groupStats(spaceId: string, groupId: string) {
+    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, BigInt(groupId)));
+    if (!group || String(group.spaceId) !== spaceId) {
+      throw new AppError(ErrorCode.NOT_FOUND, "group not found");
+    }
+    const members = await db
+      .select({ userId: spaceMembers.userId })
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.groupId, group.id)));
+    const memberIds = members.map((m) => m.userId);
+    let taskCount = 0;
+    let pointsUsed = 0;
+    if (memberIds.length > 0) {
+      const [agg] = await db
+        .select({
+          n: sql<number>`count(*)::int`,
+          used: sql<number>`coalesce(sum(credits_settled), 0)::int`,
+        })
+        .from(tasks)
+        .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.userId, memberIds)));
+      taskCount = agg?.n ?? 0;
+      pointsUsed = agg?.used ?? 0;
+    }
+    const [alloc] = await db
+      .select({ total: sql<number>`coalesce(sum(-delta), 0)::int` })
+      .from(creditFlows)
+      .where(
+        and(
+          eq(creditFlows.spaceId, BigInt(spaceId)),
+          eq(creditFlows.groupId, group.id),
+          eq(creditFlows.kind, "team_allocate_out"),
+        ),
+      );
+    return {
+      group_id: String(group.id),
+      member_count: memberIds.length,
+      task_count: taskCount,
+      points_used: pointsUsed,
+      points_allocated: alloc?.total ?? 0,
+    };
+  }
+
   // ── 角色 ────────────────────────────────────────────────
   async listRoles(spaceId: string) {
     const rows = await db.select().from(teamRoles).where(eq(teamRoles.spaceId, BigInt(spaceId)));
@@ -508,24 +605,58 @@ export class TeamService {
       .offset((p - 1) * ps);
     const [cnt] = await db.select({ n: sql<number>`count(*)::int` }).from(spaceMembers).where(where);
     return {
-      list: rows.map((r) => ({
-        user_id: String(r.userId),
-        role: r.role,
-        role_code: r.roleCode,
-        role_level: r.roleLevel,
-        group_id: r.groupId ? String(r.groupId) : null,
-        nickname: r.nickname,
-        account: r.account,
-        remark: r.remark,
-        status: r.status,
-        // 未回收的已分配额上限（**不是余额**，§12.3.1）
-        credits_quota: r.creditsQuota,
-        joined_at: r.joinedAt?.toISOString() ?? null,
-      })),
+      list: rows.map((r) => this.toMemberDto(r)),
       total: cnt?.n ?? 0,
       page: p,
       page_size: ps,
     };
+  }
+
+  /** 成员行 → 契约 DTO（列表与详情共用，避免两处字段漂移） */
+  private toMemberDto = (r: typeof spaceMembers.$inferSelect) => ({
+    user_id: String(r.userId),
+    role: r.role,
+    role_code: r.roleCode,
+    role_level: r.roleLevel,
+    group_id: r.groupId ? String(r.groupId) : null,
+    nickname: r.nickname,
+    account: r.account,
+    remark: r.remark,
+    status: r.status,
+    // 未回收的已分配额上限（**不是余额**，§12.3.1）
+    credits_quota: r.creditsQuota,
+    joined_at: r.joinedAt?.toISOString() ?? null,
+  });
+
+  /** 单成员详情（对齐参照 member/:id） */
+  async memberDetail(spaceId: string, userId: string) {
+    const [row] = await db
+      .select()
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(userId))));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "member not found");
+    return this.toMemberDto(row);
+  }
+
+  /**
+   * 改成员昵称（团队内展示名）。
+   *
+   * 与 `updateMember` 分开的理由：那边改的是角色/分组/状态（管理员操作），
+   * 昵称是成员自己的展示名——混在一个接口里会让"我只想改个名字"也要求管理员权限。
+   */
+  async updateMemberNickname(spaceId: string, userId: string, nickname: string) {
+    const name = nickname.trim();
+    if (!name) throw new AppError(ErrorCode.INVALID_PARAM, "nickname required", { field: "nickname" });
+    const [row] = await db
+      .select()
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(userId))));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "member not found");
+    await db
+      .update(spaceMembers)
+      .set({ nickname: name, updatedAt: new Date() })
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(userId))));
+    return { ok: true, nickname: name };
   }
 
   async updateMember(
@@ -779,14 +910,67 @@ export class TeamService {
     });
   }
 
-  /** 团队积分流水（含 8 个筛选维度，对应参照 points-flow/list） */
-  async listPointsFlows(
+  /**
+   * 批量分配（≤50）：**逐条独立**，一条失败不连累其它。
+   *
+   * 为什么不包成一个事务：批量分配的语义是"能分的都分出去"，
+   * 包事务会出现"第 12 条余额不足 → 前 11 条已分配全部回滚"，
+   * 与用户意图相反（与画布 batch-node-tasks 同一个判断）。
+   */
+  async batchAllocate(
     spaceId: string,
-    opts: { page?: number; page_size?: number; kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+    opUserId: string,
+    input: { items: Array<{ user_id: string; amount: number }>; memo?: string },
   ) {
-    const p = Math.max(1, opts.page ?? 1);
-    const ps = Math.min(100, Math.max(1, opts.page_size ?? 20));
-    // 只看团队相关流水（团队出/入 + 属于本 team 的分配记录）
+    if (input.items.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "items must not be empty", { field: "items" });
+    }
+    if (input.items.length > 50) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "items must be <= 50", { field: "items" });
+    }
+    const results: Array<{
+      user_id: string;
+      ok: boolean;
+      code?: number;
+      msg?: string;
+      amount?: number;
+      team_balance?: number;
+      member_balance?: number;
+    }> = [];
+    let succeeded = 0;
+    for (const item of input.items) {
+      try {
+        const r = await this.allocate(spaceId, opUserId, {
+          user_id: item.user_id,
+          amount: item.amount,
+          ...(input.memo ? { memo: input.memo } : {}),
+        });
+        results.push({
+          user_id: item.user_id,
+          ok: true,
+          amount: item.amount,
+          team_balance: r.team_balance,
+          member_balance: r.member_balance,
+        });
+        succeeded += 1;
+      } catch (e) {
+        const err = e as { code?: number; message?: string };
+        results.push({
+          user_id: item.user_id,
+          ok: false,
+          code: err.code ?? ErrorCode.INTERNAL,
+          msg: err.message ?? "allocate failed",
+        });
+      }
+    }
+    return { items: results, succeeded, failed: results.length - succeeded };
+  }
+
+  /** 流水筛选条件（列表与导出共用，避免两边筛选语义漂移） */
+  private pointsFlowWhere(
+    spaceId: string,
+    opts: { kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+  ) {
     const cond = [
       eq(creditFlows.spaceId, BigInt(spaceId)),
       sql`${creditFlows.kind} in ('team_allocate_out','team_allocate_in','team_recover_out','team_recover_in')`,
@@ -795,7 +979,19 @@ export class TeamService {
     if (opts.target_user_id) cond.push(eq(creditFlows.refUserId, BigInt(opts.target_user_id)));
     if (opts.group_id) cond.push(eq(creditFlows.groupId, BigInt(opts.group_id)));
     if (opts.op_user_id) cond.push(eq(creditFlows.opUserId, BigInt(opts.op_user_id)));
-    const where = and(...cond);
+    return and(...cond);
+  }
+
+  /**
+   * 团队积分流水（含 8 个筛选维度，对应参照 points-flow/list）
+   */
+  async listPointsFlows(
+    spaceId: string,
+    opts: { page?: number; page_size?: number; kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+  ) {
+    const p = Math.max(1, opts.page ?? 1);
+    const ps = Math.min(100, Math.max(1, opts.page_size ?? 20));
+    const where = this.pointsFlowWhere(spaceId, opts);
     const rows = await db
       .select()
       .from(creditFlows)
@@ -821,6 +1017,76 @@ export class TeamService {
       total: cnt?.n ?? 0,
       page: p,
       page_size: ps,
+    };
+  }
+
+  /**
+   * 流水导出（CSV，对齐参照 points-flow/export）。
+   *
+   * 返回**现签链接**而不是直接吐二进制：导出在用户认知里是"生成一个可下载文件"，
+   * 可能过一会儿才点；链接 1h 有效，文件留在存储里可重复取。
+   * 单次上限 5000 行——团队流水是运营报表而非审计全量，超过请用筛选分批导。
+   */
+  async exportPointsFlows(
+    spaceId: string,
+    opts: { kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+  ) {
+    const where = this.pointsFlowWhere(spaceId, opts);
+    const rows = await db
+      .select()
+      .from(creditFlows)
+      .where(where)
+      .orderBy(desc(creditFlows.createdAt))
+      .limit(5000);
+    const esc = (v: unknown): string => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      "id",
+      "kind",
+      "delta",
+      "balance_after",
+      "target_user_id",
+      "from_space_id",
+      "to_space_id",
+      "op_user_id",
+      "group_id",
+      "memo",
+      "created_at",
+    ];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push(
+        [
+          String(r.id),
+          r.kind,
+          r.delta,
+          r.balanceAfter,
+          r.refUserId ? String(r.refUserId) : "",
+          String(r.spaceId),
+          r.refSpaceId ? String(r.refSpaceId) : "",
+          r.opUserId ? String(r.opUserId) : "",
+          r.groupId ? String(r.groupId) : "",
+          r.memo ?? "",
+          r.createdAt.toISOString(),
+        ]
+          .map(esc)
+          .join(","),
+      );
+    }
+    // BOM：Excel 直接双击打开不乱码（与成员导出一致）
+    const csv = `\uFEFF${lines.join("\n")}`;
+    const stamp = Date.now();
+    const key = `u/${spaceId}/exports/points-flow-${stamp}.csv`;
+    await this.storage.put(key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
+    const ttl = 3600;
+    const url = await this.storage.signDownload(key, ttl);
+    return {
+      file_uri: url,
+      filename: `points-flow-${stamp}.csv`,
+      expires_at: new Date(Date.now() + ttl * 1000).toISOString(),
+      row_count: rows.length,
     };
   }
 

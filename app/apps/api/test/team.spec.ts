@@ -354,4 +354,113 @@ describe("team (cam) e2e", () => {
     expect(csv.split("\n")[0]).toContain("role_code");
     expect(csv.split("\n").length).toBeGreaterThanOrEqual(3); // header + owner + m1
   });
+
+  it("团队设置：改名/席位/开关生效；席位不得低于现有成员数；个人空间不可改", async () => {
+    const owner = await loginNewUser("85");
+    const second = await loginNewUser("86");
+    const { teamSpaceId } = await createTeam(owner.userId);
+    const { TeamService } = await import("../src/modules/team/team.service");
+    const svc = app.get(TeamService);
+
+    const patched = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: "新团队名", max_seats: 5, film_enabled: true },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(patched.code).toBe(0);
+    expect(patched.data.name).toBe("新团队名");
+    expect(patched.data.max_seats).toBe(5);
+    expect(patched.data.film_enabled).toBe(true);
+
+    // 先有 2 个成员，再把席位压到 1 → 400101（否则会出现"已用 2 / 上限 1"的自相矛盾状态）
+    await svc.addMembers(teamSpaceId, owner.userId, { members: [{ user_id: second.userId }] });
+    const tooLow = await inject("PATCH", "/cam/team/info", { max_seats: 1 }, owner.token, teamSpaceId);
+    expect(tooLow.code).toBe(400101);
+
+    // 个人空间不能当团队改（不带 X-Space-Id 时上下文是 token 里的个人空间）
+    const personal = await inject("PATCH", "/cam/team/info", { name: "个人空间改名" }, owner.token);
+    expect(personal.code).toBe(400101);
+  });
+
+  it("分组统计/成员详情/改名/批量分配/流水导出", async () => {
+    const owner = await loginNewUser("87");
+    const m1 = await loginNewUser("88");
+    const { teamSpaceId } = await createTeam(owner.userId);
+    const { TeamService } = await import("../src/modules/team/team.service");
+    const svc = app.get(TeamService);
+    await svc.addMembers(teamSpaceId, owner.userId, { members: [{ user_id: m1.userId, role_code: "animator" }] });
+    const group = await svc.createGroup(teamSpaceId, { name: "声音组" });
+    await svc.changeGroup(teamSpaceId, { user_ids: [m1.userId], group_id: group.id });
+
+    const detail = await inject("GET", `/cam/team/member/${m1.userId}`, undefined, owner.token, teamSpaceId);
+    expect(detail.code).toBe(0);
+    expect(detail.data.user_id).toBe(m1.userId);
+    expect(detail.data.role_code).toBe("animator");
+
+    // 改名：管理员可改他人；成员可改自己；成员改 owner 被拒（403101）
+    const renamed = await inject(
+      "PATCH",
+      `/cam/team/member/${m1.userId}/name`,
+      { nickname: "配音小王" },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(renamed.code).toBe(0);
+    const self = await inject(
+      "PATCH",
+      `/cam/team/member/${m1.userId}/name`,
+      { nickname: "小王" },
+      m1.token,
+      teamSpaceId,
+    );
+    expect(self.code).toBe(0);
+    const denied = await inject(
+      "PATCH",
+      `/cam/team/member/${owner.userId}/name`,
+      { nickname: "hack" },
+      m1.token,
+      teamSpaceId,
+    );
+    expect(denied.code).toBe(403101);
+
+    // 批量分配：一条成功 + 一条失败（逐条独立，不整批回滚）
+    const batch = await inject(
+      "POST",
+      "/cam/team/batch-points-allocation",
+      {
+        items: [
+          { user_id: m1.userId, amount: 5 },
+          { user_id: "999999", amount: 5 },
+        ],
+        memo: "批量分配",
+      },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(batch.code).toBe(0);
+    expect(batch.data.succeeded).toBe(1);
+    expect(batch.data.failed).toBe(1);
+    expect(batch.data.items.find((i: { user_id: string }) => i.user_id === "999999")?.ok).toBe(false);
+
+    // 分组统计：成员 1；分配流水落在该组上（allocate 默认取成员所在组）
+    const stats = await inject("GET", `/cam/team/group/${group.id}/stats`, undefined, owner.token, teamSpaceId);
+    expect(stats.code).toBe(0);
+    expect(stats.data.member_count).toBe(1);
+    expect(stats.data.points_allocated).toBe(5);
+
+    // 流水导出：返回现签链接 + 行数（链接所指内容由 storage/files 契约保证）
+    const exp = await inject(
+      "GET",
+      "/cam/team/points-flow/export?kind=team_allocate_out",
+      undefined,
+      owner.token,
+      teamSpaceId,
+    );
+    expect(exp.code).toBe(0);
+    expect(String(exp.data.file_uri)).toContain("/files/local");
+    expect(exp.data.row_count).toBeGreaterThanOrEqual(1);
+    expect(String(exp.data.filename)).toMatch(/\.csv$/);
+  });
 });

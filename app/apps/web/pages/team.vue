@@ -194,9 +194,10 @@ async function loadPoints(): Promise<void> {
 }
 
 watch(tab, async (v) => {
-  if (v === "points" && flows.value.length === 0) {
+  if (v === "points") {
     try {
-      await loadPoints();
+      if (flows.value.length === 0) await loadPoints();
+      await loadGroupStats();
     } catch (e) {
       error.value = (e as Error).message;
     }
@@ -384,6 +385,112 @@ async function batchGroup(groupId: string): Promise<void> {
   }
 }
 
+// ── 团队设置（团队名 / 席位 / 功能开关）──────────────────
+const teamEditOpen = ref(false);
+const teamEditForm = ref({ name: "", max_seats: "5", film_enabled: false, agent_whitelist: false });
+function openTeamEdit(): void {
+  const t = team.value;
+  if (!t) return;
+  teamEditForm.value = {
+    name: t.name,
+    max_seats: String(t.max_seats),
+    film_enabled: t.film_enabled,
+    agent_whitelist: t.agent_whitelist,
+  };
+  teamEditOpen.value = true;
+}
+async function saveTeamEdit(): Promise<void> {
+  if (!teamEditForm.value.name.trim()) return flash("请输入团队名称");
+  busy.value = true;
+  error.value = "";
+  try {
+    team.value = await api.patch<TeamInfo>("/cam/team/info", {
+      name: teamEditForm.value.name.trim(),
+      max_seats: Number(teamEditForm.value.max_seats),
+      film_enabled: teamEditForm.value.film_enabled,
+      agent_whitelist: teamEditForm.value.agent_whitelist,
+    });
+    teamEditOpen.value = false;
+    flash("团队设置已保存");
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ── 批量分配（选中成员 × 统一数量，逐条独立）──────────────
+const batchAllocOpen = ref(false);
+const batchAllocAmount = ref("10");
+const batchAllocMemo = ref("");
+function openBatchAlloc(): void {
+  if (selected.value.length === 0) return flash("请先选择成员");
+  batchAllocAmount.value = "10";
+  batchAllocMemo.value = "";
+  batchAllocOpen.value = true;
+}
+async function doBatchAlloc(): Promise<void> {
+  const amount = Number(batchAllocAmount.value);
+  if (!Number.isInteger(amount) || amount <= 0) return flash("请输入正整数积分");
+  busy.value = true;
+  error.value = "";
+  try {
+    const res = await api.post<{ succeeded: number; failed: number }>("/cam/team/batch-points-allocation", {
+      items: selected.value.map((id) => ({ user_id: id, amount })),
+      ...(batchAllocMemo.value ? { memo: batchAllocMemo.value } : {}),
+    });
+    batchAllocOpen.value = false;
+    selected.value = [];
+    await Promise.all([loadMembers(), loadPoints()]);
+    await bootstrapTeamInfo();
+    flash(`批量分配完成：成功 ${res.succeeded} 人${res.failed > 0 ? `，失败 ${res.failed} 人` : ""}`);
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ── 流水导出（现签链接，1h 有效）─────────────────────────
+const flowExporting = ref(false);
+async function exportFlows(): Promise<void> {
+  flowExporting.value = true;
+  error.value = "";
+  try {
+    const res = await api.get<{ file_uri: string; filename: string; row_count: number }>(
+      "/cam/team/points-flow/export",
+    );
+    if (res.row_count === 0) {
+      flash("暂无可导出的团队流水");
+      return;
+    }
+    window.open(res.file_uri, "_blank");
+    flash(`已生成 ${res.filename}（${res.row_count} 行）`);
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    flowExporting.value = false;
+  }
+}
+
+// ── 分组统计（进积分页时按需拉，失败不影响主列表）────────
+interface GroupStat { member_count: number; task_count: number; points_used: number; points_allocated: number }
+const groupStats = ref<Record<string, GroupStat>>({});
+async function loadGroupStats(): Promise<void> {
+  if (groups.value.length === 0) return;
+  try {
+    const rows = await Promise.all(
+      groups.value.map(async (g) => {
+        const s = await api.get<GroupStat>(`/cam/team/group/${g.id}/stats`);
+        return [g.id, s] as const;
+      }),
+    );
+    groupStats.value = Object.fromEntries(rows);
+  } catch {
+    /* 统计是辅助信息，拉取失败不该打断页面 */
+  }
+}
+
 /** 导出成员 CSV */
 function exportMembers(): void {
   const token = auth.state.value.accessToken;
@@ -440,6 +547,7 @@ onMounted(bootstrap);
         <Button v-if="team?.type === 2" :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
         <Button v-if="canManage" :disabled="busy" @click="inviteOpen = true">邀请成员</Button>
         <Button :disabled="!canManage || busy" @click="groupOpen = true">新建分组</Button>
+        <Button v-if="canManage && team?.type === 2" :disabled="busy" @click="openTeamEdit">团队设置</Button>
         <Button v-if="canManage" :disabled="busy" @click="exportMembers">导出 CSV</Button>
         <Button :disabled="busy" @click="bootstrap">刷新</Button>
       </div>
@@ -460,6 +568,7 @@ onMounted(bootstrap);
         <span>已选 {{ selected.length }} 人</span>
         <Button :disabled="busy" @click="batchStatus(1)">启用</Button>
         <Button :disabled="busy" @click="batchStatus(2)">停用</Button>
+        <Button :disabled="busy" @click="openBatchAlloc">批量分配</Button>
         <SelectField
           class="tm-batch-group"
           label=""
@@ -557,7 +666,12 @@ onMounted(bootstrap);
 
       <div class="tm-split">
         <div>
-          <h2 class="tm-h2">流水（最近 50 条，共 {{ flowTotal }}）</h2>
+          <div class="tm-h2-row">
+            <h2 class="tm-h2">流水（最近 50 条，共 {{ flowTotal }}）</h2>
+            <Button :disabled="flowExporting" size="sm" variant="secondary" @click="exportFlows">
+              {{ flowExporting ? "生成中…" : "导出流水" }}
+            </Button>
+          </div>
           <table class="tm-table">
             <thead><tr><th>时间</th><th>类型</th><th>变动</th><th>成员</th><th>备注</th></tr></thead>
             <tbody>
@@ -583,6 +697,27 @@ onMounted(bootstrap);
             <li v-if="ranking.length === 0" class="tm-empty">暂无数据</li>
           </ol>
         </div>
+      </div>
+      <div class="tm-cards">
+        <Card class="tm-card tm-group-stats">
+          <h2 class="tm-h2">分组统计</h2>
+          <p class="tm-hint">成员数 / 该组在本团队空间的任务数 / 已消耗积分 / 已分配积分（按流水统计）。</p>
+          <table class="tm-table">
+            <thead>
+              <tr><th>分组</th><th>成员</th><th>任务</th><th>已消耗</th><th>已分配</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="g in groups" :key="g.id">
+                <td>{{ g.name }}</td>
+                <td class="tm-num">{{ groupStats[g.id]?.member_count ?? "—" }}</td>
+                <td class="tm-num">{{ groupStats[g.id]?.task_count ?? "—" }}</td>
+                <td class="tm-num">{{ groupStats[g.id]?.points_used ?? "—" }}</td>
+                <td class="tm-num">{{ groupStats[g.id]?.points_allocated ?? "—" }}</td>
+              </tr>
+              <tr v-if="groups.length === 0"><td colspan="5" class="tm-empty">还没有分组</td></tr>
+            </tbody>
+          </table>
+        </Card>
       </div>
     </section>
 
@@ -662,6 +797,36 @@ onMounted(bootstrap);
       </template>
     </Modal>
 
+    <!-- 团队设置弹窗 -->
+    <Modal :open="teamEditOpen" title="团队设置" @close="teamEditOpen = false">
+      <TextField v-model="teamEditForm.name" class="tm-team-name" label="团队名称" />
+      <TextField v-model="teamEditForm.max_seats" class="tm-team-seats" label="席位上限" type="number" />
+      <p class="tm-hint">席位不能低于当前成员数（{{ team?.used_seats ?? 0 }}），调低会被拒绝。</p>
+      <label class="tm-check-row">
+        <input v-model="teamEditForm.film_enabled" type="checkbox" />
+        <span>开启影视版（film_enabled）</span>
+      </label>
+      <label class="tm-check-row">
+        <input v-model="teamEditForm.agent_whitelist" type="checkbox" />
+        <span>开启创作 Agent（agent_whitelist）</span>
+      </label>
+      <template #footer>
+        <Button :disabled="busy" @click="saveTeamEdit">保存设置</Button>
+      </template>
+    </Modal>
+
+    <!-- 批量分配弹窗 -->
+    <Modal :open="batchAllocOpen" title="批量分配积分" @close="batchAllocOpen = false">
+      <p class="tm-hint">
+        给选中的 {{ selected.length }} 位成员各分配相同积分；逐条独立，余额不足的会单独失败（不影响其他人）。
+      </p>
+      <TextField v-model="batchAllocAmount" class="tm-batch-amount" label="每人积分" type="number" />
+      <TextField v-model="batchAllocMemo" class="tm-batch-memo" label="备注（可选）" />
+      <template #footer>
+        <Button :disabled="busy" @click="doBatchAlloc">确认分配</Button>
+      </template>
+    </Modal>
+
     <!-- 创建团队弹窗 -->
     <Modal :open="newTeamOpen" title="创建团队" @close="newTeamOpen = false">
       <p class="tm-hint">
@@ -714,6 +879,8 @@ onMounted(bootstrap);
 .tm-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); }
 .tm-card { display: flex; flex-direction: column; gap: var(--space-2); }
 .tm-h2 { font-size: 15px; font-weight: 600; margin: 0 0 var(--space-2); }
+.tm-h2-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.tm-check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
 .tm-hint { font-size: 12px; color: var(--text-3); margin: 0 0 var(--space-2); }
 .tm-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); }
 .tm-rank { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }

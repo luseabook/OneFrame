@@ -66,6 +66,8 @@ fixtures/
 7. 单点工具：`/create/*` **直接打开/刷新**不白屏（`routeRules` 必须关 SSR，仅 `definePageMeta` 不够）、
    文生图/图生图提交后任务 `mode` 与 `reference_uris` 正确、视频续写上传源视频后 `mode=video_extend`
    且带 `reference_uris`（`pwsh _acceptance/tools-acceptance.ps1`）。
+8. 团队管理：团队设置改名/改席位生效、席位不得低于成员数、批量分配逐条独立（失败项单独返回）、
+   流水导出为空时提示且接口 `row_count=0`（`pwsh _acceptance/team-acceptance.ps1`）。
 
 ## 共享实例串行约束（2026-10-26）
 

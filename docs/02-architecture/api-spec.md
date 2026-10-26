@@ -20,6 +20,11 @@
 > `VideoNode` emits `video-parse`、`task_type=video_parse`；**请求体字段名/响应内层结构未取证**，
 > 按 ADR-013「对齐行为不对齐字段名」协议自研。
 > 验收：`canvas-derive.spec`（+2 例）、`adapters.spec` mock 形状（+1 段断言）、E2E S20（5 项）。
+> **v2.8 · 2026-10-27 · `cam` 团队管理收口（6 条）**：`PATCH /cam/team/info`（改名/席位/开关）、
+> `GET /cam/team/group/{id}/stats`、`GET /cam/team/member/{id}`、`PATCH …/member/{id}/name`、
+> `POST /cam/team/batch-points-allocation`（逐条独立）、`GET /cam/team/points-flow/export`（CSV 现签链接）。
+> 未实现清单收敛为项目维度流水（项目↔流水映射待定）与待取证项（BYOK/temp-info）；
+> 密码/凭证类端点标注**不适用**（我方手机号+短信验证码，无密码语义）。验收：`team.spec` 10 例 + E2E 16 项。
 > **v2.5 · 2026-10-26 · 节点产物批量下载落地**：新增 §14.4.5（3 条：打包 / 下载单列表 / 现签链接）+ 迁移 0016
 > `canvas_download_lists`。同时修掉两个"接口成功、用户用不了"的缺陷：
 > 签名链接基址默认指向 3000（另一个项目的端口）、`.zip` 缺 content-type。
@@ -1067,25 +1072,31 @@ mock 形状一致的产出（产出 JSON 与真实路径同形）；接真实能
 
 #### 14.5.1 `cam` 已实现端点（2026-10-26，迁移 0013）
 
-> 与参照 `/web/v1/cam/*` 的**命名对齐但协议自研**（ADR-009）。当前已实现 14 个（其余按需补齐）：
+> 与参照 `/web/v1/cam/*` 的**命名对齐但协议自研**（ADR-009）。v2.6 起已实现 **25 个**（其余按需补齐）：
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | POST | `/cam/team` | 登录 | **创建团队**（建 `spaces(type=2)` + 积分账户 + owner/master 成员 + 内置 11 角色），对齐参照"去开通" |
 | GET | `/cam/teams/mine` | 登录 | 我所属的全部空间（个人+团队），前端空间切换用 |
 | GET | `/cam/team/info` | 成员 | 团队信息（席位/已用/积分池=`credit_accounts.balance`） |
+| PATCH | `/cam/team/info` | 特权 | **改团队设置**：`{name?, max_seats?, film_enabled?, agent_whitelist?}`；仅团队空间可改（个人空间→400101）、席位不得低于现有成员数 |
 | GET | `/cam/permission/user` | 成员 | 当前用户角色与特权（`privileged` 按码集算） |
 | GET | `/cam/role/list` | 成员 | 角色列表（首次访问按内置 11 级幂等初始化） |
 | GET | `/cam/team/groups` | 成员 | 分组列表 |
 | POST | `/cam/team/group` | 特权 | 建分组（禁跨 space 的 parent→400101） |
 | PATCH | `/cam/team/group/{id}` | 特权 | 改分组 |
 | DELETE | `/cam/team/group/{id}` | 特权 | 删分组（有子组/成员时拒绝） |
+| GET | `/cam/team/group/{id}/stats` | 成员 | **分组统计**：`{member_count, task_count, points_used, points_allocated}`；消耗只算本团队空间内该组成员的任务 |
 | GET | `/cam/team/members` | 成员 | 成员列表（支持 group/role/status 过滤 + 分页） |
+| GET | `/cam/team/member/{user_id}` | 成员 | **单成员详情**（与列表同 DTO，避免两处字段漂移） |
 | PATCH | `/cam/team/member/{user_id}` | 特权 | 改成员（角色/分组/状态；禁止停用 owner） |
+| PATCH | `/cam/team/member/{user_id}/name` | 本人/特权 | **改成员昵称**（团队内展示名）；本人改自己、管理员改他人 |
 | DELETE | `/cam/team/member/{user_id}` | 特权 | 移除成员（禁止移除 owner） |
 | POST | `/cam/team/points-allocation` | 特权 | **团队→成员**分配（成对记账 + `credits_quota` 增长） |
 | POST | `/cam/team/points-recovery` | 特权 | **成员→团队**回收（成对记账 + 配额回落） |
+| POST | `/cam/team/batch-points-allocation` | 特权 | **批量分配**（≤50，**逐条独立**：一条余额不足不连累其它，返回 `items[{user_id,ok,code?,...}]`） |
 | GET | `/cam/team/points-flow/list` | 成员 | 团队积分流水（kind/target/group/op 四维筛选） |
+| GET | `/cam/team/points-flow/export` | 成员 | **流水导出**（CSV，现签链接 1h，单次 ≤5000 行；筛选参数同 list） |
 | GET | `/cam/team/account-points-ranking` | 成员 | 成员已分配额排行 |
 | GET | `/cam/project/{project_id}/members` | 成员 | 成员↔项目作用域 |
 | POST | `/cam/project/{project_id}/members/bind` | 特权 | 绑定（含 `participation_type`） |
@@ -1094,7 +1105,8 @@ mock 形状一致的产出（产出 JSON 与真实路径同形）；接真实能
 **偏离说明**：
 1. 参照用 `/cam/team/{team_id}/info` 把 team_id 放路径；我方**省略**，因为 `X-Space-Id` 已表达当前空间（ADR-010），路径带 ID 会产生"路径 ID 与头不一致"的二义性。
 2. 席位上限错误码为新码 **400108**（参照侧未见同义码，属我方自造，已在码表登记）。
-3. 已实现部分**不含**：`team/member/batch`（批量邀请/改密）、`member/export`、`project-points-flow`、`team/temp-info`（模型开关矩阵）、`linked-users`、`user/third/key/*`——按 F2 优先级后续补，**未实现即不暴露**（不做空壳接口）。
+3. 仍**未实现**（不暴露空壳）：`project-points-flow/*`（项目维度流水，需先定"项目"与 `credit_flows` 的映射口径）、`project-points-ranking`、`team/temp-info`（模型开关矩阵，待取证）、`linked-users`、`user/third/key/*`（BYOK，待取证）。
+   **不适用**：`member/:id/password`、`member/batch/change-password`、`member/:id/credential`——我方账号是手机号+短信验证码，没有密码/一次性登录凭证这套语义；为对齐而造一个"假密码"只会多一条无人使用的攻击面。
 
 #### 14.5.2 `X-Space-Id` 切空间已落地（2026-10-26）
 

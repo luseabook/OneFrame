@@ -47,6 +47,15 @@ export default defineNuxtConfig({
     // 所以必须在 routeRules 里也关掉 SSR。
     "/canvas": { ssr: false },
     "/canvas/**": { ssr: false },
+    // 其余"登录后才可用"的页面同样必须在 routeRules 里关 SSR：
+    // `definePageMeta({ssr:false})` 对直接访问不足以保证首帧一致（/team 实测会 hydration mismatch）。
+    // 这里按"页面 meta 已声明 ssr:false"的清单补齐，避免同类问题一处一处冒。
+    "/team": { ssr: false },
+    "/login": { ssr: false },
+    "/pricing": { ssr: false },
+    "/report": { ssr: false },
+    "/privacy": { ssr: false },
+    "/terms": { ssr: false },
     // 单点工具页（/create/*）同理：这些页面此前只在 `definePageMeta` 里写了 ssr:false，
     // 而直接打开/刷新 URL 时仍会走服务端渲染 → 与服务端未登录首帧不一致 →
     // hydration 失败后整页空白（本轮 E2E 实测：直接访问 /create/text-to-video 时
