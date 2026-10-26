@@ -712,6 +712,46 @@ function assetKindLabel(kind: AssetCandidate["kind"]): string {
   return kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具";
 }
 
+/** 资产匹配结果：`[{shot_no, character, scene, props[]}]`，逐镜渲染成一行的对照表 */
+interface MatchRow {
+  shot_no: number;
+  character: string;
+  scene: string;
+  props: string[];
+}
+
+const matchRows = computed<MatchRow[]>(() => {
+  const text = sAt(["result_text"]);
+  if (!text || !text.trim().startsWith("[")) return [];
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .filter((row) => typeof row.shot_no === "number")
+      .map((row) => ({
+        shot_no: row.shot_no as number,
+        character: typeof row.character === "string" ? row.character : "",
+        scene: typeof row.scene === "string" ? row.scene : "",
+        props: Array.isArray(row.props) ? row.props.filter((p): p is string => typeof p === "string") : [],
+      }));
+  } catch {
+    return [];
+  }
+});
+
+/** 发起分镜×资产匹配（候选资产取本画布的 asset 节点，分镜取本节点结果） */
+async function doMatchAssets(): Promise<void> {
+  const n = selectedNode.value;
+  if (!n || deriveSubmitting.value) return;
+  deriveSubmitting.value = true;
+  try {
+    await ed.matchAssets(n.id);
+  } finally {
+    deriveSubmitting.value = false;
+  }
+}
+
 /** 一键把候选建成 asset 节点：排在剧本节点右侧，避免互相压住 */
 function createAssetNodes(): void {
   const source = selectedNode.value;
@@ -1735,6 +1775,15 @@ function toggleSec(key: string): void {
                 >
                   拆分资产
                 </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="insp-derive-match"
+                  :disabled="deriveSubmitting"
+                  @click="doMatchAssets"
+                >
+                  匹配资产
+                </Button>
               </div>
               <p class="cv-hint">
                 用节点里的「原文 sourceText」作为输入；产出写回节点（结果在下方）。
@@ -1762,6 +1811,20 @@ function toggleSec(key: string): void {
                   创建 {{ assetCandidates.length }} 个资产节点
                 </Button>
                 <p class="cv-hint">建出来的是 asset 节点（带 prompt），保存后才落库。</p>
+              </div>
+              <div v-if="matchRows.length" class="cv-field insp-match-result">
+                <label>
+                  匹配结果
+                  <span class="cv-tag">{{ matchRows.length }} 镜</span>
+                </label>
+                <ul class="insp-match__list">
+                  <li v-for="(row, i) in matchRows" :key="i" class="insp-match__item">
+                    <span class="insp-match__shot">镜{{ row.shot_no }}</span>
+                    <span class="insp-match__cell">{{ row.character || "—" }}</span>
+                    <span class="insp-match__cell">{{ row.scene || "—" }}</span>
+                    <span class="insp-match__props">{{ row.props.join("、") || "—" }}</span>
+                  </li>
+                </ul>
               </div>
               <p v-else-if="ed.selectedNode.value?.status === 2" class="cv-hint insp-derive-running">
                 正在运行…（完成后自动回填）
@@ -2746,6 +2809,47 @@ function toggleSec(key: string): void {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+/* 匹配结果：镜号 + 角色 + 场景 + 道具，一行一镜（等宽数字便于纵向扫读） */
+.insp-match__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.insp-match__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  font-size: 11px;
+}
+.insp-match__shot {
+  flex: none;
+  width: 38px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+.insp-match__cell {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-match__props {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .insp-result-text {
   min-height: 120px;

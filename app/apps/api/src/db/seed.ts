@@ -343,7 +343,7 @@ const MODEL_SEED: ModelSeed[] = [
     needVip: false,
     audioVideoSupport: false,
     sort: 200,
-    modeOrder: { script_optimization: 1, storyboard_parse: 2, asset_extraction: 3 },
+    modeOrder: { script_optimization: 1, storyboard_parse: 2, asset_extraction: 3, storyboard_asset_match: 4 },
     /**
      * 文本类模式（LLM 步骤）。
      *
@@ -370,6 +370,14 @@ const MODEL_SEED: ModelSeed[] = [
         default_count: 1,
       },
       asset_extraction: {
+        endpoint: "chat",
+        resolution_options: [{ value: "per_call", label: "按次" }],
+        resolutions: ["per_call"],
+        default_resolution: "per_call",
+        counts: [1],
+        default_count: 1,
+      },
+      storyboard_asset_match: {
         endpoint: "chat",
         resolution_options: [{ value: "per_call", label: "按次" }],
         resolutions: ["per_call"],

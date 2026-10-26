@@ -4,6 +4,7 @@ import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { CanvasNodeTasksService } from "./canvas-node-tasks.service";
 import { CanvasDeriveService } from "./canvas-derive.service";
+import { TasksService } from "../tasks/tasks.service";
 
 /**
  * 画布节点派生任务端点（F1 契约 §14.4 C6 / draft §3.4）
@@ -52,6 +53,14 @@ const syncBody = z.object({ node_ids: z.array(z.string().min(1)).max(500).defaul
  * 也就是说，正常路径是"选中节点点按钮"，而不是让前端把正文再搬一遍——
  * 正文搬一遍就会出现"节点里改了、请求里还是旧的"这种不一致。
  */
+/** 分镜 × 资产匹配入参（对齐参照站：**可显式指定候选资产，不指定则用本画布全部资产节点**） */
+const matchBody = z.object({
+  storyboard_node_id: z.string().min(1).optional(),
+  scene_node_ids: z.array(z.string().min(1)).max(100).optional(),
+  character_node_ids: z.array(z.string().min(1)).max(100).optional(),
+  model: z.string().min(1).optional(),
+});
+
 const deriveBody = z.object({
   // zod 只挡明显异常的巨型请求；"超 5 万字"的业务错误码（400104）由 service 给。
   // 若 zod 也卡 50000，同一条规则会冒出两个码，前端没法统一处理。
@@ -65,6 +74,7 @@ export class CanvasNodeTasksController {
   constructor(
     @Inject(CanvasNodeTasksService) private readonly svc: CanvasNodeTasksService,
     @Inject(CanvasDeriveService) private readonly derive: CanvasDeriveService,
+    @Inject(TasksService) private readonly tasks: TasksService,
   ) {}
 
   private ctx(req: AuthedRequest): { spaceId: string; userId: string } {
@@ -186,5 +196,48 @@ export class CanvasNodeTasksController {
       body ?? {},
     );
     return this.derive.derive(c, canvasId, nodeId, "asset_extraction", input);
+  }
+
+  /** 分镜 × 资产匹配（把拆分资产的产出按镜头对上去；同一条 tasks 脊柱） */
+  @Post("canvases/:canvas_id/nodes/:node_id/storyboard-asset-match")
+  async matchAssets(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(matchBody, body ?? {});
+    return this.derive.matchAssets(c, canvasId, nodeId, input);
+  }
+
+  /**
+   * 取消匹配。
+   *
+   * 直接复用 `tasks.cancel`（而不是画布自己发一个取消信号）：任务终态、解冻、事件
+   * 那一套逻辑只该有一份；画布侧再写一遍必然与之漂移（尤其"终态不可取消"的判定）。
+   */
+  @Post("canvases/:canvas_id/nodes/:node_id/storyboard-asset-match/cancel")
+  async cancelMatch(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(z.object({ task_id: z.string().min(1) }), body);
+    await this.tasks.cancel(c.spaceId, input.task_id);
+    return { ok: true, task_id: input.task_id };
+  }
+
+  /**
+   * 重新匹配：契约上是"同一操作再来一次"，因此就是再建一条任务。
+   * 不覆盖上一条任务的结果——用户可能想对比两次匹配，历史必须留着。
+   */
+  @Post("canvases/:canvas_id/nodes/:node_id/storyboard-asset-rematch")
+  async rematch(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(matchBody.extend({ task_id: z.string().min(1).optional() }), body ?? {});
+    return this.derive.matchAssets(c, canvasId, nodeId, input);
   }
 }

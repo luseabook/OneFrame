@@ -633,6 +633,43 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     }
   }
 
+  /**
+   * 分镜 × 资产匹配。
+   *
+   * 与文本派生同构（保存 → 建任务 → 轮询回填），差别只在"参数从哪来"：
+   * 候选资产取本画布的 asset 节点，分镜取指定节点（默认就是自己）的 result_text。
+   */
+  async function matchAssets(nodeId: string, input?: { storyboard_node_id?: string }): Promise<boolean> {
+    const node = nodes.value.find((n) => n.id === nodeId);
+    if (!node) return false;
+    if (nodeId.startsWith("local_")) {
+      toast.error("请先保存画布，再发起匹配（新节点还没有服务端 id）");
+      return false;
+    }
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+    taskSubmitting.value = [...taskSubmitting.value, nodeId];
+    try {
+      const res = await api.matchStoryboardAssets(canvasId.value, nodeId, input ?? {});
+      node.status = res.node.status;
+      node.task_id = res.node.task_id;
+      toast.success(`已发起资产匹配，冻结 ${res.credits_estimate} 积分`);
+      startTaskPolling(nodeId, res.task_id);
+      return true;
+    } catch (e) {
+      const err = e as { code?: number; message: string };
+      // 400105 = 有资产没定稿（缺 prompt）：这是用户能自己修的问题，必须说清楚怎么修
+      if (err.code === 400105) toast.error("有资产还没定稿（缺提示词），先补全再匹配");
+      else if (err.code === 745701) toast.error("积分不足，请先充值");
+      else toast.error(err.message || "发起匹配失败");
+      return false;
+    } finally {
+      taskSubmitting.value = taskSubmitting.value.filter((id) => id !== nodeId);
+    }
+  }
+
   // ── 任务轮询（节点状态 → 结果回填）──────────────────────
   const pollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -1309,6 +1346,7 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     isSubmitting,
     generateNode,
     deriveText,
+    matchAssets,
     generateSelected,
     startTaskPolling,
     stopTaskPolling,

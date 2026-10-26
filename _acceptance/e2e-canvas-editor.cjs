@@ -1135,6 +1135,52 @@ function buildXlsxBuffer() {
                 t2?.data?.mode === "asset_extraction",
                 t2?.data?.mode,
               );
+
+              // 第四个文本能力：分镜×资产匹配（同脊柱、可取消、可重跑）
+              // 先备一个**已定稿**的资产节点：没有资产时匹配会（正确地）返回 400101，
+              // 那样只能测到错误分支，测不到"匹配任务真的建出来了"
+              const assetNode = await api(
+                "POST",
+                `/canvas/canvases/${canvasId}/nodes`,
+                {
+                  node_type: "asset",
+                  name: "角色·林晚",
+                  x: 420,
+                  y: 420,
+                  params: { assetKind: "character", prompt: "短剧角色肖像，林晚，冷色光影" },
+                },
+                token,
+              );
+              record("S19.7 已备好定稿资产节点", assetNode.code === 0);
+              await page.reload({ waitUntil: "domcontentloaded" });
+              await page.waitForSelector('.canvas-node[data-node-type="script"]', { timeout: 20_000 }).catch(() => {});
+              await sleep(500);
+              await page.locator(".dock-fit").click().catch(() => {});
+              await sleep(600);
+              await page
+                .locator('.canvas-node[data-node-type="script"]', { hasText: "可优化剧本" })
+                .first()
+                .locator(".canvas-node__head")
+                .click()
+                .catch(() => {});
+              await sleep(400);
+
+              const matchBtn = page.locator(".insp-derive-match");
+              record("S19.8 检查器出现「匹配资产」入口", (await matchBtn.count()) > 0);
+              if ((await matchBtn.count()) > 0) {
+                await matchBtn.first().click();
+                await sleep(1800);
+                const once = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+                const n3 = (once.data.nodes || []).find((n) => n.name === "可优化剧本");
+                const t3 = n3?.task_id ? await api("GET", `/agent/task/${n3.task_id}`, undefined, token) : null;
+                record(
+                  "S19.9 任务 mode=storyboard_asset_match",
+                  t3?.data?.mode === "storyboard_asset_match",
+                  t3?.data?.mode ?? "无 task",
+                );
+              } else {
+                record("S19.9 任务 mode=storyboard_asset_match", false, "无入口");
+              }
             } else {
               record("S19.6 任务 mode=asset_extraction", false, "无入口");
             }

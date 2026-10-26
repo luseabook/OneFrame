@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { canvasNodes } from "@app/db";
 import { AppError, ErrorCode, generationRequestSchema, newId } from "@app/shared";
 import { db } from "../../db/database";
@@ -8,6 +8,9 @@ import { ModelsService } from "../models/models.service";
 
 /** 画布当前支持的「文本类派生」能力（与 `TextMode` 一致） */
 export type DeriveKind = "script_optimization" | "storyboard_parse" | "asset_extraction";
+
+/** 文本任务的 mode 集合：三种派生 + 资产匹配（匹配不暴露给 derive()，走 matchAssets） */
+type TextTaskMode = DeriveKind | "storyboard_asset_match";
 
 /** 与契约 §3.4 一致：原文上限 5 万字（400104） */
 const SOURCE_MAX = 50_000;
@@ -93,11 +96,149 @@ export class CanvasDeriveService {
       });
     }
 
+    return this.createTextTask(
+      auth,
+      node,
+      kind,
+      this.buildPrompt(kind, source, input.prompt, input.active_tab),
+      model.name,
+    );
+  }
+
+  /**
+   * 分镜 × 资产匹配（参照站 `storyboard-asset-match` / `rematch`）。
+   *
+   * 契约形态：`{storyboard_node_id, scene_node_ids?, character_node_ids?}` → `{task_id}`。
+   * 语义：把「拆分资产」抽出来的角色/场景/道具，按镜头对到分镜上。
+   * 仍然是**一条 tasks**（同脊柱、同按次计价、可取消、可重跑），不另造表。
+   *
+   * 400105（引用资产未定稿）用在这里：资产节点还没有 `prompt` 就等于"没定稿"，
+   * 拿空名字去匹配只会得到一堆错配，比直接报错更糟。
+   */
+  async matchAssets(
+    auth: { spaceId: string; userId: string },
+    canvasId: string,
+    nodeId: string,
+    input: {
+      storyboard_node_id?: string;
+      scene_node_ids?: string[];
+      character_node_ids?: string[];
+      model?: string;
+    },
+  ): Promise<DeriveResult> {
+    const node = await this.requireNode(auth.spaceId, canvasId, nodeId);
+    if (!ALLOWED_NODE_TYPES.has(node.nodeType)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `node type ${node.nodeType} cannot run matching`, {
+        field: "node_id",
+      });
+    }
+
+    // 分镜文本：显式指定节点优先，否则用当前节点自己的派生结果/原文
+    const storyboardNode = input.storyboard_node_id
+      ? await this.requireNode(auth.spaceId, canvasId, input.storyboard_node_id)
+      : node;
+    const storyboardParams = (storyboardNode.params ?? {}) as Record<string, unknown>;
+    const storyboardText = String(
+      (typeof storyboardParams.result_text === "string" && storyboardParams.result_text) ||
+        (typeof storyboardParams.sourceText === "string" && storyboardParams.sourceText) ||
+        "",
+    ).trim();
+    if (!storyboardText) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "storyboard node has no shots yet, run storyboard-parse first", {
+        field: "storyboard_node_id",
+      });
+    }
+    if (storyboardText.length > SOURCE_MAX) {
+      throw new AppError(ErrorCode.SOURCE_TOO_LONG, "storyboard text exceeds 50000 chars", {
+        field: "storyboard_node_id",
+      });
+    }
+
+    const assets = await this.loadAssetNodes(auth.spaceId, canvasId, [
+      ...(input.character_node_ids ?? []),
+      ...(input.scene_node_ids ?? []),
+    ]);
+    if (assets.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "no asset nodes to match", {
+        field: "character_node_ids",
+      });
+    }
+    const unfinished = assets.filter((item) => !item.prompt);
+    if (unfinished.length > 0) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "referenced asset is not finalized (missing prompt)", {
+        node_ids: unfinished.map((item) => item.node_id),
+      });
+    }
+
+    const model = input.model
+      ? await this.models.findByName(input.model)
+      : await this.pickTextModel("storyboard_asset_match");
+    const prompt = [
+      "把下面的分镜清单与候选资产做匹配：每个镜头选出最合适的 1 个角色、1 个场景，以及 0~3 个道具。",
+      '只输出 JSON 数组：[{"shot_no":1,"character":"","scene":"","props":[]}]。',
+      "只能从给定候选里选，选不到就留空字符串，不要编造新名字。",
+      "",
+      "【分镜清单】",
+      storyboardText,
+      "",
+      "【候选资产】",
+      ...assets.map((item) => `- ${item.kind}：${item.name}`),
+    ].join("\n");
+
+    return this.createTextTask(auth, node, "storyboard_asset_match", prompt, model.name);
+  }
+
+  /** 候选资产：本画布下的资产节点（可按 ids 收窄），带定稿所需的 prompt */
+  private async loadAssetNodes(
+    spaceId: string,
+    canvasId: string,
+    onlyIds: string[],
+  ): Promise<Array<{ node_id: string; kind: string; name: string; prompt: string }>> {
+    const ids = onlyIds
+      .filter((raw) => raw)
+      .map((raw) => {
+        try {
+          return BigInt(raw);
+        } catch {
+          throw new AppError(ErrorCode.INVALID_PARAM, "invalid asset node id", { value: raw });
+        }
+      });
+    const rows = await db
+      .select()
+      .from(canvasNodes)
+      .where(
+        and(
+          eq(canvasNodes.canvasId, BigInt(canvasId)),
+          eq(canvasNodes.spaceId, BigInt(spaceId)),
+          eq(canvasNodes.nodeType, "asset"),
+          isNull(canvasNodes.deletedAt),
+          ids.length > 0 ? inArray(canvasNodes.id, ids) : undefined,
+        ),
+      );
+    return rows.map((row) => {
+      const params = (row.params ?? {}) as Record<string, unknown>;
+      return {
+        node_id: String(row.id),
+        kind: typeof params.assetKind === "string" ? params.assetKind : "asset",
+        name: row.name,
+        prompt: typeof params.prompt === "string" ? params.prompt : "",
+      };
+    });
+  }
+
+  /** 建文本任务并挂到节点上（三个派生能力 + 资产匹配共用，避免四份复制粘贴） */
+  private async createTextTask(
+    auth: { spaceId: string; userId: string },
+    node: { id: bigint },
+    kind: TextTaskMode,
+    prompt: string,
+    modelName: string,
+  ): Promise<DeriveResult> {
     const parsed = generationRequestSchema.safeParse({
       mode: kind,
-      model: model.name,
+      model: modelName,
       scene: null,
-      input: { prompt: this.buildPrompt(kind, source, input.prompt, input.active_tab) },
+      input: { prompt },
       // 文本模式按次计价：resolution 是"计价单位"占位（目录里声明为 per_call），
       // 不带 duration 档位——具体金额由 model_prices 决定
       options: { resolution: "per_call", count: 1 },
@@ -153,7 +294,7 @@ export class CanvasDeriveService {
   }
 
   /** 目录里第一个可见且支持该 mode 的文本模型（运营通过目录控制"用哪个 LLM"） */
-  private async pickTextModel(kind: DeriveKind) {
+  private async pickTextModel(kind: TextTaskMode) {
     const candidates = await this.models.list({ capability: "text", visible: true });
     const found = candidates.find((item) =>
       Object.prototype.hasOwnProperty.call(item.modes ?? {}, kind),

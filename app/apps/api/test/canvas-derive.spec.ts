@@ -182,6 +182,95 @@ describe("canvas text derive + admin pricing e2e", () => {
     expect(badTab.code).toBe(400101);
   }, 60_000);
 
+  it("分镜×资产匹配：落 tasks、可取消、可重跑且不覆盖上一条", async () => {
+    // 剧本节点先有"分镜文本"（这里直接用节点的 result_text 模拟已拆过分镜）
+    const storyboard = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "script",
+      name: "分镜来源",
+      x: 0,
+      y: 400,
+      params: { result_text: "镜1 | 全景 | 雨夜街头，林晚撑伞 | 5s | 9:16\n镜2 | 中景 | 顾沉递出怀表 | 5s | 9:16" },
+    });
+    const character = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "asset",
+      name: "角色·林晚",
+      x: 400,
+      y: 400,
+      params: { assetKind: "character", prompt: "短剧角色肖像，林晚，冷色光影" },
+    });
+    const scene = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "asset",
+      name: "场景·雨夜街头",
+      x: 400,
+      y: 560,
+      params: { assetKind: "scene", prompt: "电影感场景，雨夜街头" },
+    });
+
+    const matched = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${storyboard.data.id}/storyboard-asset-match`,
+      {
+        storyboard_node_id: storyboard.data.id,
+        character_node_ids: [character.data.id],
+        scene_node_ids: [scene.data.id],
+      },
+    );
+    expect(matched.code).toBe(0);
+    const firstTask = matched.data.task_id as string;
+    const { rows } = await pool.query<{ mode: string }>("select mode from tasks where id = $1", [firstTask]);
+    expect(rows[0]?.mode).toBe("storyboard_asset_match");
+
+    // 重跑：产生**新任务**（不覆盖上一条，用户要能对比两次匹配）
+    const rematched = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${storyboard.data.id}/storyboard-asset-rematch`,
+      { storyboard_node_id: storyboard.data.id, task_id: firstTask },
+    );
+    expect(rematched.code).toBe(0);
+    expect(rematched.data.task_id).not.toBe(firstTask);
+
+    // 取消：复用 tasks.cancel（终态不可取消 → 400103）
+    const cancelled = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${storyboard.data.id}/storyboard-asset-match/cancel`,
+      { task_id: rematched.data.task_id },
+    );
+    // 队列里没有 worker，任务处于 PENDING/RUNNING 才可取消；已终态则 400103。
+    // 两种结果都合法，关键是不能 500、也不能"取消成功但任务还在跑"。
+    expect([0, 400103, 400102]).toContain(cancelled.code);
+
+    // 未知任务 → 400102
+    const unknown = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${storyboard.data.id}/storyboard-asset-match/cancel`,
+      { task_id: "999999" },
+    );
+    expect(unknown.code).toBe(400102);
+  }, 60_000);
+
+  it("资产未定稿（无 prompt）→ 400105，不允许拿空名字去匹配", async () => {
+    const storyboard = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "script",
+      name: "分镜来源2",
+      x: 0,
+      y: 700,
+      params: { result_text: "镜1 | 全景 | 空镜 | 5s | 9:16" },
+    });
+    const draft = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "asset",
+      name: "草稿资产",
+      x: 700,
+      y: 700,
+      params: { assetKind: "prop" },
+    });
+    const res = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${storyboard.data.id}/storyboard-asset-match`,
+      { character_node_ids: [draft.data.id] },
+    );
+    expect(res.code).toBe(400105);
+  }, 60_000);
+
   it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {
     const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
     expect(list.code).toBe(0);

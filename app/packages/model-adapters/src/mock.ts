@@ -106,6 +106,14 @@ function mockText(req: NormalizedGenRequest): string {
       "镜3 | 特写 | 主角眼神坚定，画面定格，字幕升起 | 5s | 9:16",
     ].join("\n");
   }
+  if (req.request.mode === "storyboard_asset_match") {
+    // 匹配结果是**按镜头的 JSON 数组**：前端要逐镜渲染"这一镜用哪个角色/场景"
+    return JSON.stringify([
+      { shot_no: 1, character: "林晚", scene: "雨夜街头", props: ["旧怀表"] },
+      { shot_no: 2, character: "顾沉", scene: "雨夜街头", props: [] },
+      { shot_no: 3, character: "林晚", scene: "", props: [] },
+    ]);
+  }
   if (req.request.mode === "asset_extraction") {
     // 必须是**合法 JSON**：前端按角色/场景/道具三个 tab 渲染，
     // mock 返回自由文本的话"解析失败"会盖住真正的链路问题

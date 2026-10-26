@@ -8,7 +8,7 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
-> **v2.6 · 2026-10-26 · 文本类能力 + 后台定价可写**：新增 §14.4.6（剧本优化 / 拆解分镜 / 拆分资产 3 条），
+> **v2.6 · 2026-10-26 · 文本类能力 + 后台定价可写**：新增 §14.4.6（剧本优化 / 拆解分镜 / 拆分资产 3 条）+ §14.4.7（资产匹配 3 条），
 > 把 `TextMode` 进 `tasks.mode` 枚举（按次计价）；后台补 `POST/DELETE /ops/admin/model-prices`，
 > 让"新能力上架定价"不必改代码。同时修掉计费缺陷：`duration_s IS NULL` 的档位原先不受唯一键约束，
 > 同一档位可重复插入、扣费金额不确定（补部分唯一索引 `uq_model_prices_per_call`，迁移 0017）。
@@ -774,7 +774,7 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：`video-parse` / `storyboard-asset-match` 等派生族（7 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
+**尚未实现（不暴露空壳）**：`video-parse` 等派生族（2 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 **已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
 **已实现**：节点产物批量下载（3 条）——2026-10-26，见 §14.4.5。
@@ -966,6 +966,7 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 | POST | `/canvas/canvases/{id}/nodes/{node_id}/storyboard-parse` | 同上 | 同上 | 同上 |
 | POST | `/canvas/canvases/{id}/nodes/{node_id}/asset-extraction` | 同上 + `{active_tab?: character\|scene\|prop}` | 同上 | 同上 |
 
+
 > `asset-extraction` 的 `active_tab` 与参照站一致：用户停在哪个 tab 就优先出哪一类资产，
 > 避免一次给三屏 JSON 让人分不清"现在看的是哪一类"。产出必须是**可解析 JSON**
 > （`{characters[],scenes[],props[]}`），前端据此一键建 asset 节点（`assetKind/prompt` 一并带过去）。
@@ -989,6 +990,25 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    同一条规则不能有两个错误码。
 4. **只允许 script/text/director 节点**：其他节点没有"原文"这个概念，400101。
 
+#### 14.4.7 分镜 × 资产匹配（2026-10-26）
+
+| 方法 | 路径 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/storyboard-asset-match` | `{storyboard_node_id?, scene_node_ids?[], character_node_ids?[], model?}` | `{task_id, status, credits_estimate, node}` | 0/400101/**400105**/745701 |
+| POST | `…/storyboard-asset-match/cancel` | `{task_id}` | `{ok:true, task_id}` | 0/400102/**400103** |
+| POST | `…/storyboard-asset-rematch` | `{task_id?, 同 match}` | `{task_id}` | 0/400105/745701 |
+
+**语义**：把「拆分资产」抽出的角色/场景/道具，按镜头对到分镜上（仍是**一条 `tasks`**，
+同脊柱、同按次计价、可取消、可重跑）。
+
+**四条约定**：
+1. **候选资产来源**：显式 `character_node_ids`/`scene_node_ids` 优先；不传则用本画布全部 `asset` 节点。
+2. **400105 = 引用资产未定稿**：资产节点没有 `prompt` 就等于"没定稿"，拿空名字去匹配只会得到错配，
+   比直接报错更糟（与契约 §3.4 的 `ASSET_NOT_READY` 语义一致）。
+3. **分镜文本**：显式 `storyboard_node_id` 优先，否则用当前节点的 `result_text`，再退 `sourceText`；
+   都没有 → 400101 并提示先跑 `storyboard-parse`。
+4. **取消/重跑**：取消**复用 `tasks.cancel`**（终态不可取消 → 400103，解冻与事件只该有一份实现）；
+   重跑**建新任务、不覆盖旧任务**（用户要能对比两次匹配）。
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 
 ### 14.5 `cam` 与 `film` 端点族要点
@@ -1160,7 +1180,6 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 **实现落点**：`apps/api/src/modules/agent/`（7 service + 2 controller，模块依赖方向见该目录 `agent.module.ts` 头注释）；
 LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mock 为**规则式路由**而非假 AI）；
 任务一律经 `generations`/`tasks` 服务，**不碰 billing、不另造任务表**。
-
 
 
 

@@ -307,6 +307,40 @@ export const useCanvasApi = () => {
         input,
       ),
 
+    /** 分镜 × 资产匹配（同一条 tasks 脊柱；可取消、可重跑） */
+    matchStoryboardAssets: (
+      canvasId: string,
+      nodeId: string,
+      input: {
+        storyboard_node_id?: string;
+        scene_node_ids?: string[];
+        character_node_ids?: string[];
+        model?: string;
+      } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/storyboard-asset-match`,
+        input,
+      ),
+
+    /** 重新匹配：建新任务，不覆盖上一条（要能对比两次结果） */
+    rematchStoryboardAssets: (
+      canvasId: string,
+      nodeId: string,
+      input: { storyboard_node_id?: string; task_id?: string } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/storyboard-asset-rematch`,
+        input,
+      ),
+
+    /** 取消匹配：复用 tasks.cancel（终态不可取消 → 400103） */
+    cancelStoryboardMatch: (canvasId: string, nodeId: string, taskId: string) =>
+      api.post<{ ok: boolean; task_id: string }>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/storyboard-asset-match/cancel`,
+        { task_id: taskId },
+      ),
+
     /** 现签 24h 链接 */
     downloadListUrl: (canvasId: string, listId: string) =>
       api.post<{ url: string; filename: string; file_count: number; expires_in: number }>(

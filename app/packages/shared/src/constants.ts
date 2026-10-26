@@ -65,7 +65,12 @@ export const SpeechMode = ["tts", "voice_clone"] as const;
  * 计价单位：`model_prices.resolution` 存 `per_call`、`duration_s` 为 NULL；
  * 金额由运营在 `/ops/admin/model-prices` 配置，**代码不写死任何金额**。
  */
-export const TextMode = ["script_optimization", "storyboard_parse", "asset_extraction"] as const;
+export const TextMode = [
+  "script_optimization",
+  "storyboard_parse",
+  "asset_extraction",
+  "storyboard_asset_match", // 分镜 × 资产匹配（把拆分资产的结果按镜头对上去）
+] as const;
 
 export const GenerationMode = [...VideoMode, ...ImageMode, ...SpeechMode, ...TextMode] as const;
 export type GenerationMode = (typeof GenerationMode)[number];

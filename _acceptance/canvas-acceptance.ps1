@@ -6,8 +6,8 @@
   一条命令跑完四层门禁：
     1) typecheck（web + api）
     2) lint（只对 canvas 相关文件断言 0 error 0 warning）
-    3) api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 6 = 78 例）
-    4) 真实浏览器 E2E（89 项断言，含持久化/版本冲突/节点投递/模板/固定组/Agent 面板/表格导入/批量下载/文本派生）
+    3) api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 8 = 80 例）
+    4) 真实浏览器 E2E（92 项断言，含持久化/版本冲突/节点投递/模板/固定组/Agent 面板/表格导入/批量下载/文本派生）
 
   前置：
     pwsh _acceptance/start-local-stack.ps1      # PG 55432 / Redis 6380
@@ -78,7 +78,7 @@ if (-not $SkipLint) {
 }
 
 # ── 3. api 单测（canvas 域）──────────────────────────────
-Step "api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 6 = 78 例）" {
+Step "api 单测（canvas 46 + agent 13 + table 8 + download 5 + derive 8 = 80 例）" {
   Push-Location $App
   try {
     # agent.spec 与 canvas.spec 共享 canvas 域夹具（会话挂在画布上），一起跑才覆盖"面板 → 后端"整链
@@ -134,7 +134,7 @@ if (-not $SkipE2E) {
     if (-not $ready) { throw "web dev 重启后未就绪，见 _acceptance/web-e2e.log" }
   }
 
-  Step "浏览器 E2E（89 项断言，含 Agent/表格/下载/文本派生）" {
+  Step "浏览器 E2E（92 项断言，含 Agent/表格/下载/文本派生/资产匹配）" {
     Push-Location (Join-Path $Root "_acceptance")
     try {
       & node e2e-canvas-editor.cjs
