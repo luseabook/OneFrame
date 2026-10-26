@@ -654,7 +654,7 @@ const deriveSubmitting = ref(false);
  * `prompt` 只作为"对产出的额外要求"传过去，原文由后端从节点 `sourceText` 取——
  * 前端不要把两者混在一起（混了就等于"用户写一句要求，我们把这句话当剧本送去优化"）。
  */
-async function doDerive(kind: "script_optimization" | "storyboard_parse"): Promise<void> {
+async function doDerive(kind: "script_optimization" | "storyboard_parse" | "asset_extraction"): Promise<void> {
   const n = selectedNode.value;
   if (!n || deriveSubmitting.value) return;
   deriveSubmitting.value = true;
@@ -664,6 +664,67 @@ async function doDerive(kind: "script_optimization" | "storyboard_parse"): Promi
   } finally {
     deriveSubmitting.value = false;
   }
+}
+
+/** 「拆分资产」的产出是 JSON：解析成候选列表，让用户一键建 asset 节点 */
+interface AssetCandidate {
+  kind: "character" | "scene" | "prop";
+  name: string;
+  description?: string;
+  prompt?: string;
+}
+
+const assetCandidates = computed<AssetCandidate[]>(() => {
+  const text = sAt(["result_text"]);
+  if (!text || !text.trim().startsWith("{")) return [];
+  try {
+    const parsed = JSON.parse(text) as {
+      characters?: Array<Record<string, unknown>>;
+      scenes?: Array<Record<string, unknown>>;
+      props?: Array<Record<string, unknown>>;
+    };
+    const groups: Array<[AssetCandidate["kind"], Array<Record<string, unknown>> | undefined]> = [
+      ["character", parsed.characters],
+      ["scene", parsed.scenes],
+      ["prop", parsed.props],
+    ];
+    const out: AssetCandidate[] = [];
+    for (const [kind, list] of groups) {
+      for (const item of list ?? []) {
+        const name = typeof item.name === "string" ? item.name.trim() : "";
+        if (!name) continue;
+        out.push({
+          kind,
+          name,
+          description: typeof item.description === "string" ? item.description : undefined,
+          prompt: typeof item.prompt === "string" ? item.prompt : undefined,
+        });
+      }
+    }
+    return out;
+  } catch {
+    // 结果不是 JSON（比如用户点的是"拆解分镜"）→ 不显示候选区，不报错
+    return [];
+  }
+});
+
+function assetKindLabel(kind: AssetCandidate["kind"]): string {
+  return kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具";
+}
+
+/** 一键把候选建成 asset 节点：排在剧本节点右侧，避免互相压住 */
+function createAssetNodes(): void {
+  const source = selectedNode.value;
+  const items = assetCandidates.value;
+  if (!source || items.length === 0) return;
+  items.forEach((item, index) => {
+    const node = ed.addNode("asset", { x: source.x + 360, y: source.y + index * 150 });
+    ed.setNodeField(node.id, "name", `${assetKindLabel(item.kind)}·${item.name}`);
+    ed.setNodeParam(node.id, "assetKind", item.kind);
+    if (item.prompt) ed.setNodeParam(node.id, "prompt", item.prompt);
+    if (item.description) ed.setNodeParam(node.id, "description", item.description);
+  });
+  toast.success(`已创建 ${items.length} 个资产节点，保存后生效`);
 }
 
 // ── 批量下载（产物打包）──────────────────────────────────
@@ -1665,6 +1726,15 @@ function toggleSec(key: string): void {
                 >
                   拆解分镜
                 </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="insp-derive-assets"
+                  :disabled="deriveSubmitting"
+                  @click="doDerive('asset_extraction')"
+                >
+                  拆分资产
+                </Button>
               </div>
               <p class="cv-hint">
                 用节点里的「原文 sourceText」作为输入；产出写回节点（结果在下方）。
@@ -1676,6 +1746,22 @@ function toggleSec(key: string): void {
                   <span class="cv-tag">{{ sAt(["result_text"]).split("\n").length }} 行</span>
                 </label>
                 <textarea class="cv-textarea insp-result-text" readonly :value="sAt(['result_text'])" />
+              </div>
+              <div v-if="assetCandidates.length" class="cv-field insp-asset-candidates">
+                <label>
+                  资产候选
+                  <span class="cv-tag">{{ assetCandidates.length }} 个</span>
+                </label>
+                <ul class="insp-assets__list">
+                  <li v-for="(a, i) in assetCandidates" :key="i" class="insp-assets__item">
+                    <span class="cv-tag">{{ assetKindLabel(a.kind) }}</span>
+                    <span class="insp-assets__name">{{ a.name }}</span>
+                  </li>
+                </ul>
+                <Button class="insp-assets__create" size="sm" block @click="createAssetNodes">
+                  创建 {{ assetCandidates.length }} 个资产节点
+                </Button>
+                <p class="cv-hint">建出来的是 asset 节点（带 prompt），保存后才落库。</p>
               </div>
               <p v-else-if="ed.selectedNode.value?.status === 2" class="cv-hint insp-derive-running">
                 正在运行…（完成后自动回填）
@@ -2627,5 +2713,43 @@ function toggleSec(key: string): void {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* 拆分资产的候选列表：一行一个，名字过长省略（资产名可能很长） */
+.insp-assets__list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.insp-assets__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.insp-assets__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.insp-derive-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.insp-result-text {
+  min-height: 120px;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 </style>

@@ -285,6 +285,17 @@ export const useCanvasApi = () => {
         input,
       ),
 
+    /** 拆分资产（角色/场景/道具；产出为 JSON，前端据此建资产节点） */
+    assetExtraction: (
+      canvasId: string,
+      nodeId: string,
+      input: { source_text?: string; prompt?: string; model?: string; active_tab?: "character" | "scene" | "prop" } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/asset-extraction`,
+        input,
+      ),
+
     /** 拆解分镜（结果由 worker 回写到节点 params.result_text） */
     storyboardParse: (
       canvasId: string,

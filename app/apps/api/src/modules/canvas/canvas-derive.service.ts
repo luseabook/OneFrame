@@ -6,8 +6,8 @@ import { db } from "../../db/database";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
 
-/** 画布当前支持的两个「文本类派生」能力 */
-export type DeriveKind = "script_optimization" | "storyboard_parse";
+/** 画布当前支持的「文本类派生」能力（与 `TextMode` 一致） */
+export type DeriveKind = "script_optimization" | "storyboard_parse" | "asset_extraction";
 
 /** 与契约 §3.4 一致：原文上限 5 万字（400104） */
 const SOURCE_MAX = 50_000;
@@ -44,7 +44,13 @@ export class CanvasDeriveService {
     canvasId: string,
     nodeId: string,
     kind: DeriveKind,
-    input: { source_text?: string; prompt?: string; model?: string },
+    input: {
+      source_text?: string;
+      prompt?: string;
+      model?: string;
+      /** 与参照站一致：拆分资产时用户停在哪个 tab，就优先出哪一类 */
+      active_tab?: "character" | "scene" | "prop";
+    },
   ): Promise<DeriveResult> {
     const node = await this.requireNode(auth.spaceId, canvasId, nodeId);
     if (!ALLOWED_NODE_TYPES.has(node.nodeType)) {
@@ -91,7 +97,7 @@ export class CanvasDeriveService {
       mode: kind,
       model: model.name,
       scene: null,
-      input: { prompt: this.buildPrompt(kind, source, input.prompt) },
+      input: { prompt: this.buildPrompt(kind, source, input.prompt, input.active_tab) },
       // 文本模式按次计价：resolution 是"计价单位"占位（目录里声明为 per_call），
       // 不带 duration 档位——具体金额由 model_prices 决定
       options: { resolution: "per_call", count: 1 },
@@ -160,12 +166,40 @@ export class CanvasDeriveService {
     return this.models.findByName(found.name);
   }
 
-  private buildPrompt(kind: DeriveKind, source: string, extra?: string): string {
+  private buildPrompt(
+    kind: DeriveKind,
+    source: string,
+    extra?: string,
+    activeTab?: "character" | "scene" | "prop",
+  ): string {
     const tail = extra?.trim() ? `\n\n额外要求：${extra.trim()}` : "";
     if (kind === "script_optimization") {
       return (
         "优化下面这段剧本：保持人物、情节与集数不变，改善节奏与画面感，" +
         "只输出优化后的剧本正文。\n\n" +
+        source +
+        tail
+      );
+    }
+    if (kind === "asset_extraction") {
+      // 输出必须是可解析的 JSON：前端要按角色/场景/道具分三个 tab 展示，
+      // 自由文本没法稳定拆分（这也是参照站把 active_tab 放在请求里的原因）
+      const focus =
+        activeTab === "character"
+          ? "本次重点抽取「角色」，其余两类可以给空数组。"
+          : activeTab === "scene"
+            ? "本次重点抽取「场景」，其余两类可以给空数组。"
+            : activeTab === "prop"
+              ? "本次重点抽取「道具」，其余两类可以给空数组。"
+              : "";
+      return (
+        "从下面的剧本里抽取可复用的「角色 / 场景 / 道具」，只输出 JSON：" +
+        '{"characters":[{"name":"","description":"","prompt":"中文文生图提示词"}],' +
+        '"scenes":[{"name":"","description":"","prompt":""}],' +
+        '"props":[{"name":"","description":"","prompt":""}]}。' +
+        "name 简洁（如「林晚」「雨夜街头」「旧怀表」），每类不超过 8 个，不要输出 JSON 之外的任何文字。" +
+        (focus ? " " + focus : "") +
+        "\n\n" +
         source +
         tail
       );

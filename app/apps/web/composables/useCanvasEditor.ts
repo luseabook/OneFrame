@@ -591,7 +591,7 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
    */
   async function deriveText(
     nodeId: string,
-    kind: "script_optimization" | "storyboard_parse",
+    kind: "script_optimization" | "storyboard_parse" | "asset_extraction",
     extraPrompt?: string,
   ): Promise<boolean> {
     const node = nodes.value.find((n) => n.id === nodeId);
@@ -611,11 +611,13 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
       const res =
         kind === "script_optimization"
           ? await api.scriptOptimization(canvasId.value, nodeId, payload)
-          : await api.storyboardParse(canvasId.value, nodeId, payload);
+          : kind === "asset_extraction"
+            ? await api.assetExtraction(canvasId.value, nodeId, payload)
+            : await api.storyboardParse(canvasId.value, nodeId, payload);
       node.status = res.node.status;
       node.task_id = res.node.task_id;
       toast.success(
-        `已发起${kind === "script_optimization" ? "剧本优化" : "拆解分镜"}，冻结 ${res.credits_estimate} 积分`,
+        `已发起${{ script_optimization: "剧本优化", storyboard_parse: "拆解分镜", asset_extraction: "拆分资产" }[kind]}，冻结 ${res.credits_estimate} 积分`,
       );
       startTaskPolling(nodeId, res.task_id);
       return true;

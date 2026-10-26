@@ -119,6 +119,18 @@ describe("MockAdapter 文本分支", () => {
 
     const storyboard = await mock.submit(textRequest("storyboard_parse"));
     expect(storyboard.sync_results?.[0]?.text).toContain("分镜清单");
+
+    // 拆分资产的产出必须是**合法 JSON**：前端要按角色/场景/道具渲染，
+    // mock 返回自由文本会让"解析失败"盖住真正的链路问题
+    const assets = await mock.submit(textRequest("asset_extraction"));
+    const parsed = JSON.parse(assets.sync_results?.[0]?.text ?? "{}") as {
+      characters?: unknown[];
+      scenes?: unknown[];
+      props?: unknown[];
+    };
+    expect(Array.isArray(parsed.characters)).toBe(true);
+    expect(Array.isArray(parsed.scenes)).toBe(true);
+    expect(Array.isArray(parsed.props)).toBe(true);
   });
 
   it("媒体类仍走异步 mock（返回 vendor_task_id 而不是同步结果）", async () => {

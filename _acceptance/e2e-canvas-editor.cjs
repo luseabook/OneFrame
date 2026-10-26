@@ -1120,8 +1120,28 @@ function buildXlsxBuffer() {
             const task = await api("GET", `/agent/task/${node.task_id}`, undefined, token);
             // mode 必须是文本模式（走 tasks 脊柱，而不是另造一套）
             record("S19.4 任务 mode=script_optimization", task?.data?.mode === "script_optimization", task?.data?.mode);
+
+            // 第三个文本能力：拆分资产（同一节点、同一脊柱，产出是可解析 JSON）
+            const assetBtn = page.locator(".insp-derive-assets");
+            record("S19.5 检查器出现「拆分资产」入口", (await assetBtn.count()) > 0);
+            if ((await assetBtn.count()) > 0) {
+              await assetBtn.first().click();
+              await sleep(2000);
+              const again = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+              const n2 = (again.data.nodes || []).find((n) => n.name === "可优化剧本");
+              const t2 = n2?.task_id ? await api("GET", `/agent/task/${n2.task_id}`, undefined, token) : null;
+              record(
+                "S19.6 任务 mode=asset_extraction",
+                t2?.data?.mode === "asset_extraction",
+                t2?.data?.mode,
+              );
+            } else {
+              record("S19.6 任务 mode=asset_extraction", false, "无入口");
+            }
           } else {
             record("S19.4 任务 mode=script_optimization", false, "无 task_id");
+            record("S19.5 检查器出现「拆分资产」入口", false, "无 task_id");
+            record("S19.6 任务 mode=asset_extraction", false, "无 task_id");
           }
         } else {
           record("S19.3 节点已挂 task_id 并进入生成中", false, "无入口");

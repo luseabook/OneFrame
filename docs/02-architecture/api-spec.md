@@ -8,7 +8,7 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
-> **v2.6 · 2026-10-26 · 文本类能力 + 后台定价可写**：新增 §14.4.6（剧本优化 / 拆解分镜 2 条），
+> **v2.6 · 2026-10-26 · 文本类能力 + 后台定价可写**：新增 §14.4.6（剧本优化 / 拆解分镜 / 拆分资产 3 条），
 > 把 `TextMode` 进 `tasks.mode` 枚举（按次计价）；后台补 `POST/DELETE /ops/admin/model-prices`，
 > 让"新能力上架定价"不必改代码。同时修掉计费缺陷：`duration_s IS NULL` 的档位原先不受唯一键约束，
 > 同一档位可重复插入、扣费金额不确定（补部分唯一索引 `uq_model_prices_per_call`，迁移 0017）。
@@ -774,7 +774,7 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：`video-parse` / `asset-extraction` / `storyboard-asset-match` 等派生族（8 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
+**尚未实现（不暴露空壳）**：`video-parse` / `storyboard-asset-match` 等派生族（7 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 **已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
 **已实现**：节点产物批量下载（3 条）——2026-10-26，见 §14.4.5。
@@ -958,12 +958,17 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 6. **`.zip` 必须声明 `application/zip`**：`files/local` 的 content-type 表原先没有 zip，
    会退化成 `application/octet-stream`，部分浏览器直接内联展示乱码。
 
-#### 14.4.6 文本类派生（剧本优化 / 拆解分镜，2026-10-26）
+#### 14.4.6 文本类派生（剧本优化 / 拆解分镜 / 拆分资产，2026-10-26）
 
 | 方法 | 路径 | 请求 | 响应 | 关键码 |
 |---|---|---|---|---|
 | POST | `/canvas/canvases/{id}/nodes/{node_id}/script-optimization` | `{source_text?, prompt?, model?}` | `{task_id, status, credits_estimate, node}` | 0/400101/400104/745701/745801 |
 | POST | `/canvas/canvases/{id}/nodes/{node_id}/storyboard-parse` | 同上 | 同上 | 同上 |
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/asset-extraction` | 同上 + `{active_tab?: character\|scene\|prop}` | 同上 | 同上 |
+
+> `asset-extraction` 的 `active_tab` 与参照站一致：用户停在哪个 tab 就优先出哪一类资产，
+> 避免一次给三屏 JSON 让人分不清"现在看的是哪一类"。产出必须是**可解析 JSON**
+> （`{characters[],scenes[],props[]}`），前端据此一键建 asset 节点（`assetKind/prompt` 一并带过去）。
 
 **能力模型（为什么能落地而不写死价格）**：
 - 新增两个 `tasks.mode`（`TextMode`：`script_optimization` / `storyboard_parse`），

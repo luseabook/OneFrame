@@ -166,4 +166,25 @@ export class CanvasNodeTasksController {
     const input = parseOrThrow(deriveBody, body ?? {});
     return this.derive.derive(c, canvasId, nodeId, "storyboard_parse", input);
   }
+
+  /**
+   * 拆分资产（角色 / 场景 / 道具）。
+   *
+   * `active_tab` 与参照站一致：用户停在哪个 tab 就优先出哪一类，避免一次给三屏 JSON
+   * 让人分不清"我现在看的是哪一类"。产出是可解析 JSON，前端据此建资产节点。
+   */
+  @Post("canvases/:canvas_id/nodes/:node_id/asset-extraction")
+  async assetExtraction(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(
+      deriveBody.extend({ active_tab: z.enum(["character", "scene", "prop"]).optional() }),
+      body ?? {},
+    );
+    return this.derive.derive(c, canvasId, nodeId, "asset_extraction", input);
+  }
 }

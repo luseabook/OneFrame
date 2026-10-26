@@ -106,5 +106,17 @@ function mockText(req: NormalizedGenRequest): string {
       "镜3 | 特写 | 主角眼神坚定，画面定格，字幕升起 | 5s | 9:16",
     ].join("\n");
   }
+  if (req.request.mode === "asset_extraction") {
+    // 必须是**合法 JSON**：前端按角色/场景/道具三个 tab 渲染，
+    // mock 返回自由文本的话"解析失败"会盖住真正的链路问题
+    return JSON.stringify({
+      characters: [
+        { name: "林晚", description: "主角，坚韧克制", prompt: "短剧角色肖像，林晚，冷色光影，清晰五官" },
+        { name: "顾沉", description: "男主，隐瞒真相", prompt: "短剧角色肖像，顾沉，暖色光影，浅景深" },
+      ],
+      scenes: [{ name: "雨夜街头", description: "开场冲突发生地", prompt: "电影感场景，雨夜街头，霓虹反光" }],
+      props: [{ name: "旧怀表", description: "推动真相的关键道具", prompt: "道具特写，旧怀表，浅景深" }],
+    });
+  }
   return `【mock 文本结果】${prompt}`;
 }

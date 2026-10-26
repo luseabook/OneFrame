@@ -161,6 +161,27 @@ describe("canvas text derive + admin pricing e2e", () => {
     expect(tooLong.code).toBe(400104);
   }, 60_000);
 
+  it("拆分资产：落 tasks 且 mode=asset_extraction（与另两个文本能力同一条脊柱）", async () => {
+    const res = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${scriptNodeId}/asset-extraction`,
+      { active_tab: "character" },
+    );
+    expect(res.code).toBe(0);
+    const { rows } = await pool.query<{ mode: string }>("select mode from tasks where id = $1", [
+      res.data.task_id,
+    ]);
+    expect(rows[0]?.mode).toBe("asset_extraction");
+
+    // active_tab 只接受三个合法值（参照站语义：用户停在哪个 tab 就优先出哪一类）
+    const badTab = await inject(
+      "POST",
+      `/canvas/canvases/${canvasId}/nodes/${scriptNodeId}/asset-extraction`,
+      { active_tab: "character; DROP TABLE" },
+    );
+    expect(badTab.code).toBe(400101);
+  }, 60_000);
+
   it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {
     const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
     expect(list.code).toBe(0);
