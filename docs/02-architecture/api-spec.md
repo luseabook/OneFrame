@@ -8,6 +8,8 @@
 > **v2.0 · 2026-10-26 · 四新域契约（F1）**：新增 §14 四域端点总则与端点族清单（`canvas` 73 / `agent` 12 / `cam` 39 / `film` 37，共 161 条本体）；
 > 错误码表新增 400108、746004、746005；`credit_flows.kind` 扩 4 个配对枚举（见 database §12.3）。
 > 逐端点方法/请求/响应见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`；跨域裁决见 `f1-lead-decisions.md`。
+> **v2.1 · 2026-10-26 · canvas 前端落地回写**：§14.4.1 补 `commit` 的 `id_map` 语义（本地临时 id → 雪花 id；修正前非数字 id 直接 500，整图提交不可用）；
+> 新增 §14.4.2 记录画布前端已实现能力与"明确不做"清单。验收：`node _acceptance/e2e-canvas-editor.cjs`（23 项）。
 
 ## 1. 通用约定
 
@@ -737,8 +739,35 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 1. **提交通用整体替换**：画布编辑天然是整图操作（拖拽/批量/撤销），逐条 diff 的边界情况远多于收益；单画布百级节点下代价可接受。提交时若边引用了不存在的节点 → **400101 且事务回滚**（版本不推进）。
 2. **两层乐观锁**：画布级（`canvases.version`，提交/改名用）与节点级（`canvas_nodes.version`，单节点 PATCH 用），冲突一律 **746002**，绝不静默覆盖。
 3. **锁不落库**：`node_locks` 走 Redis（对齐 §7 既有决策）；`unlock` 只能由持锁者执行，否则 746003。
+4. **`commit` 接受本地临时 id 并回传 `id_map`**（2026-10-26 修正）：画布编辑器是"本地编辑 + 整图提交"，新节点 id 由前端临时生成（形如 `local_<ts>_<rand>`）。因此 `commit` 把**非雪花 id 一律视为新节点**（新分配），而不是解析失败。
+   - 响应体 `data.id_map`：`{ 本地临时 id → 真实雪花 id }`。前端保存后**必须**用它回写本地 id，否则下次提交会把同一批节点当新节点再建一遍（**节点翻倍**）。
+   - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
+   - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
 **尚未实现（不暴露空壳）**：模板库（`canvas_templates` 表已建，端点未做）、素材（`canvas_materials`）、批注（`canvas_comment_nodes`/`canvas_comments`）、固定组（`canvas_pin_groups`）、节点派生任务（`nodes/{id}/video-parse` 等 9 个）、画布内对话/SSE（归 `agent` 域）。
+
+#### 14.4.2 `canvas` 前端已实现能力（2026-10-26）
+
+> 页面：`/canvas`（列表，裸壳布局）+ `/canvas/{id}`（编辑器）。
+> 端到端验收：`node _acceptance/e2e-canvas-editor.cjs`（23 项断言，真实浏览器 + API 交叉核对）。
+
+| 能力 | 实现说明 |
+|---|---|
+| 画布引擎 | **自绘**（`transform: translate+scale` + pointer events），未引 X6/vue-flow/dagre；单画布百级节点目标 |
+| 视口 | 滚轮缩放（以指针为锚点）、空格/中键/抓手模式平移、适配视图、小地图（点击定位）、缩放百分比 |
+| 节点 | 11 种类型全覆盖；卡片按类型渲染参数摘要；生成结果缩略（`params.result_url`/`cover_url`）；他人持锁半透明+锁标记 |
+| 连线 | 连线模式点两个节点；贝塞尔曲线；点曲线删除（加粗透明命中区）；同 src/dst/semantic 幂等 |
+| 选择 | 单击 / Shift 多选 / 框选（世界坐标命中）/ Ctrl+A；方向键微调（Shift ×10） |
+| 编辑 | 拖拽（多选整体位移，屏幕位移÷zoom 转世界位移）、复制（Ctrl+D）、删除（Delete）、撤销/重做（快照栈，上限 50） |
+| 保存 | 整图 `commit` + `id_map` 回写；`746002` 冲突明确提示"请重新加载"，绝不静默覆盖 |
+| 检查器 | 11 种节点参数面板（字段严格对齐 CLI `node.md`）；公共区（名称/XY/宽度/Z序/状态/分组）；多选批量改状态与对齐；连线列表可删 |
+| 历史版本 | `GET /snapshots` 列表 → 载入某版本到本地（**仍需点保存**才落库，避免误触覆盖） |
+| 协作锁 | 选中即抢锁、20s 续期、15s 心跳刷新"他人编辑中"；锁仅提示，真实保护仍是 commit 乐观锁 |
+| 空态引导 | 复刻参照站：`双击画布 / 单击 Tab` + 两行 chip（8 类型）+ 新手引导入口 |
+
+**明确不做（对应端点未实现，只留入口 + 说明，不放假数据）**：模板库、素材库、历史素材、评论/批注、图层树、画布内 Agent 对话（属 `agent` 域）、固定组。
+
+**已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
 
 ### 14.5 `cam` 与 `film` 端点族要点
 

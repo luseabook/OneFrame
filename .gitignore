@@ -55,6 +55,18 @@ _acceptance/*
 # 本地依赖启动（PG 55432 / Redis 6380；宿主重启后靠它恢复，
 # 避免"依赖没起"被误判成代码坏——本轮实际踩过）
 !_acceptance/start-local-stack.ps1
+# 本项目专属开发栈（api 3002 / web 3003）。**必须入库**：
+# 3000/3001 被同机另一个项目（E:\ecpm）常驻占用，且本项目 api 只读 process.env
+# 不加载 .env —— 没有这个脚本，换机器/重启后无法复现环境，
+# 会再次把"别人的 3000"误当成自家 API（本轮实际踩过，详见
+# _acceptance/_gap/canvas-frontend-baseline.md §1）。
+!_acceptance/start-wanxing-stack.ps1
+!_acceptance/restart-api.ps1
+# 画布域验收：画布是状态最多的界面（视口/选择/锁/版本/快照），
+# 纯 typecheck 无法证明拖拽-连线-保存-冲突真的能工作，必须有行为断言。
+!_acceptance/canvas-acceptance.ps1
+!_acceptance/e2e-canvas-editor.cjs
+!_acceptance/canvas-probe.cjs
 
 # 本地依赖运行时数据（PG/Redis 数据目录，66MB+，绝不入库）
 .localstack/
