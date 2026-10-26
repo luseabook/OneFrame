@@ -3,10 +3,12 @@ import { CanvasController } from "./canvas.controller";
 import { CanvasNodeTasksController } from "./canvas-node-tasks.controller";
 import { CanvasTemplateController } from "./canvas-template.controller";
 import { CanvasMaterialController } from "./canvas-material.controller";
+import { CanvasGroupController } from "./canvas-group.controller";
 import { CanvasService } from "./canvas.service";
 import { CanvasNodeTasksService } from "./canvas-node-tasks.service";
 import { CanvasTemplateService } from "./canvas-template.service";
 import { CanvasMaterialService } from "./canvas-material.service";
+import { CanvasGroupService } from "./canvas-group.service";
 import { CreditsModule } from "../credits/credits.module";
 import { GenerationsModule } from "../generations/generations.module";
 import { ModelsModule } from "../models/models.module";
@@ -19,8 +21,21 @@ import { ModelsModule } from "../models/models.module";
     CanvasNodeTasksController,
     CanvasTemplateController,
     CanvasMaterialController,
+    CanvasGroupController,
   ],
-  providers: [CanvasService, CanvasNodeTasksService, CanvasTemplateService, CanvasMaterialService],
-  exports: [CanvasService, CanvasNodeTasksService, CanvasTemplateService, CanvasMaterialService],
+  providers: [
+    CanvasService,
+    CanvasNodeTasksService,
+    CanvasTemplateService,
+    CanvasMaterialService,
+    CanvasGroupService,
+  ],
+  exports: [
+    CanvasService,
+    CanvasNodeTasksService,
+    CanvasTemplateService,
+    CanvasMaterialService,
+    CanvasGroupService,
+  ],
 })
 export class CanvasModule {}

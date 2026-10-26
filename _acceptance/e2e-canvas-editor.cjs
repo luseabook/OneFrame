@@ -640,6 +640,78 @@ async function prepareUser() {
       for (const n of ["S14.2", "S14.3", "S14.4"]) record(`${n} 素材流程`, false, "无入口");
     }
 
+    // ══ S15 固定组 ═══════════════════════════════════════
+    console.log("\n[S15] 固定组");
+    await page.keyboard.press("Escape");
+    await sleep(400);
+    // 关掉素材抽屉（如果在开）
+    const matClose = page.locator(".canvas-materials .cv-glass-btn").first();
+    if (await matClose.count()) { await matClose.click(); await sleep(500); }
+
+    const pinBar = page.locator(".canvas-pins").first();
+    record("S15.1 画布有固定组栏", (await pinBar.count()) > 0);
+    if (await pinBar.count()) {
+      // 先选节点再「存为分组」。
+      // 注意：必须先点一下舞台把焦点拿回来（否则 Ctrl+A 可能落在上一个输入框里），
+      // 再 Ctrl+A 全选。这个顺序实测才稳。
+      await page.locator(".canvas-stage").click({ position: { x: 150, y: 620 } }).catch(() => {});
+      await sleep(400);
+      await page.keyboard.press("Control+a");
+      await sleep(900);
+      const selBefore = await page.locator(".canvas-node.is-selected").count();
+      record("S15.1b 已选中待归组节点", selBefore > 0, `selected=${selBefore}`);
+
+      const addBtn = page.locator(".pin-add").first();
+      const addEnabled = (await addBtn.count()) ? !(await addBtn.isDisabled()) : false;
+      record("S15.1c 存为分组按钮可用", addEnabled, `enabled=${addEnabled}`);
+      if (addEnabled) {
+        await addBtn.click();
+        await sleep(3000);
+
+        // API 核对：槽位 1 应有成员，且节点侧 group_ids 同步（双写一致）
+        const pins = await api("GET", `/canvas/canvases/${canvasId}/pin-groups`, undefined, token);
+        const slot1 = (pins.data?.list ?? []).find((g) => g.slot === 1);
+        record("S15.2 分组已落库", !!slot1, slot1 ? `members=${slot1.node_ids.length}` : "未找到");
+        record("S15.3 分组有成员", (slot1?.node_ids ?? []).length > 0, `n=${(slot1?.node_ids ?? []).length}`);
+
+        // 双写一致性：随便取一个成员，节点详情里 group_ids 必须含该组
+        if (slot1 && slot1.node_ids.length > 0) {
+          const det = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+          const member = (det.data?.nodes ?? []).find((n) => n.id === slot1.node_ids[0]);
+          record(
+            "S15.4 双写一致（node.group_ids 含该组）",
+            (member?.group_ids ?? []).includes(slot1.group_id),
+            `node.group_ids=${JSON.stringify(member?.group_ids)}`,
+          );
+        } else {
+          record("S15.4 双写一致（node.group_ids 含该组）", false, "无成员");
+        }
+
+        // 芯片可见
+        const chips = await page.locator(".pin-chip").count();
+        record("S15.5 分组芯片可见", chips > 0, `chips=${chips}`);
+
+        // 点芯片跳转（选中该组成员）
+        if (chips > 0) {
+          await page.locator(".pin-chip").first().click();
+          await sleep(900);
+          const selCount = await page.locator(".canvas-node.is-selected").count();
+          record("S15.6 点分组芯片选中成员", selCount > 0, `selected=${selCount}`);
+        } else {
+          record("S15.6 点分组芯片选中成员", false, "无芯片");
+        }
+      } else {
+        record("S15.2 分组已落库", false, "无存为分组按钮");
+        record("S15.3 分组有成员", false, "跳过");
+        record("S15.4 双写一致（node.group_ids 含该组）", false, "跳过");
+        record("S15.5 分组芯片可见", false, "跳过");
+        record("S15.6 点分组芯片选中成员", false, "跳过");
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "13-pingroups.png") });
+    } else {
+      for (const n of ["S15.2", "S15.3", "S15.4", "S15.5", "S15.6"]) record(`${n} 固定组流程`, false, "无栏");
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(
@@ -681,6 +753,8 @@ async function prepareUser() {
     process.exit(1);
   }
 })();
+
+
 
 
 

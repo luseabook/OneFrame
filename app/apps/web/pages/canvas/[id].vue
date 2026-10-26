@@ -675,7 +675,7 @@ function startResize(ev: PointerEvent): void {
 
 // ── 生命周期 ────────────────────────────────────────────
 onMounted(async () => {
-  await Promise.all([editor.load(), editor.loadMe()]);
+  await Promise.all([editor.load(), editor.loadMe(), editor.loadPinGroups()]);
   editor.startTimers();
   // 打开画布先校正一次节点任务状态：用户可能上次关页面时任务还没跑完，
   // 不校正的话画布会永远显示"生成中"（worker 已回写，但前端不知道）。
@@ -834,6 +834,9 @@ onUnmounted(() => {
         :stage="stageSize"
         @jump="jumpToWorld"
       />
+
+      <!-- 固定组栏（顶部，一键跳转分组） -->
+      <CanvasPinBar :editor="editor" />
 
       <!-- 模板库抽屉 -->
       <CanvasTemplatePanel v-if="templateOpen" :editor="editor" @close="templateOpen = false" />

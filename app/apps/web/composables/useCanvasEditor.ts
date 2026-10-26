@@ -7,6 +7,7 @@ import type {
   CanvasMaterialDto,
   CanvasNodeDto,
   CanvasNodeType,
+  PinGroupDto,
 } from "~/types/canvas";
 import { CANVAS_ERR, NODE_TYPE_META } from "~/types/canvas";
 
@@ -817,11 +818,101 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     }
   }
 
+  // ── 固定组（C10）────────────────────────────────────────
+  const pinGroups = ref<PinGroupDto[]>([]);
+  const pinGroupsMaxSlots = ref(7);
+
+  async function loadPinGroups(): Promise<void> {
+    try {
+      const res = await api.listPinGroups(canvasId.value);
+      pinGroups.value = res.list;
+      pinGroupsMaxSlots.value = res.max_slots;
+    } catch {
+      /* 固定组读取失败不阻塞编辑 */
+    }
+  }
+
+  /**
+   * 把当前选中节点存进某个槽位的固定组（整体替换该槽位）。
+   *
+   * 为什么是"整体替换"而不是"追加"：后端契约如此（`PUT /pin-groups/:slot`），
+   * 前端交互也一致——用户选中一批节点，点一个槽位，语义就是"这一组换成这些"。
+   * 追加语义会让"如何移除"变成一个没有出口的动作。
+   */
+  async function assignSelectionToPinSlot(slot: number, name?: string): Promise<boolean> {
+    if (selectedIds.value.length === 0) {
+      toast.error("先选中要归组的节点");
+      return false;
+    }
+    // 有未保存改动（含 local_ 临时 id 的新节点）→ 先自动保存拿真实 id 再归组。
+    // 早期实现是"检测到未保存就报错让用户先手动保存"，但实测这条路径很容易踩到
+    // （套用模板后立刻归组）——用户会觉得"点了没反应"。归组本来就是一次服务端写入，
+    // 顺手把本地改动落库更符合预期，也不会丢东西。
+    if (dirty.value || selectedIds.value.some((id) => id.startsWith("local_"))) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+    const ids = selectedIds.value.filter((id) => !id.startsWith("local_"));
+    if (ids.length === 0) {
+      toast.error("这些节点还没保存成功，无法归组");
+      return false;
+    }
+    try {
+      const res = await api.upsertPinGroup(canvasId.value, slot, {
+        node_ids: ids,
+        ...(name ? { name } : {}),
+      });
+      await loadPinGroups();
+      // 同步本地节点的 group_ids，避免要刷新才看到归属变化
+      for (const n of nodes.value) {
+        if (ids.includes(n.id)) {
+          n.group_ids = res.pin_group.node_ids;
+        } else if (n.group_ids.includes(res.pin_group.group_id)) {
+          // 被替换掉的旧成员要清掉，否则出现"幽灵归属"
+          n.group_ids = n.group_ids.filter((g) => g !== res.pin_group.group_id);
+        }
+      }
+      toast[res.replaced ? "info" : "success"](res.replaced ? `已替换槽位 ${slot}` : `已加入槽位 ${slot}`);
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "归组失败");
+      return false;
+    }
+  }
+
+  async function clearPinSlot(slot: number): Promise<void> {
+    try {
+      await api.clearPinGroupMembers(canvasId.value, slot);
+      await loadPinGroups();
+      toast.success("已清空该分组");
+    } catch (e) {
+      toast.error((e as Error).message || "清空失败");
+    }
+  }
+
+  async function removePinSlot(slot: number): Promise<void> {
+    try {
+      await api.deletePinGroup(canvasId.value, slot);
+      await loadPinGroups();
+      toast.success("已删除该分组");
+    } catch (e) {
+      toast.error((e as Error).message || "删除失败");
+    }
+  }
+
+  /** 点固定组 = 把视口带到该组成员（"一键跳转"是它的核心价值） */
+  function focusPinGroup(group: PinGroupDto): void {
+    if (group.node_ids.length === 0) return;
+    const members = nodes.value.filter((n) => group.node_ids.includes(n.id));
+    if (members.length === 0) return;
+    selectedIds.value = members.map((n) => n.id);
+    focusNode(members[0]!.id);
+  }
+
   /**
    * 打开画布时校正一次节点任务状态。
    * 存在的意义：用户可能关掉页面错过了任务完成，重新打开时画布不该永远显示"生成中"。
-   */
-  async function syncNodeTasks(): Promise<void> {
+   */  async function syncNodeTasks(): Promise<void> {
     const inFlight = nodes.value.filter((n) => n.task_id && (n.status === 2 || n.status === 1));
     if (inFlight.length === 0) return;
     try {
@@ -1186,6 +1277,14 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     replyComment,
     toggleCommentResolved,
     deleteComment,
+    // 固定组（C10）
+    pinGroups,
+    pinGroupsMaxSlots,
+    loadPinGroups,
+    assignSelectionToPinSlot,
+    clearPinSlot,
+    removePinSlot,
+    focusPinGroup,
     // 生命周期
     startTimers,
     stopTimers,
@@ -1194,3 +1293,5 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
 };
 
 export type CanvasEditor = ReturnType<typeof useCanvasEditor>;
+
+

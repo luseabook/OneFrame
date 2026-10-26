@@ -2,6 +2,7 @@ import type {
   CanvasMaterialDto,
   CanvasCommentNodeDto,
   CanvasCommentDto,
+  PinGroupDto,
   CanvasDetail,
   CanvasListItem,
   CanvasSnapshot,
@@ -213,6 +214,29 @@ export const useCanvasApi = () => {
         `${base(canvasId)}/comment-nodes/${encodeURIComponent(cnId)}/resolve`,
         { resolved },
       ),
+
+    // ── 固定组（C10）────────────────────────────────────────
+    listPinGroups: (canvasId: string) =>
+      api.get<{ list: PinGroupDto[]; max_slots: number }>(`${base(canvasId)}/pin-groups`),
+
+    upsertPinGroup: (
+      canvasId: string,
+      slot: number,
+      input: { name?: string; color?: string; node_ids: string[] },
+    ) =>
+      api.put<{ pin_group: PinGroupDto; replaced: boolean }>(`${base(canvasId)}/pin-groups/${slot}`, input),
+
+    deletePinGroup: (canvasId: string, slot: number) =>
+      api.delete<{ group_id: string; cleared: number }>(`${base(canvasId)}/pin-groups/${slot}`),
+
+    clearPinGroupMembers: (canvasId: string, slot: number) =>
+      api.delete<{ group_id: string; cleared: number }>(`${base(canvasId)}/pin-groups/${slot}/members`),
+
+    setNodePinGroups: (canvasId: string, nodeId: string, groupIds: string[]) =>
+      api.put<{ node_id: string; group_ids: string[] }>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/pin-groups`,
+        { group_ids: groupIds },
+      ),
   };
 };
 
@@ -270,5 +294,6 @@ export interface TemplateNodeDraft {
   z_index: number;
   params: Record<string, unknown>;
 }
+
 
 

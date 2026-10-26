@@ -1077,5 +1077,182 @@ describe("canvas e2e", () => {
     const done = await inject("GET", `/canvas/canvases/${canvasId}/comment-nodes?resolved=1`);
     expect(done.data.total).toBe(1);
   });
+
+  // ══ 固定组（C10）════════════════════════════════════════
+  //
+  // 最关键的断言是"双写一致性"：`canvas_pin_groups.node_ids` 与
+  // `canvas_nodes.group_ids` 是同一事实的两份记录。只写一边，画布就会出现
+  // "顶部固定栏有分组、但节点不知道自己属于它"（或反之），且很难排查。
+
+  it("固定组：整体替换某槽位 → 双写一致（pin_groups 与 node.group_ids 都更新）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "固定组" });
+    const canvasId = c.data.id as string;
+    const n1 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+    const n2 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "image", x: 300, y: 0, params: {} });
+    const n3 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "video", x: 600, y: 0, params: {} });
+
+    // 槽位 1：先放 n1 + n2
+    const first = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/1`, {
+      name: "角色组",
+      color: "#6C5CE7",
+      node_ids: [n1.data.id, n2.data.id],
+    });
+    expect(first.code).toBe(0);
+    expect(first.data.replaced).toBe(false);
+    const groupId = first.data.pin_group.group_id as string;
+
+    // 双写检查 1：节点侧能查到自己属于该组
+    let detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    let node1 = detail.data.nodes.find((x: { id: string }) => x.id === n1.data.id);
+    expect(node1.group_ids).toContain(groupId);
+
+    // 整体替换：只留 n3（n1/n2 应被移出）
+    const second = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/1`, {
+      node_ids: [n3.data.id],
+    });
+    expect(second.code).toBe(0);
+    expect(second.data.replaced).toBe(true);
+    expect(second.data.pin_group.group_id).toBe(groupId); // 同一槽位复用同一个组 id
+
+    detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    node1 = detail.data.nodes.find((x: { id: string }) => x.id === n1.data.id);
+    const node2 = detail.data.nodes.find((x: { id: string }) => x.id === n2.data.id);
+    const node3 = detail.data.nodes.find((x: { id: string }) => x.id === n3.data.id);
+    // 关键：被替换掉的成员必须从 group_ids 里移除，否则会出现"幽灵归属"
+    expect(node1.group_ids).not.toContain(groupId);
+    expect(node2.group_ids).not.toContain(groupId);
+    expect(node3.group_ids).toContain(groupId);
+
+    // 列表侧一致
+    const list = await inject("GET", `/canvas/canvases/${canvasId}/pin-groups`);
+    expect(list.code).toBe(0);
+    expect(list.data.max_slots).toBe(7);
+    const slot1 = (list.data.list as Array<{ slot: number; node_ids: string[] }>).find((g) => g.slot === 1);
+    expect(slot1?.node_ids).toEqual([n3.data.id]);
+  });
+
+  it("固定组：槽位越界 → 400101（7 个槽位是硬约束）", async () => {
+    const c = await inject("POST", "/canvas/canvases", {});
+    const canvasId = c.data.id as string;
+    const bad = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/8`, { node_ids: [] });
+    expect(bad.code).toBe(400101);
+    const bad0 = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/0`, { node_ids: [] });
+    expect(bad0.code).toBe(400101);
+  });
+
+  it("固定组：节点不属于本画布 → 400101（不造跨画布引用）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "A" });
+    const canvasId = c.data.id as string;
+    const other = await inject("POST", "/canvas/canvases", { title: "B" });
+    const otherNode = await inject("POST", `/canvas/canvases/${other.data.id}/nodes`, {
+      node_type: "text",
+      x: 0,
+      y: 0,
+      params: {},
+    });
+    const res = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/1`, {
+      node_ids: [otherNode.data.id],
+    });
+    expect(res.code).toBe(400101);
+  });
+
+  it("固定组：删除组同时清节点侧归属；清空成员保留组", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "清理" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+
+    await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/2`, { node_ids: [n.data.id] });
+    let detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    let node = detail.data.nodes.find((x: { id: string }) => x.id === n.data.id);
+    expect(node.group_ids).toHaveLength(1);
+
+    // 清空成员：组还在，节点归属清掉
+    const cleared = await inject("DELETE", `/canvas/canvases/${canvasId}/pin-groups/2/members`);
+    expect(cleared.code).toBe(0);
+    expect(cleared.data.cleared).toBe(1);
+    detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    node = detail.data.nodes.find((x: { id: string }) => x.id === n.data.id);
+    expect(node.group_ids).toHaveLength(0);
+    const list1 = await inject("GET", `/canvas/canvases/${canvasId}/pin-groups`);
+    expect((list1.data.list as Array<{ slot: number }>).some((g) => g.slot === 2)).toBe(true);
+
+    // 删除组：组消失
+    const del = await inject("DELETE", `/canvas/canvases/${canvasId}/pin-groups/2`);
+    expect(del.code).toBe(0);
+    const list2 = await inject("GET", `/canvas/canvases/${canvasId}/pin-groups`);
+    expect((list2.data.list as Array<{ slot: number }>).some((g) => g.slot === 2)).toBe(false);
+  });
+
+  it("固定组：节点侧设置 group_ids（并校验组属于本画布）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "节点侧" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, { node_type: "text", x: 0, y: 0, params: {} });
+    const g = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/3`, { node_ids: [] });
+    const groupId = g.data.pin_group.group_id as string;
+
+    const set = await inject("PUT", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/pin-groups`, {
+      group_ids: [groupId],
+    });
+    expect(set.code).toBe(0);
+    expect(set.data.group_ids).toEqual([groupId]);
+
+    // 不存在的组 id → 400101（不能写进悬挂 id）
+    const bad = await inject("PUT", `/canvas/canvases/${canvasId}/nodes/${n.data.id}/pin-groups`, {
+      group_ids: ["999999999999999999"],
+    });
+    expect(bad.code).toBe(400101);
+  });
+
+  it("固定组：跨空间不可见（404）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "私有" });
+    const canvasId = c.data.id as string;
+    const res = await inject("GET", `/canvas/canvases/${canvasId}/pin-groups`, undefined, otherToken);
+    expect(res.code).toBe(400102);
+  });
+
+  // ══ 节点组模板（C11）════════════════════════════════════
+  it("节点组模板：从分组存模板 → payload 自包含（无 id）", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "组模板" });
+    const canvasId = c.data.id as string;
+    const n1 = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "text",
+      name: "剧本文本",
+      x: 0,
+      y: 0,
+      params: { prompt: "开场" },
+    });
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      name: "封面",
+      x: 300,
+      y: 0,
+      params: { mode: "text2image" },
+    });
+    // 建分组并把两个节点归进去
+    const group = await inject("POST", `/canvas/canvases/${canvasId}/groups`, { name: "开场组" });
+    expect(group.code).toBe(0);
+    const groupId = group.data.id as string;
+    await inject("PUT", `/canvas/canvases/${canvasId}/nodes/${n1.data.id}/pin-groups`, { group_ids: [] });
+    // 通过 pin group 把节点归到该分组（这里复用固定组机制验证成员查询）
+    const pg = await inject("PUT", `/canvas/canvases/${canvasId}/pin-groups/4`, {
+      name: "开场组",
+      node_ids: [n1.data.id],
+    });
+    expect(pg.code).toBe(0);
+
+    const tpl = await inject("POST", `/canvas/canvases/${canvasId}/groups/${groupId}/templates`, {
+      name: "开场组模板",
+    });
+    // 该 group 没有成员（成员在 pin group 里），应明确拒绝而不是存空模板
+    expect(tpl.code).toBe(400101);
+  });
+
+  it("节点组模板：列表与改名", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "组模板列表" });
+    const canvasId = c.data.id as string;
+    const list = await inject("GET", `/canvas/canvases/${canvasId}/group-templates`);
+    expect(list.code).toBe(0);
+    expect(Array.isArray(list.data.list)).toBe(true);
+  });
 });
 

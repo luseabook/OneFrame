@@ -201,3 +201,12 @@ export interface CanvasCommentDto {
   created_by: string | null;
   created_at: string;
 }
+
+export interface PinGroupDto {
+  group_id: string;
+  name: string | null;
+  color: string | null;
+  /** 1..7 */
+  slot: number;
+  node_ids: string[];
+}
