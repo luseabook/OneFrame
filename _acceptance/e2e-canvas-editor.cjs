@@ -712,6 +712,97 @@ async function prepareUser() {
       for (const n of ["S15.2", "S15.3", "S15.4", "S15.5", "S15.6"]) record(`${n} 固定组流程`, false, "无栏");
     }
 
+    // ══ S16 右侧 Agent 对话面板 ═══════════════════════════
+    // 这一块此前整体缺失（参照站右侧有一整套对话面板）。断言口径：
+    // 1) 页签能切、面板能挂载；2) 真发一条消息，user/assistant 气泡都出现；
+    // 3) API 交叉核对消息确实落库（不能只有界面）；4) 卡片上的"创建节点"真的加到画布。
+    console.log("[S16] Agent 对话面板");
+    {
+      // S13 收尾时"新建批注"浮层是开着的（它盖在右侧 dock 上方），
+      // 不清掉的话点页签会被 `.comment-panel__head` 拦截——这是场景串味，
+      // 不是布局 bug：浮层本就是可覆盖内容，正常用户也会先关掉再切页签。
+      await page.keyboard.press("Escape").catch(() => {});
+      const cancelDraft = page.locator(".comment-panel__head .cv-glass-btn");
+      if ((await cancelDraft.count()) > 0) await cancelDraft.first().click().catch(() => {});
+      await sleep(400);
+
+      const agentTab = page.locator(".canvas-editor__dock-tab", { hasText: "Agent" });
+      record("S16.1 右侧 dock 有 Agent 页签", (await agentTab.count()) > 0);
+      if ((await agentTab.count()) > 0) {
+        await agentTab.first().click();
+        await sleep(700);
+        record("S16.2 切到 Agent 后面板挂载", (await page.locator(".cv-agent").count()) > 0);
+
+        // 新建一个会话（避免复用上一轮上下文，也让"发消息"有确定落点）
+        const newBtn = page.locator(".cv-agent__new");
+        if (await newBtn.count()) {
+          await newBtn.first().click();
+          await sleep(900);
+        }
+        const input = page.locator(".cv-agent__input");
+        record("S16.3 会话就绪（输入框可用）", (await input.count()) > 0 && !(await input.first().isDisabled()));
+
+        if ((await input.count()) > 0) {
+          await input.first().fill("帮我加一个文本节点");
+          await page.locator(".cv-agent__send").first().click();
+          await sleep(400);
+          record("S16.4 发送后输入框清空", ((await input.first().inputValue()) || "") === "");
+          record("S16.5 消息区出现用户气泡", (await page.locator(".cv-agent__msg--user").count()) > 0);
+
+          // 助手回复走 SSE（失败降级为 3s 轮询），给足 20s
+          await page.waitForSelector(".cv-agent__msg--assistant", { timeout: 20_000 }).catch(() => {});
+          record("S16.6 助手回复到达（SSE 或降级轮询）", (await page.locator(".cv-agent__msg--assistant").count()) > 0);
+
+          const applyBtn = page.locator(".cv-agent__apply");
+          record("S16.7 助手卡片给出可落地的节点", (await applyBtn.count()) > 0);
+          if ((await applyBtn.count()) > 0) {
+            const beforeNodes = await page.locator(".canvas-node").count();
+            await applyBtn.first().click();
+            await sleep(900);
+            const afterNodes = await page.locator(".canvas-node").count();
+            record("S16.8 点「创建」后画布节点增加", afterNodes > beforeNodes, `${beforeNodes}→${afterNodes}`);
+          } else {
+            record("S16.8 点「创建」后画布节点增加", false, "无创建按钮");
+          }
+
+          // API 交叉核对：界面上的对话必须真的在库里
+          const sessions = await api("GET", `/canvas/canvases/${canvasId}/chat/sessions`, undefined, token);
+          const sessionList = sessions?.data?.list || [];
+          record("S16.9 会话已落库", sessionList.length > 0, `sessions=${sessionList.length}`);
+          const sid = sessionList[0]?.session_id;
+          if (sid) {
+            const msgs = await api(
+              "GET",
+              `/canvas/canvases/${canvasId}/chat/sessions/${sid}/messages?page_size=50`,
+              undefined,
+              token,
+            );
+            const list = msgs?.data?.list || [];
+            const hasUser = list.some((m) => m.role === 1);
+            const hasAssistant = list.some((m) => m.role === 2);
+            record("S16.10 消息已落库（user + assistant）", hasUser && hasAssistant, `messages=${list.length}`);
+            // 有序性：提问 seq 必须小于回复（并发下最容易坏的不变式）
+            const userSeq = list.find((m) => m.role === 1)?.seq ?? 0;
+            const assistantSeq = list.find((m) => m.role === 2)?.seq ?? 0;
+            record("S16.11 提问 seq < 回复 seq", userSeq > 0 && assistantSeq > userSeq, `${userSeq}<${assistantSeq}`);
+          } else {
+            record("S16.10 消息已落库（user + assistant）", false, "无会话");
+            record("S16.11 提问 seq < 回复 seq", false, "无会话");
+          }
+          record("S16.12 有「历史产出」入口", (await page.locator(".cv-agent__outputs").count()) > 0);
+        } else {
+          for (const n of ["S16.4", "S16.5", "S16.6", "S16.7", "S16.8", "S16.9", "S16.10", "S16.11", "S16.12"]) {
+            record(`${n} Agent 对话流程`, false, "输入框不可用");
+          }
+        }
+      } else {
+        for (const n of ["S16.2", "S16.3", "S16.4", "S16.5", "S16.6", "S16.7", "S16.8", "S16.9", "S16.10", "S16.11", "S16.12"]) {
+          record(`${n} Agent 面板流程`, false, "无 Agent 页签");
+        }
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "14-agent-panel.png") });
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(

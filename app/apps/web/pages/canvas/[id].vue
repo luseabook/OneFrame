@@ -51,6 +51,14 @@ const minimapOpen = ref(true);
 const historyOpen = ref(false);
 const templateOpen = ref(false);
 const materialOpen = ref(false);
+/**
+ * 右侧 dock 页签：属性检查器 / Agent 对话。
+ *
+ * 为什么做成页签而不是并排两块：参照站本身也是"右侧一个面板，切换内容"，
+ * 并排会把画布可视区再吃掉 320px（画布宽度是用户唯一的稀缺资源）。
+ */
+const rightTab = ref<"inspector" | "agent">("inspector");
+const agentPanel = ref<{ bindLastAppliedNodes: (nodeIds: string[]) => void } | null>(null);
 const commentLayer = ref<{ setPendingAnchor: (a: { x: number; y: number }) => void } | null>(null);
 const historyList = ref<Array<{ id: string; version: number; kind: number; created_at: string }>>([]);
 const historyLoading = ref(false);
@@ -444,6 +452,39 @@ function ensureVisible(nodeId: string): void {
 }
 function addNodeAtPointer(type: Parameters<typeof editor.addNode>[0], ev: MouseEvent): void {
   editor.addNode(type, screenToWorld(ev.clientX, ev.clientY));
+}
+
+/**
+ * Agent 卡片上的「在画布中创建 N 个节点」。
+ *
+ * 为什么必须由页面建、而不是面板自己建：节点要进 `useCanvasEditor` 的本地图，
+ * 才会参与整图 commit 的乐观锁与脏标记；面板直接造节点会绕开版本校验，
+ * 保存时表现为"节点凭空消失"。
+ *
+ * 建完把真实 id 交回面板，由它补 `message → node` 的溯源绑定（失败只 warn，
+ * 绑定是元数据，不该让用户以为节点没建成）。
+ */
+function onAgentCreateNodes(
+  drafts: Array<{ node_type: string; name: string; params?: Record<string, unknown> }>,
+): void {
+  if (drafts.length === 0) return;
+  const created: string[] = [];
+  const origin = visibleCenter();
+  drafts.forEach((draft, index) => {
+    const type = draft.node_type as Parameters<typeof editor.addNode>[0];
+    // 同一次创建多个节点时错开落位，否则会叠成一摞看不出有几个
+    const node = editor.addNode(type, { x: origin.x + index * 36, y: origin.y + index * 36 });
+    if (draft.name) editor.setNodeField(node.id, "name", draft.name);
+    if (draft.params) {
+      for (const [key, value] of Object.entries(draft.params)) editor.setNodeParam(node.id, key, value);
+    }
+    created.push(node.id);
+  });
+  nextTick(() => {
+    created.forEach((id) => ensureVisible(id));
+    agentPanel.value?.bindLastAppliedNodes(created);
+    toast.success(`已创建 ${created.length} 个节点，保存后生效`);
+  });
 }
 
 function onStageDoubleClick(ev: MouseEvent): void {
@@ -847,14 +888,50 @@ onUnmounted(() => {
       <!-- 批注层（飘点 + 对话） -->
       <CanvasCommentLayer ref="commentLayer" :editor="editor" :world-to-screen="worldToScreen" />
 
-      <!-- 右侧检查器 -->
+      <!-- 右侧 dock：属性检查器 / Agent 对话（页签切换，不并排占宽） -->
       <aside
         v-if="inspectorOpen"
         class="canvas-editor__inspector"
         :style="{ width: `${inspectorWidth}px` }"
       >
         <button class="canvas-editor__resize" aria-label="拖拽调整面板宽度" @pointerdown="startResize" />
-        <CanvasInspector :editor="editor" :width="inspectorWidth" @close="inspectorOpen = false" />
+        <div class="canvas-editor__dock-tabs" role="tablist" aria-label="右侧面板">
+          <button
+            role="tab"
+            class="canvas-editor__dock-tab"
+            :class="{ 'is-active': rightTab === 'inspector' }"
+            :aria-selected="rightTab === 'inspector'"
+            @click="rightTab = 'inspector'"
+          >
+            属性
+          </button>
+          <button
+            role="tab"
+            class="canvas-editor__dock-tab"
+            :class="{ 'is-active': rightTab === 'agent' }"
+            :aria-selected="rightTab === 'agent'"
+            @click="rightTab = 'agent'"
+          >
+            Agent
+          </button>
+        </div>
+        <CanvasInspector
+          v-if="rightTab === 'inspector'"
+          :editor="editor"
+          :width="inspectorWidth"
+          @close="inspectorOpen = false"
+        />
+        <!-- v-if 而非 v-show：面板挂载即开会话列表与 SSE 流，
+             用 v-show 会在页签不可见时仍挂一条后台连接 -->
+        <CanvasAgentPanel
+          v-else
+          ref="agentPanel"
+          class="canvas-editor__agent"
+          :canvas-id="canvasId"
+          :selection-ids="selectedIds"
+          @close="rightTab = 'inspector'"
+          @create-nodes="onAgentCreateNodes"
+        />
       </aside>
       <!-- 折叠态：只留一个展开钮（参照站右侧折叠态约 58px） -->
       <button
@@ -971,7 +1048,10 @@ onUnmounted(() => {
 /* ── 检查器 ─────────────────────────────────────────── */
 .canvas-editor__inspector {
   position: absolute;
-  top: 0;
+  /* 从顶栏下沿开始：顶栏是 z-index:30 的浮层，面板是 20；
+     面板若从 top:0 起，其顶部 ~64px 会被顶栏盖住——加页签后表现为
+     "Agent 页签看得见点不到"（Playwright 报 topbar-save 拦截点击）。 */
+  top: var(--header-h);
   right: 0;
   bottom: 0;
   z-index: 20;
@@ -997,6 +1077,36 @@ onUnmounted(() => {
 .canvas-editor__resize:hover {
   background: var(--brand-400);
   opacity: 0.35;
+}
+/* dock 页签：属性 / Agent。样式跟检查器同一套 token，避免出现"两种面板语言" */
+.canvas-editor__dock-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--cv-panel-border);
+  flex: 0 0 auto;
+}
+.canvas-editor__dock-tab {
+  flex: 1;
+  height: 30px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.canvas-editor__dock-tab:hover {
+  color: var(--text-1);
+}
+.canvas-editor__dock-tab.is-active {
+  color: var(--text-1);
+  border-bottom-color: var(--brand-400);
+}
+/* Agent 面板自己管内部滚动，这里只保证它吃掉剩余高度 */
+.canvas-editor__agent {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .canvas-editor__inspector-toggle {
   position: absolute;

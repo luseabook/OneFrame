@@ -93,51 +93,50 @@ $apiEnv = @{
 
 function Start-Api {
   if (Test-Port $ApiPort) { Write-Output "api :$ApiPort already up"; return }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "node"
-  $psi.Arguments = "dist/main.js"
-  $psi.WorkingDirectory = Join-Path $App "apps\api"
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $psi.CreateNoWindow = $true
-  foreach ($k in $apiEnv.Keys) { $psi.EnvironmentVariables[$k] = $apiEnv[$k] }
-  $p = [System.Diagnostics.Process]::Start($psi)
-  $null = $p.StandardOutput.ReadToEndAsync()  # 持续读，避免管道写满阻塞
-  $null = $p.StandardError.ReadToEndAsync()
+  # 为什么用 cmd.exe 重定向到**文件**，而不是 ProcessStartInfo 重定向到**管道**：
+  # 管道读取端（ReadToEndAsync）活在本进程里，本进程一退出管道就断，子进程下次
+  # 写 stdout 会拿到 EPIPE 直接崩——表现为"启动脚本明明成功，几分钟后 api 不见了"，
+  # 而且不会有任何报错。重定向到文件则与父进程生命周期无关。
+  # 同理不能给 Start-Process 加 -RedirectStandardOutput 再用管道接走（会挂住调用方）。
+  $apiLog = Join-Path $Root "_acceptance\stack-api.log"
+  $args = "/c node dist/main.js > `"$apiLog`" 2>&1"
+  # 环境变量：cmd 继承本进程环境，所以先设置再启动
+  foreach ($k in $apiEnv.Keys) { Set-Item -Path "Env:$k" -Value $apiEnv[$k] }
+  Start-Process -FilePath "cmd.exe" -ArgumentList $args `
+    -WorkingDirectory (Join-Path $App "apps\api") -WindowStyle Hidden | Out-Null
   for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Port $ApiPort) { break }
   }
-  if (-not (Test-Port $ApiPort)) { throw "api 未能监听 $ApiPort（pid $($p.Id)）" }
-  Write-Output "api up :$ApiPort (pid $($p.Id))"
+  if (-not (Test-Port $ApiPort)) {
+    $tail = if (Test-Path $apiLog) { (Get-Content $apiLog -Tail 12) -join "`n" } else { "（无日志）" }
+    throw "api 未能监听 $ApiPort`n$tail"
+  }
+  Write-Output "api up :$ApiPort"
 }
 
 function Start-Web {
   if (Test-Port $WebPort) { Write-Output "web :$WebPort already up"; return }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = "node"
-  $psi.Arguments = ".output/server/index.mjs"
-  $psi.WorkingDirectory = Join-Path $App "apps\web"
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $psi.CreateNoWindow = $true
-  $psi.EnvironmentVariables["NODE_ENV"] = "development"
-  $psi.EnvironmentVariables["PORT"] = "$WebPort"
-  $psi.EnvironmentVariables["NITRO_PORT"] = "$WebPort"
-  $psi.EnvironmentVariables["NITRO_HOST"] = "127.0.0.1"
-  # web 的 /v1 代理目标必须指向本项目的 api
-  $psi.EnvironmentVariables["NUXT_API_PROXY"] = "http://127.0.0.1:$ApiPort"
-  $p = [System.Diagnostics.Process]::Start($psi)
-  $null = $p.StandardOutput.ReadToEndAsync()
-  $null = $p.StandardError.ReadToEndAsync()
+  # 同 Start-Api：一律重定向到文件，绝不把长寿进程的 stdout 接到本进程的管道上
+  $webLog = Join-Path $Root "_acceptance\stack-web.log"
+  $env:NODE_ENV = "development"
+  $env:PORT = "$WebPort"
+  $env:NITRO_PORT = "$WebPort"
+  $env:NITRO_HOST = "127.0.0.1"
+  # web 的 /v1 代理目标必须指向本项目的 api（否则会代理到 3000 上别人的结果）
+  $env:NUXT_API_PROXY = "http://127.0.0.1:$ApiPort"
+  Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c node .output/server/index.mjs > `"$webLog`" 2>&1" `
+    -WorkingDirectory (Join-Path $App "apps\web") -WindowStyle Hidden | Out-Null
   for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Port $WebPort) { break }
   }
-  if (-not (Test-Port $WebPort)) { throw "web 未能监听 $WebPort（pid $($p.Id)）" }
-  Write-Output "web up :$WebPort (pid $($p.Id))"
+  if (-not (Test-Port $WebPort)) {
+    $tail = if (Test-Path $webLog) { (Get-Content $webLog -Tail 12) -join "`n" } else { "（无日志）" }
+    throw "web 未能监听 $WebPort`n$tail"
+  }
+  Write-Output "web up :$WebPort"
 }
 
 Start-Api

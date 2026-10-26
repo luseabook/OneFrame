@@ -6,8 +6,8 @@
   一条命令跑完四层门禁：
     1) typecheck（web + api）
     2) lint（只对 canvas 相关文件断言 0 error 0 warning）
-    3) api 单测（含 canvas 域 12 例，含 2 条 id_map 回归）
-    4) 真实浏览器 E2E（56 项断言，含持久化/版本冲突/节点投递/模板）
+    3) api 单测（canvas.spec 46 例 + agent.spec 13 例）
+    4) 真实浏览器 E2E（68 项断言，含持久化/版本冲突/节点投递/模板/固定组/Agent 面板）
 
   前置：
     pwsh _acceptance/start-local-stack.ps1      # PG 55432 / Redis 6380
@@ -68,7 +68,7 @@ if (-not $SkipLint) {
     Push-Location $App
     try {
       # 只对本次改动的文件断言；全站 lint 已有 13 条历史 warning 在别人文件里
-      $out = & npx eslint apps/web/pages/canvas apps/web/components/canvas apps/web/composables/useCanvasEditor.ts apps/web/composables/useCanvasApi.ts apps/web/types/canvas.ts apps/web/layouts/blank.vue apps/web/app.vue apps/web/nuxt.config.ts 2>&1
+      $out = & npx eslint apps/web/pages/canvas apps/web/components/canvas apps/web/composables/useCanvasEditor.ts apps/web/composables/useCanvasApi.ts apps/web/composables/useCanvasAgent.ts apps/web/types/canvas.ts apps/web/layouts/blank.vue apps/web/app.vue apps/web/nuxt.config.ts 2>&1
       $code = $LASTEXITCODE
       $text = ($out | Out-String)
       if ($code -ne 0) { throw "eslint 非零退出：`n$text" }
@@ -78,15 +78,17 @@ if (-not $SkipLint) {
 }
 
 # ── 3. api 单测（canvas 域）──────────────────────────────
-Step "api 单测（canvas.spec，46 例含节点任务/模板/素材/批注/固定组）" {
+Step "api 单测（canvas.spec 46 例 + agent.spec 13 例）" {
   Push-Location $App
   try {
-    $out = & pnpm --filter @app/api test -- canvas.spec 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "canvas 单测失败" }
+    # agent.spec 与 canvas.spec 共享 canvas 域夹具（会话挂在画布上），一起跑才覆盖"面板 → 后端"整链
+    $out = & pnpm --filter @app/api test -- canvas.spec agent.spec 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "canvas/agent 单测失败" }
     $text = ($out | Out-String)
-    # 断言确实跑了 12 例（含 2 条 id_map 回归），且全过
+    # 断言两个 spec 都真的跑了（只匹配文件名不够：0 例也会打印 passed）
     if ($text -notmatch 'canvas\.spec\.ts \((\d+) tests?\)') { throw "未找到 canvas.spec 结果行" }
-    if ($text -match 'failed') { throw "canvas 单测有失败：`n$($text.Substring([Math]::Max(0,$text.Length-1500)))" }
+    if ($text -notmatch 'agent\.spec\.ts \((\d+) tests?\)') { throw "未找到 agent.spec 结果行" }
+    if ($text -match 'failed') { throw "canvas/agent 单测有失败：`n$($text.Substring([Math]::Max(0,$text.Length-1500)))" }
   } finally { Pop-Location }
 }
 
@@ -129,7 +131,7 @@ if (-not $SkipE2E) {
     if (-not $ready) { throw "web dev 重启后未就绪，见 _acceptance/web-e2e.log" }
   }
 
-  Step "浏览器 E2E（56 项断言）" {
+  Step "浏览器 E2E（68 项断言，含 Agent 面板）" {
     Push-Location (Join-Path $Root "_acceptance")
     try {
       & node e2e-canvas-editor.cjs

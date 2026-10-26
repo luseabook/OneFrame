@@ -9,7 +9,9 @@ export default defineNuxtConfig({
   // 不注册进全局 css 的话 .canvas-view/.cv-* 运行时全部不存在，画布组件会裸样式，
   // 而 typecheck/lint 都发现不了（它们不检查"类名有没有被定义"）。
   // 顺序放在 tokens.css 之后：canvas.css 里的 --cv-* 用 var() 引用了 tokens 的层二令牌。
-  css: ["~/assets/css/tokens.css", "~/assets/css/canvas.css"],
+  // canvas-agent.css 同理（Agent 面板的 .cv-agent* 前缀类），必须排在 canvas.css 之后：
+  // 它复用了 canvas.css 里的 --cv-* 令牌，反过来顺序会让变量拿到空值而静默失色。
+  css: ["~/assets/css/tokens.css", "~/assets/css/canvas.css", "~/assets/css/canvas-agent.css"],
   runtimeConfig: {
     public: {
       // 空 = 同源 /v1（本地由 NUXT_API_PROXY 代理，生产由 nginx 反代）
