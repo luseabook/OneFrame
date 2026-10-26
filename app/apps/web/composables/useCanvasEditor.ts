@@ -670,6 +670,44 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     }
   }
 
+  /**
+   * 视频拆解（拉片）。
+   *
+   * 与文本派生同构（保存 → 建任务 → 轮询回填），差别只在"输入是什么"：
+   * 输入是视频节点自己的产物；结果写回 `params.result_text`（JSON），
+   * 前端解析成角色/场景/道具候选，可一键建资产节点。
+   */
+  async function parseVideo(nodeId: string, input?: { object_key?: string; prompt?: string }): Promise<boolean> {
+    const node = nodes.value.find((n) => n.id === nodeId);
+    if (!node) return false;
+    if (nodeId.startsWith("local_")) {
+      toast.error("请先保存画布，再发起视频拆解（新节点还没有服务端 id）");
+      return false;
+    }
+    if (dirty.value) {
+      const ok = await save();
+      if (!ok) return false;
+    }
+    taskSubmitting.value = [...taskSubmitting.value, nodeId];
+    try {
+      const res = await api.parseVideo(canvasId.value, nodeId, input ?? {});
+      node.status = res.node.status;
+      node.task_id = res.node.task_id;
+      toast.success(`已发起视频拆解，冻结 ${res.credits_estimate} 积分`);
+      startTaskPolling(nodeId, res.task_id);
+      return true;
+    } catch (e) {
+      const err = e as { code?: number; message: string };
+      // 400101 = 节点上还没有视频可拆：这是用户能自己修的问题，必须说清楚怎么修
+      if (err.code === 400101) toast.error("这个视频节点还没有可拆解的产物，先生成或上传视频");
+      else if (err.code === 745701) toast.error("积分不足，请先充值");
+      else toast.error(err.message || "发起视频拆解失败");
+      return false;
+    } finally {
+      taskSubmitting.value = taskSubmitting.value.filter((id) => id !== nodeId);
+    }
+  }
+
   // ── 任务轮询（节点状态 → 结果回填）──────────────────────
   const pollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -1347,6 +1385,7 @@ export const useCanvasEditor = (canvasId: Ref<string>) => {
     generateNode,
     deriveText,
     matchAssets,
+    parseVideo,
     generateSelected,
     startTaskPolling,
     stopTaskPolling,

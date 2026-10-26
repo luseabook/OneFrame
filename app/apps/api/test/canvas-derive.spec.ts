@@ -22,6 +22,7 @@ describe("canvas text derive + admin pricing e2e", () => {
   let canvasId = "";
   let scriptNodeId = "";
   let imageNodeId = "";
+  let videoNodeId = "";
 
   const inject = async (
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
@@ -91,6 +92,15 @@ describe("canvas text derive + admin pricing e2e", () => {
       params: {},
     });
     imageNodeId = image.data.id as string;
+
+    const video = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "video",
+      name: "待拆解视频",
+      x: 600,
+      y: 0,
+      params: { result_uri: "mock://results/demo.mp4", mode: "text2video", model: "seedance-1-0-lite" },
+    });
+    videoNodeId = video.data.id as string;
   }, 120_000);
 
   afterAll(async () => {
@@ -271,8 +281,59 @@ describe("canvas text derive + admin pricing e2e", () => {
     expect(res.code).toBe(400105);
   }, 60_000);
 
-  it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {
-    const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
+  it("视频拆解：落 tasks 且 mode=video_parse（分析类与文本同一条脊柱，报价来自价目表）", async () => {
+    const res = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${videoNodeId}/video-parse`, {});
+    expect(res.code).toBe(0);
+    expect(res.data.node.status).toBe(2);
+    const { rows } = await pool.query<{ mode: string }>("select mode from tasks where id = $1", [
+      res.data.task_id,
+    ]);
+    expect(rows[0]?.mode).toBe("video_parse");
+
+    // 价格同样来自 model_prices（seed 只是新库初值，运营可改）
+    const price = await pool.query<{ credits: number }>(
+      `select p.credits from model_prices p
+         join models m on m.id = p.model_id
+        where m.name = 'deepseek-v4-pro' and p.mode = 'video_parse' and p.active = true`,
+    );
+    expect(price.rows[0]?.credits).toBeTruthy();
+    expect(res.data.credits_estimate).toBe(price.rows[0]!.credits);
+
+    // 契约第二条：GET 只返回 task 本体（节点视图仍走 nodes/{id}/task/{task_id}）
+    const status = await inject(
+      "GET",
+      `/canvas/canvases/${canvasId}/nodes/${videoNodeId}/video-parse/${res.data.task_id}`,
+    );
+    expect(status.code).toBe(0);
+    expect(status.data.task.task_id).toBe(res.data.task_id);
+
+    // 任务不属于该节点（或不存在）→ 400102，防止串节点/越权查询
+    const wrong = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${videoNodeId}/video-parse/999999`);
+    expect(wrong.code).toBe(400102);
+  }, 60_000);
+
+  it("视频拆解：非视频节点 / 节点上没有视频产物 分别 400101；显式 object_key 可用", async () => {
+    const wrongType = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${imageNodeId}/video-parse`, {});
+    expect(wrongType.code).toBe(400101);
+
+    const emptyVideo = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "video",
+      name: "空视频",
+      x: 0,
+      y: 900,
+      params: {},
+    });
+    const noMedia = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${emptyVideo.data.id}/video-parse`, {});
+    expect(noMedia.code).toBe(400101);
+
+    // 素材库上传的视频（显式 object_key）不依赖节点产物，应可拆解
+    const withKey = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${emptyVideo.data.id}/video-parse`, {
+      object_key: "u/space/demo-video.mp4",
+    });
+    expect(withKey.code).toBe(0);
+  }, 60_000);
+
+  it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {    const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
     expect(list.code).toBe(0);
     const price = (list.data.list as Array<{ id: string; mode: string; credits: number; model_id: string }>).find(
       (row) => row.mode === "script_optimization",

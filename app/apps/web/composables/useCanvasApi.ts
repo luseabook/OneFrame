@@ -307,6 +307,22 @@ export const useCanvasApi = () => {
         input,
       ),
 
+    /**
+     * 视频拆解（拉片）。
+     *
+     * 不传 `object_key` 就用视频节点自身的产物；产出是可解析 JSON（角色/场景/道具），
+     * 由 worker 写回 `params.result_text`，前端复用「拆分资产」的候选列表。
+     */
+    parseVideo: (
+      canvasId: string,
+      nodeId: string,
+      input: { object_key?: string; prompt?: string; model?: string } = {},
+    ) =>
+      api.post<DeriveResult>(
+        `${base(canvasId)}/nodes/${encodeURIComponent(nodeId)}/video-parse`,
+        input,
+      ),
+
     /** 分镜 × 资产匹配（同一条 tasks 脊柱；可取消、可重跑） */
     matchStoryboardAssets: (
       canvasId: string,

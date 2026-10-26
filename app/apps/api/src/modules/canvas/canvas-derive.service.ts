@@ -9,8 +9,8 @@ import { ModelsService } from "../models/models.service";
 /** 画布当前支持的「文本类派生」能力（与 `TextMode` 一致） */
 export type DeriveKind = "script_optimization" | "storyboard_parse" | "asset_extraction";
 
-/** 文本任务的 mode 集合：三种派生 + 资产匹配（匹配不暴露给 derive()，走 matchAssets） */
-type TextTaskMode = DeriveKind | "storyboard_asset_match";
+/** 文本任务的 mode 集合：三种派生 + 资产匹配 + 视频拆解（后两者不走 derive()，各有入口） */
+type TextTaskMode = DeriveKind | "storyboard_asset_match" | "video_parse";
 
 /** 与契约 §3.4 一致：原文上限 5 万字（400104） */
 const SOURCE_MAX = 50_000;
@@ -188,6 +188,75 @@ export class CanvasDeriveService {
     return this.createTextTask(auth, node, "storyboard_asset_match", prompt, model.name);
   }
 
+  /**
+   * 视频拆解（拉片）。
+   *
+   * 契约形态：`{object_key?, prompt?, model?}` → `{task_id, node}`。
+   * 输入默认取**视频节点自己已有的产物**（`params.result_uri` / `result_uris[0]`），
+   * 也允许显式传 `object_key`（例如素材库里上传的原始视频）。
+   *
+   * 仍是**一条 tasks**：同脊柱、按次计价、可取消、可重跑；产出是一段 JSON
+   * （角色/场景/道具，与「拆分资产」同形），前端复用"一键建资产节点"。
+   *
+   * 为什么必须先有媒体：没有视频就去拆解，等于让模型凭空编一集片子——
+   * 结果是"看起来成功了但全是错的"，比直接报错糟得多（同 400105 的思路）。
+   */
+  async parseVideo(
+    auth: { spaceId: string; userId: string },
+    canvasId: string,
+    nodeId: string,
+    input: { object_key?: string; prompt?: string; model?: string },
+  ): Promise<DeriveResult> {
+    const node = await this.requireNode(auth.spaceId, canvasId, nodeId);
+    if (node.nodeType !== "video") {
+      throw new AppError(ErrorCode.INVALID_PARAM, `node type ${node.nodeType} is not a video node`, {
+        field: "node_id",
+      });
+    }
+
+    const params = (node.params ?? {}) as Record<string, unknown>;
+    const objectKey = this.pickVideoKey(input.object_key, params);
+    if (!objectKey) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "video node has no media to parse, generate or upload one first", {
+        field: "object_key",
+      });
+    }
+
+    const model = input.model
+      ? await this.models.findByName(input.model)
+      : await this.pickTextModel("video_parse");
+    const modes = (model.modes ?? {}) as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(modes, "video_parse")) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `model ${model.name} has no mode video_parse`, {
+        field: "model",
+      });
+    }
+
+    return this.createTextTask(
+      auth,
+      node,
+      "video_parse",
+      this.buildVideoParsePrompt(objectKey, input.prompt),
+      model.name,
+    );
+  }
+
+  /** 视频源：显式 object_key 优先，否则取节点自身产物（result_uri / result_uris / 上传 key） */
+  private pickVideoKey(explicit: string | undefined, params: Record<string, unknown>): string {
+    const candidates: unknown[] = [
+      explicit,
+      params.result_uri,
+      Array.isArray(params.result_uris) ? params.result_uris[0] : undefined,
+      params.object_key,
+      params.video_uri,
+      params.fileId,
+    ];
+    for (const item of candidates) {
+      if (typeof item === "string" && item.trim()) return item.trim();
+    }
+    return "";
+  }
+
   /** 候选资产：本画布下的资产节点（可按 ids 收窄），带定稿所需的 prompt */
   private async loadAssetNodes(
     spaceId: string,
@@ -305,6 +374,27 @@ export class CanvasDeriveService {
       });
     }
     return this.models.findByName(found.name);
+  }
+
+  /**
+   * 视频拆解的提示词。
+   *
+   * 产出形状与「拆分资产」一致（角色/场景/道具），**不额外编造镜头表**：
+   * 参照站里镜头表是另行派生（storyboard-parse）的产物，未取证的部分不臆造（ADR-013）。
+   */
+  private buildVideoParsePrompt(videoKey: string, extra?: string): string {
+    const tail = extra?.trim() ? `\n\n额外要求：${extra.trim()}` : "";
+    return (
+      "分析下面这段视频（拉片），抽取可复用的「角色 / 场景 / 道具」，只输出 JSON：" +
+      '{"characters":[{"name":"","description":"","prompt":"中文文生图提示词"}],' +
+      '"scenes":[{"name":"","description":"","prompt":""}],' +
+      '"props":[{"name":"","description":"","prompt":""}]}。' +
+      "name 简洁（如「林晚」「雨夜街头」「旧怀表」），每类不超过 8 个，" +
+      "不要输出 JSON 之外的任何文字。" +
+      "\n\n【视频】" +
+      videoKey +
+      tail
+    );
   }
 
   private buildPrompt(

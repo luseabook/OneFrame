@@ -72,7 +72,34 @@ export const TextMode = [
   "storyboard_asset_match", // 分镜 × 资产匹配（把拆分资产的结果按镜头对上去）
 ] as const;
 
-export const GenerationMode = [...VideoMode, ...ImageMode, ...SpeechMode, ...TextMode] as const;
+/**
+ * 分析类模式（媒体 → 结构化 JSON，按次计价）。
+ *
+ * 与 `TextMode` 的差别只有「输入是媒体而不是文本」，任务形态/计价/回写完全一致：
+ * 一条 `tasks`、按次扣费、单价来自 `model_prices`、结果写回节点 `params.result_text`。
+ *
+ * `video_parse`：视频拆解（拉片）。参照站是视频节点上的一个动作
+ * （`VideoNode` 的 `video-parse` 事件 → `task_type=video_parse` → 结果落在
+ * `result.videoParse`，并在画布上落一张「视频解析资产表」/文本节点）。我方按
+ * ADR-013 对齐**行为**、协议自研：同一条任务脊柱 + 一键建资产节点，不另造任务表。
+ */
+export const AnalysisMode = ["video_parse"] as const;
+
+/**
+ * 同步返回文本的模式：文本类 + 分析类。
+ *
+ * 适配器/mock 用它判断"这个任务是不是同步产出文本"——用 adapter_code 判会把
+ * 同一适配器上的媒体任务误判成同步文本（见 mock.ts 的注释）。
+ */
+export const SyncTextMode = [...TextMode, ...AnalysisMode] as const;
+
+export const GenerationMode = [
+  ...VideoMode,
+  ...ImageMode,
+  ...SpeechMode,
+  ...TextMode,
+  ...AnalysisMode,
+] as const;
 export type GenerationMode = (typeof GenerationMode)[number];
 
 // 流水线 scene 键（api-spec §5）：仅两个；studio_asset_image 是 mode，不是 scene 键

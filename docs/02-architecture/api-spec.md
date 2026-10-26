@@ -13,6 +13,13 @@
 > 让"新能力上架定价"不必改代码。同时修掉计费缺陷：`duration_s IS NULL` 的档位原先不受唯一键约束，
 > 同一档位可重复插入、扣费金额不确定（补部分唯一索引 `uq_model_prices_per_call`，迁移 0017）。
 > 验收：`apps/api/test/canvas-derive.spec.ts`（5 例，含"改价后报价立刻变"）+ E2E S19（4 项）。
+> **v2.7 · 2026-10-26 · 视频拆解（`video-parse`，2 条）**：视频节点上的「拉片」动作落地为
+> `tasks.mode=video_parse`（按次计价，价目后台可调），产出 JSON（角色/场景/道具）由 worker
+> 写回 `params.result_text`，前端复用「拆分资产」的候选列表一键建资产节点；见 §14.4.8。
+> 证据：`rea-reelmate/routes.txt:370-371` + bundle 请求配置（POST body=json、GET 无 query）+
+> `VideoNode` emits `video-parse`、`task_type=video_parse`；**请求体字段名/响应内层结构未取证**，
+> 按 ADR-013「对齐行为不对齐字段名」协议自研。
+> 验收：`canvas-derive.spec`（+2 例）、`adapters.spec` mock 形状（+1 段断言）、E2E S20（5 项）。
 > **v2.5 · 2026-10-26 · 节点产物批量下载落地**：新增 §14.4.5（3 条：打包 / 下载单列表 / 现签链接）+ 迁移 0016
 > `canvas_download_lists`。同时修掉两个"接口成功、用户用不了"的缺陷：
 > 签名链接基址默认指向 3000（另一个项目的端口）、`.zip` 缺 content-type。
@@ -774,10 +781,11 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
    - 修正前：`BigInt("local_xxx")` 抛 `SyntaxError` → **500**，"先加节点再保存"这条最主流路径 100% 失败。
    - 回归锁定：`test/canvas.spec.ts` 的「整图提交接受本地临时 id」「整图提交是整体替换」两例。
 
-**尚未实现（不暴露空壳）**：`video-parse` 等派生族（2 条）、`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
+**尚未实现（不暴露空壳）**：`pinned-timelines`（4 条，结构待取证 G-09）、`group-recover`（1 条，需先改成软删）。
 **已实现**：画布内对话/SSE（C7 族 11 条）——2026-10-26 随 `agent` 域落地，见 §14.9。
 **已实现**：表格节点 Excel 导入（2 条）——2026-10-26，见 §14.4.4。
 **已实现**：节点产物批量下载（3 条）——2026-10-26，见 §14.4.5。
+**已实现**：视频拆解 `video-parse`（2 条）——2026-10-26，见 §14.4.8（C6 派生族已清零）。
 
 #### 14.4.3 `canvas` 第二批端点（2026-10-26，节点任务/模板/素材/批注/固定组）
 
@@ -1010,6 +1018,38 @@ POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（a
 4. **取消/重跑**：取消**复用 `tasks.cancel`**（终态不可取消 → 400103，解冻与事件只该有一份实现）；
    重跑**建新任务、不覆盖旧任务**（用户要能对比两次匹配）。
 **已知边界**：整图提交在千级节点会变慢（需换增量 diff）；`/canvas` 首帧空白属 `ssr:false` 预期行为（见 `_acceptance/_gap/canvas-frontend-baseline.md`）。
+
+#### 14.4.8 视频拆解（`video-parse`，2026-10-26）
+
+> **参照证据**：`rea-reelmate/routes.txt:370-371`（两条路径存在）；`rea-reelmate/capture-canvas.json`
+> 内联 bundle 的请求配置（POST `requestBodyType=json`、`queryNames=[]`；GET `requestBodyType=query`、
+> `paramNames=[canvas_id,node_id,task_id]`）；`VideoNode` 组件 emits `video-parse`，任务
+> `task_type=video_parse`，结果落节点 `result.videoParse`，成功后画布上生成资产表/文本节点。
+> **未取证**：请求体字段名（bundle 的 `requestDataJsonSchema` 为空）、响应内层结构、按秒计费策略
+> → 按 ADR-013「对齐行为、不对齐字段名」协议自研；金额由价目表决定，不做代码常量。
+
+| 方法 | 路径 | 请求 | 响应 | 关键码 |
+|---|---|---|---|---|
+| POST | `/canvas/canvases/{id}/nodes/{node_id}/video-parse` | `{object_key?, prompt?, model?}` | `{task_id, status, credits_estimate, node}` | 0/400101/745701 |
+| GET | `…/nodes/{node_id}/video-parse/{task_id}` | — | `{task:{task_id,status,progress,results,error}}` | 0/400102 |
+
+**语义**：把视频节点上的视频「拉片」成可复用的**角色 / 场景 / 道具**（与「拆分资产」同形），
+仍是一条 `tasks`（`mode=video_parse`、按次计价、可取消、可重跑），结果由 worker 写回
+`canvas_nodes.params.result_text`，前端复用同一套候选列表与「一键建资产节点」。
+
+**四条约定**：
+1. **视频源**：显式 `object_key` 优先；否则取节点自身产物（`params.result_uri` →
+   `result_uris[0]` → `object_key`/`video_uri`/`fileId`）。都没有 → **400101**：
+   没有视频就去拆解，只会得到"看起来成功、其实全是编的"结果，比直接报错糟得多。
+2. **只接受 `video` 节点**：其他类型 → 400101（文本节点没有视频）。
+3. **产出只含三类资产**（`characters/scenes/props`，每项 `name/description/prompt`）：
+   镜头表在参照站是 `storyboard-parse` 的另行产物，未取证的部分不臆造。
+4. **计价**：`model_prices` 里 `mode='video_parse'`、`resolution='per_call'`、`duration_s=NULL`；
+   运营可在 `/ops/admin/model-prices` 调整（参照站按视频秒数计费属其定价策略，我方做成可配置项）。
+
+**未真实联调（X5 标注）**：真实供应商下"视频被模型看到"需要抽帧/音轨链路，本轮只落
+mock 形状一致的产出（产出 JSON 与真实路径同形）；接真实能力时补 ffmpeg 抽帧 + 多模态调用，
+本契约不变。
 
 ### 14.5 `cam` 与 `film` 端点族要点
 

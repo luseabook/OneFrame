@@ -114,6 +114,33 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v2.3 · 视频拆解 `video-parse` · 2026-10-26）
+
+**范围**：canvas C6「节点派生任务」里最后一条已取证的派生族。参照站的视频节点上有「拆解」
+动作（拉片：从成片里抽角色/场景/道具），我方按 ADR-013 对齐**行为**、协议自研。
+
+| 交付 | 内容 |
+|---|---|
+| 能力 | `tasks.mode=video_parse`（分析类，按次计价；单价由后台价目表配置） |
+| 端点 | POST `…/nodes/{id}/video-parse {object_key?,prompt?,model?}` → `tasks`；GET `…/video-parse/{task_id}` |
+| 产出 | JSON `{characters[],scenes[],props[]}`（与「拆分资产」同形）→ 写回 `params.result_text` |
+| 前端 | 视频节点检查器「拆解视频」按钮 + 候选列表 + 一键建资产节点 |
+| 验收 | `canvas-derive.spec` +2 例、`adapters.spec` mock 形状断言、E2E S20 五项（总计 97） |
+
+**为什么"视频源"要单独判**：节点上没有视频也去拆解，模型会编出一整套角色/场景，
+用户以为拆成功了——与 400105（资产未定稿）同一个思路：宁可挡住，不可假装成功。
+显式 `object_key` 覆盖"素材库上传的视频"这条路，不让功能只能用于已出片节点。
+
+**取证边界**：`routes.txt:370-371` 只有路径；bundle 的请求体 schema 为空。
+所以字段名与响应内层结构是**自研**的（截图/抓包里没有证据），已写进 api-spec §14.4.8，
+后续不得把"自研字段"当成参照站的事实引用。真实供应商下的"视频被模型看到"需要抽帧链路，
+本轮按 X5 标注为**未真实联调**（mock 产出与真实路径同形）。
+
+| 文档 | 版本 | 变更摘要 |
+|---|---|---|
+| 02-architecture/api-spec.md | v2.7 | 新增 §14.4.8；§14.4.1「尚未实现」只剩 `pinned-timelines` / `group-recover` |
+| README.md | v2.3 | 本条变更登记 |
+
 ## 变更登记（v2.2 · 分镜×资产匹配 + 「竞品怎么做我们就怎么做」成文 · 2026-10-26）
 
 **1. 把 Owner 口径写成项目标准（ADR-013）**
@@ -328,13 +355,13 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 |---|---:|---:|
 | 画布根/节点/连线/锁/分组 | 30 | 27 |
 | 整画布模板 | 8 | 6 |
-| 节点派生任务 | 9 | 4（4 条核心） |
+| 节点派生任务 | 9 | 10（含 `video-parse` 2 条，C6 清零） |
 | 素材 | 6 | 5 |
 | 批注 | 10 | 10 |
 | 固定组/组模板 | 13 | 10 |
 | 图像编辑 clip/crop | 2 | 走 `sub_mode`，无独立端点 |
-| 表格 Excel 导入 | 2 | 未做（依赖 Excel 解析链路） |
-| 画布内对话/SSE | 11 | 归 `agent` 域，本期不做 |
+| 表格 Excel 导入 | 2 | 2（v1.8，两步式） |
+| 画布内对话/SSE | 11 | 11（归 `agent` 域，§14.9） |
 ## 未决事项（Owner 补充后删除本节）
 
 - [ ] 项目名称/域名（阻塞：备案、落地页文案；**阻塞：W1 0.5 备案**）

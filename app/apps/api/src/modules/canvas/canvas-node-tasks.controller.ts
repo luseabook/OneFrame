@@ -69,6 +69,18 @@ const deriveBody = z.object({
   model: z.string().min(1).optional(),
 });
 
+/**
+ * 视频拆解入参。
+ *
+ * `object_key` 可选：不传就用视频节点自身的产物（`result_uri` / `result_uris[0]`）。
+ * 也就是说正常路径是"选中已经出片的视频节点点拆解"，而不是让前端把 URI 再搬一遍。
+ */
+const videoParseBody = z.object({
+  object_key: z.string().min(1).max(2048).optional(),
+  prompt: z.string().max(2_000).optional(),
+  model: z.string().min(1).optional(),
+});
+
 @Controller("canvas")
 export class CanvasNodeTasksController {
   constructor(
@@ -239,5 +251,43 @@ export class CanvasNodeTasksController {
     const c = this.ctx(req);
     const input = parseOrThrow(matchBody.extend({ task_id: z.string().min(1).optional() }), body ?? {});
     return this.derive.matchAssets(c, canvasId, nodeId, input);
+  }
+
+  /**
+   * 视频拆解（拉片）。
+   *
+   * 参照站是视频节点上的动作（`task_type=video_parse`，结果落 `result.videoParse`，
+   * 并在画布上生成资产表/文本节点）。我方对齐**行为**、协议自研：
+   * 仍是一条 `tasks`（按次计价、可取消、可重跑），产出 JSON 写回节点，
+   * 前端复用「拆分资产」的候选列表 + 一键建资产节点。
+   */
+  @Post("canvases/:canvas_id/nodes/:node_id/video-parse")
+  async videoParse(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Body() body: unknown,
+  ) {
+    const c = this.ctx(req);
+    const input = parseOrThrow(videoParseBody, body ?? {});
+    return this.derive.parseVideo(c, canvasId, nodeId, input);
+  }
+
+  /**
+   * 视频拆解任务状态（契约第二条）。
+   *
+   * 只返回 `task` 本身（与参照站一致），节点状态仍走 `nodes/{id}/task/{task_id}`——
+   * 这里复用同一条查询，避免两套"任务属于哪个节点"的校验各写一遍。
+   */
+  @Get("canvases/:canvas_id/nodes/:node_id/video-parse/:task_id")
+  async videoParseStatus(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+    @Param("task_id") taskId: string,
+  ) {
+    const c = this.ctx(req);
+    const result = await this.svc.nodeTaskStatus(c.spaceId, canvasId, nodeId, taskId);
+    return { task: result.task };
   }
 }

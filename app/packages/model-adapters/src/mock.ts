@@ -1,4 +1,4 @@
-import { TextMode } from "@app/shared";
+import { SyncTextMode } from "@app/shared";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 export interface MockAdapterOptions {
@@ -24,9 +24,9 @@ export class MockAdapter implements ModelAdapter {
      * 否则本地/E2E 里"剧本优化"会拿到一个 `.mp4` 的 mock 结果——形状都是错的，
      * 前端要文本却收到视频 URI，看起来像"功能坏了"。
      */
-    // 判据是**任务形态**（文本模式）而不是 adapter_code：同一个 LLM 适配器也可能
+    // 判据是**任务形态**（文本/分析模式）而不是 adapter_code：同一个 LLM 适配器也可能
     // 被拿来跑别的形态，按 adapter 判会把媒体任务误判成同步文本
-    if ((TextMode as readonly string[]).includes(req.request.mode)) {
+    if ((SyncTextMode as readonly string[]).includes(req.request.mode)) {
       return {
         sync_results: [
           {
@@ -124,6 +124,23 @@ function mockText(req: NormalizedGenRequest): string {
       ],
       scenes: [{ name: "雨夜街头", description: "开场冲突发生地", prompt: "电影感场景，雨夜街头，霓虹反光" }],
       props: [{ name: "旧怀表", description: "推动真相的关键道具", prompt: "道具特写，旧怀表，浅景深" }],
+    });
+  }
+  if (req.request.mode === "video_parse") {
+    /**
+     * 视频拆解的产出与「拆分资产」**同形**（角色/场景/道具，name+prompt）：
+     * 参照站的解析结果就落这三类（视频解析资产表的列是 character_name/prompt、
+     * scene_name/prompt、prop_name/prompt），前端因此能复用同一套"一键建资产节点"。
+     *
+     * 只给这三类、不给"镜头表"：镜头表在参照站是另行派生（storyboard），
+     * 未取证的部分不臆造（ADR-013）。
+     */
+    return JSON.stringify({
+      characters: [
+        { name: "林晚", description: "视频第 1 个镜头出现的主角", prompt: "短剧角色肖像，林晚，冷色光影" },
+      ],
+      scenes: [{ name: "雨夜街头", description: "视频前 5 秒的场景", prompt: "电影感场景，雨夜街头，霓虹反光" }],
+      props: [{ name: "旧怀表", description: "视频中反复出现的道具", prompt: "道具特写，旧怀表，浅景深" }],
     });
   }
   return `【mock 文本结果】${prompt}`;

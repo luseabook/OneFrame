@@ -1199,6 +1199,81 @@ function buildXlsxBuffer() {
       await page.screenshot({ path: path.join(SHOT_DIR, "17-derive.png") });
     }
 
+    // ══ S20 视频拆解（拉片）════════════════════════════════
+    // 栈里没跑 worker，所以只断言到"投递成功 + 任务 mode 正确 + 查询端点可用"；
+    // 结果回填（params.result_text）由 worker 单测与 adapters 单测覆盖。
+    console.log("[S20] 视频拆解");
+    {
+      const snapshot = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+      const bottom = Math.max(0, ...(snapshot.data.nodes || []).map((n) => (n.y ?? 0) + (n.height ?? 120)));
+      const created = await api(
+        "POST",
+        `/canvas/canvases/${canvasId}/nodes`,
+        {
+          node_type: "video",
+          name: "可拆解视频",
+          x: 0,
+          y: bottom + 240,
+          // 用 object_key 模拟"素材库上传的视频"：不写 result_uri 就不会有
+          // <video src="mock://..."> 的加载尝试（mock:// 会让浏览器打
+          // ERR_UNKNOWN_URL_SCHEME，污染 S9.1 的控制台错误断言）。
+          // result_uri 优先级由 canvas-derive.spec 的单测覆盖。
+          params: { object_key: "u/space/demo-video.mp4", mode: "text2video", model: "seedance-1-0-lite" },
+        },
+        token,
+      );
+      record("S20.1 视频节点已创建", created.code === 0);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector('.canvas-node[data-node-type="video"]', { timeout: 20_000 }).catch(() => {});
+      await sleep(500);
+      await page.locator(".dock-fit").click().catch(() => {});
+      await sleep(800);
+
+      const videoNode = page.locator('.canvas-node[data-node-type="video"]', { hasText: "可拆解视频" }).first();
+      if ((await videoNode.count()) > 0) {
+        await videoNode.locator(".canvas-node__head").click();
+        await sleep(400);
+        const parseBtn = page.locator(".insp-parse-video");
+        record("S20.2 检查器出现「拆解视频」入口", (await parseBtn.count()) > 0);
+        if ((await parseBtn.count()) > 0) {
+          await parseBtn.first().click();
+          await sleep(2000);
+          const detail = await api("GET", `/canvas/canvases/${canvasId}`, undefined, token);
+          const node = (detail.data.nodes || []).find((n) => n.name === "可拆解视频");
+          record(
+            "S20.3 节点已挂 task_id 并进入生成中",
+            !!node?.task_id && node?.status === 2,
+            `status=${node?.status}`,
+          );
+          if (node?.task_id) {
+            const task = await api("GET", `/agent/task/${node.task_id}`, undefined, token);
+            record("S20.4 任务 mode=video_parse", task?.data?.mode === "video_parse", task?.data?.mode);
+            const status = await api(
+              "GET",
+              `/canvas/canvases/${canvasId}/nodes/${node.id}/video-parse/${node.task_id}`,
+              undefined,
+              token,
+            );
+            record(
+              "S20.5 拆解查询端点返回同一 task",
+              status?.data?.task?.task_id === node.task_id,
+              status?.data?.task?.task_id ?? status?.msg ?? "无返回",
+            );
+          } else {
+            record("S20.4 任务 mode=video_parse", false, "无 task_id");
+            record("S20.5 拆解查询端点返回同一 task", false, "无 task_id");
+          }
+        } else {
+          record("S20.3 节点已挂 task_id 并进入生成中", false, "无入口");
+        }
+      } else {
+        for (const n of ["S20.2", "S20.3", "S20.4", "S20.5"]) {
+          record(`${n} 视频拆解`, false, "视频节点未渲染");
+        }
+      }
+      await page.screenshot({ path: path.join(SHOT_DIR, "18-video-parse.png") });
+    }
+
     // ══ 收尾：控制台错误 ═════════════════════════════════
     // 过滤掉与画布无关的已知噪音（favicon 等）
     const realErrors = consoleErrors.filter(

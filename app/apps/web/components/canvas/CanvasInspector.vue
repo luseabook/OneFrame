@@ -767,6 +767,25 @@ function createAssetNodes(): void {
   toast.success(`已创建 ${items.length} 个资产节点，保存后生效`);
 }
 
+// ── 视频拆解（拉片）──────────────────────────────────────
+/**
+ * 视频拆解：输入是视频节点**自己的产物**（后端取 `result_uri`），前端不搬 URI——
+ * 搬一遍就会出现"节点里换了视频、请求里还是旧 URI"的不一致。
+ *
+ * 产出 JSON 与「拆分资产」同形，因此复用同一套候选列表与"建资产节点"按钮
+ * （参照站也是把解析结果落成资产表 + 文本节点）。
+ */
+async function doParseVideo(): Promise<void> {
+  const n = selectedNode.value;
+  if (!n || deriveSubmitting.value) return;
+  deriveSubmitting.value = true;
+  try {
+    await ed.parseVideo(n.id);
+  } finally {
+    deriveSubmitting.value = false;
+  }
+}
+
 // ── 批量下载（产物打包）──────────────────────────────────
 const downloadPacking = ref(false);
 /** 只有真的"出过产物"的节点才值得打包：全选一堆空节点只会得到"无可下载内容" */
@@ -1422,6 +1441,49 @@ function toggleSec(key: string): void {
               />
               <span>错峰生成 offPeak（更便宜、更慢）</span>
             </label>
+
+            <!-- 视频拆解（拉片）：输入是本节点已出的视频，产出 JSON 候选 -->
+            <section class="cv-section insp-sec-videoparse">
+              <div class="cv-section__head">
+                <span>视频拆解</span>
+                <span class="cv-tag">按次计价</span>
+              </div>
+              <div class="insp-derive-row">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  class="insp-parse-video"
+                  :disabled="deriveSubmitting"
+                  :loading="deriveSubmitting"
+                  @click="doParseVideo"
+                >
+                  拆解视频
+                </Button>
+              </div>
+              <p class="cv-hint">
+                从本节点的视频里抽「角色 / 场景 / 道具」（拉片）；结果写在节点上，可一键建资产节点。
+                单价由后台价目表控制，不在此写死。
+              </p>
+              <div v-if="assetCandidates.length" class="cv-field insp-asset-candidates insp-videoparse-candidates">
+                <label>
+                  拆解出的候选
+                  <span class="cv-tag">{{ assetCandidates.length }} 个</span>
+                </label>
+                <ul class="insp-assets__list">
+                  <li v-for="(a, i) in assetCandidates" :key="i" class="insp-assets__item">
+                    <span class="cv-tag">{{ assetKindLabel(a.kind) }}</span>
+                    <span class="insp-assets__name">{{ a.name }}</span>
+                  </li>
+                </ul>
+                <Button class="insp-assets__create" size="sm" block @click="createAssetNodes">
+                  创建 {{ assetCandidates.length }} 个资产节点
+                </Button>
+                <p class="cv-hint">建出来的是 asset 节点（带 prompt），保存后才落库。</p>
+              </div>
+              <p v-else-if="ed.selectedNode.value?.status === 2" class="cv-hint insp-derive-running">
+                正在拆解…（完成后自动回填）
+              </p>
+            </section>
           </template>
 
           <!-- audio -->

@@ -131,6 +131,20 @@ describe("MockAdapter 文本分支", () => {
     expect(Array.isArray(parsed.characters)).toBe(true);
     expect(Array.isArray(parsed.scenes)).toBe(true);
     expect(Array.isArray(parsed.props)).toBe(true);
+
+    // 视频拆解（分析类）也必须走**同步文本**分支、且产出与拆分资产同形的 JSON——
+    // 否则本地/E2E 拆视频会拿到 .mp4 假结果，前端解析失败会掩盖真正的链路问题
+    const videoParse = await mock.submit(textRequest("video_parse"));
+    expect(videoParse.vendor_task_id).toBeUndefined();
+    const parsedVideo = JSON.parse(videoParse.sync_results?.[0]?.text ?? "{}") as {
+      characters?: Array<{ name?: string; prompt?: string }>;
+      scenes?: unknown[];
+      props?: unknown[];
+    };
+    expect(Array.isArray(parsedVideo.characters)).toBe(true);
+    expect(parsedVideo.characters?.[0]?.name).toBeTruthy();
+    expect(Array.isArray(parsedVideo.scenes)).toBe(true);
+    expect(Array.isArray(parsedVideo.props)).toBe(true);
   });
 
   it("媒体类仍走异步 mock（返回 vendor_task_id 而不是同步结果）", async () => {

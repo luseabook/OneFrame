@@ -343,7 +343,13 @@ const MODEL_SEED: ModelSeed[] = [
     needVip: false,
     audioVideoSupport: false,
     sort: 200,
-    modeOrder: { script_optimization: 1, storyboard_parse: 2, asset_extraction: 3, storyboard_asset_match: 4 },
+    modeOrder: {
+      script_optimization: 1,
+      storyboard_parse: 2,
+      asset_extraction: 3,
+      storyboard_asset_match: 4,
+      video_parse: 5,
+    },
     /**
      * 文本类模式（LLM 步骤）。
      *
@@ -378,6 +384,23 @@ const MODEL_SEED: ModelSeed[] = [
         default_count: 1,
       },
       storyboard_asset_match: {
+        endpoint: "chat",
+        resolution_options: [{ value: "per_call", label: "按次" }],
+        resolutions: ["per_call"],
+        default_resolution: "per_call",
+        counts: [1],
+        default_count: 1,
+      },
+      /**
+       * 视频拆解（拉片）：输入是一段视频、产出是结构化 JSON，仍是**按次计价**。
+       *
+       * 为什么挂在这个 LLM 模型上：真实实现是"抽帧/抽音轨 → LLM 读 → 出 JSON"，
+       * 计费对象是这次分析调用而不是视频秒数（参照站按秒计费是其定价策略，
+       * 我方价格由后台价目表决定，改策略不需要改代码）。
+       * 真实供应商联调（视频真正被模型"看到"）尚未做，见 api-spec §14.4.8 的
+       * "未真实联调"标注——mock 下产出形状与真实一致。
+       */
+      video_parse: {
         endpoint: "chat",
         resolution_options: [{ value: "per_call", label: "按次" }],
         resolutions: ["per_call"],
