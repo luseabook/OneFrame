@@ -147,13 +147,29 @@ describe("MockAdapter 文本分支", () => {
     expect(Array.isArray(parsedVideo.props)).toBe(true);
   });
 
-  it("媒体类仍走异步 mock（返回 vendor_task_id 而不是同步结果）", async () => {
-    const mock = new MockAdapter();
+  it("媒体类仍走异步 mock（返回 vendor_task_id 而不是同步结果），且结果扩展名与能力一致", async () => {
+    const mock = new MockAdapter({ delayMs: 0 });
     const submitted = await mock.submit({
       ...textRequest("text2image"),
       model: { name: "tgi-2", vendor: "volcengine", adapter_code: "volcengine:image" },
     });
     expect(submitted.vendor_task_id).toBeTruthy();
     expect(submitted.sync_results).toBeUndefined();
+
+    // 图像任务的结果必须是图片扩展名：图片工具直接把它塞进 <img src>，
+    // `.mp4` 会渲染成裂图，而"裂图"与"生成失败"在界面上几乎无法区分
+    const state = await mock.poll(submitted.vendor_task_id!);
+    expect(state.status).toBe("succeeded");
+    expect(state.results?.[0]?.uri.endsWith(".png")).toBe(true);
+    expect(state.results?.[0]?.preview_uri?.endsWith(".png")).toBe(true);
+
+    // 视频任务仍是 mp4（不能为了图片把视频也改掉）
+    const video = new MockAdapter({ delayMs: 0 });
+    const vs = await video.submit({
+      ...textRequest("text2video"),
+      model: { name: "seedance-2.5", vendor: "jimeng", adapter_code: "volcengine:video" },
+    });
+    const vstate = await video.poll(vs.vendor_task_id!);
+    expect(vstate.results?.[0]?.uri.endsWith(".mp4")).toBe(true);
   });
 });

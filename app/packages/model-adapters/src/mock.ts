@@ -1,4 +1,4 @@
-import { SyncTextMode } from "@app/shared";
+import { ImageMode, SyncTextMode } from "@app/shared";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 export interface MockAdapterOptions {
@@ -63,10 +63,21 @@ export class MockAdapter implements ModelAdapter {
       return { status: "review_rejected", error: { code: "mock_review", message: "mock review rejected" } };
     }
 
+    /**
+     * 结果形状必须跟能力一致：图像任务返回 `.png`，不能一律返回 `.mp4`。
+     *
+     * 前端图片工具直接把它塞进 `<img src>`，`.mp4` 会渲染成裂图；
+     * 而"裂图"和"生成失败"在界面上很难区分——mock 形状错了会把真问题盖住
+     * （与 mock 文本分支同一个教训）。
+     */
+    const isImage = (ImageMode as readonly string[]).includes(job.mode);
+    const ext = isImage ? "png" : "mp4";
+    const previewExt = isImage ? "png" : "jpg";
+    const suffix = (index: number): string => (job.count === 1 ? "" : `-${index}`);
     const results: GenResult[] = Array.from({ length: job.count }, (_, index) => ({
-      uri: job.count === 1 ? `mock://results/${job.taskId}.mp4` : `mock://results/${job.taskId}-${index}.mp4`,
-      preview_uri: `mock://results/${job.taskId}-${index}.jpg`,
-      duration_s: 5,
+      uri: `mock://results/${job.taskId}${suffix(index)}.${ext}`,
+      preview_uri: `mock://results/${job.taskId}-${index}.${previewExt}`,
+      ...(isImage ? {} : { duration_s: 5 }),
       width: 720,
       height: 1280,
       meta: { mock: true, mode: job.mode, candidate_index: index },

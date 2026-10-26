@@ -47,6 +47,13 @@ export default defineNuxtConfig({
     // 所以必须在 routeRules 里也关掉 SSR。
     "/canvas": { ssr: false },
     "/canvas/**": { ssr: false },
+    // 单点工具页（/create/*）同理：这些页面此前只在 `definePageMeta` 里写了 ssr:false，
+    // 而直接打开/刷新 URL 时仍会走服务端渲染 → 与服务端未登录首帧不一致 →
+    // hydration 失败后整页空白（本轮 E2E 实测：直接访问 /create/text-to-video 时
+    // `#__nuxt` 不存在、body 仅 356 字节）。工具页全是"登录后才可用"的参数面板，
+    // 关掉 SSR 是唯一正确解，不需要给它们做一套登录态 SSR 首帧。
+    "/create": { ssr: false },
+    "/create/**": { ssr: false },
   },
   app: {
     head: {
