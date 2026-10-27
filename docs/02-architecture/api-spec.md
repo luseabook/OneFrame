@@ -1720,3 +1720,18 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 追加到 `prompt_with_images` 末尾（主体描述 → `[[@imgN]]` → 风格前缀），同一前缀不重复追加。
 
 **未做**：前端主体卡片上的"应用模板"下拉（API 已可用；本轮页面未接，登记在 §5 缺口）。
+
+### 17.12 创作者效果标签（`effect`）与主体模板 UI（2026-10-27 第 6 轮）
+
+**`creator_assets.effect`（迁移 0033）**：对照 `crc/resource/list` 的 `effect` 筛选与 `crc/effect/tree` 目录。
+此前表无此列，接口只能"透传但不过滤"（`effect_applied:false`）——用户选了筛选项却看不到结果变化，比没有筛选项更糟。
+
+| 项 | 口径 |
+|---|---|
+| 取值 | `crc/effect/tree` 叶子扁平化：`anime`/`realistic`/`ink`（风格）、`push`/`pan`/`handheld`（运镜）；**可空**（老数据与未设置效果的作品不参与效果筛选） |
+| 写入 | `POST /crc/assets/create`、`POST /crc/assets/update` 接受 `effect`（白名单枚举；`update` 传 `null` 可清空，但**只有草稿/已驳回可编辑**——已通过需先下架） |
+| 读取 | `POST /crc/resource/list` 的 `effect` 是**真过滤**（走 `idx_creator_assets_effect(status, effect, published_at desc)`），响应 `filters.effect_applied=true`；未知值 `400101` 且附合法集合（不进信封） |
+| DTO | 作品 DTO 回显 `effect`。 |
+
+**前端**：`SubjectLibrary` 的"应用模板"下拉来自 `GET /subjects/templates`，调 `POST /subjects/:id/apply-template`；
+提示文案明确"已追加风格前缀，原描述不变"（与自由填写的模板键 `template_key` 是两个不同动作）。
