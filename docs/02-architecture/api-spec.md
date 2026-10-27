@@ -1555,3 +1555,86 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 | 0030 | `market_categories` / `market_tags` / `market_review_logs` / `market_works.{category_id,tag_ids}` / `market_withdrawals.work_id`；`creditOut.kind` 放宽为 `"refund" \| "consume"`（购买记 `consume`，否则财务对账"退款金额"虚高） |
 
 **表数**：96 → **110**；`schema.spec.ts` 锁 P1 不变量 + 第 0 批/续 + 本轮新列。
+
+---
+
+## 17. 第 3 轮新增端点与口径（2026-10-27 · 广告剧/视频转绘/发布播放/资产快照）
+
+> 本轮端点 648 → **683**，页面 55 → **60**，表 110 → **111**（迁移 0031/0032）。
+> 逐条证据见 [`_acceptance/_team/report-round3-lead.md`](../../_acceptance/_team/report-round3-lead.md)。
+
+### 17.1 广告剧（`/v1/ad-drama/*`，12 端点 · 模块 #13）
+
+竞品 `df/script_project/drama_ad/*`（`rea-reelmate/routes.txt:680-691`）→ 我方按域收敛为 `/ad-drama/*`（ADR-009），
+状态挂 `script_projects(project_mode=2)`，模式私有数据全部进 `mode_meta` jsonb（**服务端不解析语义**，只校验对象与大小上限）。
+
+| 竞品（rt 行） | 我方 |
+|---|---|
+| `asset/extract` (680) | `POST /ad-drama/projects/:id/asset/extract`（`need_voice` 1/2，参数名沿用竞品 CLI `commands/ad.md:133`） |
+| `asset/image-tips` (681) | `POST /ad-drama/projects/:id/asset/image-tips` |
+| `brief/generate` (682) | `POST /ad-drama/projects/:id/brief/generate` |
+| `brief/select` (683) | `POST /ad-drama/projects/:id/brief/select`（`brief_id`） |
+| `project/info` (684) | `GET /ad-drama/projects/:id`（五段进度 `stages[]` + `current_stage`） |
+| `project/point` (685) | `POST /ad-drama/projects/:id/point`（只试算不冻结） |
+| `project/save` (686) | `POST /ad-drama/projects`（`project_id` 有值=更新） |
+| `script/edit` (687) | `POST /ad-drama/projects/:id/script/edit`（`script_text`，走内容安全检查） |
+| `script/generate` (688) | `POST /ad-drama/projects/:id/script/generate` |
+| `script/reset` (689) | `POST /ad-drama/projects/:id/script/reset`（保留素材与卖点，只清剧本） |
+| `selling-point/generate` (690) | `POST /ad-drama/projects/:id/selling-point/generate` |
+| `storyboard/generate` (691) | `POST /ad-drama/projects/:id/storyboard/generate`（`template_type` 1 急速 / 2 至尊） |
+
+**口径**：每个生成动作都回 `charge{credits,task_id}`（走 `tasks` 记账，不白送）；`stage`/`status` 的**值域竞品未取证**，
+我方定义 1..5 / 1 进行中 2 完成，并在 `ad.constants.ts` 注释标注「待取证」。
+
+### 17.2 视频转绘（`/v1/video-redraw/*`，9 端点 · 模块 #14）
+
+竞品 `df/script_project/video_redraw/*`（`routes.txt:703-710`）+ 我方补充 1 条列表：
+
+| 竞品（rt 行） | 我方 |
+|---|---|
+| `project/create` (706) | `POST /video-redraw/projects`（`mode_meta={source_uri,source_kind,style,redraw_strength,source_duration_s,episode_ranges,shot_duration_s}`） |
+| `project/info` (707) | `GET /video-redraw/projects/:id`（`video_redraw_stage` / `video_redraw_stage_status` / `progress{}`） |
+| `project/point` (708) | `POST /video-redraw/projects/:id/point` |
+| `episode/create` (705) | `POST /video-redraw/projects/:id/episodes` |
+| `episode/batch_create` (704) | `POST /video-redraw/projects/:id/episodes/batch`（等分 N 集） |
+| `storyboard/plan` (710) | `POST /video-redraw/projects/:id/storyboard/plan`（**覆盖式**，幂等） |
+| `resources/generate` (709) | `POST /video-redraw/projects/:id/resources/generate`（报价 + 任务记账） |
+| `asset/bind` (703) | `POST /video-redraw/projects/:id/asset/bind`（快照语义，与 `PUT timeline` 同口径） |
+| （我方补充） | `GET /video-redraw/projects`（列表；竞品 8 端点无列表，但工作台必须有入口） |
+
+**口径**：`episode_ranges` 记录每集 `[start_s,end_s]`，分镜计划据此取默认区间；`redraw_strength` 在 mock 模式下无可见差异（已标注）。
+
+### 17.3 发布播放（`/v1/watch/:token`，2 端点 · 模块 #20）
+
+| 端点 | 语义 |
+|---|---|
+| `GET /watch/:token` | **公开只读**（`@Public`，只认 32 位 hex token）。可播放返回 `{title,episode_no,status,file_url(现签 1h),duration_ms,published_at,view_count}`；**键集合严格收紧**（spec 用全等断言，不含 space/user/project/episode/publication/token/slice）。四种非正常态：`not_found`(400102) / `off_shelf`(400102) / `transcoding`(400105) / `transcode_failed`(400105) |
+| `POST /watch/:token/view` | 播放计数：同 token + 同 IP **5 分钟去重**（Redis `SETNX`，IP 只存 sha256 前 24 位）；去重通过后 `timeline_publications.view_count` **原子自增**（迁移 0032），响应 `{ok,counted,view_count}` |
+
+**为什么计数落列**：Redis 重启/淘汰会丢"这部片子被看了多少次"，而这是创作者与运营要看的历史指标；
+Redis 只承担去重闸（见 `publish.service.ts` 注释）。
+
+### 17.4 资产/主体补完（模块 #17，无新端点为主）
+
+| 变更 | 说明 |
+|---|---|
+| 新表 `episode_resources` | 每集每类（角色/场景/道具）的**完整快照**；唯一键 `(episode_id,kind,name)`；`save-resource-matches` 按类清空重写（空类别显式 `[]`，漏传 400101 且零写入）；`match-result` 三态统计基于该表 |
+| `project_assets.prompt_status` | 0 未处理 / 1 生成中 / 2 已完备 / 3 被拦截；被拦截与生成中的资产不参与"智能补充" |
+| `subjects.is_starred` / `template_key` | 星标置顶 + IP 模板归类筛选（模板渲染语义未取证，只做归类） |
+| `prompt_inject_mode=append｜replace` | 默认 `append`（保持既有行为）；`replace` 直接把 `prompt_with_images` 作为 `video_prompt`，**需产品确认后才建议启用** |
+| extraction 补面 | `GET /extraction/tasks`（分页/状态筛）、`POST /extraction/tasks/:id/cancel`、`GET /extraction/stats` |
+
+### 17.5 多语言路由口径（模块 #16）
+
+- 前缀 `/en /ja /br /es` 由**全局中间件**解析（不复制页面树）：`/en/pricing` → 设 `en` + 内部渲染 `/pricing`；中文无前缀。
+- `hreflang` 5 条 + `x-default`（指向中文无前缀）；`/sitemap.xml` 只列公开页 × 5 语言；`/robots.txt` 指向 sitemap。
+- 切换语言时**替换**前缀（先 `stripLocalePrefix` 再加），避免 `/ja/en/pricing`。
+
+### 17.6 数据层（迁移 0031–0032）
+
+| 迁移 | 内容 |
+|---|---|
+| 0031 | `episode_resources` 新表；`script_projects.project_mode`（1 普通/2 广告剧/3 视频转绘）+ `mode_meta` jsonb；`project_assets.prompt_status`；`subjects.is_starred` / `template_key` |
+| 0032 | `timeline_publications.view_count`（播放量权威计数） |
+
+**表数**：110 → **111**。
