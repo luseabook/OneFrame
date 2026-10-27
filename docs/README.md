@@ -123,6 +123,28 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v5.0 · 多语言第 20 批：广告剧 + 视频转绘全流程 4 页 · 2026-10-28）
+
+页面覆盖 **27 → 31/64**；**用户面 31/45 = 69%**；全站 **97.6%** / 首发 **97.6%**。
+
+| 页面 | namespace | 迁移内容 |
+|---|---|---|
+| [ad-drama/create.vue](app/apps/web/pages/ad-drama/create.vue) | `adDrama.create` | 商品素材（上传/预览/名称/亮点）、生成设置（画幅/风格/主题/项目名）、创建动作、顺序提示、12 条校验与 toast；画幅与风格标签改 computed，**风格值仍保留后端认的字符串** |
+| [ad-drama/workspace.vue](app/apps/web/pages/ad-drama/workspace.vue) | `adDrama.workspace` | 五段（卖点/剧情方案/剧本/分镜/资产）标题、按钮与空态、剧本重置与保存、急速/至尊模板、含配音/不含配音、提示词建议、消耗表、`actions.*` 动作名与"完成，消耗 N 积分" |
+| [video-redraw/create.vue](app/apps/web/pages/video-redraw/create.vue) | `redraw.create` | 源视频（上传/资产库/已选提示）、风格与强度、比例三档、最近项目、创建动作；风格改 computed + 13 条校验与 toast |
+| [video-redraw/workspace.vue](app/apps/web/pages/video-redraw/workspace.vue) | `redraw.workspace` | 四阶段名、切集（单集/批量/等分集数/每集时长/集 chip）、分镜计划（单镜时长/覆盖式说明/四列表头/已绑数）、重绘生成（参考图/视频/报价说明）、绑定（快照语义） |
+
+### 四个实现要点
+
+1. **"值"与"标签"分离**：`ad-drama` 的风格值是中文（后端按字符串存），`video-redraw` 的风格值是英文 key；
+   两处都改成 `computed` 标签 + 值不动，避免改翻译就改坏已有数据。
+2. **阶段常量改 computed**：两个 workspace 的 `STAGES` 原本是模块级常量，切语言不会更新。
+3. **两处英文空态缺空格**：`No ad drama projects yet.` 直接拼 `<NuxtLink>` → `yet.Create`，E2E 文本对比一眼看出，已修。
+4. `i18n-check` 仍会报 `ad-drama` 风格值里的中文字面量（5 处）——那是**发给后端的数据**，不是 UI 文案，属预期保留。
+
+**验证**：`i18n-check.cjs` 全绿（1290 key / 31 页 + 4 组件）；`e2e-i18n-pages.cjs` **91/91**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.9 · 多语言第 19 批：举报 / 发布作品 / 作品预览 + 新口径 · 2026-10-28）
 
 页面覆盖 **24 → 27/64**；**用户面页面 27/45 = 60%**（新口径）；全站 **97.6%** / 首发 **97.6%**。

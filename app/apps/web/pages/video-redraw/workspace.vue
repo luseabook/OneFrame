@@ -15,7 +15,8 @@
  *    （若后端返回），保证"看到的价格就是扣的价格"。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "视频转绘工作台 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("redraw.workspace.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -87,12 +88,13 @@ const batchForm = reactive({ count: 3, episode_duration_s: 60 });
 const shotDuration = ref(3);
 
 /** 四段（与服务端 `stageOf` 的 1..4 对齐） */
-const STAGES = [
-  { stage: 1, name: "切集" },
-  { stage: 2, name: "分镜计划" },
-  { stage: 3, name: "重绘生成" },
-  { stage: 4, name: "绑定完成" },
-];
+// 阶段名走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const STAGES = computed(() => [
+  { stage: 1, name: t("redraw.workspace.stages.1") },
+  { stage: 2, name: t("redraw.workspace.stages.2") },
+  { stage: 3, name: t("redraw.workspace.stages.3") },
+  { stage: 4, name: t("redraw.workspace.stages.4") },
+]);
 
 async function load(): Promise<void> {
   if (!projectId.value) {
@@ -113,7 +115,7 @@ async function load(): Promise<void> {
     if (activeEpisodeId.value) await loadShots(activeEpisodeId.value);
     await refreshPoint();
   } catch (err) {
-    toast.error((err as Error).message || "项目加载失败");
+    toast.error((err as Error).message || t("redraw.workspace.loadFailed"));
   } finally {
     loading.value = false;
   }
@@ -157,10 +159,10 @@ async function run(key: string, fn: () => Promise<unknown>): Promise<void> {
   busy.value = key;
   try {
     await fn();
-    toast.success("完成");
+    toast.success(t("redraw.workspace.done"));
     await load();
   } catch (err) {
-    toast.error((err as Error).message || "操作失败");
+    toast.error((err as Error).message || t("redraw.workspace.opFailed"));
   } finally {
     busy.value = "";
   }
@@ -223,7 +225,7 @@ const bindAll = () =>
       })),
     };
     const result = await api.post<BindResult>(`/video-redraw/projects/${projectId.value}/asset/bind`, body);
-    if (result?.bound !== undefined) toast.success(`已绑定 ${result.bound} 个分镜`);
+    if (result?.bound !== undefined) toast.success(t("redraw.workspace.boundToast", { count: result.bound }));
   });
 
 async function selectEpisode(id: string): Promise<void> {
@@ -242,20 +244,27 @@ watch(projectId, () => void load());
   <div class="rw">
     <header class="head">
       <div>
-        <h1>{{ info?.title || "视频转绘工作台" }}</h1>
+        <h1>{{ info?.title || t("redraw.workspace.titleFallback") }}</h1>
         <p v-if="info" class="muted">
-          风格 {{ info.style }} · 强度 {{ info.redraw_strength }} ·
-          源视频 {{ info.source.duration_s ? `${Math.round(info.source.duration_s)}s` : "时长未知" }}
-          <span v-if="quote"> · 预计本集重绘 {{ quote.credits ?? "—" }} 积分</span>
+          {{
+            t("redraw.workspace.meta", {
+              style: info.style,
+              strength: info.redraw_strength,
+              source: t("redraw.workspace.sourceDuration", {
+                duration: info.source.duration_s ? `${Math.round(info.source.duration_s)}s` : t("redraw.workspace.durationUnknown"),
+              }),
+              quote: quote ? t("redraw.workspace.quote", { credits: quote.credits ?? "—" }) : "",
+            })
+          }}
         </p>
       </div>
-      <NuxtLink to="/video-redraw/create" class="link">＋ 新建转绘</NuxtLink>
+      <NuxtLink to="/video-redraw/create" class="link">{{ t("redraw.workspace.newProject") }}</NuxtLink>
     </header>
 
     <template v-if="!projectId">
-      <p v-if="loading" class="muted">加载中…</p>
+      <p v-if="loading" class="muted">{{ t("redraw.workspace.loading") }}</p>
       <p v-else-if="recent.length === 0" class="muted">
-        还没有转绘项目。<NuxtLink to="/video-redraw/create" class="link">上传一段视频开始</NuxtLink>
+        {{ t("redraw.workspace.empty") }} <NuxtLink to="/video-redraw/create" class="link">{{ t("redraw.workspace.emptyCreate") }}</NuxtLink>
       </p>
       <ul v-else class="recent">
         <li v-for="item in recent" :key="item.id">
@@ -274,22 +283,22 @@ watch(projectId, () => void load());
       <!-- ① 切集 -->
       <section class="card">
         <div class="card-head">
-          <h2>① 切集</h2>
-          <span class="muted small">已切 {{ info.progress.episodes }} 集</span>
+          <h2>{{ t("redraw.workspace.stepEpisode") }}</h2>
+          <span class="muted small">{{ t("redraw.workspace.episodesDone", { count: info.progress.episodes }) }}</span>
         </div>
         <div class="row">
           <button type="button" class="btn" :disabled="!!busy" @click="createEpisode">
-            {{ busy === "episode" ? "处理中…" : "按默认时长切一集" }}
+            {{ busy === "episode" ? t("redraw.workspace.loading") : t("redraw.workspace.cutDefault") }}
           </button>
           <label class="inline">
-            等分集数
+            {{ t("redraw.workspace.evenCount") }}
             <input v-model.number="batchForm.count" type="number" min="1" max="50" class="num" />
           </label>
           <label class="inline">
-            每集时长(s)
+            {{ t("redraw.workspace.episodeDuration") }}
             <input v-model.number="batchForm.episode_duration_s" type="number" min="1" max="3600" class="num" />
           </label>
-          <button type="button" class="btn ghost" :disabled="!!busy" @click="batchEpisodes">批量切集</button>
+          <button type="button" class="btn ghost" :disabled="!!busy" @click="batchEpisodes">{{ t("redraw.workspace.cutBatch") }}</button>
         </div>
         <div v-if="episodes.length" class="chips">
           <button
@@ -300,7 +309,7 @@ watch(projectId, () => void load());
             :class="{ on: ep.id === activeEpisodeId }"
             @click="selectEpisode(ep.id)"
           >
-            第 {{ ep.ep_no }} 集{{ ep.title ? ` · ${ep.title}` : "" }}
+            {{ t("redraw.workspace.episodeChip", { no: ep.ep_no }) }}{{ ep.title ? ` · ${ep.title}` : "" }}
           </button>
         </div>
       </section>
@@ -308,71 +317,72 @@ watch(projectId, () => void load());
       <!-- ② 分镜计划 -->
       <section class="card">
         <div class="card-head">
-          <h2>② 分镜计划</h2>
+          <h2>{{ t("redraw.workspace.stepPlan") }}</h2>
           <span class="muted small">
-            本集 {{ shots.length }} 镜 · 已提交生成 {{ info.progress.storyboards_submitted }} 镜
+            {{ t("redraw.workspace.shotsProgress", { shots: shots.length, submitted: info.progress.storyboards_submitted }) }}
           </span>
         </div>
         <div class="row">
           <label class="inline">
-            单镜时长(s)
+            {{ t("redraw.workspace.shotDuration") }}
             <input v-model.number="shotDuration" type="number" min="1" max="60" class="num" />
           </label>
           <button type="button" class="btn" :disabled="!!busy || !activeEpisodeId" @click="planStoryboards">
-            {{ busy === "plan" ? "规划中…" : "按时间轴切镜（覆盖式）" }}
+            {{ busy === "plan" ? t("redraw.workspace.planning") : t("redraw.workspace.planCover") }}
           </button>
-          <span class="muted small">覆盖式：重复规划会替换本集分镜，不会叠加。</span>
+          <span class="muted small">{{ t("redraw.workspace.planHint") }}</span>
         </div>
         <table v-if="shots.length" class="table">
-          <thead><tr><th>#</th><th>画面</th><th>时长</th><th>已绑产物</th></tr></thead>
+          <thead><tr><th>{{ t("redraw.workspace.thNo") }}</th><th>{{ t("redraw.workspace.thVisual") }}</th><th>{{ t("redraw.workspace.thDuration") }}</th><th>{{ t("redraw.workspace.thBound") }}</th></tr></thead>
           <tbody>
             <tr v-for="shot in shots" :key="shot.id">
               <td>{{ shot.shot_no }}</td>
               <td>{{ shot.shot_desc }}</td>
               <td>{{ shot.duration_s ?? "—" }}s</td>
-              <td>{{ shot.asset_ids?.length ? `${shot.asset_ids.length} 个` : "—" }}</td>
+              <td>{{ shot.asset_ids?.length ? t("redraw.workspace.assetCount", { count: shot.asset_ids.length }) : "—" }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">还没有分镜。先切集，再按源视频时间轴生成分镜计划。</p>
+        <p v-else class="muted">{{ t("redraw.workspace.needEpisode") }}</p>
       </section>
 
       <!-- ③ 重绘生成 -->
       <section class="card">
         <div class="card-head">
-          <h2>③ 重绘生成</h2>
+          <h2>{{ t("redraw.workspace.stepGenerate") }}</h2>
           <span class="muted small">
-            已产出 {{ info.progress.redraw_assets }} 个重绘资产
-            <template v-if="info.latest_flow"> · 最近任务 {{ info.latest_flow.task_count }} 个</template>
+            {{ t("redraw.workspace.redrawAssets", { count: info.progress.redraw_assets }) }}<template v-if="info.latest_flow">{{
+              t("redraw.workspace.latestTask", { count: info.latest_flow.task_count })
+            }}</template>
           </span>
         </div>
         <div class="row">
           <button type="button" class="btn" :disabled="!!busy || !activeEpisodeId" @click="generateResources('image')">
-            {{ busy === "generate" ? "提交中…" : "生成本集重绘参考图" }}
+            {{ busy === "generate" ? t("redraw.workspace.submitting") : t("redraw.workspace.generate") }}
           </button>
           <button type="button" class="btn ghost" :disabled="!!busy || !activeEpisodeId" @click="generateResources('video')">
-            生成重绘视频
+            {{ t("redraw.workspace.generateVideo") }}
           </button>
-          <span class="muted small">生成走积分报价 + 任务记账；无供应商 Key 时按 mock 返回。</span>
+          <span class="muted small">{{ t("redraw.workspace.generateHint") }}</span>
         </div>
       </section>
 
       <!-- ④ 绑定 -->
       <section class="card">
         <div class="card-head">
-          <h2>④ 绑定</h2>
-          <span class="muted small">已绑 {{ info.progress.bound_storyboards }} / {{ info.progress.storyboards }} 镜</span>
+          <h2>{{ t("redraw.workspace.stepBind") }}</h2>
+          <span class="muted small">{{ t("redraw.workspace.bindCount", { bound: info.progress.bound_storyboards, total: info.progress.storyboards }) }}</span>
         </div>
         <div class="row">
           <button type="button" class="btn" :disabled="!!busy || shots.length === 0" @click="bindAll">
-            {{ busy === "bind" ? "绑定中…" : "把本集产物绑到分镜" }}
+            {{ busy === "bind" ? t("redraw.workspace.binding") : t("redraw.workspace.bind") }}
           </button>
-          <span class="muted small">快照语义：每次绑定覆盖该分镜的资产集合，与剪辑台时间线一致。</span>
+          <span class="muted small">{{ t("redraw.workspace.bindHint") }}</span>
         </div>
       </section>
     </template>
 
-    <p v-else-if="loading" class="muted">加载中…</p>
+    <p v-else-if="loading" class="muted">{{ t("redraw.workspace.loading") }}</p>
   </div>
 </template>
 

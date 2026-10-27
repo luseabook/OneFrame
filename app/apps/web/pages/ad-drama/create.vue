@@ -16,7 +16,8 @@
  *    不自造同义词，方便与 CLI `ad save` 对照验收。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "广告剧 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("adDrama.create.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -29,13 +30,24 @@ interface AssetDto {
 }
 
 /** 竞品 `AD_RATIOS`（`ad.constants.ts:22`）：9:16 竖版 / 16:9 横版 */
-const RATIOS = [
-  { value: "9:16", label: "竖版 9:16（抖音/视频号）" },
-  { value: "16:9", label: "横版 16:9（B 站/YouTube）" },
-];
+const RATIOS = computed(() => [
+  { value: "9:16", label: t("adDrama.create.ratios.vertical") },
+  { value: "16:9", label: t("adDrama.create.ratios.horizontal") },
+]);
 
 /** 风格：竞品 `style` 是"风格 ID"（值域未取证），我方给可读预置 + 自由输入 */
+// 风格值需要发给后端（英文/中文都可，后端按字符串存）；标签另给翻译，互不影响
 const STYLE_PRESETS = ["真人实拍", "动漫二次元", "3D 卡通", "赛博霓虹", "国风"];
+const styleLabel = (value: string): string => {
+  const map: Record<string, string> = {
+    真人实拍: t("adDrama.create.styles.live"),
+    动漫二次元: t("adDrama.create.styles.anime"),
+    "3D 卡通": t("adDrama.create.styles.cartoon3d"),
+    赛博霓虹: t("adDrama.create.styles.cyber"),
+    国风: t("adDrama.create.styles.guofeng"),
+  };
+  return map[value] ?? value;
+};
 
 const form = reactive({
   materialName: "",
@@ -58,11 +70,11 @@ async function pickImage(event: Event): Promise<void> {
   input.value = "";
   if (!file) return;
   if (!file.type.startsWith("image/")) {
-    toast.error("请选择商品图片");
+    toast.error(t("adDrama.create.errImageOnly"));
     return;
   }
   if (file.size > 8 * 1024 * 1024) {
-    toast.error("图片不能超过 8MB");
+    toast.error(t("adDrama.create.errImageSize"));
     return;
   }
   uploading.value = true;
@@ -70,7 +82,7 @@ async function pickImage(event: Event): Promise<void> {
     const base64 = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("adDrama.create.errReadFile")));
       reader.readAsDataURL(file);
     });
     // 契约要求 `filename`（不是 `name`）：`assetUploadSchema.filename` 必填，
@@ -86,9 +98,9 @@ async function pickImage(event: Event): Promise<void> {
       // 商品名默认取文件名（去掉扩展名）：运营少填一项是一个
       form.materialName = file.name.replace(/\.[^.]+$/, "").slice(0, 60);
     }
-    toast.success("商品图已上传");
+    toast.success(t("adDrama.create.uploaded"));
   } catch (err) {
-    toast.error((err as Error).message || "上传失败");
+    toast.error((err as Error).message || t("adDrama.create.uploadFailed"));
   } finally {
     uploading.value = false;
   }
@@ -96,15 +108,15 @@ async function pickImage(event: Event): Promise<void> {
 
 async function createProject(): Promise<void> {
   if (!form.materialName.trim()) {
-    toast.error("请填写商品名称");
+    toast.error(t("adDrama.create.errName"));
     return;
   }
   if (!form.materialHighlight.trim()) {
-    toast.error("请填写商品亮点（卖点生成的输入）");
+    toast.error(t("adDrama.create.errHighlight"));
     return;
   }
   if (!form.materialImage) {
-    toast.error("请上传商品图");
+    toast.error(t("adDrama.create.errImage"));
     return;
   }
   creating.value = true;
@@ -118,10 +130,10 @@ async function createProject(): Promise<void> {
       ratio: form.ratio,
       theme: form.theme.trim() || undefined,
     });
-    toast.success("广告剧项目已创建，进入五段工作台");
+    toast.success(t("adDrama.create.created"));
     await router.push(`/ad-drama/workspace?id=${created.project.id}`);
   } catch (err) {
-    toast.error((err as Error).message || "创建失败");
+    toast.error((err as Error).message || t("adDrama.create.createFailed"));
   } finally {
     creating.value = false;
   }
@@ -132,34 +144,32 @@ async function createProject(): Promise<void> {
   <div class="ad-create">
     <header class="head">
       <div>
-        <h1>广告剧</h1>
-        <p class="muted">
-          一张商品图 + 一句卖点，自动产出剧情方案、剧本、分镜与资产。对齐竞品 `/ad-drama/create` 五段流程。
-        </p>
+        <h1>{{ t("adDrama.create.title") }}</h1>
+        <p class="muted">{{ t("adDrama.create.sub") }}</p>
       </div>
-      <NuxtLink to="/ad-drama/workspace" class="link">我的广告剧项目 →</NuxtLink>
+      <NuxtLink to="/ad-drama/workspace" class="link">{{ t("adDrama.create.myProjects") }}</NuxtLink>
     </header>
 
     <section class="card">
-      <h2>① 商品素材</h2>
+      <h2>{{ t("adDrama.create.stepMaterial") }}</h2>
       <div class="material">
         <button type="button" class="uploader" :disabled="uploading" @click="fileInput?.click()">
-          <img v-if="imagePreview" :src="imagePreview" alt="商品图预览" />
-          <span v-else>{{ uploading ? "上传中…" : "上传商品图" }}</span>
+          <img v-if="imagePreview" :src="imagePreview" :alt="t('adDrama.create.previewAlt')" />
+          <span v-else>{{ uploading ? t("adDrama.create.uploading") : t("adDrama.create.uploadHint") }}</span>
         </button>
         <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="pickImage" />
         <div class="material-fields">
           <label class="field">
-            <span>商品名称 <b>*</b></span>
-            <input v-model="form.materialName" maxlength="120" placeholder="例：便携榨汁杯" />
+            <span>{{ t("adDrama.create.nameLabel") }} <b>*</b></span>
+            <input v-model="form.materialName" maxlength="120" :placeholder="t('adDrama.create.namePlaceholder')" />
           </label>
           <label class="field">
-            <span>商品亮点（一句卖点，生成多条卖点的输入）<b>*</b></span>
+            <span>{{ t("adDrama.create.highlightLabel") }} <b>*</b></span>
             <textarea
               v-model="form.materialHighlight"
               rows="3"
               maxlength="300"
-              placeholder="例：30 秒出汁，充一次用一周，出差也能喝鲜榨"
+              :placeholder="t('adDrama.create.highlightPlaceholder')"
             />
           </label>
         </div>
@@ -167,38 +177,36 @@ async function createProject(): Promise<void> {
     </section>
 
     <section class="card">
-      <h2>② 生成设置</h2>
+      <h2>{{ t("adDrama.create.stepSettings") }}</h2>
       <div class="grid">
         <label class="field">
-          <span>画幅</span>
+          <span>{{ t("adDrama.create.ratioLabel") }}</span>
           <select v-model="form.ratio">
             <option v-for="item in RATIOS" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
         <label class="field">
-          <span>风格</span>
+          <span>{{ t("adDrama.create.styleLabel") }}</span>
           <select v-model="form.style">
-            <option v-for="item in STYLE_PRESETS" :key="item" :value="item">{{ item }}</option>
+            <option v-for="item in STYLE_PRESETS" :key="item" :value="item">{{ styleLabel(item) }}</option>
           </select>
         </label>
         <label class="field">
-          <span>主题（选填）</span>
-          <input v-model="form.theme" maxlength="120" placeholder="例：夏日出行" />
+          <span>{{ t("adDrama.create.themeLabel") }}</span>
+          <input v-model="form.theme" maxlength="120" :placeholder="t('adDrama.create.themePlaceholder')" />
         </label>
         <label class="field">
-          <span>项目名称（选填，默认用商品名）</span>
-          <input v-model="form.title" maxlength="120" placeholder="例：榨汁杯-夏日投放-A 版" />
+          <span>{{ t("adDrama.create.projectNameLabel") }}</span>
+          <input v-model="form.title" maxlength="120" :placeholder="t('adDrama.create.projectNamePlaceholder')" />
         </label>
       </div>
     </section>
 
     <div class="actions">
       <button type="button" class="btn primary" :disabled="creating || uploading" @click="createProject">
-        {{ creating ? "创建中…" : "创建项目并进入工作台" }}
+        {{ creating ? t("adDrama.create.creating") : t("adDrama.create.createProject") }}
       </button>
-      <span class="muted small">
-        创建后先「生成卖点」，再选剧情方案——竞品的顺序同样是先素材理解再创意选择。
-      </span>
+      <span class="muted small">{{ t("adDrama.create.orderHint") }}</span>
     </div>
   </div>
 </template>

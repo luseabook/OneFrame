@@ -14,7 +14,8 @@
  *    重置是"回到生成态"而不是删项目（`script/reset` 保留素材与卖点）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "广告剧工作台 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("adDrama.workspace.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -96,11 +97,11 @@ const scriptDraft = ref("");
 const scriptDirty = ref(false);
 
 const STYLE_LABEL: Record<string, string> = {
-  selling_point: "生成卖点",
-  brief: "生成剧情方案",
-  script: "生成剧本",
-  storyboard: "生成分镜",
-  asset: "抽取资产",
+  selling_point: "selling_point",
+  brief: "brief",
+  script: "script",
+  storyboard: "storyboard",
+  asset: "asset",
 };
 
 async function load(): Promise<void> {
@@ -116,7 +117,7 @@ async function load(): Promise<void> {
     if (!scriptDirty.value) scriptDraft.value = data.script?.text ?? "";
     await refreshEstimate();
   } catch (err) {
-    toast.error((err as Error).message || "项目加载失败");
+    toast.error((err as Error).message || t("adDrama.workspace.loadFailed"));
   } finally {
     loading.value = false;
   }
@@ -165,10 +166,14 @@ async function run(action: string, fn: () => Promise<unknown>): Promise<void> {
   try {
     const result = (await fn()) as RunResult;
     const credits = result?.charge?.credits;
-    toast.success(credits ? `${STYLE_LABEL[action] ?? action}完成，消耗 ${credits} 积分` : "完成");
+    toast.success(
+      credits
+        ? t("adDrama.workspace.doneWithCredits", { action: t(`adDrama.workspace.actions.${STYLE_LABEL[action] ?? action}`), credits })
+        : t("adDrama.workspace.done"),
+    );
     await load();
   } catch (err) {
-    toast.error((err as Error).message || "操作失败");
+    toast.error((err as Error).message || t("adDrama.workspace.opFailed"));
   } finally {
     busy.value = "";
   }
@@ -186,7 +191,7 @@ const genScript = () => run("script", () => api.post(`/ad-drama/projects/${proje
 
 async function saveScript(): Promise<void> {
   if (!scriptDraft.value.trim()) {
-    toast.error("剧本不能为空");
+    toast.error(t("adDrama.workspace.scriptEmpty"));
     return;
   }
   await run("script", async () => {
@@ -217,22 +222,23 @@ watch(projectId, () => void load());
   <div class="ad-ws">
     <header class="head">
       <div>
-        <h1>{{ info?.project.title || "广告剧工作台" }}</h1>
+        <h1>{{ info?.project.title || t("adDrama.workspace.titleFallback") }}</h1>
         <p v-if="info" class="muted">
-          {{ info.status_name }} · 画幅 {{ info.project.ratio }} · 当前第 {{ info.current_stage }} / 5 段
-          <span v-if="pricing"> · 预计还需 {{ pricing.credits }} 积分</span>
+          {{ t("adDrama.workspace.meta", { status: info.status_name, ratio: info.project.ratio, stage: info.current_stage }) }}<span
+            v-if="pricing"
+          >{{ t("adDrama.workspace.pricingHint", { credits: pricing.credits }) }}</span>
         </p>
       </div>
       <div class="head-actions">
-        <NuxtLink to="/ad-drama/create" class="link">＋ 新建广告剧</NuxtLink>
+        <NuxtLink to="/ad-drama/create" class="link">{{ t("adDrama.workspace.newProject") }}</NuxtLink>
       </div>
     </header>
 
     <!-- 无 id：项目入口列表 -->
     <template v-if="!projectId">
-      <p v-if="loading" class="muted">加载中…</p>
+      <p v-if="loading" class="muted">{{ t("adDrama.workspace.loading") }}</p>
       <p v-else-if="recent.length === 0" class="muted">
-        还没有广告剧项目。<NuxtLink to="/ad-drama/create" class="link">从商品图创建第一个</NuxtLink>
+        {{ t("adDrama.workspace.recentEmptyInline") }} <NuxtLink to="/ad-drama/create" class="link">{{ t("adDrama.workspace.emptyCreate") }}</NuxtLink>
       </p>
       <ul v-else class="recent">
         <li v-for="item in recent" :key="item.id">
@@ -254,25 +260,25 @@ watch(projectId, () => void load());
       <!-- ① 卖点 -->
       <section class="card">
         <div class="card-head">
-          <h2>① 卖点</h2>
+          <h2>{{ t("adDrama.workspace.stepSellingPoint") }}</h2>
           <button type="button" class="btn" :disabled="!!busy" @click="genSellingPoints">
-            {{ busy === "selling_point" ? "生成中…" : info.selling_points.length ? "重新生成" : "生成卖点" }}
+            {{ busy === "selling_point" ? t("adDrama.workspace.generating") : info.selling_points.length ? t("adDrama.workspace.regenSellingPoint") : t("adDrama.workspace.genSellingPoint") }}
           </button>
         </div>
-        <p class="muted small">商品：{{ info.material.name }} — {{ info.material.highlight }}</p>
-        <img v-if="info.material.image" :src="info.material.image" class="thumb" alt="商品图" />
+        <p class="muted small">{{ t("adDrama.workspace.materialLine", { name: info.material.name, highlight: info.material.highlight }) }}</p>
+        <img v-if="info.material.image" :src="info.material.image" :alt="t('adDrama.workspace.materialAlt')" />
         <ul v-if="info.selling_points.length" class="points">
           <li v-for="(point, index) in info.selling_points" :key="index">{{ point }}</li>
         </ul>
-        <p v-else class="muted">还没有卖点。卖点是后续方案与剧本的输入，请先生成。</p>
+        <p v-else class="muted">{{ t("adDrama.workspace.noSellingPoint") }}</p>
       </section>
 
       <!-- ② 剧情方案 -->
       <section class="card">
         <div class="card-head">
-          <h2>② 剧情方案</h2>
+          <h2>{{ t("adDrama.workspace.stepBrief") }}</h2>
           <button type="button" class="btn" :disabled="!!busy || info.selling_points.length === 0" @click="genBriefs">
-            {{ busy === "brief" ? "生成中…" : info.briefs.length ? "重新生成候选" : "生成候选" }}
+            {{ busy === "brief" ? t("adDrama.workspace.generating") : info.briefs.length ? t("adDrama.workspace.regenBrief") : t("adDrama.workspace.genBrief") }}
           </button>
         </div>
         <div v-if="info.briefs.length" class="briefs">
@@ -288,23 +294,23 @@ watch(projectId, () => void load());
               :disabled="!!busy || brief.id === info.selected_brief"
               @click="selectBrief(brief.id)"
             >
-              {{ brief.id === info.selected_brief ? "已选定" : "选定此方案" }}
+              {{ brief.id === info.selected_brief ? t("adDrama.workspace.selected") : t("adDrama.workspace.selectBrief") }}
             </button>
           </article>
         </div>
-        <p v-else class="muted">先有卖点才能生成方案（竞品 `ad plot` 同样要求先出卖点）。</p>
+        <p v-else class="muted">{{ t("adDrama.workspace.needSellingPoint") }}</p>
       </section>
 
       <!-- ③ 剧本 -->
       <section class="card">
         <div class="card-head">
-          <h2>③ 剧本</h2>
+          <h2>{{ t("adDrama.workspace.stepScript") }}</h2>
           <div class="row">
             <button type="button" class="btn" :disabled="!!busy || !info.selected_brief" @click="genScript">
-              {{ busy === "script" ? "生成中…" : info.script ? "重新生成" : "生成剧本" }}
+              {{ busy === "script" ? t("adDrama.workspace.generating") : info.script ? t("adDrama.workspace.regenScript") : t("adDrama.workspace.genScript") }}
             </button>
             <button v-if="info.script" type="button" class="btn ghost" :disabled="!!busy" @click="resetScript">
-              重置
+              {{ t("adDrama.workspace.reset") }}
             </button>
           </div>
         </div>
@@ -315,31 +321,31 @@ watch(projectId, () => void load());
           class="script"
           @input="scriptDirty = true"
         />
-        <p v-else class="muted">选定方案后生成剧本；生成后可人工修改（品牌口径/合规）。</p>
+        <p v-else class="muted">{{ t("adDrama.workspace.needBrief") }}</p>
         <div v-if="info.script" class="row">
           <button type="button" class="btn primary" :disabled="!!busy || !scriptDirty" @click="saveScript">
-            保存修改
+            {{ t("adDrama.workspace.saveScript") }}
           </button>
-          <span v-if="scriptDirty" class="muted small">有未保存修改</span>
+          <span v-if="scriptDirty" class="muted small">{{ t("adDrama.workspace.dirty") }}</span>
         </div>
       </section>
 
       <!-- ④ 分镜 -->
       <section class="card">
         <div class="card-head">
-          <h2>④ 分镜</h2>
+          <h2>{{ t("adDrama.workspace.stepStoryboard") }}</h2>
           <div class="row">
             <button type="button" class="btn" :disabled="!!busy || !info.script" @click="genStoryboard(1)">
-              {{ busy === "storyboard" ? "生成中…" : "急速模板" }}
+              {{ busy === "storyboard" ? t("adDrama.workspace.generating") : t("adDrama.workspace.fastTemplate") }}
             </button>
             <button type="button" class="btn ghost" :disabled="!!busy || !info.script" @click="genStoryboard(2)">
-              至尊模板
+              {{ t("adDrama.workspace.premiumTemplate") }}
             </button>
           </div>
         </div>
         <table v-if="info.shots.length" class="table">
           <thead>
-            <tr><th>#</th><th>画面</th><th>提示词</th><th>时长</th></tr>
+            <tr><th>{{ t("adDrama.workspace.thNo") }}</th><th>{{ t("adDrama.workspace.thVisual") }}</th><th>{{ t("adDrama.workspace.thPrompt") }}</th><th>{{ t("adDrama.workspace.thDuration") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="shot in info.shots" :key="shot.id">
@@ -350,22 +356,22 @@ watch(projectId, () => void load());
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">剧本定稿后生成分镜（急速/至尊两档对应竞品 `template_type` 1/2）。</p>
+        <p v-else class="muted">{{ t("adDrama.workspace.needScript") }}</p>
       </section>
 
       <!-- ⑤ 资产 -->
       <section class="card">
         <div class="card-head">
-          <h2>⑤ 资产</h2>
+          <h2>{{ t("adDrama.workspace.stepAsset") }}</h2>
           <div class="row">
             <button type="button" class="btn" :disabled="!!busy || info.shots.length === 0" @click="extractAssets(1)">
-              {{ busy === "asset" ? "处理中…" : "抽取资产（含配音）" }}
+              {{ busy === "asset" ? t("adDrama.workspace.processing") : t("adDrama.workspace.genAsset") }}
             </button>
             <button type="button" class="btn ghost" :disabled="!!busy || info.shots.length === 0" @click="extractAssets(2)">
-              抽取资产（不配音）
+              {{ t("adDrama.workspace.genAssetNoVoice") }}
             </button>
             <button v-if="info.assets.length" type="button" class="btn ghost" :disabled="!!busy" @click="genImageTips">
-              生成提示词建议
+              {{ t("adDrama.workspace.genImageTips") }}
             </button>
           </div>
         </div>
@@ -376,7 +382,7 @@ watch(projectId, () => void load());
             <p v-if="asset.prompt" class="prompt">{{ asset.prompt }}</p>
           </article>
         </div>
-        <p v-else class="muted">分镜完成后抽取商品/场景/角色资产，供后续出图出片复用。</p>
+        <p v-else class="muted">{{ t("adDrama.workspace.needStoryboard") }}</p>
         <ul v-if="info.image_tips.length" class="tips">
           <li v-for="(tip, index) in info.image_tips" :key="index">
             <b>{{ tip.name }}</b>：{{ tip.prompt }}
@@ -386,9 +392,9 @@ watch(projectId, () => void load());
 
       <!-- 消耗留痕 -->
       <section v-if="info.charges.length" class="card">
-        <h2>本次消耗</h2>
+        <h2>{{ t("adDrama.workspace.costTitle") }}</h2>
         <table class="table">
-          <thead><tr><th>动作</th><th>积分</th><th>时间</th></tr></thead>
+          <thead><tr><th>{{ t("adDrama.workspace.thAction") }}</th><th>{{ t("adDrama.workspace.thCredits") }}</th><th>{{ t("adDrama.workspace.thTime") }}</th></tr></thead>
           <tbody>
             <tr v-for="(charge, index) in info.charges" :key="index">
               <td>{{ charge.action }}</td>
@@ -400,7 +406,7 @@ watch(projectId, () => void load());
       </section>
     </template>
 
-    <p v-else-if="loading" class="muted">加载中…</p>
+    <p v-else-if="loading" class="muted">{{ t("adDrama.workspace.loading") }}</p>
   </div>
 </template>
 

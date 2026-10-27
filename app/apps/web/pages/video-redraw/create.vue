@@ -1,6 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t } = useI18n();
+useHead({ title: () => t("redraw.create.metaTitle") });
+
 /**
  * 视频转绘 · 新建（对照竞品 `/video-redraw/create`，`rt:121`）
  *
@@ -22,13 +25,9 @@ const toast = useToast();
 const router = useRouter();
 const activeSpace = useActiveSpaceId();
 
-const STYLES = [
-  { value: "anime", label: "日系动漫" },
-  { value: "ghibli", label: "吉卜力" },
-  { value: "ink", label: "国风水墨" },
-  { value: "comic", label: "美漫" },
-  { value: "cyberpunk", label: "赛博朋克" },
-];
+// 风格值（value）会发给后端，保持英文常量；标签走 i18n
+const STYLE_VALUES = ["anime", "ghibli", "ink", "comic", "cyberpunk"] as const;
+const STYLES = computed(() => STYLE_VALUES.map((value) => ({ value, label: t(`redraw.create.styles.${value}`) })));
 
 const loading = ref(true);
 const errorMsg = ref("");
@@ -62,7 +61,7 @@ async function load() {
     assets.value = assetRes.list.filter((a) => a.kind === "video");
     projects.value = projectRes.list;
   } catch (e) {
-    errorMsg.value = (e as Error).message || "加载失败";
+    errorMsg.value = (e as Error).message || t("redraw.create.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -72,7 +71,7 @@ function pickAsset(a: AssetDto) {
   form.sourceUri = a.uri;
   form.sourceAssetId = a.id;
   form.sourceName = a.name;
-  if (!form.title) form.title = `${a.name} 转绘`;
+  if (!form.title) form.title = t("redraw.create.autoTitle", { name: a.name });
 }
 
 /** 本地文件 → base64 → `POST /assets/upload`（与竞品"上传源视频"同路径） */
@@ -81,11 +80,11 @@ async function onFile(evt: Event) {
   const file = input.files?.[0];
   if (!file) return;
   if (!file.type.startsWith("video/")) {
-    toast.error("请选择视频文件（mp4/mov/webm 等）");
+    toast.error(t("redraw.create.errVideoOnly"));
     return;
   }
   if (file.size > 32 * 1024 * 1024) {
-    toast.error("视频需小于 32MB（服务端上限）；大文件请先压缩或改用资产库地址");
+    toast.error(t("redraw.create.errVideoSize"));
     return;
   }
   busy.value = "upload";
@@ -93,7 +92,7 @@ async function onFile(evt: Event) {
     const base64 = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("redraw.create.errReadFile")));
       reader.readAsDataURL(file);
     });
     const asset = await api.post<AssetDto>("/assets/upload", {
@@ -103,9 +102,9 @@ async function onFile(evt: Event) {
     });
     assets.value = [asset, ...assets.value];
     pickAsset(asset);
-    toast.success("源视频已上传");
+    toast.success(t("redraw.create.uploaded"));
   } catch (e) {
-    toast.error((e as Error).message || "上传失败");
+    toast.error((e as Error).message || t("redraw.create.uploadFailed"));
   } finally {
     busy.value = "";
     input.value = "";
@@ -114,11 +113,11 @@ async function onFile(evt: Event) {
 
 async function createProject() {
   if (!form.title.trim()) {
-    toast.error("请填写项目名称");
+    toast.error(t("redraw.create.errName"));
     return;
   }
   if (!form.sourceUri.trim()) {
-    toast.error("请先上传源视频或选择资产");
+    toast.error(t("redraw.create.errSource"));
     return;
   }
   busy.value = "create";
@@ -133,10 +132,10 @@ async function createProject() {
       ratio: form.ratio,
       source_duration_s: form.durationS,
     });
-    toast.success("转绘项目已创建，进入工作台");
+    toast.success(t("redraw.create.created"));
     await router.push(`/video-redraw/workspace?id=${p.id}`);
   } catch (e) {
-    toast.error((e as Error).message || "创建失败");
+    toast.error((e as Error).message || t("redraw.create.createFailed"));
   } finally {
     busy.value = "";
   }
@@ -153,32 +152,32 @@ onMounted(load);
   <div class="vr">
     <header class="vr-head">
       <div>
-        <h1 class="vr-title">视频转绘</h1>
-        <p class="vr-sub">已有视频 → 重绘成动漫：切集 → 分镜 → 重绘 → 绑定，四段流水线</p>
+        <h1 class="vr-title">{{ t("redraw.create.title") }}</h1>
+        <p class="vr-sub">{{ t("redraw.create.sub") }}</p>
       </div>
-      <button type="button" class="vr-btn" :disabled="loading" @click="load">刷新</button>
+      <button type="button" class="vr-btn" :disabled="loading" @click="load">{{ t("redraw.create.refresh") }}</button>
     </header>
 
     <p v-if="errorMsg" class="vr-alert">
       {{ errorMsg }}
-      <button type="button" class="vr-link" @click="load">重试</button>
+      <button type="button" class="vr-link" @click="load">{{ t("redraw.create.retry") }}</button>
     </p>
 
-    <div v-if="loading" class="vr-skeleton">加载中…</div>
+    <div v-if="loading" class="vr-skeleton">{{ t("redraw.create.loading") }}</div>
 
     <div v-else class="vr-grid">
       <!-- ① 源视频 -->
       <section class="vr-card">
-        <h2 class="vr-card-title">① 源视频</h2>
-        <p class="vr-hint">上传本地视频（≤32MB），或从资产库挑一个已有视频。源视频会作为重绘的参考输入。</p>
+        <h2 class="vr-card-title">{{ t("redraw.create.stepSource") }}</h2>
+        <p class="vr-hint">{{ t("redraw.create.sourceHint") }}</p>
 
         <label class="vr-upload">
           <input type="file" accept="video/*" hidden @change="onFile" />
-          <span>{{ busy === "upload" ? "上传中…" : "选择本地视频上传" }}</span>
+          <span>{{ busy === "upload" ? t("redraw.create.uploading") : t("redraw.create.uploadLocal") }}</span>
         </label>
 
         <div v-if="assets.length === 0" class="vr-empty">
-          资产库里还没有视频。上面上传一个即可（上传后会自动选中）。
+          {{ t("redraw.create.noAssets") }}
         </div>
         <ul v-else class="vr-assets">
           <li
@@ -194,21 +193,21 @@ onMounted(load);
         </ul>
 
         <p v-if="form.sourceUri" class="vr-ok">
-          已选源视频：{{ form.sourceName || form.sourceUri }}
+          {{ t("redraw.create.selectedSource", { name: form.sourceName || form.sourceUri }) }}
         </p>
       </section>
 
       <!-- ② 风格与强度 -->
       <section class="vr-card">
-        <h2 class="vr-card-title">② 风格与强度</h2>
+        <h2 class="vr-card-title">{{ t("redraw.create.stepStyle") }}</h2>
 
         <label class="vr-field">
-          <span>项目名称</span>
-          <input v-model="form.title" class="vr-input" maxlength="120" placeholder="例如：预告片转绘" />
+          <span>{{ t("redraw.create.projectName") }}</span>
+          <input v-model="form.title" class="vr-input" maxlength="120" :placeholder="t('redraw.create.projectNamePlaceholder')" />
         </label>
 
         <label class="vr-field">
-          <span>重绘风格</span>
+          <span>{{ t("redraw.create.styleLabel") }}</span>
           <div class="vr-styles">
             <button
               v-for="s in STYLES"
@@ -224,21 +223,21 @@ onMounted(load);
         </label>
 
         <label class="vr-field">
-          <span>重绘强度：{{ form.strength }}（0 保留构图 / 100 完全风格化）</span>
+          <span>{{ t("redraw.create.strengthLabel", { value: form.strength }) }}</span>
           <input v-model.number="form.strength" type="range" min="0" max="100" step="5" class="vr-range" />
         </label>
 
         <div class="vr-row">
           <label class="vr-field">
-            <span>画面比例</span>
+            <span>{{ t("redraw.create.ratioLabel") }}</span>
             <select v-model="form.ratio" class="vr-input">
-              <option value="9:16">9:16 竖屏</option>
-              <option value="16:9">16:9 横屏</option>
-              <option value="1:1">1:1 方形</option>
+              <option value="9:16">{{ t("redraw.create.ratios.vertical") }}</option>
+              <option value="16:9">{{ t("redraw.create.ratios.horizontal") }}</option>
+              <option value="1:1">{{ t("redraw.create.ratios.square") }}</option>
             </select>
           </label>
           <label class="vr-field">
-            <span>源视频时长（秒，用于切集/切镜估算）</span>
+            <span>{{ t("redraw.create.durationLabel") }}</span>
             <input v-model.number="form.durationS" type="number" min="1" max="36000" class="vr-input" />
           </label>
         </div>
@@ -247,24 +246,24 @@ onMounted(load);
           type="button"
           class="vr-btn primary"
           :disabled="busy === 'create' || !canCreate"
-          :title="canCreate ? '' : '需要项目名称 + 源视频'"
+          :title="canCreate ? '' : t('redraw.create.needNameAndSource')"
           @click="createProject"
         >
-          {{ busy === "create" ? "创建中…" : "③ 创建转绘项目" }}
+          {{ busy === "create" ? t("redraw.create.creating") : t("redraw.create.createProject") }}
         </button>
       </section>
 
       <!-- 最近项目 -->
       <section class="vr-card vr-card-wide">
-        <h2 class="vr-card-title">最近的转绘项目</h2>
-        <p v-if="projects.length === 0" class="vr-empty">还没有转绘项目。上面建一个就会出现在这里。</p>
+        <h2 class="vr-card-title">{{ t("redraw.create.recentTitle") }}</h2>
+        <p v-if="projects.length === 0" class="vr-empty">{{ t("redraw.create.recentEmpty") }}</p>
         <ul v-else class="vr-projects">
           <li v-for="p in projects" :key="p.id" class="vr-project">
             <span class="vr-project-title">{{ p.title }}</span>
             <span class="vr-muted">
-              风格 {{ p.mode_meta?.style || "—" }} · 强度 {{ p.mode_meta?.redraw_strength ?? "—" }}
+              {{ t("redraw.create.projectMetaLine", { style: p.mode_meta?.style || "—", strength: p.mode_meta?.redraw_strength ?? "—" }) }}
             </span>
-            <button type="button" class="vr-btn sm" @click="openWorkspace(p.id)">进入工作台</button>
+            <button type="button" class="vr-btn sm" @click="openWorkspace(p.id)">{{ t("redraw.create.openWorkspace") }}</button>
           </li>
         </ul>
       </section>
