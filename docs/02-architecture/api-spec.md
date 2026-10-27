@@ -1638,3 +1638,24 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | 0032 | `timeline_publications.view_count`（播放量权威计数） |
 
 **表数**：110 → **111**。
+
+### 17.7 创作者中心 5 条路由（模块 #10，2026-10-27 第 4 轮）
+
+竞品 `rea-reelmate/routes.txt:43-47` 有 5 条 `creator-center` 路由，第 4 轮前我方只有 `/creator-center`。本轮补 4 页（**全部复用既有端点，未新增 API**）：
+
+| 竞品路由（rt 行） | 我方页面 | 数据来源 |
+|---|---|---|
+| `/creator-center` (43) | `pages/creator-center/index.vue`（已有） | `crc/*` 资产、`market/creator/*` |
+| `/creator-center/:id` (44) | `pages/creator-center/[id].vue` | `GET /market/creator/works/:id`（含 `readiness{has_novel,novel_finalized,price_set,can_submit}`）、`POST /market/creator/works`（更新必须用 **`work_id`** 而非 `id`）、`.../:id/submit`、`.../:id/offline` |
+| `/creator-center/earnings` (45) | `pages/creator-center/earnings.vue` | `GET /market/creator/revenues/overview`、`GET .../revenues`、`GET .../withdrawals`、`POST .../withdraw`、`POST .../withdrawals/:id/cancel` |
+| `/creator-center/preview/:id` (46) | `pages/creator-center/preview/[id].vue` | `GET /market/creator/works/:id` + `.../content-tree`；视频/图片/文本三态渲染 + 复制站内预览链接 |
+| `/creator-center/publish` (47) | `pages/creator-center/publish.vue` | `POST /market/creator/works/save`（强制草稿）、`POST /market/creator/works`（`submit=true` 提审）、`POST .../works/parse`（本子→建议值） |
+
+**三条口径（写进页面注释）**：
+1. **收益不是积分余额**（竞品 `d-commerce-account.md:415-417` 按作品分账）：`earnings` 页所有金额来自后端 `available_credits/locked_credits/min_withdraw_credits`，前端**不复算**可提额度；提现只提交申请，不改任何余额。
+2. **提审前置条件由后端一次给全**（`readiness.can_submit`）：前端按字段展示"售价 > 0 / 关联本子已定稿"，不重复实现规则（避免两处漂移）。
+3. **作品更新用 `work_id`**：`creatorSaveWork` 以 `work_id` 判更新，传 `id` 会被当成新建（本轮实测踩到，已在 `[id].vue` 注释标注）。
+
+**同时修**：`script.projects` 的 `projectDto` 透出 `project_mode`（1 普通/2 广告剧/3 视频转绘）——否则前端无法区分"我的广告剧/转绘项目"与普通项目（`source_type` 两者都是 2）。
+
+**真实链路证据**：`_acceptance/smoke-creator.ps1` —— 存草稿(1) → 编辑(标题/价格生效) → 提审(2 待审核) → 收益总览 → 提现越界被拒(400101 `amount exceeds available balance`) → 提现列表/收益明细 → 内容树。
