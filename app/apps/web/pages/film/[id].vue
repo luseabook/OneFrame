@@ -37,6 +37,9 @@ const errorMsg = ref("");
 const authorized = ref<boolean | null>(null);
 
 const tables = ref<FilmTableDto[]>([]);
+const { t, locale } = useI18n();
+useHead({ title: () => t("filmDetail.metaTitle") });
+
 const currentTableId = ref("");
 const projectTitle = ref("");
 const query = ref<FilmTaskQueryDto | null>(null);
@@ -56,25 +59,33 @@ const assignUserId = ref("");
 const pageNo = ref(1);
 const PAGE_SIZE = 50;
 
-const FIELD_TYPES = [
-  { value: "text", label: "文本" },
-  { value: "date", label: "日期" },
-  { value: "user", label: "成员" },
-  { value: "select", label: "单选" },
-  { value: "multi_select", label: "多选" },
-  { value: "number", label: "数字" },
-  { value: "link", label: "链接" },
-  { value: "canvas_ref", label: "画布引用" },
-  { value: "asset_ref", label: "资产引用" },
-];
+// 列类型文案走 i18n（computed：常量在 setup 期固化，切语言不更新）；value 是契约值不动
+const FIELD_TYPE_KEYS = [
+  { value: "text", key: "text" },
+  { value: "date", key: "date" },
+  { value: "user", key: "user" },
+  { value: "select", key: "select" },
+  { value: "multi_select", key: "multiSelect" },
+  { value: "number", key: "number" },
+  { value: "link", key: "link" },
+  { value: "canvas_ref", key: "canvasRef" },
+  { value: "asset_ref", key: "assetRef" },
+] as const;
+const FIELD_TYPES = computed(() =>
+  FIELD_TYPE_KEYS.map((item) => ({ value: item.value, label: t(`filmDetail.fieldTypes.${item.key}`) })),
+);
 
-const STATUS_OPTIONS = [
-  { value: 1, label: "未开始" },
-  { value: 2, label: "制作中" },
-  { value: 3, label: "提交审核" },
-  { value: 4, label: "驳回修改" },
-  { value: 5, label: "定稿完成" },
-];
+// 状态文案同样走 i18n；数值是与后端的契约，不动
+const STATUS_KEYS = [
+  { value: 1, key: "notStarted" },
+  { value: 2, key: "producing" },
+  { value: 3, key: "submitted" },
+  { value: 4, key: "rejected" },
+  { value: 5, key: "finalized" },
+] as const;
+const STATUS_OPTIONS = computed(() =>
+  STATUS_KEYS.map((item) => ({ value: item.value, label: t(`filmDetail.statuses.${item.key}`) })),
+);
 
 const currentTable = computed(() => tables.value.find((t) => t.id === currentTableId.value) ?? null);
 const fields = computed<FilmFieldDto[]>(() => query.value?.fields ?? []);
@@ -110,7 +121,7 @@ async function loadProject() {
     if (!currentTableId.value && tables.value.length > 0) currentTableId.value = tables.value[0].id;
     await Promise.all([loadTable(), loadStats()]);
   } catch (e) {
-    errorMsg.value = (e as Error).message || "加载失败";
+    errorMsg.value = (e as Error).message || t("filmDetail.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -129,7 +140,7 @@ async function loadTable() {
       .post(`/film/projects/${projectId.value}/recent-open`, { table_id: currentTableId.value })
       .catch(() => undefined);
   } catch (e) {
-    errorMsg.value = (e as Error).message || "加载任务表失败";
+    errorMsg.value = (e as Error).message || t("filmDetail.loadTableFailed");
   }
 }
 
@@ -148,16 +159,16 @@ async function selectTable(id: string) {
 }
 
 async function createTable() {
-  const name = window.prompt("新表名称", "新任务表");
+  const name = window.prompt(t("filmDetail.newTablePrompt"), t("filmDetail.newTableDefault"));
   if (!name) return;
   busy.value = true;
   try {
     const created = await api.post<FilmTableDto>(`/film/projects/${projectId.value}/task-tables`, { name });
     tables.value = [...tables.value, created];
     await selectTable(created.id);
-    toast.success("任务表已创建");
+    toast.success(t("filmDetail.tableCreated"));
   } catch (e) {
-    toast.error((e as Error).message || "创建失败");
+    toast.error((e as Error).message || t("filmDetail.createFailed"));
   } finally {
     busy.value = false;
   }
@@ -177,10 +188,10 @@ async function commitCell(task: FilmTaskDto, field: FilmFieldDto, value: unknown
   } catch (e) {
     const err = e as { code?: number; message?: string };
     if (err.code === 746002) {
-      toast.error("这一行刚才被别人改过，已刷新到最新版本，请重试");
+      toast.error(t("filmDetail.rowConflict"));
       await loadTable();
     } else {
-      toast.error(err.message || "保存失败");
+      toast.error(err.message || t("filmDetail.saveFailed"));
     }
   } finally {
     busy.value = false;
@@ -194,7 +205,7 @@ async function addRow() {
     await api.post(`/film/projects/${projectId.value}/task-tables/${currentTableId.value}/tasks`, { count: 1 });
     await Promise.all([loadTable(), loadStats()]);
   } catch (e) {
-    toast.error((e as Error).message || "新建行失败");
+    toast.error((e as Error).message || t("filmDetail.addRowFailed"));
   } finally {
     busy.value = false;
   }
@@ -202,14 +213,14 @@ async function addRow() {
 
 async function deleteRow(task: FilmTaskDto) {
   if (!currentTableId.value) return;
-  if (!window.confirm(`删除行「${task.title || task.id.slice(-6)}」？（可从批量恢复入口找回）`)) return;
+  if (!window.confirm(t("filmDetail.deleteRowConfirm", { title: task.title || task.id.slice(-6) }))) return;
   busy.value = true;
   try {
     await api.delete(`/film/projects/${projectId.value}/task-tables/${currentTableId.value}/tasks/${task.id}`);
     await Promise.all([loadTable(), loadStats()]);
-    toast.success("已删除");
+    toast.success(t("filmDetail.deleted"));
   } catch (e) {
-    toast.error((e as Error).message || "删除失败");
+    toast.error((e as Error).message || t("filmDetail.deleteFailed"));
   } finally {
     busy.value = false;
   }
@@ -224,9 +235,9 @@ async function changeStatus(task: FilmTaskDto, status: number) {
       client_id: clientId,
     });
     await Promise.all([loadTable(), loadStats()]);
-    toast.success("状态已更新");
+    toast.success(t("filmDetail.statusUpdated"));
   } catch (e) {
-    toast.error((e as Error).message || "改状态失败（定稿需先有审核通过的版本）");
+    toast.error((e as Error).message || t("filmDetail.statusFailed"));
   } finally {
     busy.value = false;
   }
@@ -237,11 +248,11 @@ async function batchAssign() {
   if (!currentTableId.value || !assigneesField.value) return;
   const userId = assignUserId.value.trim();
   if (!/^\d+$/.test(userId)) {
-    toast.error("请填成员 ID（数字）");
+    toast.error(t("filmDetail.memberIdRequired"));
     return;
   }
   if (selectedIds.value.length === 0) {
-    toast.error("先勾选要派工的行");
+    toast.error(t("filmDetail.selectRowsFirst"));
     return;
   }
   busy.value = true;
@@ -264,7 +275,7 @@ async function batchAssign() {
         // 单行失败（版本冲突/非本 space 成员）不阻塞其它行，最后统一汇报成功数
       }
     }
-    toast.success(`已派工 ${ok}/${selectedIds.value.length} 行`);
+    toast.success(t("filmDetail.assigned", { done: ok, total: selectedIds.value.length }));
     await Promise.all([loadTable(), loadStats()]);
   } finally {
     busy.value = false;
@@ -273,16 +284,16 @@ async function batchAssign() {
 
 async function batchDelete() {
   if (!currentTableId.value || selectedIds.value.length === 0) return;
-  if (!window.confirm(`批量删除 ${selectedIds.value.length} 行？`)) return;
+  if (!window.confirm(t("filmDetail.batchDeleteConfirm", { count: selectedIds.value.length }))) return;
   busy.value = true;
   try {
     await api.post(`/film/projects/${projectId.value}/task-tables/${currentTableId.value}/tasks/batch-delete`, {
       task_ids: selectedIds.value,
     });
-    toast.success("已移入回收站");
+    toast.success(t("filmDetail.movedToTrash"));
     await Promise.all([loadTable(), loadStats()]);
   } catch (e) {
-    toast.error((e as Error).message || "批量删除失败");
+    toast.error((e as Error).message || t("filmDetail.batchDeleteFailed"));
   } finally {
     busy.value = false;
   }
@@ -292,7 +303,7 @@ async function createField() {
   if (!currentTableId.value) return;
   const name = newFieldName.value.trim();
   if (!name) {
-    toast.error("请填列名");
+    toast.error(t("filmDetail.fieldNameRequired"));
     return;
   }
   busy.value = true;
@@ -304,9 +315,9 @@ async function createField() {
     showFieldDialog.value = false;
     newFieldName.value = "";
     await loadTable();
-    toast.success("列已创建");
+    toast.success(t("filmDetail.fieldCreated"));
   } catch (e) {
-    toast.error((e as Error).message || "建列失败（可能该类型已有唯一列）");
+    toast.error((e as Error).message || t("filmDetail.fieldCreateFailed"));
   } finally {
     busy.value = false;
   }
@@ -326,7 +337,7 @@ async function toggleHidden(fieldId: string) {
       ui: query.value?.pref.ui ?? {},
     });
   } catch (e) {
-    toast.error((e as Error).message || "保存列偏好失败");
+    toast.error((e as Error).message || t("filmDetail.colPrefFailed"));
   }
 }
 
@@ -352,9 +363,9 @@ async function saveBind() {
     );
     showBindDialog.value = false;
     await loadTable();
-    toast.success("画布绑定已更新");
+    toast.success(t("filmDetail.bindUpdated"));
   } catch (e) {
-    toast.error((e as Error).message || "绑定失败");
+    toast.error((e as Error).message || t("filmDetail.bindFailed"));
   } finally {
     busy.value = false;
   }
@@ -370,10 +381,10 @@ async function exportTable() {
       row_count: number;
       note: string;
     }>(`/film/projects/${projectId.value}/exports`, { table_ids: [currentTableId.value], format: "xlsx" });
-    toast.success(`已导出 ${res.row_count} 行（${res.delivered_format}）：${res.note}`);
+    toast.success(t("filmDetail.exported", { rows: res.row_count, format: res.delivered_format, note: res.note }));
     if (res.download_url) window.open(res.download_url, "_blank");
   } catch (e) {
-    toast.error((e as Error).message || "导出失败（需要管理特权）");
+    toast.error((e as Error).message || t("filmDetail.exportFailed"));
   } finally {
     busy.value = false;
   }
@@ -409,56 +420,57 @@ onMounted(loadProject);
   <div class="fl-page">
     <header class="fl-head">
       <div>
-        <NuxtLink to="/film" class="fl-back">← 影视版</NuxtLink>
-        <h1 class="fl-title">{{ projectTitle || "影视项目" }}</h1>
+        <NuxtLink to="/film" class="fl-back">{{ t("filmDetail.backToFilm") }}</NuxtLink>
+        <h1 class="fl-title">{{ projectTitle || t("filmDetail.titleFallback") }}</h1>
         <p class="fl-sub">
-          项目 {{ projectId.slice(-8) }}
-          <template v-if="stats"> · {{ stats.total }} 条任务 · 待审 {{ stats.pending_review }} · 定稿 {{ stats.done }}</template>
+          {{ t("filmDetail.projectShort", { id: projectId.slice(-8) }) }}
+          <template v-if="stats">{{ t("filmDetail.stats", { total: stats.total, pending: stats.pending_review, done: stats.done }) }}</template>
         </p>
       </div>
       <div class="fl-head-actions">
-        <button type="button" class="fl-btn" :disabled="busy" @click="exportTable">导出</button>
-        <button type="button" class="fl-btn" :disabled="busy" @click="showFieldDialog = true">＋ 新建列</button>
+        <button type="button" class="fl-btn" :disabled="busy" @click="exportTable">{{ t("filmDetail.export") }}</button>
+        <button type="button" class="fl-btn" :disabled="busy" @click="showFieldDialog = true">{{ t("filmDetail.newColumn") }}</button>
         <button type="button" class="fl-btn fl-btn-primary" :disabled="busy || !currentTableId" @click="addRow">
-          ＋ 新建行
+          {{ t("filmDetail.newRow") }}
         </button>
       </div>
     </header>
 
     <p v-if="errorMsg" class="fl-alert">{{ errorMsg }}</p>
 
-    <div v-if="loading" class="fl-skeleton">加载中…</div>
+    <div v-if="loading" class="fl-skeleton">{{ t("filmDetail.loading") }}</div>
 
     <section v-else-if="authorized === false" class="fl-gate">
-      <h2 class="fl-gate-title">影视版尚未开通</h2>
-      <p class="fl-gate-text">请联系商务或团队管理员开通影视版后使用。</p>
+      <h2 class="fl-gate-title">{{ t("filmDetail.gateTitle") }}</h2>
+      <p class="fl-gate-text">{{ t("filmDetail.gateText") }}</p>
     </section>
 
     <template v-else>
       <!-- 表页签 -->
       <nav class="fl-tabs">
+        <!-- 循环变量不能叫 `t`：会遮蔽 i18n 的 t()，模板里 `t("...")` 直接 TS2349（本项目第三次踩） -->
         <button
-          v-for="t in tables"
-          :key="t.id"
+          v-for="tab in tables"
+          :key="tab.id"
           type="button"
           class="fl-tab"
-          :class="{ active: t.id === currentTableId }"
-          @click="selectTable(t.id)"
+          :class="{ active: tab.id === currentTableId }"
+          @click="selectTable(tab.id)"
         >
-          {{ t.name }}
-          <span v-if="t.is_preset" class="fl-tab-preset">预置</span>
+          {{ tab.name }}
+          <span v-if="tab.is_preset" class="fl-tab-preset">{{ t("filmDetail.preset") }}</span>
         </button>
-        <button type="button" class="fl-tab fl-tab-add" :disabled="busy" @click="createTable">＋ 新表</button>
+        <button type="button" class="fl-tab fl-tab-add" :disabled="busy" @click="createTable">{{ t("filmDetail.newTable") }}</button>
       </nav>
 
       <!-- 批量工具条 -->
       <div class="fl-toolbar">
-        <span class="fl-selected">已选 {{ selectedIds.length }} 行</span>
-        <input v-model="assignUserId" class="fl-input fl-input-sm" placeholder="成员ID（用于派工）" />
-        <button type="button" class="fl-btn fl-btn-sm" :disabled="busy" @click="batchAssign">批量派工</button>
-        <button type="button" class="fl-btn fl-btn-sm fl-btn-danger" :disabled="busy" @click="batchDelete">批量删除</button>
+        <span class="fl-selected">{{ t("filmDetail.selectedRows", { count: selectedIds.length }) }}</span>
+        <input v-model="assignUserId" class="fl-input fl-input-sm" :placeholder="t('filmDetail.memberIdPlaceholder')" />
+        <button type="button" class="fl-btn fl-btn-sm" :disabled="busy" @click="batchAssign">{{ t("filmDetail.batchAssign") }}</button>
+        <button type="button" class="fl-btn fl-btn-sm fl-btn-danger" :disabled="busy" @click="batchDelete">{{ t("filmDetail.batchDelete") }}</button>
         <details class="fl-cols">
-          <summary>列设置</summary>
+          <summary>{{ t("filmDetail.colSettings") }}</summary>
           <ul>
             <li v-for="f in fields" :key="f.id">
               <label>
@@ -471,7 +483,7 @@ onMounted(loadProject);
       </div>
 
       <p v-if="tasks.length === 0" class="fl-empty">
-        这张表还没有任务行。点右上「＋ 新建行」开始；或在画布侧提交产物后自动进入待审。
+        {{ t("filmDetail.tableEmpty") }}
       </p>
 
       <div v-else class="fl-grid-wrap">
@@ -488,10 +500,10 @@ onMounted(loadProject);
               <th class="fl-col-idx">#</th>
               <th v-for="f in visibleFields" :key="f.id" class="fl-col">
                 {{ f.name }}
-                <span v-if="f.is_system" class="fl-sys" title="系统列">S</span>
+                <span v-if="f.is_system" class="fl-sys" :title="t('filmDetail.systemCol')">S</span>
               </th>
-              <th class="fl-col-status">状态</th>
-              <th class="fl-col-ops">操作</th>
+              <th class="fl-col-status">{{ t("filmDetail.thStatus") }}</th>
+              <th class="fl-col-ops">{{ t("filmDetail.thOps") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -522,10 +534,10 @@ onMounted(loadProject);
                 </td>
                 <td class="fl-col-ops">
                   <button type="button" class="fl-link" @click="reviewTask = row">
-                    审核<span v-if="row.review_version_no > 0">({{ row.review_version_no }})</span>
+                    {{ t("filmDetail.review") }}<span v-if="row.review_version_no > 0">({{ row.review_version_no }})</span>
                   </button>
-                  <button type="button" class="fl-link" @click="openBind(row)">画布</button>
-                  <button type="button" class="fl-link fl-link-danger" @click="deleteRow(row)">删除</button>
+                  <button type="button" class="fl-link" @click="openBind(row)">{{ t("filmDetail.canvas") }}</button>
+                  <button type="button" class="fl-link fl-link-danger" @click="deleteRow(row)">{{ t("filmDetail.delete") }}</button>
                 </td>
               </tr>
               <tr v-for="child in row.children ?? []" :key="child.id" class="fl-row-child">
@@ -544,7 +556,7 @@ onMounted(loadProject);
                   <span class="fl-muted">{{ STATUS_OPTIONS.find((s) => s.value === child.status)?.label }}</span>
                 </td>
                 <td class="fl-col-ops">
-                  <button type="button" class="fl-link" @click="reviewTask = child">审核</button>
+                  <button type="button" class="fl-link" @click="reviewTask = child">{{ t("filmDetail.review") }}</button>
                 </td>
               </tr>
             </template>
@@ -553,15 +565,15 @@ onMounted(loadProject);
       </div>
 
       <div v-if="totalRows > PAGE_SIZE" class="fl-pager">
-        <button type="button" class="fl-btn fl-btn-sm" :disabled="pageNo === 1" @click="changePage(-1)">上一页</button>
-        <span class="fl-muted">{{ pageNo }} / {{ Math.ceil(totalRows / PAGE_SIZE) }}（共 {{ totalRows }} 行）</span>
+        <button type="button" class="fl-btn fl-btn-sm" :disabled="pageNo === 1" @click="changePage(-1)">{{ t("filmDetail.prevPage") }}</button>
+        <span class="fl-muted">{{ t("filmDetail.pagerInfo", { page: pageNo, pages: Math.ceil(totalRows / PAGE_SIZE), total: totalRows }) }}</span>
         <button
           type="button"
           class="fl-btn fl-btn-sm"
           :disabled="pageNo * PAGE_SIZE >= totalRows"
           @click="changePage(1)"
         >
-          下一页
+          {{ t("filmDetail.nextPage") }}
         </button>
       </div>
     </template>
@@ -579,17 +591,17 @@ onMounted(loadProject);
     <!-- 新建列 -->
     <div v-if="showFieldDialog" class="fl-modal-mask" @click.self="showFieldDialog = false">
       <div class="fl-modal">
-        <h2 class="fl-modal-title">新建列</h2>
-        <label class="fl-label" for="fl-field-name">列名</label>
-        <input id="fl-field-name" v-model="newFieldName" class="fl-input" placeholder="例如：交付日期" />
-        <label class="fl-label" for="fl-field-type">类型</label>
+        <h2 class="fl-modal-title">{{ t("filmDetail.newColumnTitle") }}</h2>
+        <label class="fl-label" for="fl-field-name">{{ t("filmDetail.fieldNameLabel") }}</label>
+        <input id="fl-field-name" v-model="newFieldName" class="fl-input" :placeholder="t('filmDetail.fieldNamePlaceholder')" />
+        <label class="fl-label" for="fl-field-type">{{ t("filmDetail.fieldTypeLabel") }}</label>
         <select id="fl-field-type" v-model="newFieldType" class="fl-input">
           <option v-for="t in FIELD_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
         </select>
-        <p class="fl-hint">审核/积分/状态是系统只读列，不在这里创建。</p>
+        <p class="fl-hint">{{ t("filmDetail.fieldHint") }}</p>
         <div class="fl-modal-actions">
-          <button type="button" class="fl-btn" @click="showFieldDialog = false">取消</button>
-          <button type="button" class="fl-btn fl-btn-primary" :disabled="busy" @click="createField">创建</button>
+          <button type="button" class="fl-btn" @click="showFieldDialog = false">{{ t("filmDetail.cancel") }}</button>
+          <button type="button" class="fl-btn fl-btn-primary" :disabled="busy" @click="createField">{{ t("filmDetail.create") }}</button>
         </div>
       </div>
     </div>
@@ -597,8 +609,8 @@ onMounted(loadProject);
     <!-- 绑定画布 -->
     <div v-if="showBindDialog" class="fl-modal-mask" @click.self="showBindDialog = false">
       <div class="fl-modal">
-        <h2 class="fl-modal-title">绑定画布 · {{ bindTarget?.title || bindTarget?.id.slice(-6) }}</h2>
-        <p v-if="canvasOptions.length === 0" class="fl-empty">当前空间还没有画布。</p>
+        <h2 class="fl-modal-title">{{ t("filmDetail.bindTitle", { name: bindTarget?.title || bindTarget?.id.slice(-6) || "" }) }}</h2>
+        <p v-if="canvasOptions.length === 0" class="fl-empty">{{ t("filmDetail.noCanvas") }}</p>
         <ul v-else class="fl-canvas-list">
           <li v-for="c in canvasOptions" :key="c.canvas_id">
             <label>
@@ -608,8 +620,8 @@ onMounted(loadProject);
           </li>
         </ul>
         <div class="fl-modal-actions">
-          <button type="button" class="fl-btn" @click="showBindDialog = false">取消</button>
-          <button type="button" class="fl-btn fl-btn-primary" :disabled="busy" @click="saveBind">保存</button>
+          <button type="button" class="fl-btn" @click="showBindDialog = false">{{ t("filmDetail.cancel") }}</button>
+          <button type="button" class="fl-btn fl-btn-primary" :disabled="busy" @click="saveBind">{{ t("filmDetail.save") }}</button>
         </div>
       </div>
     </div>
