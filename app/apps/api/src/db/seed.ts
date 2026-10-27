@@ -1640,9 +1640,11 @@ const SKU_SEED: SkuSeed[] = [
 
   { sku: "df-vip-month", label: "DF 会员 · 月", priceCents: 6900, credits: 1200, kind: "vip", period: "month" },
   { sku: "df-vip-quarter", label: "DF 会员 · 季", priceCents: 17900, credits: 3600, kind: "vip", period: "quarter" },
+  { sku: "df-vip-halfyear", label: "DF 会员 · 半年", priceCents: 34900, credits: 7200, kind: "vip", period: "halfyear" },
   { sku: "df-vip-year", label: "DF 会员 · 年", priceCents: 59900, credits: 14400, kind: "vip", period: "year" },
 
   { sku: "pro-month", label: "Pro 会员 · 月", priceCents: 12900, credits: 2400, kind: "vip", period: "month" },
+  { sku: "pro-quarter", label: "Pro 会员 · 季", priceCents: 35900, credits: 7200, kind: "vip", period: "quarter" },
   { sku: "pro-year", label: "Pro 会员 · 年", priceCents: 99900, credits: 28800, kind: "vip", period: "year" },
 
   { sku: "studio-month", label: "Studio 会员 · 月", priceCents: 29900, credits: 6000, kind: "vip", period: "month" },
