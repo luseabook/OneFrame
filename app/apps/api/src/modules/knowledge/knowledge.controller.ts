@@ -28,9 +28,16 @@ import { KnowledgeService } from "./knowledge.service";
  * | `dir/:ukd_id/asset/resource/delete`(:747) | `DELETE /knowledge/assets/:id/resource` |
  * | `dir/asset/batch-*`(:751-754) | 4 条 batch |
  * | `info`(:757) / `list`(:759) / `scriptwriter/list`(:760) | 3 条 |
+ * | `create`(:739) / `update`(:765) / `info/update`(:758) / `delete`(:740) | 第 59 批：`GET/POST /knowledge/base`、`POST /knowledge/base/update`、`POST /knowledge/base/info/update`、`POST /knowledge/base/delete` |
  *
- * 不做的 4 条：`create`(:739) / `delete`(:740) / `update`(:765) / `info/update`(:758)——
- * 它们是"知识库实体"CRUD，我方无该表（详见 service 顶部说明），**不造假端点**。
+ * ## 第 59 批纠正的一处误判
+ * 原注释把这 4 条记成"知识库实体 CRUD，我方无该表 → 不做（不造假端点）"，
+ * 理由是"竞品支持一个空间建多个库"。复核 `routes.txt` 后这理由不成立：这 4 条
+ * 端点**都没有路径 id**（同文件的目录端点都带 `dir/:ukd_id`、资产端点都带
+ * `asset/{uk_id}`）。要改/删"多个库中的某一个"必须有 id → 没有 id 只能解释为
+ * **当前空间唯一的那个库**。所以竞品语义就是「一 team 一库」，我方缺的是这一库
+ * 的元数据没落库。第 59 批补 `knowledge_bases` 表 + 5 条端点（含一条我方自加的
+ * `GET /knowledge/base`，理由见该方法注释），字段名按我方口径自定、已标待取证。
  */
 
 const pageQuery = z.object({
@@ -98,6 +105,32 @@ const attachResourceBody = z.object({ asset_id: z.string().min(1).max(32) });
 const batchIdsBody = z.object({ ids: z.array(z.string().min(1).max(32)).min(1).max(200) });
 const batchTagsBody = batchIdsBody.extend({ tags: z.array(z.string().min(1).max(40)).min(1).max(20) });
 const batchMoveBody = batchIdsBody.extend({ dir_id: z.string().min(1).max(32).nullable().optional() });
+
+// ── 知识库实体（第 59 批，rt:739/740/758/765）──────────────
+/** 建库：全字段可选（未给的走表默认值）；名称上限与竞品目录名一致取 60 */
+const baseCreateBody = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  description: z.string().max(2000).optional(),
+  cover_uri: z.string().max(500).optional(),
+});
+
+/** 改名：只收 name（简介/封面走 info/update，避免表单误清空） */
+const baseUpdateBody = z.object({ name: z.string().trim().min(1).max(60) });
+
+/** 改概览：三个字段都可选，"不传=不动" */
+const baseInfoPatchBody = z.object({
+  description: z.string().max(2000).optional(),
+  cover_uri: z.string().max(500).optional(),
+  note: z.string().max(2000).optional(),
+});
+
+/**
+ * 删库：`purge` 默认 false。
+ *
+ * 显式要求传 body 而不是空 POST —— 级联清内容是不可逆意图，必须让调用方
+ * 写出 `{"purge":true}`，避免"手滑点了页头删除按钮"把整个团队知识库清空。
+ */
+const baseDeleteBody = z.object({ purge: z.boolean().optional() });
 
 function requireAuth(req: AuthedRequest) {
   const auth = req.auth;
@@ -289,6 +322,43 @@ export class KnowledgeController {
   @Delete("assets/:id/resource")
   detachResource(@Req() req: AuthedRequest, @Param("id") id: string) {
     return this.knowledge.detachResource(requireAuth(req), id);
+  }
+
+  // ── 知识库实体（4）—— 第 59 批 ──────────────────────────
+
+  /**
+   * 知识库实体（我方 `GET /knowledge/base`）。
+   *
+   * 竞品这里没有独立 GET（实体信息混在 `info`:757 里）。我方单独给一条是因为
+   * 页头要的只有名称/简介/封面，不该为此拉三个 count 聚合（`info` 一次 4 条查询）。
+   */
+  @Get("base")
+  base(@Req() req: AuthedRequest) {
+    return this.knowledge.baseInfo(requireAuth(req));
+  }
+
+  /** 建库（rt:739 `POST /create`）：一 space 一库，已存在即幂等返回 `created:false` */
+  @Post("base")
+  createBase(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.knowledge.createBase(requireAuth(req), parseOrThrow(baseCreateBody, body ?? {}));
+  }
+
+  /** 改库名（rt:765 `POST /update`） */
+  @Post("base/update")
+  updateBase(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.knowledge.updateBase(requireAuth(req), parseOrThrow(baseUpdateBody, body ?? {}));
+  }
+
+  /** 改概览信息（rt:758 `POST /info/update`）：简介 / 封面 / 提示文案，传了才改 */
+  @Post("base/info/update")
+  updateBaseInfo(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.knowledge.updateInfo(requireAuth(req), parseOrThrow(baseInfoPatchBody, body ?? {}));
+  }
+
+  /** 删库（rt:740 `POST /delete`）：默认只软删库行，`purge=true` 才级联清内容 */
+  @Post("base/delete")
+  deleteBase(@Req() req: AuthedRequest, @Body() body: unknown) {
+    return this.knowledge.deleteBase(requireAuth(req), parseOrThrow(baseDeleteBody, body ?? {}));
   }
 
   // ── 概览 / 平铺 / 创建人（3）────────────────────────────

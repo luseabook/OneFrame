@@ -2291,7 +2291,49 @@ export const agentSkillFavorites = pgTable(
   (t) => [uniqueIndex("uq_agent_skill_favorites").on(t.skillId, t.userId)],
 );
 
-// ── 团队知识库（第 6 批）：目录 / 标签 / 资产三层 ─────────────────────
+// ── 团队知识库（第 6 批）：知识库实体 / 目录 / 标签 / 资产 ────────────
+/**
+ * 知识库实体（第 59 批）—— 对照竞品 `user_knowledge/create`(:739)、`delete`(:740)、
+ * `update`(:765)、`info/update`(:758)。
+ *
+ * ## 为什么最终判定"一 space 一知识库"（而不是"竞品支持多库、我方不做"）
+ * 这 4 条实体端点**全都没有路径 id**（对比 `dir/:ukd_id/*`、`asset/{uk_id}/*` 都带 id）。
+ * 若一个空间可建多个知识库，`delete`/`update` 必须带 `uk_id` 才能定位到改哪一个；
+ * 没有 id 只能解释为"当前空间唯一的那个库"。→ 路由形状本身就是"一 team 一库"的证据。
+ *
+ * ## 为什么不加 `knowledge_dirs.base_id`
+ * 一空间一库时 `base_id` 恒等于 `space_id` 对应的那行，属可推导的冗余列；
+ * 加了就有两个真相来源，删库重建后旧目录会指向已软删的 base（静默错挂）。
+ * 目录/标签/资产继续只用 `space_id` 归组。
+ *
+ * `uq_knowledge_bases_space` 是**偏唯一索引**（`deleted_at is null`）：一个空间同时
+ * 只能有一个**活的**库，但允许软删后重建（删掉的那行留着做审计，不挡新行）。
+ */
+export const knowledgeBases = pgTable(
+  "knowledge_bases",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    name: text("name").notNull().default("团队知识库"),
+    description: text("description").notNull().default(""),
+    /** 封面图 uri；空串表示用前端默认样式（我方自定字段，竞品无证据） */
+    coverUri: text("cover_uri").notNull().default(""),
+    /** 概览面板的自定义说明（`info/update` 的落点；与 description 分开：description 是简介，note 是给成员的操作提示） */
+    note: text("note").notNull().default(""),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_knowledge_bases_space")
+      .on(t.spaceId)
+      .where(sql`${t.deletedAt} is null`),
+  ],
+);
+
 /**
  * 竞品证据：`rt`（`user_knowledge` 29 端点）。三层结构与资产库**双向导入**：
  * 知识库资产可引用资产库 uri，资产库条目也可挂进知识库目录。

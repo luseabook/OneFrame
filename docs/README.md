@@ -123,6 +123,98 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.13 · 第 59 批：#18 知识库实体 —— 把"产品定义不做"改判为实现 · 2026-10-28）
+
+> 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.2**（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：#18 **92% → 99%**（2.76 → 2.97），全站 **201.42 → 201.63/206 = 97.9%**、剩余 **4.58 → 4.37**。
+
+### 先纠正一条被写进文档多轮的"结论"
+
+本仓文档（主台账 §3.5 D 类、§5 第 7 行、`knowledge.service.ts` 文件头）此前一致写：
+
+> 竞品有 4 条"知识库实体 CRUD"，我方是「一 space 一库」，**产品定义如此，不做**。
+
+第 59 批复核竞品路由清单（`rea-reelmate/routes.txt` 第 737–765 行，`user_knowledge` 共 29 条）后发现**这个理由站不住**：
+
+| 竞品端点 | 路径参数 |
+|---|---|
+| `dir`(:741) / `dir/list`(:755) / `dir/{ukd_id}/move`(:756) | 带 `ukd_id`（目录） |
+| `asset/{uk_id}` 系（:742 等） | 带 `uk_id`（资产） |
+| **`create`(:739) / `delete`(:740) / `info`(:757) / `info/update`(:758) / `update`(:765)** | **一个参数都没有** |
+
+同一批端点里，凡是对"某一个具体对象"动手的都带 id，唯独这 5 条不带。**路由形状本身就是证据：只有一个库，
+动作才不需要目标 id**。所以缺的不是"产品定义"，而是**我方连这一个库的元数据都没落库**——`knowledge_dirs` /
+`knowledge_assets` / `knowledge_tags` 三张表都在，就是没有承载 name/description 的那一层。
+
+> 教训与 v7.6（集级 resources）、v7.7（Apple form_post 会 415）同类：**"文档结论"会随时间变成"过时事实"**，
+> 而"竞品没给字段"和"竞品路由形状反证了我们的实现口径"是两件完全不同的事——后者恰恰是**支持实现的证据**。
+
+### 做了什么
+
+| 层 | 改动 |
+|---|---|
+| 表 | 迁移 **0037** 新增 `knowledge_bases`：`space_id` / `name`（默认「团队知识库」）/ `description` / `cover_uri` / `note` / `created_by` / `deleted_at` / 时间戳 |
+| 索引 | `uq_knowledge_bases_space` 是**偏唯一**（`where deleted_at is null`）：一空间一活库，但软删后可以重建 |
+| 端点 | 5 条：`GET /knowledge/base`（我方自加）+ `POST /knowledge/base` + `POST /knowledge/base/update` + `POST /knowledge/base/info/update` + `POST /knowledge/base/delete` |
+| 读路径 | `GET /knowledge/info` 直接带 `base` 实体块（省一次请求），删掉原「我方为一 space 一库…」那句已过时的 `note` |
+| 前端 | `/knowledge` 页头从"死标题 + 统计"改成实体编辑；删库/清空两个不可逆动作的确认框**写清影响量** |
+| i18n | `knowledge.*` **20 key × 5 语言**（78 → 98） |
+
+### 三个不显然的设计决定
+
+**1. 用偏唯一索引，而不是硬唯一 — 且 `onConflictDoNothing` 不能带 target**
+
+一空间只能有一个活库，但"删掉重建"必须能走通，所以索引带 `where deleted_at is null`。
+
+踩坑（记在这里免得下轮重犯）：一旦用了偏索引，**`onConflictDoNothing({ target: knowledgeBases.spaceId })`
+在 PostgreSQL 上必抛**
+
+```
+42P10  there is no unique or exclusion constraint matching the ON CONFLICT specification
+```
+
+因为偏索引不是全表唯一约束，PG 无法用它做冲突仲裁（用 psql 直接跑 `insert … on conflict (space_id) do nothing`
+同样报错，不是驱动层的问题）。必须写成**不带 target** 的 `.onConflictDoNothing()`——它走"任意冲突"语义，能命中偏索引。
+首版 4 个新用例全 500，就是这一行。
+
+**2. 改名与改简介分成两个端点**
+
+- `POST /knowledge/base/update { name }` —— **只改名**
+- `POST /knowledge/base/info/update { description?, cover_uri?, note? }` —— **传了才改**
+
+如果合成一条 patch："页头就地改名 → 只想改 1 个字 → 请求体里没带 description → 服务端当成清空"。
+这类事故不会在测试里报错，只会静默丢掉用户写的简介。分开两条端点把"高频小动作"和"低频大编辑"隔开，
+查询成本是一次多几十字节的路由匹配，值得。
+
+**3. 删库默认不动内容，`purge` 才级联；且标签走物理删**
+
+| 动作 | 请求 | 结果 |
+|---|---|---|
+| 删库 | `POST /knowledge/base/delete`（空 body） | 只软删库行；目录/资产/标签**原地保留**，`info` 的计数不变，库名回到默认 |
+| 删库并清空 | `POST /knowledge/base/delete {"purge":true}` | 软删全部目录与资产 + **物理删**标签 |
+
+为什么 `purge` 要显式写进 body：级联不可逆，不能由"没传参数"默认触发。
+
+为什么标签是物理删而不是软删：`uq_knowledge_tags(space_id, name)` 是**硬唯一索引**，如果标签也软删，
+下次 "删库 → 重建 → 建同名标签" 会直接撞唯一键，用户看到的是 500 而不是"标签已存在"。
+目录/资产没有这种唯一约束，所以保留软删（可追溯）。
+
+### 验证：18 例（原 14 + 新 4）
+
+| 用例 | 覆盖的那条不变量 |
+|---|---|
+| 懒初始化与幂等 | 老空间第一次 `GET /base` 自动建行且两次拿到同一个 id；`POST /base` 已存在时 `created:false` 且**不覆盖**现有名称 |
+| 改名与改概览互不清空 | 先写 description/cover/note 再只改名 → 三字段保留；只改 note → 名称不变；空名与 61 字名 → 400101 |
+| 删库默认保留内容 vs `purge` 级联 | 默认 `deleted:true / purged:false` 且 `dir_count`/`asset_count` 不变、`base.id` 已换；`purge` 后 `dirs:1 / assets:1 / tags:1` 且 info 三项归零 |
+| 跨 space 隔离 | 每个 space 只看到自己的库名；冒用 `X-Space-Id` 改库名 → **403101** 且原名未变 |
+
+### 诚实边界
+
+**字段名是我方口径，标注「待取证」**。竞品侧我们只有路由清单——`capture.json` 里 29 处 `user_knowledge` 命中全是
+URL 与导航组件串（`route:"TeamKnowledgeBase"` / `titleKey:"menu.knowledgeBase"`），**没有任何响应体**。
+所以 `name` / `description` / `cover_uri` / `note` 这四个名字是照"产品最常识的划分"定的，不是"已对齐竞品 schema"。
+这一项按红线**不能**写成已对齐，对应 §5 里仍留 **0.03** 权重（#18 99% 而非 100%）。
+
 ## 变更登记（v6.12 · 第 58 批：修第 57 批自己引入的回归 —— 看门狗误杀队列中任务 + 无条件 markTranscoding · 2026-10-28）
 
 > 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.1**（同一批；本文件与主台账各有一套编号，勿混）。

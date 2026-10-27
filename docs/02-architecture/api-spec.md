@@ -1536,7 +1536,7 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 |---|---|---|
 | 集市 | 36（竞品 29 全覆盖 + 买断/账户提现/提现列表/撤销等 7） | 上架/编辑/下架、预售定金、列表/搜索/分类/标签、**购买走 `creditOut(kind="consume")` 事务内**（余额不足 745701 整事务回滚，余额/协议/销量/收益零副作用）、协议三类（购买/预售/授权）、收益只累计（`== Σ(生效协议价 − 抽成)`，取消预售同额减回）、提现状态机 **1 待审→2 通过→3 打款 / 4 驳回 / 5 撤销（跳步 400101）**、`pg_advisory_xact_lock` 串行化"查+插"保证同用户仅 1 笔待审、内容树购买后才可读（否则 403101） |
 | 集市 Admin | 22（竞品 12 全覆盖 + 提现审核 3 + 待审/详情/看板） | 独立服务域物理隔离；审核留痕 `market_review_logs`（提交/通过/驳回/下架） |
-| 知识库 | 29（竞品 25 条 1:1，4 条"知识库实体 CRUD"明确不做） | 目录树（深度 ≤5，删除级联软删）+ 标签 + 资产 CRUD/搜索/批量移动 + **与资产库双向导入**（`import-from-asset` / `to-asset`，校验同 space）；`asset_count` 由建树时写入（不是事后补） |
+| 知识库 | 34（竞品 29 条全对 + 我方 5 条实体，第 59 批） | 目录树（深度 ≤5，删除级联软删）+ 标签 + 资产 CRUD/搜索/批量移动 + **与资产库双向导入**（`import-from-asset` / `to-asset`，校验同 space）+ **知识库实体**（`knowledge_bases` 迁移 0037，一 space 一活库；详见 §17.18）；`asset_count` 由建树时写入（不是事后补） |
 
 **偏离**：抽成常量 `MARKET_COMMISSION_BPS=2000`（20%，**运营未拍板、仅初值**，由 `/market/scripts/config` 下发给前端，前端不写死）；提现不接资金通道（资质/合规），`payout` 只回填线下打款凭证 + 推进终态；买断后二次改编/再发布未做（许可范围未拍板）；作品解析只做**结构解析**（章节/字数/角色/摘要建议值），竞品 `parse` 产出未取证，不臆造。
 
@@ -1958,3 +1958,108 @@ or(eq(status, PUB_STATUS_QUEUED),
 探针抛错 → 整轮放弃）、`apps/worker/test/publish-transcode.spec.ts` **11 例**（+7：并发两 job → 结果集恰为
 `["ready","skipped"]` 且 reason 含 `claimed`、源只读一次 / `status=2` 且 `updated_at` 1 小时前 → 救回 /
 `status=2` 但 `updated_at` 很新 → skipped / 反查正常 / 三种 null 分支不抛）。
+
+---
+
+### 17.18 知识库实体：`knowledge_bases`（迁移 0037）与 5 条 `/knowledge/base*` 端点（第 59 批）
+
+**端点变更**：`knowledge` 模块 **29 → 34** 条。新增 5 条，**均为新增不改动既有端点形状**；唯一被改的是
+`GET /knowledge/info` 的响应体（加 `base` 块、删 `note` 字段）。
+
+#### 18.1 为什么现在才做：一条被写错多轮的"结论"
+
+旧文档（本文件 §16.6、主台账 §3.5 D 类、`knowledge.service.ts` 文件头）一致写着：
+
+> 竞品 4 条"知识库实体 CRUD"（`create`:739 / `delete`:740 / `update`:765 / `info/update`:758）我方不做，
+> 因为我们是「一 space 一库」。
+
+第 59 批复核 `user_knowledge` 全 29 条路由（`rea-reelmate/routes.txt:737-765`）发现：**这 4 条都没有路径 id 参数**，
+而同一批里 `dir/{ukd_id}/move`、`asset/{uk_id}`、`dir/{ukd_id}/asset/{uk_id}/delete` 全都带 id。
+**只有一个库，动作才不需要目标 id** —— 路由形状是"一 team 一库"的**正面证据**，而不是"所以不做"的理由。
+真实缺口是：`knowledge_dirs` / `knowledge_assets` / `knowledge_tags` 三张表承载了内容，但没有承载
+name/description 的实体层。故本批补表 + 补端点，**口径仍是"一 space 一活库"**。
+
+#### 18.2 表
+
+```
+knowledge_bases
+  id            bigint PK
+  space_id      bigint NOT NULL  → spaces.id
+  name          text   DEFAULT '团队知识库' NOT NULL
+  description   text   DEFAULT ''           NOT NULL
+  cover_uri     text   DEFAULT ''           NOT NULL
+  note          text   DEFAULT ''           NOT NULL
+  created_by    bigint          → users.id  (nullable)
+  deleted_at    timestamptz
+  created_at    timestamptz DEFAULT now() NOT NULL
+  updated_at    timestamptz DEFAULT now() NOT NULL
+
+CREATE UNIQUE INDEX uq_knowledge_bases_space
+  ON knowledge_bases (space_id) WHERE deleted_at IS NULL;   -- 偏唯一
+```
+
+**偏唯一而不是硬唯一**：一空间只能有一个活库，但"删掉再建"必须能走通；硬唯一索引会让软删后的重建直接撞键。
+
+> ⚠️ **实现禁忌**：一旦索引是偏的，`onConflictDoNothing({ target: knowledgeBases.spaceId })` **必抛**
+> `42P10 there is no unique or exclusion constraint matching the ON CONFLICT specification`
+> （PG 不能用偏索仲裁 `ON CONFLICT (col)`；psql 直接跑同样报错）。必须用**不带 target** 的
+> `.onConflictDoNothing()`，它走"任意冲突"语义，可命中偏索引。首版 4 例全 500 即此原因。
+
+#### 18.3 端点
+
+| # | 方法 | 路径 | 对齐 | 语义 |
+|---:|---|---|---|---|
+| 30 | GET | `/v1/knowledge/base` | **我方自加** | 只取库实体。`info` 会跑 4 条 count 聚合，页头只要名字不该为它付这个代价 |
+| 31 | POST | `/v1/knowledge/base` | `create`:739 | 幂等：已存在返回 `{base, created:false}` 且**不覆盖**现有名称 |
+| 32 | POST | `/v1/knowledge/base/update` | `update`:765 | **只改名**。`name` 必填 1–60，空名 → 400101 |
+| 33 | POST | `/v1/knowledge/base/info/update` | `info/update`:758 | 简介/封面/提示，**"传了才改"** |
+| 34 | POST | `/v1/knowledge/base/delete` | `delete`:740 | 默认只软删库行；`{"purge":true}` 才级联 |
+
+`GET /knowledge/info` 响应新增 `base`（`KnowledgeBaseDto`）并**删除**原 `note: string`（原文案「我方为
+『一 space 一知识库』…」在实体落地后已过时）。
+
+**响应示例**（`GET /v1/knowledge/base`）：
+
+```json
+{ "code": 0, "msg": "ok", "data": { "base": {
+  "id": "108707544764891200", "space_id": "108707544764891137",
+  "name": "团队知识库", "description": "", "cover_uri": "", "note": "",
+  "created_by": "108707544764891136",
+  "created_at": "2026-10-28T07:20:11.000Z", "updated_at": "2026-10-28T07:20:11.000Z"
+} } }
+```
+
+**删库两种档位**：
+
+| 请求 body | 效果 | 恢复方式 |
+|---|---|---|
+| `{}` 或省略 | 软删库行；目录/资产/标签**原地保留**，`info` 的 `dir_count`/`asset_count`/`tag_count` 不变，库名回落默认 | 再 `GET /base` 会新建一行，内容还在 |
+| `{"purge": true}` | 软删全部目录与资产 + **物理删**标签 | 不可恢复 |
+
+- `purge` 必须显式写进 body：级联不可逆，不能由"没传参数"默认触发。
+- 标签走**物理删**：`uq_knowledge_tags(space_id, name)` 是硬唯一索引，软删会让"删库 → 重建 → 建同名标签"
+  撞键并回 500；目录/资产无此约束，保留软删以便追溯。
+- 找不到（或已软删）时删库 → `400102`。
+
+**为什么改名与改简介分成两条端点**：页头就地改名是高频小动作，若与简介共用一条 patch，
+"只想改 1 个字 → 请求体没带 description → 服务端当成清空"是迟早的事故，且不会报错、只会静默丢数据。
+
+#### 18.4 `ensureBase` 与懒初始化
+
+`GET /base`、`GET /info` 都走 `ensureBase()`：先查活库行，没有则 `insert … onConflictDoNothing().returning()`，
+无返回再回读一次；两次都拿不到才抛 `500000`。
+
+理由：**读也要能写**。老空间（本批上线前就存在、已有目录/资产）没有库行，若 GET 直接返回 400102，页面会白屏；
+懒初始化把它们平滑接上，且并发下靠偏唯一索引 + `onConflictDoNothing` 收敛成一行。
+
+#### 18.5 测试
+
+`apps/api/test/knowledge.spec.ts` **14 → 18 例**，新增 4 例：懒初始化与幂等 / 改名与改概览互不清空 /
+删库默认保留内容 vs `purge` 级联 / 跨 space 隔离（冒用 `X-Space-Id` 改库名 → 403101 且原名未变）。
+
+#### 18.6 诚实边界
+
+**字段名是自建口径，待取证**。竞品侧只有路由清单：`capture.json` 中 29 处 `user_knowledge` 命中全是 URL 与
+导航组件串（`route:"TeamKnowledgeBase"`、`titleKey:"menu.knowledgeBase"`），**无任何响应体**。
+故 `name` / `description` / `cover_uri` / `note` 不能写成"已对齐竞品 schema"。该项在进度表中标「待取证」，
+对应 #18 得分 **99%**（非 100%），剩余 0.03 权重等竞品响应体。

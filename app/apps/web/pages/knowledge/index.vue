@@ -2,6 +2,7 @@
 import type {
   KnowledgeAssetDto,
   KnowledgeAssetListDto,
+  KnowledgeBaseDto,
   KnowledgeDirNodeDto,
   KnowledgeDirTreeDto,
   KnowledgeInfoDto,
@@ -20,6 +21,11 @@ import type {
  *    前端不自己猜（它拿不到整棵子树的资产计数）。
  * 2. **标签是先建后用的共享词表**：给资产打标签时只能选已存在的标签，
  *    未知标签后端会 400101；所以页面上有独立的"标签管理"，不做"输入即新建"。
+ *
+ * 第 59 批补的**知识库实体**（页头）：对应竞品 `create`/`update`/`info/update`/`delete`
+ * 四条无 id 参数的端点 —— 一个空间只有**一个**库，所以这四个动作不需要目标 id。
+ * 名称走 `POST /knowledge/base/update`（页头就地改名），简介/封面/说明走
+ * `POST /knowledge/base/info/update`（传了才改，避免改名时误清简介）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
@@ -35,10 +41,16 @@ const tree = ref<KnowledgeDirNodeDto[]>([]);
 const flatDirs = ref<KnowledgeDirNodeDto[]>([]);
 const tags = ref<KnowledgeTagDto[]>([]);
 const info = ref<KnowledgeInfoDto | null>(null);
+const base = ref<KnowledgeBaseDto | null>(null);
 const assets = ref<KnowledgeAssetDto[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
+
+/** 页头实体编辑态：分开存两份，因为改名与改概览是两个端点 */
+const editingBase = ref(false);
+const baseForm = reactive({ name: "", description: "", cover_uri: "", note: "" });
+const savingBase = ref(false);
 
 const selectedDirId = ref("");
 const includeChildren = ref(true);
@@ -70,6 +82,8 @@ async function loadTags() {
 
 async function loadInfo() {
   info.value = await api.get<KnowledgeInfoDto>("/knowledge/info");
+  // 第 59 批：实体块随 info 一起下发，省一次请求
+  base.value = info.value.base ?? null;
 }
 
 async function loadAssets() {
@@ -108,6 +122,70 @@ function tagNamesOf(ids: string[]): string[] {
   return ids
     .map((id) => tags.value.find((t) => t.id === id)?.name)
     .filter((n): n is string => Boolean(n));
+}
+
+// ── 知识库实体（页头）────────────────────────────────────
+/**
+ * 一个 space 只有一个库（竞品那 4 条实体端点都没有目标 id），
+ * 所以这里没有"切换库"，只有"改这个库的名字/简介/封面"。
+ *
+ * 懒初始化在服务端：老空间第一次 GET `/knowledge/base` 会补一行默认库，
+ * 前端不做"没有就显示新建表单"的分支 —— 否则老空间会看到一个空壳页头。
+ */
+function startEditBase() {
+  if (!base.value) return;
+  baseForm.name = base.value.name;
+  baseForm.description = base.value.description;
+  baseForm.cover_uri = base.value.cover_uri;
+  baseForm.note = base.value.note;
+  editingBase.value = true;
+}
+
+function cancelEditBase() {
+  editingBase.value = false;
+  savingBase.value = false;
+}
+
+async function saveBase() {
+  const name = baseForm.name.trim();
+  if (!name) {
+    toast.error(t("knowledge.baseNameRequired"));
+    return;
+  }
+  savingBase.value = true;
+  try {
+    // 先改名、再改概览：两个端点分开，任一失败都只回滚自己的字段
+    const renamed = await api.post<{ base: KnowledgeBaseDto }>("/knowledge/base/update", { name });
+    const patched = await api.post<{ base: KnowledgeBaseDto }>("/knowledge/base/info/update", {
+      description: baseForm.description.trim(),
+      cover_uri: baseForm.cover_uri.trim(),
+      note: baseForm.note.trim(),
+    });
+    base.value = patched.base ?? renamed.base;
+    editingBase.value = false;
+    toast.success(t("knowledge.baseSaved"));
+    await loadInfo();
+  } catch (e) {
+    toast.error((e as Error).message || t("knowledge.baseSaveFailed"));
+  } finally {
+    savingBase.value = false;
+  }
+}
+
+async function deleteBase(purge: boolean) {
+  const dirs = info.value?.dir_count ?? 0;
+  const assetCount = info.value?.asset_count ?? 0;
+  const prompt = purge
+    ? t("knowledge.basePurgeConfirm", { dirs, assets: assetCount })
+    : t("knowledge.baseDeleteConfirm");
+  if (!window.confirm(prompt)) return;
+  try {
+    await api.post("/knowledge/base/delete", purge ? { purge: true } : {});
+    toast.success(purge ? t("knowledge.basePurged") : t("knowledge.baseDeleted"));
+    await load();
+  } catch (e) {
+    toast.error((e as Error).message || t("knowledge.baseDeleteFailed"));
+  }
 }
 
 // ── 目录 ────────────────────────────────────────────────
@@ -330,12 +408,53 @@ onMounted(load);
 
 <template>
   <div class="kb-page">
+    <!-- 第 59 批：页头改为知识库实体（名称 / 简介 / 封面）—— 一个 space 一个库 -->
     <header class="kb-head">
-      <div>
-        <h1 class="kb-title">{{ t("knowledge.title") }}</h1>
+      <div class="kb-head-main">
+        <div v-if="!editingBase" class="kb-head-title-row">
+          <h1 class="kb-title">{{ base?.name || t("knowledge.title") }}</h1>
+          <button type="button" class="kb-btn kb-btn-sm" @click="startEditBase">
+            {{ t("knowledge.baseEdit") }}
+          </button>
+        </div>
+        <div v-else class="kb-base-form">
+          <label class="kb-field">
+            <span class="kb-field-label">{{ t("knowledge.baseName") }}</span>
+            <input v-model="baseForm.name" class="kb-input" :placeholder="t('knowledge.baseNamePlaceholder')" maxlength="60">
+          </label>
+          <label class="kb-field">
+            <span class="kb-field-label">{{ t("knowledge.baseDescription") }}</span>
+            <input v-model="baseForm.description" class="kb-input" :placeholder="t('knowledge.baseDescriptionPlaceholder')" maxlength="2000">
+          </label>
+          <label class="kb-field">
+            <span class="kb-field-label">{{ t("knowledge.baseCover") }}</span>
+            <input v-model="baseForm.cover_uri" class="kb-input" :placeholder="t('knowledge.baseCoverPlaceholder')" maxlength="500">
+          </label>
+          <label class="kb-field">
+            <span class="kb-field-label">{{ t("knowledge.baseNote") }}</span>
+            <input v-model="baseForm.note" class="kb-input" :placeholder="t('knowledge.baseNotePlaceholder')" maxlength="2000">
+          </label>
+          <div class="kb-base-form-actions">
+            <button type="button" class="kb-btn kb-btn-sm" :disabled="savingBase" @click="saveBase">
+              {{ t("knowledge.save") }}
+            </button>
+            <button type="button" class="kb-btn kb-btn-sm" :disabled="savingBase" @click="cancelEditBase">
+              {{ t("knowledge.baseCancel") }}
+            </button>
+            <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="deleteBase(false)">
+              {{ t("knowledge.baseDelete") }}
+            </button>
+            <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="deleteBase(true)">
+              {{ t("knowledge.basePurge") }}
+            </button>
+          </div>
+        </div>
+        <img v-if="base?.cover_uri" class="kb-cover" :src="base.cover_uri" :alt="base.name">
+        <p v-if="base?.description" class="kb-base-desc">{{ base.description }}</p>
         <p class="kb-sub">
           {{ t("knowledge.stats", { dirs: info?.dir_count ?? 0, assets: info?.asset_count ?? 0, tags: info?.tag_count ?? 0, depth: info?.max_dir_depth ?? 5 }) }}
         </p>
+        <p v-if="base?.note" class="kb-base-note">{{ base.note }}</p>
       </div>
       <div class="kb-head-actions">
         <button type="button" class="kb-btn" :disabled="loading" @click="load">{{ t("knowledge.refresh") }}</button>
@@ -605,6 +724,61 @@ onMounted(load);
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
+}
+.kb-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.kb-head-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+/* 页头实体编辑（第 59 批）：四行窄表单，不用弹窗——改名是高频小事 */
+.kb-base-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2xl);
+  max-width: 560px;
+}
+.kb-base-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.kb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kb-field-label {
+  font-size: 12px;
+  color: var(--text-4);
+}
+.kb-cover {
+  max-width: 240px;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-1);
+}
+.kb-base-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.kb-base-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-4);
+  line-height: 1.6;
 }
 .kb-title {
   margin: 0;

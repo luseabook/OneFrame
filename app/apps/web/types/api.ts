@@ -1736,9 +1736,31 @@ export interface KnowledgeAssetListDto {
   page_size: number;
 }
 
-export interface KnowledgeInfoDto {
-  scope: string;
+/**
+ * 知识库实体（第 59 批）—— 对照竞品 `user_knowledge/create|update|info/update|delete`
+ * （`routes.txt:739`、`:765`、`:758`、`:740`）。
+ *
+ * 判定依据：这 4 条端点**都没有路径 id**（同文件目录端点带 `dir/:ukd_id`、资产端点带
+ * `asset/{uk_id}`）→ 竞品语义是「一 team 一库」，不是我方"产品定义不做"。
+ * 字段名（name/description/cover_uri/note）为我方口径，竞品响应体无证据 → 待取证。
+ */
+export interface KnowledgeBaseDto {
+  id: string;
+  space_id: string;
+  name: string;
+  description: string;
+  cover_uri: string;
+  /** 概览面板给成员的操作提示（`info/update` 的落点） */
   note: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeInfoDto {
+  /** 第 59 批起 `info` 直接带实体块，页面一次拿全 */
+  base: KnowledgeBaseDto;
+  scope: string;
   dir_count: number;
   asset_count: number;
   tag_count: number;

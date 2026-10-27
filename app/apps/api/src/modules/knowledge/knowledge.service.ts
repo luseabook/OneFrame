@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { and, arrayContains, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { assets, knowledgeAssets, knowledgeDirs, knowledgeTags, users } from "@app/db";
+import { assets, knowledgeAssets, knowledgeBases, knowledgeDirs, knowledgeTags, users } from "@app/db";
 import type { Tx } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
@@ -8,6 +8,7 @@ import type { AuthContext } from "../../common/auth.types";
 
 type DirRow = typeof knowledgeDirs.$inferSelect;
 type AssetRow = typeof knowledgeAssets.$inferSelect;
+type BaseRow = typeof knowledgeBases.$inferSelect;
 
 /**
  * 目录树最大深度（根目录 = 1）。
@@ -21,16 +22,18 @@ export const KNOWLEDGE_MAX_DIR_DEPTH = 5;
 /**
  * 团队知识库（`user_knowledge`，29 端点）服务 —— 对照 `routes.txt:737-765`。
  *
- * ## 与竞品的一处结构性偏离（必须知道）
- * 竞品有 `user_knowledge/create|info|info/update|update|delete|list` 6 条**知识库实体**端点
- * （`routes.txt:739-740`、`:757-759`、`:765`）—— 说明"知识库"是独立实体（一个空间可建多个）。
- * 我方数据层只有 `knowledge_dirs` / `knowledge_tags` / `knowledge_assets` 三张表
- * （schema.ts:2238-2292），**没有知识库实体表**，本批不能改 schema。所以我方语义是
- * **「一 space 一知识库」**（实体即 space 本身）：
- * - `create` / `update` / `delete` / `info/update` 4 条**无法照做** → 不做（不造假端点）；
- * - `info` 用三表聚合的概览实现（`GET /knowledge/info`）；
- * - `list` 用跨目录的平铺资产列表实现（`GET /knowledge/list`）。
- * → 已登记给 Lead：要照做需要 `knowledge_bases` 表 + `knowledge_dirs.base_id`。
+ * ## 第 59 批修正的一处误判（原注释写错了，留档）
+ * 原注释说「竞品有 6 条知识库实体端点 → 说明一个空间可建多个库 → 我方不做」。
+ * 复核 `routes.txt` 才发现：`create`(:739) / `delete`(:740) / `update`(:765) /
+ * `info/update`(:758) **这 4 条全都没有路径 id**，而同一文件的目录端点都带
+ * `dir/:ukd_id`、资产端点都带 `asset/{uk_id}`。要改/删"多个库中的某一个"必须有 id
+ * → 没有 id 只能解释为**当前空间唯一的那个库**。所以竞品语义就是「一 team 一库」，
+ * 我方缺的不是"产品定义"，而是**这一库的元数据压根没落库**（名称/简介/封面/说明）。
+ *
+ * 第 59 批据此补 `knowledge_bases` 表（schema.ts）与 4 条端点（实体读取走
+ * `GET /knowledge/base`；`info` 仍是聚合口径，另在返回值里带上实体块）。
+ * 目录/标签/资产**不加 `base_id`**：一空间一库时它恒等于 space_id，加了就有两个
+ * 真相来源（删库重建后旧目录会静默挂到已软删的库上）。理由见 schema 该表注释。
  *
  * ## 删除策略（task 要求二选一，我方选「级联软删」）
  * 删目录时**级联软删**整棵子树与该子树下的资产（`deleted_at` 打点，行保留可恢复），
@@ -786,7 +789,12 @@ export class KnowledgeService {
   // 六、概览 / 平铺列表 / 创建人聚合
   // ══════════════════════════════════════════════════════════
 
-  /** 知识库概览（rt:757 `GET /info`）—— 我方"一 space 一知识库"，故用聚合实现 */
+  /**
+   * 知识库概览（rt:757 `GET /info`）—— 三个聚合计数 + **第 59 批起带上库实体**。
+   *
+   * 竞品把 `info`（概览）与 `info/update`（改概览）分成两条；实体本身的名称/简介在
+   * `update` 里。我方保持 1:1 形状：`info` 返回 counts + `base` 实体块，页面一次拿全。
+   */
   async info(auth: AuthContext) {
     const spaceId = BigInt(auth.spaceId);
     const [dirAgg] = await db
@@ -807,9 +815,11 @@ export class KnowledgeService {
       .from(knowledgeTags)
       .where(eq(knowledgeTags.spaceId, spaceId));
     const byDir = await this.assetCountByDir(spaceId);
+    // 老空间（第 6 批就上线的）没有库行，这里懒初始化一行，否则页面拿不到名称
+    const baseRow = await this.ensureBase(spaceId, BigInt(auth.userId));
     return {
+      base: this.toBaseDto(baseRow),
       scope: "space",
-      note: "我方为「一 space 一知识库」；竞品的多知识库实体表尚未建（见 knowledge.service.ts 顶部说明）",
       dir_count: dirAgg?.count ?? 0,
       asset_count: assetAgg?.count ?? 0,
       tag_count: tagAgg?.count ?? 0,
@@ -888,7 +898,200 @@ export class KnowledgeService {
   }
 
   // ══════════════════════════════════════════════════════════
-  // 七、内部工具
+  // 七、知识库实体（第 59 批）—— 竞品 4 条实体端点
+  // ══════════════════════════════════════════════════════════
+
+  /**
+   * 当前空间的知识库实体（内部读，不存在则按需创建）。
+   *
+   * 为什么"读"也要能写：竞品 `create`(:739) 是显式创建端点，但**我方存量空间已经有
+   * 目录/标签/资产数据**（第 6 批就上线了）。若 GET 在库不存在时报 404，这批老空间的
+   * 知识库页面会立刻白屏 —— 唯一能自愈的做法是首次读时按默认值补一行（懒初始化）。
+   * 所以 `create` 对老空间是幂等 no-op（返回已存在那行），只对"删过又重建"才有意义。
+   */
+  private async ensureBase(spaceId: bigint, userId?: bigint) {
+    const existing = await this.findBase(db, spaceId);
+    if (existing) return existing;
+    const [created] = await db
+      .insert(knowledgeBases)
+      .values({ id: newId(), spaceId, createdBy: userId ?? null })
+      /**
+       * **不能**写 `onConflictDoNothing({ target: knowledgeBases.spaceId })`。
+       *
+       * 这里挡冲突的是**偏唯一索引** `uq_knowledge_bases_space ... where deleted_at is null`；
+       * PostgreSQL 的 `ON CONFLICT (col)` 推断要求索引谓词完全一致且能被列集合推断，
+       * 偏索引推不出来 → 会直接报 `42P10 there is no unique or exclusion constraint
+       * matching the ON CONFLICT specification`（这条 SQL 是真的跑过才发现的，不是理论担忧）。
+       * 不带 target 的 `ON CONFLICT DO NOTHING` 对任意唯一约束生效，才等价于"并发撞了就回读"。
+       */
+      .onConflictDoNothing()
+      .returning();
+    if (created) return created;
+    // 并发下另一个请求刚插进去（偏唯一索引只挡活行）：回读那一行
+    const raced = await this.findBase(db, spaceId);
+    if (!raced) throw new AppError(ErrorCode.INTERNAL, "knowledge base init failed");
+    return raced;
+  }
+
+  private async findBase(runner: Tx | typeof db, spaceId: bigint): Promise<BaseRow | undefined> {
+    const [row] = await runner
+      .select()
+      .from(knowledgeBases)
+      .where(and(eq(knowledgeBases.spaceId, spaceId), isNull(knowledgeBases.deletedAt)));
+    return row;
+  }
+
+  /** 知识库实体（rt:757 `GET /info` 的实体部分；我方 `GET /knowledge/base`） */
+  async baseInfo(auth: AuthContext) {
+    const spaceId = BigInt(auth.spaceId);
+    const row = await this.ensureBase(spaceId, BigInt(auth.userId));
+    return { base: this.toBaseDto(row) };
+  }
+
+  /**
+   * 建库（rt:739 `POST /create`）—— 一 space 一库，已存在则幂等返回。
+   *
+   * 语义提醒：竞品该端点大概率为"首次建档"，我方把"已存在"处理成 0 而非 400102：
+   * 前端页头"新建知识库"按钮在老空间上应是"打开知识库"，不该弹错误。
+   */
+  async createBase(auth: AuthContext, input: { name?: string; description?: string; cover_uri?: string }) {
+    const spaceId = BigInt(auth.spaceId);
+    const existing = await this.findBase(db, spaceId);
+    if (existing) {
+      return { base: this.toBaseDto(existing), created: false };
+    }
+    const [created] = await db
+      .insert(knowledgeBases)
+      .values({
+        id: newId(),
+        spaceId,
+        name: input.name?.trim() || "团队知识库",
+        description: input.description?.trim() ?? "",
+        coverUri: input.cover_uri?.trim() ?? "",
+        createdBy: BigInt(auth.userId),
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (created) return { base: this.toBaseDto(created), created: true };
+    const raced = await this.findBase(db, spaceId);
+    if (!raced) throw new AppError(ErrorCode.INTERNAL, "knowledge base create failed");
+    return { base: this.toBaseDto(raced), created: false };
+  }
+
+  /**
+   * 改名（rt:765 `POST /update`）—— 只管**库名**。
+   *
+   * 与 `info/update` 的分工：这条对应竞品的"改名"动作（与 `dir/:ukd_id/name`、
+   * `tag/{tag_id}/name` 同族）；简介/封面/提示文案全归 `info/update`。
+   * 这样拆的好处是改名可以做成页头双击就地编辑（只提交一个字段），
+   * 不会因为表单里其他字段是空串而把简介清掉。
+   */
+  async updateBase(auth: AuthContext, input: { name: string }) {
+    const spaceId = BigInt(auth.spaceId);
+    const row = await this.ensureBase(spaceId, BigInt(auth.userId));
+    const name = input.name.trim();
+    if (name.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "base name must not be empty", { field: "name" });
+    }
+    const [updated] = await db
+      .update(knowledgeBases)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(knowledgeBases.id, row.id))
+      .returning();
+    return { base: this.toBaseDto(updated!) };
+  }
+
+  /**
+   * 改概览信息（rt:758 `POST /info/update`）—— 简介 / 封面 / 给成员的操作提示。
+   *
+   * 三个字段都是"传了才改"：不传表示不动，避免整段覆盖（前端表单一提交就把没编辑的
+   * 字段清空是这类接口最常见的线上事故）。
+   */
+  async updateInfo(auth: AuthContext, input: { description?: string; cover_uri?: string; note?: string }) {
+    const spaceId = BigInt(auth.spaceId);
+    const row = await this.ensureBase(spaceId, BigInt(auth.userId));
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.description !== undefined) patch.description = input.description;
+    if (input.cover_uri !== undefined) patch.coverUri = input.cover_uri;
+    if (input.note !== undefined) patch.note = input.note;
+    const [updated] = await db
+      .update(knowledgeBases)
+      .set(patch)
+      .where(eq(knowledgeBases.id, row.id))
+      .returning();
+    return { base: this.toBaseDto(updated!) };
+  }
+
+  /**
+   * 删库（rt:740 `POST /delete`）—— **软删库本身，不动目录/标签/资产**（`purge` 才级联）。
+   *
+   * 为什么默认不级联：竞品把 `delete` 与 `dir/:ukd_id/delete` 分成两条端点，
+   * 说明"删库"与"删目录"是两种意图；把删库做成级联，用户点一下就没了几百条资产
+   * （且软删行仍占空间）。所以默认只软删库行；要清内容必须显式 `purge=true`。
+   * 删后目录/标签/资产**原地保留**：重建库时它们自动重新可见（都是按 space_id 归组的
+   * ——这也是一 space 一库的时候不给 dir 加 base_id 的好处）。
+   */
+  async deleteBase(auth: AuthContext, input: { purge?: boolean }) {
+    const spaceId = BigInt(auth.spaceId);
+    const row = await this.findBase(db, spaceId);
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "knowledge base not found");
+    return db.transaction(async (tx) => {
+      const now = new Date();
+      await tx
+        .update(knowledgeBases)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(knowledgeBases.id, row.id));
+      if (!input.purge) {
+        return { deleted: true, base_id: String(row.id), purged: false, dirs: 0, assets: 0 };
+      }
+      /**
+       * purge：软删全部目录/资产 + 物理删标签。
+       *
+       * 标签为什么物理删：`knowledge_tags` 上有 `uq_knowledge_tags(space_id, name)`，
+       * 软删会让"重建库后建同名标签"撞唯一索引（而不像目录/资产那样有 `deleted_at`
+       * 参与查询条件）。它们的唯一消费者就是本空间的库，库都不要了，行没有留存价值。
+       */
+      const dirs = await tx
+        .update(knowledgeDirs)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(knowledgeDirs.spaceId, spaceId), isNull(knowledgeDirs.deletedAt)))
+        .returning({ id: knowledgeDirs.id });
+      const assetRows = await tx
+        .update(knowledgeAssets)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)))
+        .returning({ id: knowledgeAssets.id });
+      const tags = await tx
+        .delete(knowledgeTags)
+        .where(eq(knowledgeTags.spaceId, spaceId))
+        .returning({ id: knowledgeTags.id });
+      return {
+        deleted: true,
+        base_id: String(row.id),
+        purged: true,
+        dirs: dirs.length,
+        assets: assetRows.length,
+        tags: tags.length,
+      };
+    });
+  }
+
+  private toBaseDto(row: BaseRow) {
+    return {
+      id: String(row.id),
+      space_id: String(row.spaceId),
+      name: row.name,
+      description: row.description,
+      cover_uri: row.coverUri,
+      note: row.note,
+      created_by: row.createdBy ? String(row.createdBy) : null,
+      created_at: row.createdAt.toISOString(),
+      updated_at: row.updatedAt.toISOString(),
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 八、内部工具
   // ══════════════════════════════════════════════════════════
 
   private async dirRows(spaceId: bigint, tx?: Tx): Promise<DirRow[]> {

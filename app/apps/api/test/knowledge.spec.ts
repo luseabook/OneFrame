@@ -7,7 +7,7 @@ import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 import { AppModule } from "../src/app.module";
 import { db, pool } from "../src/db/database";
-import { assets, knowledgeAssets, knowledgeDirs, knowledgeTags } from "@app/db";
+import { assets, knowledgeAssets, knowledgeBases, knowledgeDirs, knowledgeTags } from "@app/db";
 import { newId } from "@app/shared";
 
 /**
@@ -124,6 +124,8 @@ describe("knowledge e2e", () => {
 
   afterAll(async () => {
     if (usedSpaceIds.length > 0) {
+      // 第 59 批新增 knowledge_bases（space_id 外键），先删它再删 spaces 相关行
+      await db.delete(knowledgeBases).where(inArray(knowledgeBases.spaceId, usedSpaceIds));
       await db.delete(knowledgeAssets).where(inArray(knowledgeAssets.spaceId, usedSpaceIds));
       await db.delete(knowledgeDirs).where(inArray(knowledgeDirs.spaceId, usedSpaceIds));
       await db.delete(knowledgeTags).where(inArray(knowledgeTags.spaceId, usedSpaceIds));
@@ -596,6 +598,150 @@ describe("knowledge e2e", () => {
     expect(w.list.length).toBe(1);
     expect(w.list[0]!.user_id).toBe(u.userId);
     expect(w.list[0]!.asset_count).toBe(2);
+  });
+
+  // ══════════════════════════════════════════════════════════
+  // 五之半、知识库实体（第 59 批：rt:739/740/758/765）
+  // ══════════════════════════════════════════════════════════
+
+  /**
+   * 这组用例盯的是"一 team 一库"这个判定本身：如果哪天有人把表改成支持多库，
+   * 下面第一条（同名/同 space 幂等）与第三条（删后重建能拿到新行）会立刻变红。
+   */
+  it("知识库实体：GET /base 懒初始化一行、POST /base 幂等返回 created:false", async () => {
+    const u = await loginNewUser("61");
+
+    // 首次 GET：老空间（已有目录/资产但没库行）必须自愈，不能 404
+    const first = await inject("GET", "/knowledge/base", undefined, u.token, u.spaceId);
+    expect(first.code).toBe(0);
+    const b1 = (first.data as { base: { id: string; name: string; description: string; cover_uri: string } }).base;
+    expect(b1.id).not.toBe("");
+    expect(b1.name).toBe("团队知识库");
+    expect(b1.description).toBe("");
+    expect(b1.cover_uri).toBe("");
+
+    // 再 GET 一次：必须是同一行（不是每读一次建一行）
+    const second = await inject("GET", "/knowledge/base", undefined, u.token, u.spaceId);
+    expect((second.data as { base: { id: string } }).base.id).toBe(b1.id);
+
+    // info 也带实体块，且与 /base 是同一行（页面一次拿全，不必两处各自初始化）
+    const info = await inject("GET", "/knowledge/info", undefined, u.token, u.spaceId);
+    expect((info.data as { base: { id: string } }).base.id).toBe(b1.id);
+
+    // POST /base：已存在 → 幂等，不新建、不覆盖已有名称
+    const created = await inject("POST", "/knowledge/base", { name: "第二个库" }, u.token, u.spaceId);
+    expect(created.code).toBe(0);
+    const c = created.data as { base: { id: string; name: string }; created: boolean };
+    expect(c.created).toBe(false);
+    expect(c.base.id).toBe(b1.id);
+    expect(c.base.name).toBe("团队知识库");
+  });
+
+  it("知识库实体：改名与改概览分开，未传字段不被清空", async () => {
+    const u = await loginNewUser("62");
+    // 先把简介/封面/提示写进去
+    const setInfo = await inject(
+      "POST",
+      "/knowledge/base/info/update",
+      { description: "本团队的世界观与设定集", cover_uri: "s3://spec/cover.png", note: "先建目录再放条目" },
+      u.token,
+      u.spaceId,
+    );
+    expect(setInfo.code).toBe(0);
+    const afterInfo = (setInfo.data as { base: Record<string, unknown> }).base;
+    expect(afterInfo.description).toBe("本团队的世界观与设定集");
+    expect(afterInfo.cover_uri).toBe("s3://spec/cover.png");
+    expect(afterInfo.note).toBe("先建目录再放条目");
+
+    // 只改名：简介/封面/提示必须原样保留（这是"拆两条端点"的全部理由）
+    const renamed = await inject("POST", "/knowledge/base/update", { name: "星河设定库" }, u.token, u.spaceId);
+    expect(renamed.code).toBe(0);
+    const b = (renamed.data as { base: Record<string, unknown> }).base;
+    expect(b.name).toBe("星河设定库");
+    expect(b.description).toBe("本团队的世界观与设定集");
+    expect(b.cover_uri).toBe("s3://spec/cover.png");
+    expect(b.note).toBe("先建目录再放条目");
+
+    // 只改提示：名称不动
+    const noteOnly = await inject("POST", "/knowledge/base/info/update", { note: "改过的提示" }, u.token, u.spaceId);
+    expect((noteOnly.data as { base: Record<string, unknown> }).base.name).toBe("星河设定库");
+
+    // 空名/超长名 → 400101（不是 500，也不是静默成功）
+    const emptyName = await inject("POST", "/knowledge/base/update", { name: "   " }, u.token, u.spaceId);
+    expect(emptyName.code).toBe(400101);
+    const longName = await inject("POST", "/knowledge/base/update", { name: "x".repeat(61) }, u.token, u.spaceId);
+    expect(longName.code).toBe(400101);
+  });
+
+  it("删库：默认只软删库行（目录/标签/资产原地保留），purge=true 才级联清", async () => {
+    const u = await loginNewUser("63");
+    const dir = await createDir(u, "删库前目录");
+    await createTag(u, "删库前标签");
+    await inject("POST", "/knowledge/assets", { title: "删库前条目", dir_id: dir.id }, u.token, u.spaceId);
+    const before = (await inject("GET", "/knowledge/info", undefined, u.token, u.spaceId)).data as {
+      dir_count: number;
+      asset_count: number;
+      base: { id: string };
+    };
+    expect(before.dir_count).toBe(1);
+    expect(before.asset_count).toBe(1);
+
+    // 默认删：库行软删，内容不动
+    const soft = await inject("POST", "/knowledge/base/delete", {}, u.token, u.spaceId);
+    expect(soft.code).toBe(0);
+    const softData = soft.data as { deleted: boolean; purged: boolean; dirs: number; assets: number };
+    expect(softData.deleted).toBe(true);
+    expect(softData.purged).toBe(false);
+    expect(softData.dirs).toBe(0);
+    expect(softData.assets).toBe(0);
+
+    // 内容仍在（这是一 space 一库、不给 dir 加 base_id 的直接好处）
+    const mid = (await inject("GET", "/knowledge/info", undefined, u.token, u.spaceId)).data as {
+      dir_count: number;
+      asset_count: number;
+      base: { id: string };
+    };
+    expect(mid.dir_count).toBe(1);
+    expect(mid.asset_count).toBe(1);
+    // 删后重读会自动补一行新库（软删行被偏唯一索引放过）→ id 变化
+    expect(mid.base.id).not.toBe(before.base.id);
+
+    // purge：库 + 内容一起清
+    const purge = await inject("POST", "/knowledge/base/delete", { purge: true }, u.token, u.spaceId);
+    expect(purge.code).toBe(0);
+    const purgeData = purge.data as { purged: boolean; dirs: number; assets: number; tags: number };
+    expect(purgeData.purged).toBe(true);
+    expect(purgeData.dirs).toBe(1);
+    expect(purgeData.assets).toBe(1);
+    expect(purgeData.tags).toBe(1);
+
+    const after = (await inject("GET", "/knowledge/info", undefined, u.token, u.spaceId)).data as {
+      dir_count: number;
+      asset_count: number;
+      tag_count: number;
+    };
+    expect(after.dir_count).toBe(0);
+    expect(after.asset_count).toBe(0);
+    expect(after.tag_count).toBe(0);
+  });
+
+  it("知识库实体隔离：别的 space 的库名改不到、删不掉", async () => {
+    const mine = await loginNewUser("64");
+    const other = await loginNewUser("65");
+    await inject("POST", "/knowledge/base/update", { name: "我的库" }, mine.token, mine.spaceId);
+    await inject("POST", "/knowledge/base/update", { name: "他的库" }, other.token, other.spaceId);
+
+    // 各自只看到自己的库名（服务层所有查询第一条件都是 auth.spaceId）
+    const mineNow = await inject("GET", "/knowledge/base", undefined, mine.token, mine.spaceId);
+    expect((mineNow.data as { base: { name: string } }).base.name).toBe("我的库");
+    const otherNow = await inject("GET", "/knowledge/base", undefined, other.token, other.spaceId);
+    expect((otherNow.data as { base: { name: string } }).base.name).toBe("他的库");
+
+    // 冒用别人的 X-Space-Id 改库名：AuthGuard 拦在入口 403101
+    const spoof = await inject("POST", "/knowledge/base/update", { name: "被改了" }, other.token, mine.spaceId);
+    expect(spoof.code).toBe(403101);
+    const stillMine = await inject("GET", "/knowledge/base", undefined, mine.token, mine.spaceId);
+    expect((stillMine.data as { base: { name: string } }).base.name).toBe("我的库");
   });
 
   it("多租户隔离：别的 space 看不到我的知识库；X-Space-Id 指向非成员 space 403", async () => {
