@@ -157,8 +157,36 @@ export class TasksService {
       .from(taskEvents)
       .where(eq(taskEvents.taskId, row.id))
       .orderBy(desc(taskEvents.createdAt));
+    /**
+     * 成功态给每个产物补**现签 URL**（结果在库里只存 storage key：`u/<space>/tasks/<id>/r0.png`）。
+     *
+     * 为什么在这里签而不是让前端逐张调 `/tasks/:id/results/:n/download-url`：
+     * 结果页要**直接渲染图片**，逐张签名意味着 N 次请求 + N 次往返；而轮询期（1/2 态）
+     * 结果为空、不会产生额外签名开销。只为**已完成**的任务签，且最多签 8 张——
+     * 防止极端批量任务把一次详情请求变成几十次对象存储调用。
+     *
+     * `uri` 仍原样保留（CLI/脚本与旧前端在用），新增 `url` 是纯增量。
+     */
+    const rawResults = Array.isArray(row.results) ? (row.results as Array<{ uri?: string; text?: string }>) : [];
+    const shouldSign = row.status === TaskStatus.SUCCEEDED;
+    const results = rawResults.length
+      ? await Promise.all(
+          rawResults.map(async (item, index) => {
+            if (!item.uri) return item;
+            const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
+            if (!shouldSign || !isStorageKey || index >= 8) return item;
+            try {
+              return { ...item, url: await this.storage.signDownload(item.uri, 3600) };
+            } catch {
+              // 签名失败不影响详情可用性（前端可退化为 download-url 接口）
+              return item;
+            }
+          }),
+        )
+      : rawResults;
     return {
       ...this.toDto(row),
+      results,
       input: row.input,
       options: row.options,
       task_events: events.map((e) => ({

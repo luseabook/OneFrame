@@ -62,12 +62,21 @@ const counts = computed(() => modeCfg.value?.counts ?? [1, 2, 3, 4]);
 const modeLabel = computed(() => MODE_TABS.find((t) => t.key === mode.value)?.label ?? "图片生成");
 const statusText = computed(() => (task.value ? statusLabel(task.value.status) : ""));
 const taskImages = computed(() =>
-  (task.value?.results ?? []).map((r) => r.uri ?? r.preview_uri ?? "").filter(Boolean),
+  (task.value?.results ?? [])
+    // 优先用后端现签 `url`；`uri` 是 storage key（`u/<space>/tasks/<id>/r0.png`），
+    // 直接当 `<img src>` 会 404（浏览器会在当前域下找这个相对路径）。
+    .map((r) => r.url ?? r.uri ?? r.preview_uri ?? "")
+    .filter(Boolean),
 );
 /** 历史结果：只列真的出过图的（排队/失败的卡片点开是空白，反而让人以为坏了） */
 const historyImages = computed(() =>
-  history.value.filter((t) => (t.results ?? []).some((r) => r.uri || r.preview_uri)),
+  history.value.filter((t) => (t.results ?? []).some((r) => r.url || r.uri || r.preview_uri)),
 );
+/** 历史缩略图状态：优先签好的 url */
+const historyThumb = (t: { results?: Array<{ url?: string; uri?: string; preview_uri?: string }> | null }): string => {
+  const first = (t.results ?? []).find((r) => r.url || r.uri || r.preview_uri);
+  return first?.url ?? first?.uri ?? first?.preview_uri ?? "";
+};
 
 /** 模型目录决定默认档位：图像是 1K/2K/4K，写死 720p 会 100% 报"resolution not supported" */
 function applyDefaults(): void {
@@ -447,7 +456,7 @@ onBeforeUnmount(() => {
             :title="item.input?.prompt ?? item.task_id"
             @click="download(item)"
           >
-            <img :src="(item.results ?? []).find((r) => r.uri || r.preview_uri)?.uri ?? ''" alt="" loading="lazy" />
+            <img :src="historyThumb(item)" alt="" loading="lazy" />
           </button>
         </div>
       </div>

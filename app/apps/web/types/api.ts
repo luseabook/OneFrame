@@ -85,7 +85,11 @@ export interface TaskDto {
   capability: string;
   model_id: string;
   scene: string | null;
-  results: Array<{ uri?: string; preview_uri?: string }> | null;
+  /**
+   * 产物：`uri` 是 storage key（`u/<space>/...`），`url` 是后端为**已完成任务**现签的 1h 地址
+   * （`GET /tasks/:id` 补签；直接拿 uri 当 `<img src>` 会 404）。
+   */
+  results: Array<{ uri?: string; url?: string; preview_uri?: string }> | null;
   error: { kind?: string; message?: string } | null;
   credits_frozen: number;
   credits_settled: number;

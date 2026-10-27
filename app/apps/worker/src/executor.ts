@@ -7,6 +7,7 @@ import type { StorageDriver } from "@app/storage";
 import { newId, TaskStatus, type GenerationRequest } from "@app/shared";
 import { labelResults, type AiLabelConfig } from "./label";
 import { resolveOutboundUris } from "./outbound-uri";
+import { mockPngBuffer } from "./mock-media";
 
 export type TaskRow = typeof tasks.$inferSelect;
 
@@ -62,7 +63,17 @@ export async function transferResult(
   try {
     let data: Buffer;
     if (result.uri.startsWith("mock://")) {
-      data = Buffer.from(`mock result for task ${task.id} #${index}\n`);
+      /**
+       * mock 产物必须**能被子类型解码器渲染**：
+       * - 图片 → 真 PNG（`mockPngBuffer`，纯 Node 生成，颜色由 taskId 派生）
+       * - 其它（音视频）→ 保留文本占位，但打 `mock_placeholder` 标记，
+       *   让前端显示"mock 占位（未接真实供应商）"而不是裂图/静默不播。
+       */
+      if (contentType.startsWith("image/")) {
+        data = mockPngBuffer(`${String(task.id)}#${index}`);
+      } else {
+        data = Buffer.from(`mock result for task ${task.id} #${index}\n`);
+      }
     } else if (/^https?:\/\//.test(result.uri)) {
       const res = await fetch(result.uri);
       if (!res.ok) throw new Error(`download result failed: ${res.status}`);
@@ -74,10 +85,16 @@ export async function transferResult(
     const ext = extFor(contentType);
     const key = `u/${task.spaceId}/tasks/${task.id}/r${index}.${ext}`;
     const stored = await deps.storage.put(key, data, contentType);
+    const isMockPlaceholder = result.uri.startsWith("mock://") && !contentType.startsWith("image/");
     return {
       ...result,
       uri: stored.key,
-      meta: { ...(result.meta ?? {}), storage: deps.storage.driver, original_uri: result.uri },
+      meta: {
+        ...(result.meta ?? {}),
+        storage: deps.storage.driver,
+        original_uri: result.uri,
+        ...(isMockPlaceholder ? { mock_placeholder: true } : {}),
+      },
     };
   } catch (error) {
     // ADR-005 降级：转存失败保留供应商 URL，并标记，便于人工补转

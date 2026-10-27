@@ -625,6 +625,11 @@ describe("op e2e", () => {
     // op 侧已无写路由（只有 GET）：账密不混用，避免"用户 id 写进 admin 外键"
     const noRoute = await inject("POST", "/op/promo-slots", { slot: "banner" }, ownerA.token, a.teamSpaceId);
     expect(noRoute.code).not.toBe(0);
+
+    // 收尾：本用例建的 banner 是**平台级**行（`promo_slots` 无 space 列），不清会逐轮污染
+    // `/home/config` 的 banner 列表（有 20 条上限），最终把 home-config 用例挤红。
+    const cleanup = await inject("DELETE", `/ops/admin/promo-slots/${id}`, undefined, adminToken);
+    expect(cleanup.code).toBe(0);
   });
 
   // ── 参数校验 ────────────────────────────────────────────

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import {
   abExperiments,
   abHits,
@@ -152,6 +152,12 @@ describe("home config / unread / ab e2e", () => {
     await db.delete(taskEvents).where(inArray(taskEvents.taskId, [BigInt(taskId), BigInt(otherTaskId)]));
     await db.delete(taskShares).where(inArray(taskShares.taskId, [BigInt(taskId), BigInt(otherTaskId)]));
     await db.delete(tasks).where(inArray(tasks.id, [BigInt(taskId), BigInt(otherTaskId)]));
+    /**
+     * 运营位（`promo_slots`）必须清：它是**平台级**表（无 space 列），且 `/home/config` 的 banner
+     * 列表有 20 条上限。不清的话每跑一轮就多 5 行，几十轮后新插入的 banner 被上限挤掉，
+     * 用例会以 "expected [...] to include 运营位-窗口内B" 这种极难排查的方式红掉（已实际发生）。
+     */
+    await db.delete(promoSlots).where(like(promoSlots.title, "运营位-%"));
     await db.delete(homeConfigs).where(eq(homeConfigs.scope, "global"));
     await db
       .delete(homeConfigs)
