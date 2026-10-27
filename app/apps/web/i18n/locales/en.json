@@ -2070,7 +2070,10 @@
     "pubStatusTranscoding": "Transcoding",
     "pubStatusPlayable": "Playable",
     "pubStatusFailed": "Failed",
-    "pubStatusOffline": "Unlisted"
+    "pubStatusOffline": "Unlisted",
+    "pubTrimFfmpeg": "Trimmed to the range",
+    "pubTrimCopy": "Not trimmed (full copy)",
+    "pubTrimCopyReason": "Not trimmed because: {reason}"
   },
   "teamPage": {
     "metaTitle": "Team management · OneFrame",

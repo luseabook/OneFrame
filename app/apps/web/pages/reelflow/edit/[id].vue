@@ -1207,6 +1207,22 @@ const episodeLabel = computed(() => {
               {{ Math.round((item.slice.start_ms ?? 0) / 1000) }}s ~
               {{ Math.round((item.slice.end_ms ?? 0) / 1000) }}s
             </span>
+            <!--
+              裁剪状态必须可见：只在后端留 transcode_mode、前端不显示，等于没人会发现
+              "我以为是 30s 切片，其实是整片复制"。status=3 才有意义（转码前还没决定方式）。
+            -->
+            <span
+              v-if="item.status === 3 && item.transcode_mode"
+              class="rf-pub__trim"
+              :class="item.transcode_mode === 'ffmpeg' ? 'rf-pub__trim--ok' : 'rf-pub__trim--warn'"
+              :title="
+                item.transcode_mode === 'ffmpeg'
+                  ? t('editor.pubTrimFfmpeg')
+                  : t('editor.pubTrimCopyReason', { reason: item.transcode_reason ?? '—' })
+              "
+            >
+              {{ item.transcode_mode === "ffmpeg" ? t("editor.pubTrimFfmpeg") : t("editor.pubTrimCopy") }}
+            </span>
             <a v-if="item.download_url" :href="item.download_url" class="rf-pub__dl" download>{{ t("editor.download") }}</a>
             <button
               v-if="item.share_token"

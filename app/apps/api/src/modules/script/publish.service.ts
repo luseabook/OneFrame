@@ -398,6 +398,13 @@ export class PublishService {
       slice: row.slice,
       share_token: row.status === PUB_STATUS.REMOVED ? null : row.shareToken,
       download_url: downloadUrl,
+      /**
+       * 这次发布到底是**真裁剪**还是**复制**（`transcode_mode`），以及未裁剪的原因。
+       * 为什么要透出：创作者/运营要看得出"我发布的 30s 切片是不是真的只含 30s"；
+       * 只在后端留痕而前端看不到，等于没人会去查库。
+       */
+      transcode_mode: row.transcodeMode || null,
+      transcode_reason: row.transcodeReason ?? null,
       error: row.error,
       published_at: row.publishedAt ? row.publishedAt.toISOString() : null,
       created_at: row.createdAt.toISOString(),

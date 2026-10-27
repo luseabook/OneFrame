@@ -1310,6 +1310,13 @@ export interface TimelinePublicationDto {
   };
   share_token: string | null;
   download_url: string | null;
+  /**
+   * 这次发布是**按 slice 真裁剪**（`ffmpeg`）还是**复制成片**（`copy`）。
+   * null = 历史数据/尚未转码。前端据此给创作者一句人话，避免"我以为是 30s 切片，其实是整片"。
+   */
+  transcode_mode?: "ffmpeg" | "copy" | null;
+  /** 未裁剪时的可读原因（没 ffmpeg / 区间过短 / 片源不可解码） */
+  transcode_reason?: string | null;
   error: { code?: number; message?: string } | null;
   published_at: string | null;
   created_at: string;

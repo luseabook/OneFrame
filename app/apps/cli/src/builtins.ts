@@ -639,6 +639,18 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
       return accountUse(ctx);
     case "env-info": {
       const profile = currentProfile(config);
+      // 尽力而为：拿不到能力不影响 env info 的其余字段
+      let media: unknown = null;
+      let mediaError: string | null = null;
+      try {
+        const baseUrl = resolveApiBaseUrl(config, runtime.env, flagString(parsed, "api-url"));
+        const res = await new ApiClient({ baseUrl, transport: runtime.transport }).call<{
+          media?: unknown;
+        }>({ method: "GET", path: "/meta/capabilities" });
+        media = res?.media ?? null;
+      } catch (error) {
+        mediaError = error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160);
+      }
       return {
         data: {
           cli_version: CLI_VERSION,
@@ -661,6 +673,18 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
             ONEFRAME_API_URL: runtime.env.ONEFRAME_API_URL ?? null,
             ONEFRAME_CONFIG_DIR: runtime.env.ONEFRAME_CONFIG_DIR ?? null,
           },
+          /**
+           * 服务端媒体能力（`GET /meta/capabilities`）。
+           *
+           * 为什么放进 `env info`：`ffmpeg` 决定"切片真裁剪 / 显式水印"能不能做，
+           * 是**部署环境属性**。排障最常见的问题就是"为什么我的切片时长不对/没有水印"，
+           * 答案往往在这台机器的 ffmpeg 上。直接透出，省一次翻日志。
+           *
+           * 探测失败**不影响命令成功**（`media:null` + `media_error`）：env info 是排障工具，
+           * 不能因为一个可选能力探测失败就把整个命令打红。
+           */
+          media,
+          media_error: mediaError,
         },
       };
     }

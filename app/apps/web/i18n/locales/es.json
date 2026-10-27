@@ -2070,7 +2070,10 @@
     "pubStatusTranscoding": "Transcodificando",
     "pubStatusPlayable": "Reproducible",
     "pubStatusFailed": "Falló",
-    "pubStatusOffline": "Retirado"
+    "pubStatusOffline": "Retirado",
+    "pubTrimFfmpeg": "Recortado al intervalo",
+    "pubTrimCopy": "Sin recortar (copia completa)",
+    "pubTrimCopyReason": "Sin recortar porque: {reason}"
   },
   "teamPage": {
     "metaTitle": "Gestión del equipo · OneFrame",

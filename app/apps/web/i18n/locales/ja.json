@@ -2070,7 +2070,10 @@
     "pubStatusTranscoding": "変換中",
     "pubStatusPlayable": "再生可",
     "pubStatusFailed": "失敗",
-    "pubStatusOffline": "公開停止"
+    "pubStatusOffline": "公開停止",
+    "pubTrimFfmpeg": "区間でトリム済み",
+    "pubTrimCopy": "未トリム（全体をコピー）",
+    "pubTrimCopyReason": "未トリムの理由：{reason}"
   },
   "teamPage": {
     "metaTitle": "チーム管理 · OneFrame",

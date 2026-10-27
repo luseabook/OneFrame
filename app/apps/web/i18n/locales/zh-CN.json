@@ -2070,7 +2070,10 @@
     "pubStatusTranscoding": "转码中",
     "pubStatusPlayable": "可播放",
     "pubStatusFailed": "失败",
-    "pubStatusOffline": "已下架"
+    "pubStatusOffline": "已下架",
+    "pubTrimFfmpeg": "已按区间裁剪",
+    "pubTrimCopy": "未裁剪（复制整片）",
+    "pubTrimCopyReason": "未裁剪原因：{reason}"
   },
   "teamPage": {
     "metaTitle": "团队管理 · 一帧",
