@@ -23,6 +23,9 @@ import type {
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t } = useI18n();
+useHead({ title: () => t("knowledge.metaTitle") });
+
 const api = useApi();
 const toast = useToast();
 
@@ -95,7 +98,7 @@ async function load() {
     await Promise.all([loadDirs(), loadTags(), loadInfo()]);
     await loadAssets();
   } catch (e) {
-    errorMsg.value = (e as Error).message || "知识库加载失败";
+    errorMsg.value = (e as Error).message || t("knowledge.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -111,50 +114,50 @@ function tagNamesOf(ids: string[]): string[] {
 async function createDir() {
   const name = newDirName.value.trim();
   if (!name) {
-    toast.error("请填目录名");
+    toast.error(t("knowledge.dirNameRequired"));
     return;
   }
   try {
     await api.post("/knowledge/dirs", { name, ...(selectedDirId.value ? { parent_id: selectedDirId.value } : {}) });
-    toast.success("目录已创建");
+    toast.success(t("knowledge.dirCreated"));
     newDirName.value = "";
     newSubDirName.value = "";
     await loadDirs();
     await loadInfo();
   } catch (e) {
-    toast.error((e as Error).message || "创建目录失败");
+    toast.error((e as Error).message || t("knowledge.dirCreateFailed"));
   }
 }
 
 async function renameDir(dir: KnowledgeDirNodeDto) {
   const name = renamingDirName.value.trim();
   if (!name) {
-    toast.error("请填新名字");
+    toast.error(t("knowledge.renameRequired"));
     return;
   }
   try {
     await api.patch(`/knowledge/dirs/${dir.id}`, { name });
-    toast.success("已改名");
+    toast.success(t("knowledge.renamed"));
     renamingDirId.value = "";
     renamingDirName.value = "";
     await loadDirs();
     await loadAssets();
   } catch (e) {
-    toast.error((e as Error).message || "改名失败");
+    toast.error((e as Error).message || t("knowledge.renameFailed"));
   }
 }
 
 async function deleteDir(dir: KnowledgeDirNodeDto) {
-  if (!window.confirm(`删除目录「${dir.name}」？子目录与目录内条目会被一并软删（行保留，可恢复）。`)) return;
+  if (!window.confirm(t("knowledge.deleteDirConfirm", { name: dir.name }))) return;
   try {
     const res = await api.delete<{ dirs: number; assets: number }>(`/knowledge/dirs/${dir.id}`);
-    toast.success(`已删除 ${res.dirs} 个目录、${res.assets} 条资产`);
+    toast.success(t("knowledge.dirDeleted", { dirs: res.dirs, assets: res.assets }));
     if (selectedDirId.value === dir.id) selectedDirId.value = "";
     await loadDirs();
     await loadInfo();
     await loadAssets();
   } catch (e) {
-    toast.error((e as Error).message || "删除失败");
+    toast.error((e as Error).message || t("knowledge.deleteFailed"));
   }
 }
 
@@ -168,29 +171,29 @@ function selectDir(id: string) {
 async function createTag() {
   const name = newTagName.value.trim();
   if (!name) {
-    toast.error("请填标签名");
+    toast.error(t("knowledge.tagNameRequired"));
     return;
   }
   try {
     await api.post("/knowledge/tags", { name });
-    toast.success("标签已创建");
+    toast.success(t("knowledge.tagCreated"));
     newTagName.value = "";
     await loadTags();
   } catch (e) {
-    toast.error((e as Error).message || "创建标签失败");
+    toast.error((e as Error).message || t("knowledge.tagCreateFailed"));
   }
 }
 
 async function deleteTag(tag: KnowledgeTagDto) {
-  if (!window.confirm(`删除标签「${tag.name}」？会同时从 ${tag.asset_count} 条资产上移除。`)) return;
+  if (!window.confirm(t("knowledge.deleteTagConfirm", { name: tag.name, count: tag.asset_count }))) return;
   try {
     await api.delete(`/knowledge/tags/${tag.id}`);
-    toast.success("标签已删除");
+    toast.success(t("knowledge.tagDeleted"));
     if (filterTag.value === tag.name) filterTag.value = "";
     await loadTags();
     await loadAssets();
   } catch (e) {
-    toast.error((e as Error).message || "删除标签失败");
+    toast.error((e as Error).message || t("knowledge.tagDeleteFailed"));
   }
 }
 
@@ -198,7 +201,7 @@ async function deleteTag(tag: KnowledgeTagDto) {
 async function createAsset() {
   const title = assetForm.title.trim();
   if (!title) {
-    toast.error("请填标题");
+    toast.error(t("knowledge.titleRequired"));
     return;
   }
   try {
@@ -208,7 +211,7 @@ async function createAsset() {
       ...(selectedDirId.value ? { dir_id: selectedDirId.value } : {}),
       ...(assetForm.tagIds.length > 0 ? { tags: tagNamesOf(assetForm.tagIds) } : {}),
     });
-    toast.success("条目已创建");
+    toast.success(t("knowledge.assetCreated"));
     assetForm.title = "";
     assetForm.content = "";
     assetForm.tagIds = [];
@@ -216,7 +219,7 @@ async function createAsset() {
     await loadInfo();
     await loadDirs();
   } catch (e) {
-    toast.error((e as Error).message || "创建条目失败");
+    toast.error((e as Error).message || t("knowledge.assetCreateFailed"));
   }
 }
 
@@ -224,7 +227,7 @@ async function createAsset() {
 async function importFromAsset() {
   const assetId = importAssetId.value.trim();
   if (!assetId) {
-    toast.error("请填资产库条目 ID");
+    toast.error(t("knowledge.importIdRequired"));
     return;
   }
   try {
@@ -232,13 +235,13 @@ async function importFromAsset() {
       asset_id: assetId,
       ...(importDirId.value ? { dir_id: importDirId.value } : {}),
     });
-    toast.success("已从资产库导入");
+    toast.success(t("knowledge.imported"));
     importAssetId.value = "";
     await loadAssets();
     await loadInfo();
     await loadDirs();
   } catch (e) {
-    toast.error((e as Error).message || "导入失败（只能导入本空间资产）");
+    toast.error((e as Error).message || t("knowledge.importFailed"));
   }
 }
 
@@ -251,36 +254,36 @@ async function toggleAssetTag(asset: KnowledgeAssetDto, tag: KnowledgeTagDto) {
     asset.tags = names;
     await loadTags();
   } catch (e) {
-    toast.error((e as Error).message || "更新标签失败");
+    toast.error((e as Error).message || t("knowledge.updateTagFailed"));
   }
 }
 
 async function deleteAsset(asset: KnowledgeAssetDto) {
-  if (!window.confirm(`删除条目「${asset.title}」？`)) return;
+  if (!window.confirm(t("knowledge.deleteAssetConfirm", { title: asset.title }))) return;
   try {
     await api.delete(`/knowledge/assets/${asset.id}`);
-    toast.success("已删除");
+    toast.success(t("knowledge.deleted"));
     await loadAssets();
     await loadInfo();
     await loadDirs();
   } catch (e) {
-    toast.error((e as Error).message || "删除失败");
+    toast.error((e as Error).message || t("knowledge.deleteFailed"));
   }
 }
 
 async function exportToAsset(asset: KnowledgeAssetDto) {
   try {
     const res = await api.post<{ asset: { id: string } }>(`/knowledge/assets/${asset.id}/to-asset`);
-    toast.success(`已导出到资产库（${res.asset.id}）`);
+    toast.success(t("knowledge.exported", { id: res.asset.id }));
   } catch (e) {
-    toast.error((e as Error).message || "导出失败（仅资产引用条目可导出）");
+    toast.error((e as Error).message || t("knowledge.exportFailed"));
   }
 }
 
 // ── 批量 ────────────────────────────────────────────────
 async function batchMove() {
   if (selectedIds.value.length === 0) {
-    toast.error("先勾选条目");
+    toast.error(t("knowledge.selectFirst"));
     return;
   }
   try {
@@ -288,29 +291,29 @@ async function batchMove() {
       ids: selectedIds.value,
       dir_id: movingDirId.value || null,
     });
-    toast.success("已移动");
+    toast.success(t("knowledge.moved"));
     selectedIds.value = [];
     await loadAssets();
     await loadDirs();
   } catch (e) {
-    toast.error((e as Error).message || "批量移动失败");
+    toast.error((e as Error).message || t("knowledge.batchMoveFailed"));
   }
 }
 
 async function batchDelete() {
   if (selectedIds.value.length === 0) {
-    toast.error("先勾选条目");
+    toast.error(t("knowledge.selectFirst"));
     return;
   }
-  if (!window.confirm(`删除 ${selectedIds.value.length} 条资产？`)) return;
+  if (!window.confirm(t("knowledge.batchDeleteConfirm", { count: selectedIds.value.length }))) return;
   try {
     await api.post("/knowledge/assets/batch-delete", { ids: selectedIds.value });
-    toast.success("已删除");
+    toast.success(t("knowledge.deleted"));
     selectedIds.value = [];
     await loadAssets();
     await loadInfo();
   } catch (e) {
-    toast.error((e as Error).message || "批量删除失败");
+    toast.error((e as Error).message || t("knowledge.batchDeleteFailed"));
   }
 }
 
@@ -329,29 +332,28 @@ onMounted(load);
   <div class="kb-page">
     <header class="kb-head">
       <div>
-        <h1 class="kb-title">团队知识库</h1>
+        <h1 class="kb-title">{{ t("knowledge.title") }}</h1>
         <p class="kb-sub">
-          目录 {{ info?.dir_count ?? 0 }} · 条目 {{ info?.asset_count ?? 0 }} · 标签 {{ info?.tag_count ?? 0 }} ·
-          最多 {{ info?.max_dir_depth ?? 5 }} 层目录
+          {{ t("knowledge.stats", { dirs: info?.dir_count ?? 0, assets: info?.asset_count ?? 0, tags: info?.tag_count ?? 0, depth: info?.max_dir_depth ?? 5 }) }}
         </p>
       </div>
       <div class="kb-head-actions">
-        <button type="button" class="kb-btn" :disabled="loading" @click="load">刷新</button>
+        <button type="button" class="kb-btn" :disabled="loading" @click="load">{{ t("knowledge.refresh") }}</button>
       </div>
     </header>
 
-    <p v-if="loading" class="kb-state">正在加载知识库…</p>
+    <p v-if="loading" class="kb-state">{{ t("knowledge.loading") }}</p>
     <div v-else-if="errorMsg" class="kb-state kb-state-error">
       <p>{{ errorMsg }}</p>
-      <button type="button" class="kb-btn" @click="load">重试</button>
+      <button type="button" class="kb-btn" @click="load">{{ t("knowledge.retry") }}</button>
     </div>
 
     <div v-else class="kb-body">
       <!-- 左：目录树 -->
       <aside class="kb-side">
         <div class="kb-side-head">
-          <h2 class="kb-h2">目录</h2>
-          <button type="button" class="kb-btn kb-btn-sm" @click="selectDir('')">全部</button>
+          <h2 class="kb-h2">{{ t("knowledge.dirsTitle") }}</h2>
+          <button type="button" class="kb-btn kb-btn-sm" @click="selectDir('')">{{ t("knowledge.all") }}</button>
         </div>
         <ul class="kb-tree">
           <li v-for="root in tree" :key="root.id" class="kb-tree-item">
@@ -379,16 +381,16 @@ onMounted(load);
             </ul>
           </li>
         </ul>
-        <p v-if="tree.length === 0" class="kb-note">还没有目录，先在下面建一个。</p>
+        <p v-if="tree.length === 0" class="kb-note">{{ t("knowledge.noDirs") }}</p>
 
         <div class="kb-side-block">
           <input
             v-model="newDirName"
             class="kb-input"
-            :placeholder="selectedDirId ? '在选中目录下建子目录' : '新建顶层目录'"
+            :placeholder="selectedDirId ? t('knowledge.dirPlaceholderChild') : t('knowledge.dirPlaceholderRoot')"
             @keyup.enter="createDir"
           >
-          <button type="button" class="kb-btn kb-btn-sm" @click="createDir">新建</button>
+          <button type="button" class="kb-btn kb-btn-sm" @click="createDir">{{ t("knowledge.create") }}</button>
         </div>
 
         <div v-if="selectedDirId" class="kb-side-block kb-side-block-col">
@@ -397,7 +399,7 @@ onMounted(load);
             class="kb-btn kb-btn-sm"
             @click="renamingDirId = selectedDirId; renamingDirName = flatDirs.find((d) => d.id === selectedDirId)?.name ?? ''"
           >
-            重命名选中目录
+            {{ t("knowledge.renameSelected") }}
           </button>
           <button
             type="button"
@@ -409,10 +411,10 @@ onMounted(load);
               })()
             "
           >
-            删除选中目录（级联）
+            {{ t("knowledge.deleteSelected") }}
           </button>
           <div v-if="renamingDirId" class="kb-side-block">
-            <input v-model="renamingDirName" class="kb-input" placeholder="新名字">
+            <input v-model="renamingDirName" class="kb-input" :placeholder="t('knowledge.renamePlaceholder')">
             <button
               type="button"
               class="kb-btn kb-btn-sm"
@@ -423,7 +425,7 @@ onMounted(load);
                 })()
               "
             >
-              保存
+              {{ t("knowledge.save") }}
             </button>
           </div>
         </div>
@@ -436,76 +438,76 @@ onMounted(load);
             v-model="keyword"
             class="kb-input kb-input-wide"
             type="search"
-            placeholder="搜索标题或正文（跨目录）"
+            :placeholder="t('knowledge.searchPlaceholder')"
             @keyup.enter="page = 1; loadAssets()"
           >
-          <button type="button" class="kb-btn" @click="page = 1; loadAssets()">搜索</button>
+          <button type="button" class="kb-btn" @click="page = 1; loadAssets()">{{ t("knowledge.search") }}</button>
           <label class="kb-check">
             <input v-model="includeChildren" type="checkbox" @change="loadAssets()">
-            含子目录
+            {{ t("knowledge.includeSubdirs") }}
           </label>
           <select v-model="filterTag" class="kb-input" @change="page = 1; loadAssets()">
-            <option value="">全部标签</option>
-            <option v-for="t in tags" :key="t.id" :value="t.name">{{ t.name }}</option>
+            <option value="">{{ t("knowledge.allTags") }}</option>
+            <option v-for="tag in tags" :key="tag.id" :value="tag.name">{{ t.name }}</option>
           </select>
         </section>
 
         <section class="kb-panel">
-          <h2 class="kb-h2">新建条目</h2>
+          <h2 class="kb-h2">{{ t("knowledge.createAssetTitle") }}</h2>
           <div class="kb-form">
-            <input v-model="assetForm.title" class="kb-input" placeholder="标题（如「雨夜街景参考」）">
-            <textarea v-model="assetForm.content" class="kb-input kb-textarea" rows="3" placeholder="正文（设定/提示词/参考链接）" />
+            <input v-model="assetForm.title" class="kb-input" :placeholder="t('knowledge.assetTitlePlaceholder')">
+            <textarea v-model="assetForm.content" class="kb-input kb-textarea" rows="3" :placeholder="t('knowledge.assetContentPlaceholder')" />
             <div class="kb-tags">
               <button
-                v-for="t in tags"
-                :key="t.id"
+                v-for="tag in tags"
+                :key="tag.id"
                 type="button"
                 class="kb-tag"
-                :class="{ 'kb-tag-active': assetForm.tagIds.includes(t.id) }"
+                :class="{ 'kb-tag-active': assetForm.tagIds.includes(tag.id) }"
                 @click="
-                  assetForm.tagIds.includes(t.id)
-                    ? assetForm.tagIds.splice(assetForm.tagIds.indexOf(t.id), 1)
-                    : assetForm.tagIds.push(t.id)
+                  assetForm.tagIds.includes(tag.id)
+                    ? assetForm.tagIds.splice(assetForm.tagIds.indexOf(tag.id), 1)
+                    : assetForm.tagIds.push(tag.id)
                 "
               >
-                {{ t.name }}
+                {{ tag.name }}
               </button>
             </div>
             <div class="kb-form-actions">
-              <button type="button" class="kb-btn kb-btn-primary" @click="createAsset">创建条目</button>
-              <span class="kb-note">标签需先创建（见右侧标签管理），不会自动新建</span>
+              <button type="button" class="kb-btn kb-btn-primary" @click="createAsset">{{ t("knowledge.createAsset") }}</button>
+              <span class="kb-note">{{ t("knowledge.tagsHint") }}</span>
             </div>
           </div>
         </section>
 
         <section class="kb-panel">
-          <h2 class="kb-h2">从资产库导入</h2>
+          <h2 class="kb-h2">{{ t("knowledge.importTitle") }}</h2>
           <div class="kb-form-actions">
-            <input v-model="importAssetId" class="kb-input" placeholder="资产库条目 ID">
+            <input v-model="importAssetId" class="kb-input" :placeholder="t('knowledge.importPlaceholder')">
             <select v-model="importDirId" class="kb-input">
-              <option value="">不指定目录</option>
+              <option value="">{{ t("knowledge.noDir") }}</option>
               <option v-for="d in flatDirs" :key="d.id" :value="d.id">{{ d.name }}</option>
             </select>
-            <button type="button" class="kb-btn" @click="importFromAsset">导入</button>
-            <span class="kb-note">只能导入本空间素材（跨团队会被服务端 403 拒绝）</span>
+            <button type="button" class="kb-btn" @click="importFromAsset">{{ t("knowledge.import") }}</button>
+            <span class="kb-note">{{ t("knowledge.importHint") }}</span>
           </div>
         </section>
 
         <section class="kb-panel">
           <div class="kb-list-head">
-            <h2 class="kb-h2">条目（{{ total }}）</h2>
+            <h2 class="kb-h2">{{ t("knowledge.assetsTitle", { total }) }}</h2>
             <div class="kb-batch">
               <select v-model="movingDirId" class="kb-input">
-                <option value="">移到…</option>
+                <option value="">{{ t("knowledge.moveTo") }}</option>
                 <option v-for="d in flatDirs" :key="d.id" :value="d.id">{{ d.name }}</option>
               </select>
-              <button type="button" class="kb-btn kb-btn-sm" @click="batchMove">批量移动</button>
-              <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="batchDelete">批量删除</button>
+              <button type="button" class="kb-btn kb-btn-sm" @click="batchMove">{{ t("knowledge.batchMove") }}</button>
+              <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="batchDelete">{{ t("knowledge.batchDelete") }}</button>
             </div>
           </div>
 
           <p v-if="assets.length === 0" class="kb-state">
-            这个范围内还没有条目。用上面的表单新建，或从资产库导入。
+            {{ t("knowledge.assetsEmpty") }}
           </p>
           <ul v-else class="kb-assets">
             <li v-for="asset in assets" :key="asset.id" class="kb-asset">
@@ -516,22 +518,22 @@ onMounted(load);
                 <div class="kb-asset-head">
                   <strong class="kb-asset-title">{{ asset.title }}</strong>
                   <span class="kb-asset-type">{{ asset.source_type_name }}</span>
-                  <span class="kb-asset-dir">{{ asset.dir_name || "未分类" }}</span>
+                  <span class="kb-asset-dir">{{ asset.dir_name || t("knowledge.uncategorized") }}</span>
                 </div>
                 <p v-if="asset.content" class="kb-asset-content">{{ asset.content }}</p>
                 <p v-if="asset.resource" class="kb-asset-resource">
-                  引用资产：{{ asset.resource.name || asset.resource.id }}（{{ asset.resource.kind }}）
+                  {{ t("knowledge.resourceRef", { name: asset.resource.name || asset.resource.id, kind: asset.resource.kind }) }}
                 </p>
                 <div class="kb-asset-tags">
                   <button
-                    v-for="t in tags"
-                    :key="t.id"
+                    v-for="tag in tags"
+                    :key="tag.id"
                     type="button"
                     class="kb-tag kb-tag-sm"
-                    :class="{ 'kb-tag-active': asset.tags.includes(t.name) }"
-                    @click="toggleAssetTag(asset, t)"
+                    :class="{ 'kb-tag-active': asset.tags.includes(tag.name) }"
+                    @click="toggleAssetTag(asset, tag)"
                   >
-                    {{ t.name }}
+                    {{ tag.name }}
                   </button>
                 </div>
               </div>
@@ -542,16 +544,16 @@ onMounted(load);
                   class="kb-btn kb-btn-sm"
                   @click="exportToAsset(asset)"
                 >
-                  导出到资产库
+                  {{ t("knowledge.exportToAssets") }}
                 </button>
-                <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="deleteAsset(asset)">删除</button>
+                <button type="button" class="kb-btn kb-btn-sm kb-btn-danger" @click="deleteAsset(asset)">{{ t("knowledge.delete") }}</button>
               </div>
             </li>
           </ul>
 
           <footer v-if="total > pageSize" class="kb-pager">
             <button type="button" class="kb-btn kb-btn-sm" :disabled="page <= 1" @click="changePage(page - 1)">
-              上一页
+              {{ t("knowledge.prev") }}
             </button>
             <span class="kb-note">{{ page }} / {{ totalPages }}</span>
             <button
@@ -560,7 +562,7 @@ onMounted(load);
               :disabled="page >= totalPages"
               @click="changePage(page + 1)"
             >
-              下一页
+              {{ t("knowledge.next") }}
             </button>
           </footer>
         </section>
@@ -568,22 +570,22 @@ onMounted(load);
 
       <!-- 标签管理 -->
       <aside class="kb-side kb-side-right">
-        <h2 class="kb-h2">标签管理</h2>
+        <h2 class="kb-h2">{{ t("knowledge.tagManageTitle") }}</h2>
         <div class="kb-side-block">
-          <input v-model="newTagName" class="kb-input" placeholder="新标签名" @keyup.enter="createTag">
-          <button type="button" class="kb-btn kb-btn-sm" @click="createTag">新建</button>
+          <input v-model="newTagName" class="kb-input" :placeholder="t('knowledge.newTagPlaceholder')" @keyup.enter="createTag">
+          <button type="button" class="kb-btn kb-btn-sm" @click="createTag">{{ t("knowledge.create") }}</button>
         </div>
-        <p v-if="tags.length === 0" class="kb-note">还没有标签。</p>
+        <p v-if="tags.length === 0" class="kb-note">{{ t("knowledge.noTags") }}</p>
         <ul v-else class="kb-tag-list">
-          <li v-for="t in tags" :key="t.id" class="kb-tag-row">
-            <span class="kb-tag-name">{{ t.name }}</span>
-            <span class="kb-tag-count">{{ t.asset_count }}</span>
-            <span v-if="!t.in_use" class="kb-tag-idle">未使用</span>
-            <button type="button" class="kb-btn kb-btn-xs kb-btn-danger" @click="deleteTag(t)">删除</button>
+          <li v-for="tag in tags" :key="tag.id" class="kb-tag-row">
+            <span class="kb-tag-name">{{ tag.name }}</span>
+            <span class="kb-tag-count">{{ tag.asset_count }}</span>
+            <span v-if="!tag.in_use" class="kb-tag-idle">{{ t("knowledge.tagUnused") }}</span>
+            <button type="button" class="kb-btn kb-btn-xs kb-btn-danger" @click="deleteTag(tag)">{{ t("knowledge.delete") }}</button>
           </li>
         </ul>
         <p class="kb-note">
-          标签改名会同步改写条目上的标签文本；删除会从所有条目上摘掉。
+          {{ t("knowledge.tagManageHint") }}
         </p>
       </aside>
     </div>

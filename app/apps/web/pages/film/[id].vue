@@ -448,7 +448,7 @@ onMounted(loadProject);
     <template v-else>
       <!-- 表页签 -->
       <nav class="fl-tabs">
-        <!-- 循环变量不能叫 `t`：会遮蔽 i18n 的 t()，模板里 `t("...")` 直接 TS2349（本项目第三次踩） -->
+        <!-- 循环变量不能叫 `t`：会遮蔽 i18n 的翻译函数，模板里调用它直接 TS2349（本项目第三次踩） -->
         <button
           v-for="tab in tables"
           :key="tab.id"
