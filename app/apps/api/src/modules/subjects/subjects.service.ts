@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { projectAssets, scriptProjects, subjectFiles, subjects, tasks } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
+import { SUBJECT_TEMPLATES, applyTemplateToPrompt, findSubjectTemplate } from "./subject-templates";
 import { db } from "../../db/database";
 import { StorageService } from "../../storage/storage.service";
 
@@ -169,6 +170,38 @@ export class SubjectsService {
       total: countRow?.count ?? 0,
       page,
       page_size: pageSize,
+    };
+  }
+
+  /**
+   * 应用 IP/风格模板：只落 `template_key`，**不改写用户的主体描述**。
+   *
+   * 为什么不动 `desc`：`desc` 是"这个角色/场景是什么"的描述，是用户的语义资产；
+   * 把风格前缀写进去会让描述越来越长、且用户再也分不清哪句是自己写的。
+   * 生成时由调用方用 `prompt_template = desc + 模板前缀`（见 subject-templates.ts 的
+   * `applyTemplateToPrompt`），描述与风格各归各位。
+   */
+  async applyTemplate(spaceId: string, id: string, templateKey: string) {
+    const template = findSubjectTemplate(templateKey);
+    if (!template) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "unknown template_key", {
+        field: "template_key",
+        supported: SUBJECT_TEMPLATES.map((item) => item.key),
+      });
+    }
+    const [row] = await db
+      .update(subjects)
+      .set({ templateKey: template.key, updatedAt: new Date() })
+      .where(and(eq(subjects.id, BigInt(id)), eq(subjects.spaceId, BigInt(spaceId)), isNull(subjects.deletedAt)))
+      .returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "subject not found");
+    return {
+      id: String(row.id),
+      template_key: row.templateKey,
+      desc: row.desc,
+      prompt_template: applyTemplateToPrompt(row.desc, template),
+      negative_prompt: template.negative_prompt,
+      semantics: "模板 = 生成时追加的风格前缀 + 负向前缀，不改主体描述",
     };
   }
 

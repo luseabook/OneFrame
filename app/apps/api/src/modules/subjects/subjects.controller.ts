@@ -5,6 +5,7 @@ import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { TeamService } from "../team/team.service";
 import { SubjectsService } from "./subjects.service";
+import { SUBJECT_TEMPLATES } from "./subject-templates";
 
 /**
  * 主体库（subject）端点 —— 对照竞品 `subject` 子命令族（`cmd/subject.md`）。
@@ -132,6 +133,27 @@ export class SubjectsController {
   }
 
   /** 2. 详情（竞品 `subject get`，subject.md:108-122） */
+  /**
+   * IP/风格模板目录（自建口径，见 subject-templates.ts 文件头）。
+   *
+   * ⚠️ 必须放在 `@Get(":id")` **之前**：Nest 按声明顺序匹配，`GET /subjects/templates`
+   * 若排在 `:id` 之后会被当成 id="templates" 的详情查询。
+   */
+  @Get("templates")
+  listTemplates(@Req() req: AuthedRequest) {
+    const m = this.ctx(req);
+    void m;
+    return { templates: SUBJECT_TEMPLATES, semantics: "template = 生成时追加的风格前缀 + 负向前缀（不改主体描述）" };
+  }
+
+  /** 给主体应用模板：只追加不覆盖；响应回 prompt_before/prompt_after 便于前端确认 */
+  @Post(":id/apply-template")
+  async applyTemplate(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const m = await this.ctx(req);
+    const input = parseOrThrow(z.object({ template_key: z.string().min(1).max(80) }), body ?? {});
+    return this.subjects.applyTemplate(m.spaceId, id, input.template_key);
+  }
+
   @Get(":id")
   async detail(@Req() req: AuthedRequest, @Param("id") id: string) {
     const m = await this.ctx(req);

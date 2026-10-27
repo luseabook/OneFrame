@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { AppError, ErrorCode, ProjectAssetStatus } from "@app/shared";
 import { SubjectsService, SubjectReviewStatus } from "../subjects/subjects.service";
+import { findSubjectTemplate } from "../subjects/subject-templates";
 import { AssetMatchService, MatchStatus } from "./asset-match.service";
 
 /**
@@ -188,6 +189,52 @@ export class AssetGatesService {
       promptWithImages = promptWithImages.split(subject.name).join(subject.marker);
     }
     return { images, image_subjects: imageSubjects, prompt_with_images: promptWithImages };
+  }
+
+  /**
+   * 生成注入 + **IP/风格模板前缀**（模块 #17 收尾）。
+   *
+   * 与 `injectImages` 的关系：那一步只把"资产名 → [[@imgN]]"标记掉；
+   * 这里再补一层"风格约束"——已定稿资产若关联了带 `template_key` 的主体，
+   * 就把模板前缀追加到 `prompt_with_images` **末尾**（不覆盖、不重复）。
+   *
+   * 为什么顺序是「主体描述 → 图像标记 → 模板前缀」：标记（`[[@imgN]]`）必须紧跟它替换的位置，
+   * 而风格前缀是**整体修饰**，放末尾对适配器最稳（部分模型对前置风格词更敏感，取证不足不做猜测）。
+   *
+   * 竞品模板语义未取证，这里是**自建口径**（见 `subjects/subject-templates.ts` 文件头）。
+   */
+  async injectImagesWithTemplates(
+    spaceId: string,
+    prompt: string,
+    assets: AssetLike[],
+  ): Promise<GenerationInjection & { template_keys: string[] }> {
+    const base = this.injectImages(prompt, assets);
+    const ready = assets.filter(
+      (asset) => asset.status === ProjectAssetStatus.FINALIZED && Boolean(asset.refImageUri),
+    );
+    if (ready.length === 0) return { ...base, template_keys: [] };
+    const linked = await this.subjects.subjectsOfAssetFiles(
+      spaceId,
+      ready.map((asset) => ({ assetId: asset.portraitAssetId ?? null, uri: asset.refImageUri ?? null })),
+    );
+    const templateKeys: string[] = [];
+    const prefixes: string[] = [];
+    for (const item of linked) {
+      const key = item.subject.templateKey;
+      if (!key) continue;
+      const template = findSubjectTemplate(key);
+      if (!template) continue;
+      if (!templateKeys.includes(key)) {
+        templateKeys.push(key);
+        prefixes.push(template.prompt_prefix);
+      }
+    }
+    if (prefixes.length === 0) return { ...base, template_keys: [] };
+    const suffix = prefixes.join(", ");
+    const promptWithImages = base.prompt_with_images.includes(suffix)
+      ? base.prompt_with_images
+      : `${base.prompt_with_images}${base.prompt_with_images.endsWith("，") || base.prompt_with_images.endsWith(",") ? "" : "，"}${suffix}`;
+    return { ...base, prompt_with_images: promptWithImages, template_keys: templateKeys };
   }
 
   /**
