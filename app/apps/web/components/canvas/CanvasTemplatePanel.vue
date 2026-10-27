@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
 import type { CanvasTemplateDto } from "~/composables/useCanvasApi";
 
@@ -69,7 +71,11 @@ function colorOf(type: string): string {
 }
 
 function scopeLabel(scope: number): string {
-  return scope === 1 ? "官方" : scope === 2 ? "团队" : "我的";
+  return scope === 1
+    ? t("canvasUi.tplScopeOfficial")
+    : scope === 2
+      ? t("canvasUi.tplScopeTeam")
+      : t("canvasUi.tplScopeMine");
 }
 
 async function load(): Promise<void> {
@@ -83,7 +89,7 @@ async function load(): Promise<void> {
         : await api.listTemplates({ page: 1, page_size: 50, mine: tab.value === "mine" });
     list.value = res.list;
   } catch (e) {
-    error.value = (e as Error).message || "读取模板失败";
+    error.value = (e as Error).message || t("canvasUi.tplReadFailed");
   } finally {
     loading.value = false;
   }
@@ -97,7 +103,7 @@ function switchTab(next: Tab): void {
 async function doSave(): Promise<void> {
   const name = saveName.value.trim();
   if (!name) {
-    toast.error("先给模板起个名字");
+    toast.error(t("canvasUi.tplNeedName"));
     return;
   }
   saving.value = true;
@@ -123,14 +129,14 @@ async function doApply(tpl: CanvasTemplateDto): Promise<void> {
 }
 
 async function doDelete(tpl: CanvasTemplateDto): Promise<void> {
-  if (!confirm(`删除模板「${tpl.name}」？（软删除，可恢复）`)) return;
+  if (!confirm(t("canvasUi.tplDeleteConfirm", { name: tpl.name }))) return;
   const api = useCanvasApi();
   try {
     await api.deleteTemplate(tpl.id);
-    toast.success("模板已删除");
+    toast.success(t("canvasUi.tplDeleted"));
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "删除失败");
+    toast.error((e as Error).message || t("canvasUi.tplDeleteFailed"));
   }
 }
 
@@ -138,11 +144,11 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="canvas-templates" role="dialog" aria-label="模板库">
+  <div class="canvas-templates" role="dialog" :aria-label="t('canvasUi.tplDialogAria')">
     <div class="canvas-templates__panel cv-chrome">
       <header class="canvas-templates__head">
-        <span>模板库</span>
-        <button class="cv-glass-btn" aria-label="关闭" @click="emit('close')">
+        <span>{{ t("canvasUi.tplTitle") }}</span>
+        <button class="cv-glass-btn" :aria-label="t('canvasUi.close')" @click="emit('close')">
           <CanvasIcon name="close" :size="16" />
         </button>
       </header>
@@ -152,20 +158,20 @@ onMounted(load);
         <input
           v-model="saveName"
           class="cv-input tpl-save-name"
-          placeholder="把当前画布存为模板，起个名字"
+          :placeholder="t('canvasUi.tplNamePlaceholder')"
           maxlength="60"
           @keyup.enter="doSave"
         />
-        <Button size="sm" class="tpl-save-btn" :loading="saving" @click="doSave">存为模板</Button>
+        <Button size="sm" class="tpl-save-btn" :loading="saving" @click="doSave">{{ t("canvasUi.tplSaveAs") }}</Button>
       </section>
 
       <!-- 全部 / 我的 -->
       <div class="cv-seg canvas-templates__tabs">
         <button type="button" :class="{ 'is-active': tab === 'all' }" class="tpl-tab-all" @click="switchTab('all')">
-          全部模板
+           {{ t("canvasUi.tplAll") }}
         </button>
         <button type="button" :class="{ 'is-active': tab === 'mine' }" class="tpl-tab-mine" @click="switchTab('mine')">
-          我的模板
+           {{ t("canvasUi.tplMine") }}
         </button>
       </div>
 
@@ -173,14 +179,16 @@ onMounted(load);
         v-if="tab === 'mine'"
         v-model="searchQuery"
         class="cv-input tpl-search"
-        placeholder="按名称搜索我的模板"
+        :placeholder="t('canvasUi.tplSearchMine')"
         @keyup.enter="load"
       />
 
       <p v-if="error" class="cv-hint canvas-templates__err">{{ error }}</p>
-      <p v-else-if="loading" class="cv-hint">读取中…</p>
+      <p v-else-if="loading" class="cv-hint">{{ t("canvasUi.reading") }}</p>
       <p v-else-if="list.length === 0" class="cv-hint canvas-templates__empty">
-        {{ tab === "mine" ? "还没有自己的模板。把常用画布存成模板，下次一键复用。" : "还没有可用模板。" }}
+        {{
+          tab === "mine" ? t("canvasUi.tplEmptyMine") : t("canvasUi.tplEmpty")
+        }}
       </p>
 
       <ul v-else class="canvas-templates__list">
@@ -199,13 +207,13 @@ onMounted(load);
                 rx="1.5"
               />
             </svg>
-            <span v-else class="tpl-card__thumb-empty">空</span>
+            <span v-else class="tpl-card__thumb-empty">{{ t("canvasUi.tplEmptyThumb") }}</span>
           </div>
           <div class="tpl-card__info">
             <p class="tpl-card__name" :title="tpl.name">{{ tpl.name }}</p>
             <p class="tpl-card__meta">
               <span class="cv-tag">{{ scopeLabel(tpl.tpl_scope) }}</span>
-              <span>{{ (tpl.payload?.nodes ?? []).length }} 节点</span>
+              <span>{{ t("canvasUi.tplNodes", { n: (tpl.payload?.nodes ?? []).length }) }}</span>
             </p>
           </div>
           <div class="tpl-card__acts">
@@ -215,23 +223,23 @@ onMounted(load);
               :loading="applying === tpl.id"
               @click="doApply(tpl)"
             >
-              套用
+              {{ t("canvasUi.tplApply") }}
             </Button>
             <button
               v-if="tpl.tpl_scope === 3"
               class="tpl-delete"
               type="button"
-              aria-label="删除模板"
+              :aria-label="t('canvasUi.tplDeleteAria')"
               @click="doDelete(tpl)"
             >
-              删除
+              {{ t("canvasUi.tplDelete") }}
             </button>
           </div>
         </li>
       </ul>
 
       <p class="cv-hint canvas-templates__foot">
-        套用只加到本地画布，**点顶栏保存后才写库**（走版本校验，不会覆盖别人的编辑）。
+         {{ t("canvasUi.tplApplyHint") }}
       </p>
     </div>
   </div>

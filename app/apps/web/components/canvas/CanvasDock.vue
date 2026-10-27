@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 /**
  * 底部悬浮 dock（模式 / 视图 / 缩放）
  *
@@ -86,8 +88,8 @@ function onSlide(ev: Event): void {
           type="button"
           class="cv-glass-btn dock-mode-select cv-tip"
           :class="{ 'cv-glass-btn--active': activeMode === 'select' }"
-          data-tip="选择 V"
-          aria-label="选择"
+          :data-tip="t('canvasUi.dockSelectTip')"
+          :aria-label="t('canvasUi.dockSelect')"
           :aria-pressed="activeMode === 'select' ? 'true' : 'false'"
           @click="setMode('select')"
         >
@@ -97,8 +99,8 @@ function onSlide(ev: Event): void {
           type="button"
           class="cv-glass-btn dock-mode-pan cv-tip"
           :class="{ 'cv-glass-btn--active': activeMode === 'pan' }"
-          data-tip="抓手 H（空格临时切换）"
-          aria-label="抓手"
+          :data-tip="t('canvasUi.dockHandTip')"
+          :aria-label="t('canvasUi.dockHand')"
           :aria-pressed="activeMode === 'pan' ? 'true' : 'false'"
           @click="setMode('pan')"
         >
@@ -114,8 +116,8 @@ function onSlide(ev: Event): void {
           type="button"
           class="cv-glass-btn dock-minimap cv-tip"
           :class="{ 'cv-glass-btn--active': minimapOpen }"
-          data-tip="小地图"
-          aria-label="小地图开关"
+          :data-tip="t('canvasUi.dockMinimapTip')"
+          :aria-label="t('canvasUi.dockMinimapAria')"
           :aria-pressed="minimapOpen ? 'true' : 'false'"
           @click="emit('toggle:minimap')"
         >
@@ -124,8 +126,8 @@ function onSlide(ev: Event): void {
         <button
           type="button"
           class="cv-glass-btn dock-organize cv-tip"
-          data-tip="整理画布"
-          aria-label="整理画布"
+          :data-tip="t('canvasUi.dockArrangeTip')"
+          :aria-label="t('canvasUi.dockArrange')"
           @click="emit('organize')"
         >
           <CanvasIcon name="organize" :size="18" />
@@ -133,8 +135,8 @@ function onSlide(ev: Event): void {
         <button
           type="button"
           class="cv-glass-btn dock-fit cv-tip"
-          data-tip="适配视图"
-          aria-label="适配视图"
+          :data-tip="t('canvasUi.dockFitTip')"
+          :aria-label="t('canvasUi.dockFit')"
           @click="emit('fitView')"
         >
           <CanvasIcon name="fit" :size="18" />
@@ -148,8 +150,8 @@ function onSlide(ev: Event): void {
         <button
           type="button"
           class="cv-glass-btn dock-zoom-out cv-tip"
-          data-tip="缩小"
-          aria-label="缩小"
+          :data-tip="t('canvasUi.dockZoomOut')"
+          :aria-label="t('canvasUi.dockZoomOut')"
           :disabled="!canZoomOut"
           @click="emit('zoomOut')"
         >
@@ -162,14 +164,14 @@ function onSlide(ev: Event): void {
           :max="MAX_ZOOM"
           step="1"
           :value="sliderValue"
-          aria-label="缩放"
+          :aria-label="t('canvasUi.dockZoomAria')"
           @input="onSlide"
         />
         <button
           type="button"
           class="cv-glass-btn dock-zoom-in cv-tip"
-          data-tip="放大"
-          aria-label="放大"
+          :data-tip="t('canvasUi.dockZoomIn')"
+          :aria-label="t('canvasUi.dockZoomIn')"
           :disabled="!canZoomIn"
           @click="emit('zoomIn')"
         >
@@ -181,8 +183,8 @@ function onSlide(ev: Event): void {
       <button
         type="button"
         class="canvas-dock__percent dock-zoom-percent"
-        aria-label="重置为 100%"
-        :title="`当前 ${percentText}，点击回到 100%`"
+        :aria-label="t('canvasUi.dockResetAria')"
+        :title="t('canvasUi.dockResetTip', { percent: percentText })"
         @click="emit('setZoom', 100)"
       >
         {{ percentText }}

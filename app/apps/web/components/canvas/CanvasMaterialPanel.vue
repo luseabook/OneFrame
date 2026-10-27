@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
 import type { CanvasMaterialDto } from "~/types/canvas";
 
@@ -26,11 +28,22 @@ const filtered = computed(() => {
 });
 
 function sourceLabel(src: number): string {
-  return src === 1 ? "上传" : src === 2 ? "节点产出" : "资产库";
+  return src === 1
+    ? t("canvasUi.matSrcUpload")
+    : src === 2
+      ? t("canvasUi.matSrcNode")
+      : t("canvasUi.matSrcLibrary");
 }
 
-function typeLabel(t: string): string {
-  return t === "image" ? "图片" : t === "video" ? "视频" : t === "audio" ? "音频" : "文件";
+function typeLabel(materialType: string): string {
+  // 参数原本叫 `t`，会遮蔽 i18n 的 t()（本项目第 7 次踩同类）→ 改名 materialType
+  return materialType === "image"
+    ? t("canvasUi.matTypeImage")
+    : materialType === "video"
+      ? t("canvasUi.matTypeVideo")
+      : materialType === "audio"
+        ? t("canvasUi.matTypeAudio")
+        : t("canvasUi.matTypeFile");
 }
 
 function toggleSelect(id: string): void {
@@ -41,7 +54,7 @@ function toggleSelect(id: string): void {
 
 async function removeSelected(): Promise<void> {
   if (selected.value.length === 0) return;
-  if (!confirm(`移除选中的 ${selected.value.length} 个素材？（软删除）`)) return;
+  if (!confirm(t("canvasUi.matRemoveConfirm", { n: selected.value.length }))) return;
   busy.value = true;
   try {
     await ed.removeMaterials([...selected.value]);
@@ -55,7 +68,7 @@ async function removeSelected(): Promise<void> {
 async function saveFromSelection(): Promise<void> {
   const n = ed.selectedNode.value;
   if (!n) {
-    toast.error("先选中一个已有生成结果的节点");
+    toast.error(t("canvasUi.matSelectNodeFirst"));
     return;
   }
   busy.value = true;
@@ -70,9 +83,9 @@ async function saveFromSelection(): Promise<void> {
 async function copyKey(m: CanvasMaterialDto): Promise<void> {
   try {
     await navigator.clipboard.writeText(m.object_key ?? "");
-    toast.success("已复制 object_key");
+    toast.success(t("canvasUi.matKeyCopied"));
   } catch {
-    toast.error("复制失败");
+    toast.error(t("canvasUi.matCopyFailed"));
   }
 }
 
@@ -80,36 +93,36 @@ onMounted(() => void ed.loadMaterials());
 </script>
 
 <template>
-  <div class="canvas-materials" role="dialog" aria-label="画布素材库">
+  <div class="canvas-materials" role="dialog" :aria-label="t('canvasUi.matDialogAria')">
     <div class="canvas-materials__panel cv-chrome">
       <header class="canvas-materials__head">
-        <span>素材库</span>
-        <button class="cv-glass-btn" aria-label="关闭" @click="emit('close')">
+        <span>{{ t("canvasUi.matTitle") }}</span>
+        <button class="cv-glass-btn" :aria-label="t('canvasUi.close')" @click="emit('close')">
           <CanvasIcon name="close" :size="16" />
         </button>
       </header>
 
       <div class="canvas-materials__bar">
         <div class="cv-seg mat-filter">
-          <button type="button" :class="{ 'is-active': typeFilter === '' }" @click="typeFilter = ''">全部</button>
+          <button type="button" :class="{ 'is-active': typeFilter === '' }" @click="typeFilter = ''">{{ t("canvasUi.matAll") }}</button>
           <button type="button" :class="{ 'is-active': typeFilter === 'image' }" class="mat-filter-image" @click="typeFilter = 'image'">
-            图片
+            {{ t("canvasUi.matTypeImage") }}
           </button>
           <button type="button" :class="{ 'is-active': typeFilter === 'video' }" class="mat-filter-video" @click="typeFilter = 'video'">
-            视频
+            {{ t("canvasUi.matTypeVideo") }}
           </button>
           <button type="button" :class="{ 'is-active': typeFilter === 'audio' }" class="mat-filter-audio" @click="typeFilter = 'audio'">
-            音频
+            {{ t("canvasUi.matTypeAudio") }}
           </button>
         </div>
         <Button size="sm" variant="ghost" class="mat-save-from-node" :loading="busy" @click="saveFromSelection">
-          把选中节点结果存入
+           {{ t("canvasUi.matStoreBtn") }}
         </Button>
       </div>
 
-      <p v-if="ed.materialsLoading.value" class="cv-hint">读取中…</p>
+      <p v-if="ed.materialsLoading.value" class="cv-hint">{{ t("canvasUi.reading") }}</p>
       <p v-else-if="filtered.length === 0" class="cv-hint canvas-materials__empty">
-        还没有素材。生成出结果后点「把选中节点结果存入」，或从上传入口添加。
+         {{ t("canvasUi.matEmpty") }}
       </p>
 
       <ul v-else class="canvas-materials__list">
@@ -124,7 +137,7 @@ onMounted(() => void ed.loadMaterials());
             <CanvasIcon :name="m.material_type === 'image' ? 'node-image' : m.material_type === 'video' ? 'node-video' : m.material_type === 'audio' ? 'node-audio' : 'node-asset'" :size="18" />
           </div>
           <div class="mat-card__info">
-            <p class="mat-card__name" :title="m.name">{{ m.name || "未命名素材" }}</p>
+            <p class="mat-card__name" :title="m.name">{{ m.name || t("canvasUi.matUnnamed") }}</p>
             <p class="mat-card__meta">
               <span class="cv-tag">{{ typeLabel(m.material_type) }}</span>
               <span class="cv-tag">{{ sourceLabel(m.source) }}</span>
@@ -137,11 +150,11 @@ onMounted(() => void ed.loadMaterials());
       </ul>
 
       <footer v-if="selected.length > 0" class="canvas-materials__foot">
-        <span class="cv-hint">已选 {{ selected.length }} 个</span>
-        <Button size="sm" variant="danger" :loading="busy" @click="removeSelected">移除</Button>
+        <span class="cv-hint">{{ t("canvasUi.matSelectedN", { n: selected.length }) }}</span>
+        <Button size="sm" variant="danger" :loading="busy" @click="removeSelected">{{ t("canvasUi.matRemove") }}</Button>
       </footer>
       <p v-else class="cv-hint canvas-materials__hint">
-        点击卡片多选后可批量移除。素材只登记 object_key，不存直链（避免过期与驱动绑定）。
+         {{ t("canvasUi.matFooterHint") }}
       </p>
     </div>
   </div>

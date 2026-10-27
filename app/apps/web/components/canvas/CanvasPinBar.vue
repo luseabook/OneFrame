@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
 
 /**
@@ -32,7 +34,7 @@ const firstFreeSlot = computed(() => {
 async function addToFirstFree(): Promise<void> {
   const slot = firstFreeSlot.value;
   if (!slot) {
-    toast.error(`最多 ${maxSlots.value} 个分组，请先清空一个槽位`);
+    toast.error(t("canvasUi.pinMaxSlots", { n: maxSlots.value }));
     return;
   }
   await ed.assignSelectionToPinSlot(slot);
@@ -40,7 +42,7 @@ async function addToFirstFree(): Promise<void> {
 
 async function overwrite(slot: number): Promise<void> {
   if (selectedCount.value === 0) {
-    toast.error("先选中要归入该组的节点");
+    toast.error(t("canvasUi.pinSelectNodesFirst"));
     return;
   }
   await ed.assignSelectionToPinSlot(slot);
@@ -48,13 +50,13 @@ async function overwrite(slot: number): Promise<void> {
 }
 
 async function clearSlot(slot: number): Promise<void> {
-  if (!confirm(`清空槽位 ${slot} 的成员？（组本身保留）`)) return;
+  if (!confirm(t("canvasUi.pinClearConfirm", { slot: slot }))) return;
   await ed.clearPinSlot(slot);
   openSlot.value = null;
 }
 
 async function removeSlot(slot: number): Promise<void> {
-  if (!confirm(`删除槽位 ${slot} 的分组？`)) return;
+  if (!confirm(t("canvasUi.pinDeleteConfirm", { slot: slot }))) return;
   await ed.removePinSlot(slot);
   openSlot.value = null;
 }
@@ -72,12 +74,12 @@ defineExpose({ reload: () => ed.loadPinGroups() });
         class="pin-chip"
         :class="{ 'is-empty': g.node_ids.length === 0 }"
         :style="{ '--pin-color': g.color ?? '#8b93a7' }"
-        :title="g.node_ids.length ? `${g.node_ids.length} 个节点，点击跳转` : '空分组'"
+        :title="g.node_ids.length ? t('canvasUi.pinSlotTitle', { n: g.node_ids.length }) : t('canvasUi.pinSlotEmpty')"
         @click="ed.focusPinGroup(g)"
         @contextmenu.prevent="openSlot = openSlot === g.slot ? null : g.slot"
       >
         <span class="pin-chip__dot" />
-        <span class="pin-chip__name">{{ g.name || `分组 ${g.slot}` }}</span>
+        <span class="pin-chip__name">{{ g.name || t("canvasUi.pinGroupN", { n: g.slot }) }}</span>
         <span class="pin-chip__count">{{ g.node_ids.length }}</span>
       </button>
 
@@ -86,28 +88,28 @@ defineExpose({ reload: () => ed.loadPinGroups() });
         v-if="firstFreeSlot"
         class="pin-add"
         :disabled="selectedCount === 0"
-        :title="selectedCount === 0 ? '先选中节点' : `把选中的 ${selectedCount} 个节点存为分组`"
+        :title="selectedCount === 0 ? t('canvasUi.pinSaveTitleEmpty') : t('canvasUi.pinSaveTitle', { n: selectedCount })"
         @click="addToFirstFree"
       >
         <CanvasIcon name="plus" :size="14" />
-        <span>存为分组</span>
+        <span>{{ t("canvasUi.pinSaveAsGroup") }}</span>
       </button>
 
       <!-- 槽位已满 -->
-      <span v-else class="cv-hint pin-full">已满 {{ maxSlots }} 个</span>
+      <span v-else class="cv-hint pin-full">{{ t("canvasUi.pinFull", { n: maxSlots }) }}</span>
     </div>
 
     <!-- 槽位操作浮层（右键已有分组打开） -->
-    <div v-if="openSlot !== null" class="pin-menu cv-chrome" role="menu" aria-label="分组操作">
-      <p class="pin-menu__head">槽位 {{ openSlot }}</p>
+    <div v-if="openSlot !== null" class="pin-menu cv-chrome" role="menu" :aria-label="t('canvasUi.pinMenuAria')">
+      <p class="pin-menu__head">{{ t("canvasUi.pinSlotHead", { n: openSlot }) }}</p>
       <button type="button" class="pin-menu__item pin-overwrite" @click="overwrite(openSlot)">
-        用当前选中替换
+        {{ t("canvasUi.pinReplace") }}
       </button>
-      <button type="button" class="pin-menu__item pin-clear" @click="clearSlot(openSlot)">清空成员</button>
+      <button type="button" class="pin-menu__item pin-clear" @click="clearSlot(openSlot)">{{ t("canvasUi.pinClear") }}</button>
       <button type="button" class="pin-menu__item pin-remove is-danger" @click="removeSlot(openSlot)">
-        删除分组
+        {{ t("canvasUi.pinDelete") }}
       </button>
-      <button type="button" class="pin-menu__item pin-cancel" @click="openSlot = null">取消</button>
+      <button type="button" class="pin-menu__item pin-cancel" @click="openSlot = null">{{ t("canvasUi.cancel") }}</button>
     </div>
   </div>
 </template>

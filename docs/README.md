@@ -123,6 +123,29 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.6 · 多语言第 36 批：canvas 七个面板 → **canvas 模块完成** · 2026-10-28）
+
+页面覆盖 **40 → 41/64**；**用户面 41/45 = 91%**；`canvasUi` 扩到 **513 key**。canvas 模块 5 轮收口。
+
+| 面板 | 迁移内容 |
+|---|---|
+| [CanvasAgentPanel](app/apps/web/components/canvas/CanvasAgentPanel.vue) | 新会话/结束会话/选择会话、**降级轮询提示 + 重试实时连接**、历史产出（N 节点 + 创建）、四态输入区（连接中/轮询/发送中/只读）、空态两套、同意/拒绝、将要创建的节点、赞/踩、模型由服务端路由的诚实说明、已引用 N 个节点 |
+| [CanvasMaterialPanel](app/apps/web/components/canvas/CanvasMaterialPanel.vue) | 三种来源（上传/节点产出/资产库）、四种类型、移除确认、**"把选中节点结果存入"**、object_key 复制、**"只登记 object_key 不存直链"**说明 |
+| [CanvasTemplatePanel](app/apps/web/components/canvas/CanvasTemplatePanel.vue) | 三种 scope（官方/团队/我的）、存为模板与命名、全部/我的、搜索、两种空态、套用、**"套用只加本地，点保存后才写库（走版本校验）"** |
+| [CanvasDock](app/apps/web/components/canvas/CanvasDock.vue) | 选择/抓手/小地图/整理画布/适配视图/缩小/放大/重置百分比，全部 data-tip + aria |
+| [CanvasPinBar](app/apps/web/components/canvas/CanvasPinBar.vue) | 槽位上限提示、空分组、存为分组、清空/删除两条确认、槽位菜单（替换/清空成员/删除/取消） |
+| [CanvasCommentLayer](app/apps/web/components/canvas/CanvasCommentLayer.vue) | 两条校验、删除确认、批注点 aria（含已解决）、放置提示两态、回复（Ctrl+Enter）、重新打开/标记已解决 |
+| [CanvasDownloadPanel](app/apps/web/components/canvas/CanvasDownloadPanel.vue) | 取链接（24h 有效）、空态、N 节点/N 文件、分页提示 |
+
+### 两处工程细节
+
+1. **第 7 次变量遮蔽**：`typeLabel(t: string)` 的参数名 `t` 遮蔽翻译函数 → 改名 `materialType`。
+2. **把组件纳入 i18n-check**：`PAGES` 从 40 → **50**（新增 10 个 canvas 组件），立刻查出 `canvasUi.cancel` 漏建
+   （有 3 个语言缺键）——这类"只在组件里用到"的键以前没人查，现在自动覆盖。
+
+**验证**：`i18n-check.cjs` 全绿（2817 key / 41 页 + 20 组件）；`e2e-i18n-pages.cjs` **134/134**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v6.5 · 多语言第 35 批：CanvasInspector 收尾 → 检查器 100% · 2026-10-28）
 
 `canvasUi` 扩到 **356 key**（本轮 +**56**）——**`CanvasInspector`（2921 行、全站最大单文件）已 100% 迁移**。

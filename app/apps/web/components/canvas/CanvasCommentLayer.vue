@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
 
 /**
@@ -41,12 +43,12 @@ async function submitDraft(): Promise<void> {
   // 批注模式下的输入框：内容在下方输入区，位置由页面在点击画布时记录
   const text = draftText.value.trim();
   if (!text) {
-    toast.error("先写点什么再发");
+    toast.error(t("canvasUi.cmtNeedText"));
     return;
   }
   const at = pendingAnchor.value;
   if (!at) {
-    toast.error("先在画布上点一个位置");
+    toast.error(t("canvasUi.cmtNeedAnchor"));
     return;
   }
   const ok = await ed.createComment(at, text);
@@ -88,7 +90,7 @@ async function toggleResolved(id: string, cur: boolean): Promise<void> {
 }
 
 async function removeComment(id: string): Promise<void> {
-  if (!confirm("删除这条批注及其全部消息？")) return;
+  if (!confirm(t("canvasUi.cmtDeleteConfirm"))) return;
   await ed.deleteComment(id);
   if (openId.value === id) openId.value = null;
 }
@@ -116,7 +118,7 @@ onMounted(() => void ed.loadCommentNodes());
       class="comment-pin"
       :class="{ 'is-resolved': cn.resolved, 'is-active': openId === cn.id }"
       :style="pinStyle(cn.anchor)"
-      :aria-label="`批注 ${cn.comment_count ?? 0} 条${cn.resolved ? '（已解决）' : ''}`"
+      :aria-label="t('canvasUi.cmtPinAria', { n: cn.comment_count ?? 0, resolved: cn.resolved ? t('canvasUi.cmtResolvedSuffix') : '' })"
       :data-comment-id="cn.id"
       @click.stop="openThread(cn.id)"
     >
@@ -126,7 +128,7 @@ onMounted(() => void ed.loadCommentNodes());
 
     <!-- 放置中的提示：告诉用户"现在点画布会落批注点" -->
     <div v-if="ed.commentMode.value" class="comment-hint">
-      {{ pendingAnchor ? "写好内容后点「发送」" : "点击画布任意位置放置批注点" }}
+      {{ pendingAnchor ? t("canvasUi.cmtPendingHint") : t("canvasUi.cmtPlaceHint") }}
     </div>
 
     <!-- 编辑区（放置中 或 已选中某条批注） -->
@@ -134,21 +136,21 @@ onMounted(() => void ed.loadCommentNodes());
       <!-- 新建 -->
       <template v-if="ed.commentMode.value">
         <div class="comment-panel__head">
-          <span>新建批注</span>
-          <button class="cv-glass-btn" aria-label="取消" @click="ed.commentMode.value = false; pendingAnchor = null">
+          <span>{{ t("canvasUi.cmtNew") }}</span>
+          <button class="cv-glass-btn" :aria-label="t('canvasUi.cancel')" @click="ed.commentMode.value = false; pendingAnchor = null">
             <CanvasIcon name="close" :size="14" />
           </button>
         </div>
-        <p v-if="!pendingAnchor" class="cv-hint">先点击画布上的位置</p>
+        <p v-if="!pendingAnchor" class="cv-hint">{{ t("canvasUi.cmtClickPosition") }}</p>
         <textarea
           v-model="draftText"
           class="cv-textarea comment-draft"
-          placeholder="写下你的意见，例如「这里的镜头再长一点」"
+          :placeholder="t('canvasUi.cmtInputPlaceholder')"
           :disabled="!pendingAnchor"
           @keydown.ctrl.enter="submitDraft"
         />
         <Button size="sm" block class="comment-send" :disabled="!pendingAnchor || !draftText.trim()" @click="submitDraft">
-          发送
+          {{ t("canvasUi.cmtSend") }}
         </Button>
       </template>
 
@@ -156,10 +158,10 @@ onMounted(() => void ed.loadCommentNodes());
       <template v-else-if="openId">
         <div class="comment-panel__head">
           <span>
-            批注
+            {{ t("canvasUi.cmtTitle") }}
             <span v-if="ed.commentNodes.value.find((c) => c.id === openId)?.resolved" class="cv-tag cv-tag--success">已解决</span>
           </span>
-          <button class="cv-glass-btn" aria-label="关闭" @click="openId = null">
+          <button class="cv-glass-btn" :aria-label="t('canvasUi.close')" @click="openId = null">
             <CanvasIcon name="close" :size="14" />
           </button>
         </div>
@@ -170,25 +172,29 @@ onMounted(() => void ed.loadCommentNodes());
             <p class="comment-item__meta">{{ fmtTime(c.created_at) }}</p>
           </li>
         </ul>
-        <p v-if="activeComments.length === 0" class="cv-hint">没有消息</p>
+        <p v-if="activeComments.length === 0" class="cv-hint">{{ t("canvasUi.cmtNoMessages") }}</p>
 
         <textarea
           v-model="replyText"
           class="cv-textarea comment-reply"
-          placeholder="回复…（Ctrl+Enter 发送）"
+          :placeholder="t('canvasUi.cmtReplyPlaceholder')"
           @keydown.ctrl.enter="submitReply"
         />
         <div class="comment-panel__acts">
-          <Button size="sm" class="comment-send-reply" :disabled="!replyText.trim()" @click="submitReply">回复</Button>
+          <Button size="sm" class="comment-send-reply" :disabled="!replyText.trim()" @click="submitReply">{{ t("canvasUi.cmtReply") }}</Button>
           <Button
             size="sm"
             variant="ghost"
             class="comment-toggle-resolve"
             @click="toggleResolved(openId, !!ed.commentNodes.value.find((c) => c.id === openId)?.resolved)"
           >
-            {{ ed.commentNodes.value.find((c) => c.id === openId)?.resolved ? "重新打开" : "标记已解决" }}
+            {{
+              ed.commentNodes.value.find((c) => c.id === openId)?.resolved
+                ? t("canvasUi.cmtReopen")
+                : t("canvasUi.cmtResolve")
+            }}
           </Button>
-          <Button size="sm" variant="ghost" class="comment-delete" @click="removeComment(openId)">删除</Button>
+          <Button size="sm" variant="ghost" class="comment-delete" @click="removeComment(openId)">{{ t("canvasUi.cmtDelete") }}</Button>
         </div>
       </template>
     </aside>

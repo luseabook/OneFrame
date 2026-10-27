@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
 import type { DownloadListDto } from "~/composables/useCanvasApi";
 
@@ -32,7 +34,7 @@ async function load(): Promise<void> {
     rows.value = res.list;
     total.value = res.total;
   } catch (err) {
-    loadError.value = (err as { message?: string }).message || "读取失败";
+    loadError.value = (err as { message?: string }).message || t("canvasUi.dlReadFailed");
   } finally {
     loading.value = false;
   }
@@ -44,9 +46,9 @@ async function fetchUrl(row: DownloadListDto): Promise<void> {
   try {
     const res = await api.downloadListUrl(ed.canvasId.value, row.download_list_id);
     links.value = { ...links.value, [row.download_list_id]: { url: res.url, filename: res.filename } };
-    toast.success("链接已生成（24 小时内有效）");
+    toast.success(t("canvasUi.dlLinkGenerated"));
   } catch (err) {
-    toast.error((err as { message?: string }).message || "取链接失败");
+    toast.error((err as { message?: string }).message || t("canvasUi.dlLinkFailed"));
   } finally {
     fetching.value = "";
   }
@@ -61,19 +63,19 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <div class="canvas-downloads" role="dialog" aria-label="下载记录">
+  <div class="canvas-downloads" role="dialog" :aria-label="t('canvasUi.dlDialogAria')">
     <div class="canvas-downloads__panel cv-chrome">
       <header class="canvas-downloads__head">
-        <span>下载记录</span>
-        <button class="cv-glass-btn" aria-label="关闭" @click="emit('close')">
+        <span>{{ t("canvasUi.dlTitle") }}</span>
+        <button class="cv-glass-btn" :aria-label="t('canvasUi.close')" @click="emit('close')">
           <CanvasIcon name="close" :size="16" />
         </button>
       </header>
 
-      <p v-if="loading" class="cv-hint">读取中…</p>
+      <p v-if="loading" class="cv-hint">{{ t("canvasUi.reading") }}</p>
       <p v-else-if="loadError" class="cv-hint canvas-downloads__error">{{ loadError }}</p>
       <p v-else-if="rows.length === 0" class="cv-hint canvas-downloads__empty">
-        还没有打包记录。多选带产物的节点后点检查器里的「打包选中节点的产物」。
+         {{ t("canvasUi.dlEmpty") }}
       </p>
 
       <ul v-else class="canvas-downloads__list">
@@ -86,8 +88,8 @@ onMounted(() => void load());
           <div class="dl-row__info">
             <p class="dl-row__name" :title="row.filename">{{ row.filename }}</p>
             <p class="dl-row__meta">
-              <span class="cv-tag">{{ row.node_count }} 节点</span>
-              <span class="cv-tag">{{ row.file_count }} 文件</span>
+              <span class="cv-tag">{{ t("canvasUi.dlNodesTag", { n: row.node_count }) }}</span>
+              <span class="cv-tag">{{ t("canvasUi.dlFilesTag", { n: row.file_count }) }}</span>
               <span class="cv-tag">{{ timeText(row.created_at) }}</span>
             </p>
           </div>
@@ -98,7 +100,7 @@ onMounted(() => void load());
             :loading="fetching === row.download_list_id"
             @click="fetchUrl(row)"
           >
-            取链接
+            {{ t("canvasUi.dlGetLink") }}
           </Button>
           <a
             v-if="links[row.download_list_id]"
@@ -108,12 +110,12 @@ onMounted(() => void load());
             target="_blank"
             rel="noopener"
           >
-            下载
+            {{ t("canvasUi.dlDownload") }}
           </a>
         </li>
       </ul>
 
-      <p v-if="total > rows.length" class="cv-hint">共 {{ total }} 条，仅显示最近 {{ rows.length }} 条。</p>
+      <p v-if="total > rows.length" class="cv-hint">{{ t("canvasUi.dlTotalHint", { total: total, shown: rows.length }) }}</p>
     </div>
   </div>
 </template>
