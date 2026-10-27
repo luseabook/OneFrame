@@ -15,7 +15,9 @@
  * 抽成比例、锁定额度都会变，前端算一份必然与后端不一致（客诉来源）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "收益 · 一帧" });
+
+const { t, locale } = useI18n();
+useHead({ title: () => t("earnings.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -85,18 +87,20 @@ const canApply = computed(
     form.amount <= (overview.value?.available_credits ?? 0),
 );
 
-const money = (credits: number): string => `${Number(credits ?? 0).toLocaleString()} 积分`;
+const money = (credits: number): string =>
+  t("earnings.creditUnit", { value: Number(credits ?? 0).toLocaleString(locale.value) });
 const pct = (bps: number): string => `${(Number(bps ?? 0) / 100).toFixed(2)}%`;
 const fmtTime = (value?: string | null): string =>
-  value ? new Date(value).toLocaleString() : "—";
+  value ? new Date(value).toLocaleString(locale.value) : "—";
 
-const WITHDRAW_STATUS: Record<number, string> = {
-  1: "待审核",
-  2: "已通过",
-  3: "已打款",
-  4: "已驳回",
-  5: "已撤销",
-};
+// 状态文案走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const WITHDRAW_STATUS = computed<Record<number, string>>(() => ({
+  1: t("earnings.statusPending"),
+  2: t("earnings.statusApproved"),
+  3: t("earnings.statusPaid"),
+  4: t("earnings.statusRejected"),
+  5: t("earnings.statusCancelled"),
+}));
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -114,7 +118,7 @@ async function load(): Promise<void> {
       form.amount = Math.max(ov.min_withdraw_credits, Math.min(ov.available_credits, ov.min_withdraw_credits));
     }
   } catch (err) {
-    error.value = (err as Error).message || "收益数据加载失败";
+    error.value = (err as Error).message || t("earnings.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -125,15 +129,15 @@ function validateAmount(): boolean {
   const ov = overview.value;
   if (!ov) return false;
   if (!Number.isFinite(form.amount) || form.amount <= 0) {
-    amountError.value = "请输入提现金额";
+    amountError.value = t("earnings.amountRequired");
     return false;
   }
   if (form.amount < ov.min_withdraw_credits) {
-    amountError.value = `单笔最低 ${ov.min_withdraw_credits} 积分`;
+    amountError.value = t("earnings.amountTooLow", { min: ov.min_withdraw_credits });
     return false;
   }
   if (form.amount > ov.available_credits) {
-    amountError.value = `可提现 ${ov.available_credits} 积分（已扣除未终结提现）`;
+    amountError.value = t("earnings.amountTooHigh", { max: ov.available_credits });
     return false;
   }
   return true;
@@ -142,7 +146,7 @@ function validateAmount(): boolean {
 async function applyWithdraw(): Promise<void> {
   if (!validateAmount()) return;
   if (!form.account.trim()) {
-    amountError.value = "请填写收款账号";
+    amountError.value = t("earnings.accountRequired");
     return;
   }
   submitting.value = true;
@@ -155,27 +159,27 @@ async function applyWithdraw(): Promise<void> {
         holder: form.holder.trim() || undefined,
       },
     });
-    toast.success("提现申请已提交，等待人工审核");
+    toast.success(t("earnings.submitted"));
     form.amount = 0;
     form.account = "";
     form.holder = "";
     await load();
   } catch (err) {
     // 服务端错误码原样展示（例如"已有待审提现"），前端不猜测、不改写
-    amountError.value = (err as Error).message || "提交失败";
+    amountError.value = (err as Error).message || t("earnings.submitFailed");
   } finally {
     submitting.value = false;
   }
 }
 
 async function cancelWithdrawal(row: WithdrawalRow): Promise<void> {
-  if (!window.confirm(`撤销这笔 ${row.amount_credits} 积分的提现申请？`)) return;
+  if (!window.confirm(t("earnings.revokeConfirm", { amount: row.amount_credits }))) return;
   try {
     await api.post(`/market/creator/withdrawals/${row.id}/cancel`, {});
-    toast.success("已撤销");
+    toast.success(t("earnings.revoked"));
     await load();
   } catch (err) {
-    toast.error((err as Error).message || "取消失败");
+    toast.error((err as Error).message || t("earnings.revokeFailed"));
   }
 }
 
@@ -186,34 +190,32 @@ onMounted(load);
   <div class="earn">
     <header class="head">
       <div>
-        <h1>收益</h1>
-        <p class="muted">
-          作品销售收入（不进入积分余额）。提现为人工审核 + 渠道打款；抽成与结算规则以服务端为准。
-        </p>
+        <h1>{{ t("earnings.title") }}</h1>
+        <p class="muted">{{ t("earnings.sub") }}</p>
       </div>
-      <NuxtLink to="/creator-center" class="link">返回创作者中心 →</NuxtLink>
+      <NuxtLink to="/creator-center" class="link">{{ t("earnings.backToCenter") }}</NuxtLink>
     </header>
 
     <p v-if="error" class="err">{{ error }}</p>
-    <p v-else-if="loading" class="muted">加载中…</p>
+    <p v-else-if="loading" class="muted">{{ t("earnings.loading") }}</p>
 
     <template v-else-if="overview">
       <!-- 总览：全部数字来自后端 -->
       <section class="cards">
         <article class="card">
-          <p class="k">累计收益</p>
+          <p class="k">{{ t("earnings.kRevenue") }}</p>
           <p class="v">{{ money(overview.revenue_credits) }}</p>
-          <p class="s">成交 {{ overview.total_sales }} 笔 · 平台抽成 {{ pct(overview.commission_bps) }}</p>
+          <p class="s">{{ t("earnings.salesLine", { count: overview.total_sales, pct: pct(overview.commission_bps) }) }}</p>
         </article>
         <article class="card strong">
-          <p class="k">可提现</p>
+          <p class="k">{{ t("earnings.kAvailable") }}</p>
           <p class="v">{{ money(overview.available_credits) }}</p>
-          <p class="s">已扣除未终结提现（待审/已通过）</p>
+          <p class="s">{{ t("earnings.availableHint") }}</p>
         </article>
         <article class="card">
-          <p class="k">提现中</p>
+          <p class="k">{{ t("earnings.kLocked") }}</p>
           <p class="v">{{ money(overview.locked_credits) }}</p>
-          <p class="s">已打款累计 {{ money(overview.paid_credits) }}</p>
+          <p class="s">{{ t("earnings.paidLine", { amount: money(overview.paid_credits) }) }}</p>
         </article>
       </section>
 
@@ -222,14 +224,12 @@ onMounted(load);
       <!-- 提现申请 -->
       <section class="panel">
         <div class="panel-head">
-          <h2>申请提现</h2>
-          <span v-if="pendingWithdrawals.length" class="warn">
-            你有一笔待审提现，审核完成或撤销后才能再次申请
-          </span>
+          <h2>{{ t("earnings.applyTitle") }}</h2>
+          <span v-if="pendingWithdrawals.length" class="warn">{{ t("earnings.pendingWarn") }}</span>
         </div>
         <div class="form">
           <label class="field">
-            <span>金额（积分）</span>
+            <span>{{ t("earnings.amountLabel") }}</span>
             <input
               v-model.number="form.amount"
               type="number"
@@ -237,25 +237,23 @@ onMounted(load);
               :max="overview.available_credits"
               step="1"
             />
-            <small class="muted">
-              最低 {{ overview.min_withdraw_credits }}，最多 {{ overview.available_credits }}
-            </small>
+            <small class="muted">{{ t("earnings.amountHint", { min: overview.min_withdraw_credits, max: overview.available_credits }) }}</small>
           </label>
           <label class="field">
-            <span>收款渠道</span>
+            <span>{{ t("earnings.channelLabel") }}</span>
             <select v-model="form.channel">
-              <option value="alipay">支付宝</option>
-              <option value="wechat">微信</option>
-              <option value="bank">银行卡</option>
+              <option value="alipay">{{ t("earnings.channelAlipay") }}</option>
+              <option value="wechat">{{ t("earnings.channelWechat") }}</option>
+              <option value="bank">{{ t("earnings.channelBank") }}</option>
             </select>
           </label>
           <label class="field">
-            <span>收款账号</span>
-            <input v-model="form.account" placeholder="手机号 / 邮箱 / 卡号" maxlength="120" />
+            <span>{{ t("earnings.accountLabel") }}</span>
+            <input v-model="form.account" :placeholder="t('earnings.accountPlaceholder')" maxlength="120" />
           </label>
           <label class="field">
-            <span>收款人（选填）</span>
-            <input v-model="form.holder" placeholder="与账号实名一致" maxlength="60" />
+            <span>{{ t("earnings.holderLabel") }}</span>
+            <input v-model="form.holder" :placeholder="t('earnings.holderPlaceholder')" maxlength="60" />
           </label>
         </div>
         <p v-if="amountError" class="err small">{{ amountError }}</p>
@@ -266,18 +264,18 @@ onMounted(load);
             :disabled="submitting || !canApply"
             @click="applyWithdraw"
           >
-            {{ submitting ? "提交中…" : "提交提现申请" }}
+            {{ submitting ? t("earnings.submitting") : t("earnings.submitWithdraw") }}
           </button>
-          <span class="muted small">提交后前端不改余额，状态以服务端回读为准。</span>
+          <span class="muted small">{{ t("earnings.submitHint") }}</span>
         </div>
       </section>
 
       <!-- 提现记录 -->
       <section class="panel">
-        <h2>提现记录</h2>
+        <h2>{{ t("earnings.recordsTitle") }}</h2>
         <table v-if="withdrawals.length" class="table">
           <thead>
-            <tr><th>金额</th><th>渠道</th><th>状态</th><th>提交时间</th><th>备注</th><th>操作</th></tr>
+            <tr><th>{{ t("earnings.thAmount") }}</th><th>{{ t("earnings.thChannel") }}</th><th>{{ t("earnings.thStatus") }}</th><th>{{ t("earnings.thSubmittedAt") }}</th><th>{{ t("earnings.thNote") }}</th><th>{{ t("earnings.thOps") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="row in withdrawals" :key="row.id">
@@ -297,22 +295,22 @@ onMounted(load);
                   class="btn tiny ghost"
                   @click="cancelWithdrawal(row)"
                 >
-                  撤销
+                  {{ t("earnings.revoke") }}
                 </button>
                 <span v-else class="muted">—</span>
               </td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">还没有提现记录。</p>
+        <p v-else class="muted">{{ t("earnings.recordsEmpty") }}</p>
       </section>
 
       <!-- 收益明细 -->
       <section class="panel">
-        <h2>收益明细（最近 20 条）</h2>
+        <h2>{{ t("earnings.revenueTitle") }}</h2>
         <table v-if="revenues.length" class="table">
           <thead>
-            <tr><th>作品</th><th>金额</th><th>状态</th><th>时间</th></tr>
+            <tr><th>{{ t("earnings.thWork") }}</th><th>{{ t("earnings.thAmount") }}</th><th>{{ t("earnings.thStatus") }}</th><th>{{ t("earnings.thTime") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="(row, index) in revenues" :key="row.id ?? index">
@@ -323,8 +321,8 @@ onMounted(load);
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">还没有收益记录。作品售出后这里会出现分账明细。</p>
-        <p class="muted small">共 {{ revenueTotal }} 条（本页显示最近 20 条）。</p>
+        <p v-else class="muted">{{ t("earnings.revenueEmpty") }}</p>
+        <p class="muted small">{{ t("earnings.revenueTotal", { count: revenueTotal }) }}</p>
       </section>
     </template>
   </div>

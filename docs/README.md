@@ -123,6 +123,28 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v5.2 · 多语言第 22 批：收益页 · 2026-10-28）
+
+页面覆盖 **32 → 33/64**；**用户面 33/45 = 73%**；全站 **97.6%** / 首发 **97.6%**。
+
+[creator-center/earnings.vue](app/apps/web/pages/creator-center/earnings.vue) 新增 `earnings`（约 **84 key** × 5 语言）：
+
+| 区块 | 迁移内容 |
+|---|---|
+| 总览 | 累计收益 / 可提现 / 提现中三张卡（含「成交 N 笔 · 平台抽成 x.xx%」「已扣除未终结提现」「已打款累计」三条说明）、结算说明 |
+| 提现表单 | 金额（含最低/最高提示）、收款渠道（支付宝/微信/银行卡）、收款账号与占位、收款人（选填）、待审警告、提交与"前端不改余额"说明 |
+| 提现记录 | 六列表头、五个状态文案、撤销动作与确认框、空态 |
+| 收益明细 | 四列表头、空态、`共 N 条（本页显示最近 20 条）` |
+| 校验与提示 | 金额必填/低于最低/超过可提现/账号必填，提交成功与失败、撤销成功与失败 |
+
+两处顺带修掉的"隐式中文"：
+
+1. `money()` 里写死 `toLocaleString()` + 「积分」后缀 → 改为 `t("earnings.creditUnit", { value })` + 当前 locale 数字格式；
+2. `fmtTime()` 写死 `toLocaleString()`（默认中文格式）→ 改为 `toLocaleString(locale.value)`。
+
+**验证**：`i18n-check.cjs` 全绿（1458 key / 33 页 + 4 组件）；`e2e-i18n-pages.cjs` **101/101**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v5.1 · 多语言第 21 批：影视版任务表 · 2026-10-28）
 
 页面覆盖 **31 → 32/64**；**用户面 32/45 = 71%**；全站 **97.6%** / 首发 **97.6%**。
