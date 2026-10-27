@@ -30,7 +30,8 @@ import type { EpisodeDto, ProjectDto, StoryboardDto, TimelineClipAssetDto, Timel
  */
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
-useHead({ title: "时间线导出 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("editor.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -218,7 +219,7 @@ async function bootstrap(): Promise<void> {
     await loadEpisode();
     await loadTimeline();
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : "加载失败";
+    loadError.value = e instanceof Error ? e.message : t("editor.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -260,10 +261,10 @@ async function persistTimeline(silent: boolean): Promise<boolean> {
       clips.value = clips.value.map((c, i) => ({ ...c, clip_id: ids[i] ?? c.clip_id }));
     }
     dirty.value = false;
-    if (!silent) toast.success("时间线已保存");
+    if (!silent) toast.success(t("editor.saved"));
     return true;
   } catch (e) {
-    toast.error(e instanceof Error ? `保存失败：${e.message}` : "保存失败");
+    toast.error(e instanceof Error ? t("editor.saveFailedWith", { msg: e.message }) : t("editor.saveFailed"));
     return false;
   } finally {
     saving.value = false;
@@ -283,7 +284,7 @@ function clipFromShot(shot: StoryboardDto): Clip {
     clip_id: newClipId(),
     shot_id: shot.id,
     task_id: shot.video_task_id,
-    name: `分镜 ${shot.shot_no}`,
+    name: t("editor.shotClip", { no: shot.shot_no }),
     // 后端契约：duration 整数 1..30；分镜时长可能为 null
     duration: Math.min(30, Math.max(1, Math.round(shot.duration_s ?? 5))),
     url: null,
@@ -295,7 +296,7 @@ const info = ref("");
 
 async function addShot(shot: StoryboardDto, atIndex?: number): Promise<void> {
   if (!isFinalized(shot)) {
-    toast.error(`分镜 ${shot.shot_no} 还没定稿：先在分镜页投递并等出片`);
+    toast.error(t("editor.shotNotFinalized", { no: shot.shot_no }));
     return;
   }
   const clip = clipFromShot(shot);
@@ -309,7 +310,7 @@ async function addShot(shot: StoryboardDto, atIndex?: number): Promise<void> {
     if (target) target.url = url;
   }
   scheduleSave();
-  info.value = `已加入 ${clip.name}`;
+  info.value = t("editor.addedClip", { name: clip.name });
 }
 
 function removeClip(clipId: string): void {
@@ -326,7 +327,7 @@ function removeClip(clipId: string): void {
 async function rebuildFromStoryboards(): Promise<void> {
   const finals = finalizedShots.value;
   if (!finals.length) {
-    toast.error("本集还没有已定稿镜头：先去分镜页投递并等出片");
+    toast.error(t("editor.noFinalizedShots"));
     return;
   }
   const byShotId = new Map(clips.value.map((c) => [c.shot_id, c]));
@@ -343,8 +344,8 @@ async function rebuildFromStoryboards(): Promise<void> {
   scheduleSave();
   toast.success(
     removed > 0
-      ? `已按 ${finals.length} 个已定稿镜头同步（移除 ${removed} 个不再定稿的片段）`
-      : `已按 ${finals.length} 个已定稿镜头同步`,
+      ? t("editor.syncedWithRemoved", { count: finals.length, removed })
+      : t("editor.synced", { count: finals.length }),
   );
 }
 
@@ -402,7 +403,7 @@ function isOverTrack(clientY: number): boolean {
 function onRailPointerDown(ev: PointerEvent, shot: StoryboardDto, finalized: boolean): void {
   if (ev.button !== 0) return;
   if (!finalized) {
-    toast.error(`分镜 ${shot.shot_no} 未定稿，不能进入时间线`);
+    toast.error(t("editor.shotNotFinalizedShort", { no: shot.shot_no }));
     return;
   }
   ev.preventDefault();
@@ -418,7 +419,7 @@ function onRailPointerDown(ev: PointerEvent, shot: StoryboardDto, finalized: boo
     moved: false,
     dropIndex: null,
   };
-  dragGhost.value = { x: ev.clientX, y: ev.clientY, label: `分镜 ${shot.shot_no}` };
+  dragGhost.value = { x: ev.clientX, y: ev.clientY, label: t("editor.shotClip", { no: shot.shot_no }) };
 }
 
 function onClipPointerDown(ev: PointerEvent, clip: Clip, mode: "reorder" | "trim"): void {
@@ -448,7 +449,7 @@ function onPointerMove(ev: PointerEvent): void {
   state.moved = true;
 
   if (state.kind === "rail") {
-    dragGhost.value = { x: ev.clientX, y: ev.clientY, label: state.shot ? `分镜 ${state.shot.shot_no}` : "" };
+    dragGhost.value = { x: ev.clientX, y: ev.clientY, label: state.shot ? t("editor.shotClip", { no: state.shot.shot_no }) : "" };
     state.dropIndex = isOverTrack(ev.clientY) ? indexAtX(ev.clientX) : null;
     return;
   }
@@ -541,7 +542,7 @@ function onTrackClick(ev: MouseEvent): void {
 
 function togglePlay(): void {
   if (!clips.value.length) {
-    toast.error("时间线还是空的：从左侧点选分镜加入");
+    toast.error(t("editor.timelineEmptyAdd"));
     return;
   }
   playing.value = !playing.value;
@@ -595,17 +596,17 @@ const exporting = ref(false);
 const previewComposed = ref(false);
 let exportTimer: ReturnType<typeof setInterval> | undefined;
 
-const EXPORT_LABEL: Record<number, string> = {
+const EXPORT_LABEL = computed<Record<number, string>>(() => ({
   0: "",
-  1: "排队中",
-  2: "渲染中",
-  3: "已完成",
-  4: "失败",
-};
+  1: t("editor.statusQueued"),
+  2: t("editor.statusRendering"),
+  3: t("editor.statusDone"),
+  4: t("editor.statusFailed"),
+}));
 
 async function startExport(): Promise<void> {
   if (!clips.value.length) {
-    toast.error("时间线为空：先把分镜加入时间线");
+    toast.error(t("editor.timelineEmptyExport"));
     return;
   }
   // 导出前必须先落库：worker 是读服务端时间线来合成的，不先 PUT 会导出旧内容
@@ -625,8 +626,8 @@ async function startExport(): Promise<void> {
     pollExport();
   } catch (e) {
     exporting.value = false;
-    exportError.value = e instanceof Error ? e.message : "提交失败";
-    toast.error(`导出提交失败：${exportError.value}`);
+    exportError.value = e instanceof Error ? e.message : t("editor.submitFailed");
+    toast.error(t("editor.exportSubmitFailed", { msg: exportError.value }));
   }
 }
 
@@ -646,12 +647,12 @@ function pollExport(): void {
       if (data.status === 3) {
         exportUrl.value = data.download_url;
         exporting.value = false;
-        toast.success("合成完成，可下载 mp4（含 AI 生成水印）");
+        toast.success(t("editor.composeDone"));
         if (exportTimer) clearInterval(exportTimer);
       } else if (data.status === 4) {
-        exportError.value = data.error?.message ?? "合成失败";
+        exportError.value = data.error?.message ?? t("editor.composeFailed");
         exporting.value = false;
-        toast.error(`合成失败：${exportError.value}`);
+        toast.error(t("editor.composeFailedWith", { msg: exportError.value }));
         if (exportTimer) clearInterval(exportTimer);
       }
     } catch {
@@ -661,7 +662,7 @@ function pollExport(): void {
       // 5 分钟仍未终态：明确告知，不无限转圈
       clearInterval(exportTimer);
       exporting.value = false;
-      exportError.value = "导出超时（5 分钟未完成），请到任务中心查看";
+      exportError.value = t("editor.exportTimeout");
     }
   }, 2000);
 }
@@ -688,13 +689,13 @@ const publishing = ref(false);
 const pubError = ref("");
 let pubTimer: ReturnType<typeof setInterval> | undefined;
 
-const PUB_STATUS: Record<number, { text: string; tone: "info" | "success" | "danger" | "neutral" }> = {
-  1: { text: "排队中", tone: "info" },
-  2: { text: "转码中", tone: "info" },
-  3: { text: "可播放", tone: "success" },
-  4: { text: "失败", tone: "danger" },
-  5: { text: "已下架", tone: "neutral" },
-};
+const PUB_STATUS = computed<Record<number, { text: string; tone: "info" | "success" | "danger" | "neutral" }>>(() => ({
+  1: { text: t("editor.pubStatusQueued"), tone: "info" },
+  2: { text: t("editor.pubStatusTranscoding"), tone: "info" },
+  3: { text: t("editor.pubStatusPlayable"), tone: "success" },
+  4: { text: t("editor.pubStatusFailed"), tone: "danger" },
+  5: { text: t("editor.pubStatusOffline"), tone: "neutral" },
+}));
 
 async function loadPublications(): Promise<void> {
   if (!selectedEpisodeId.value) return;
@@ -704,14 +705,14 @@ async function loadPublications(): Promise<void> {
     );
     publications.value = data.list;
   } catch (e) {
-    pubError.value = e instanceof Error ? e.message : "加载发布记录失败";
+    pubError.value = e instanceof Error ? e.message : t("editor.publishLoadFailed");
   }
 }
 
 async function openPublish(): Promise<void> {
   showPublish.value = true;
   pubError.value = "";
-  pubTitle.value = `${project.value?.title ?? ""} · ${episodeLabel.value} 切片`;
+  pubTitle.value = t("editor.titles.slice", { title: project.value?.title ?? "", episode: episodeLabel.value });
   // 默认整集：起止按当前时间线总时长（单位秒，提交时换算 ms）
   pubStartS.value = 0;
   pubEndS.value = Math.round(totalDuration.value);
@@ -729,7 +730,7 @@ function pollPublications(): void {
     if (!pending || tries > 150) {
       if (pubTimer) clearInterval(pubTimer);
       pubTimer = undefined;
-      if (tries > 150) pubError.value = "转码超时（5 分钟未完成），请稍后刷新列表";
+      if (tries > 150) pubError.value = t("editor.transcodeTimeout");
     }
   }, 2000);
 }
@@ -737,7 +738,7 @@ function pollPublications(): void {
 async function publishSlice(): Promise<void> {
   if (!selectedEpisodeId.value) return;
   if (pubEndS.value <= pubStartS.value) {
-    pubError.value = "切片的结束时间必须大于开始时间";
+    pubError.value = t("editor.endAfterStart");
     return;
   }
   // 发布读的是服务端时间线：先落库，否则会发出旧内容
@@ -753,27 +754,27 @@ async function publishSlice(): Promise<void> {
         slice: { start_ms: Math.round(pubStartS.value * 1000), end_ms: Math.round(pubEndS.value * 1000) },
       },
     );
-    toast.success("已提交发布，正在转码（1 排队 → 2 转码中 → 3 可播放）");
+    toast.success(t("editor.publishSubmitted"));
     await loadPublications();
     pollPublications();
   } catch (e) {
-    pubError.value = e instanceof Error ? e.message : "发布失败";
-    toast.error(`发布失败：${pubError.value}`);
+    pubError.value = e instanceof Error ? e.message : t("editor.publishFailed");
+    toast.error(t("editor.publishFailedWith", { msg: pubError.value }));
   } finally {
     publishing.value = false;
   }
 }
 
 async function unpublish(item: TimelinePublicationDto): Promise<void> {
-  if (!confirm(`下架「${item.title}」？下架后分享链接失效（记录保留可审计）。`)) return;
+  if (!confirm(t("editor.offlineConfirm", { title: item.title }))) return;
   try {
     await api.delete(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/publications/${item.publication_id}`,
     );
-    toast.success("已下架");
+    toast.success(t("editor.offlineDone"));
     await loadPublications();
   } catch (e) {
-    pubError.value = e instanceof Error ? e.message : "下架失败";
+    pubError.value = e instanceof Error ? e.message : t("editor.offlineFailed");
     toast.error(pubError.value);
   }
 }
@@ -782,9 +783,9 @@ async function copyShareToken(item: TimelinePublicationDto): Promise<void> {
   if (!item.share_token) return;
   try {
     await navigator.clipboard.writeText(item.share_token);
-    toast.success("shareToken 已复制");
+    toast.success(t("editor.tokenCopied"));
   } catch {
-    toast.error("复制失败：浏览器未授予剪贴板权限");
+    toast.error(t("editor.copyFailed"));
   }
 }
 
@@ -806,7 +807,7 @@ async function openClipAssets(clip: Clip): Promise<void> {
     // 只列已定稿且有参考图的资产：未定稿挂上去在成片里也是空引用
     projectAssetList.value = data.list.filter((asset) => asset.status === 2 && asset.ref_image_uri);
   } catch (e) {
-    clipAssetError.value = e instanceof Error ? e.message : "加载项目资产失败";
+    clipAssetError.value = e instanceof Error ? e.message : t("editor.clipAssetsLoadFailed");
   }
 }
 
@@ -839,7 +840,7 @@ async function bindProjectAsset(assetId: string): Promise<void> {
       bindingPayload(clip, { assetId }),
     );
     await refreshClipAssets();
-    toast.success("资产已绑定到片段");
+    toast.success(t("editor.assetBound"));
   } catch (e) {
     clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
     toast.error(clipAssetError.value);
@@ -851,7 +852,7 @@ async function bindProjectAsset(assetId: string): Promise<void> {
 async function bindShotProductToClip(): Promise<void> {
   const clip = assetClip.value;
   if (!clip || !clip.task_id) {
-    clipAssetError.value = "该片段没有镜头产物（task_id 为空）";
+    clipAssetError.value = t("editor.noShotOutput");
     return;
   }
   clipAssetBusy.value = true;
@@ -861,7 +862,7 @@ async function bindShotProductToClip(): Promise<void> {
       bindingPayload(clip, { taskId: clip.task_id }),
     );
     await refreshClipAssets();
-    toast.success("镜头产物已绑定到片段");
+    toast.success(t("editor.shotBound"));
   } catch (e) {
     clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
     toast.error(clipAssetError.value);
@@ -880,7 +881,7 @@ async function clearClipAssets(): Promise<void> {
       { clear: true },
     );
     await refreshClipAssets();
-    toast.success("已清空该片段的资产绑定");
+    toast.success(t("editor.clearedBinding"));
   } catch (e) {
     clipAssetError.value = e instanceof Error ? e.message : "清空失败";
   } finally {
@@ -946,8 +947,8 @@ onUnmounted(() => {
 
 const episodeLabel = computed(() => {
   const idx = episodes.value.findIndex((e) => e.id === selectedEpisodeId.value);
-  if (idx < 0) return "本集";
-  return `第${episodes.value[idx]?.ep_no ?? idx + 1}集`;
+  if (idx < 0) return t("editor.thisEpisode");
+  return t("editor.episodeNo", { n: episodes.value[idx]?.ep_no ?? idx + 1 });
 });
 </script>
 
@@ -956,31 +957,31 @@ const episodeLabel = computed(() => {
     <!-- ═════════ 顶栏 64：返回 / 时间线导出（选中）/ 保存 + 集数 + 导出 ═════════ -->
     <header class="rf-top">
       <div class="rf-top__left">
-        <NuxtLink :to="`/projects/${projectId}`" class="rf-pill">← 返回分镜创作</NuxtLink>
-        <span class="rf-pill rf-pill--on">时间线导出</span>
-        <Button size="sm" :loading="saving" :disabled="loading" @click="persistTimeline(false)">保存</Button>
+        <NuxtLink :to="`/projects/${projectId}`" class="rf-pill">{{ t("editor.backToStoryboard") }}</NuxtLink>
+        <span class="rf-pill rf-pill--on">{{ t("editor.timelineExport") }}</span>
+        <Button size="sm" :loading="saving" :disabled="loading" @click="persistTimeline(false)">{{ t("editor.save") }}</Button>
       </div>
 
       <div class="rf-top__mid">
-        <b class="rf-title" :title="project?.title">{{ project?.title ?? "剪辑台" }}</b>
-        <span v-if="dirty" class="rf-dirty">未保存</span>
+        <b class="rf-title" :title="project?.title">{{ project?.title ?? t("editor.titleFallback") }}</b>
+        <span v-if="dirty" class="rf-dirty">{{ t("editor.unsaved") }}</span>
       </div>
 
       <div class="rf-top__right">
         <select v-if="episodes.length > 1" v-model="selectedEpisodeId" class="rf-select" :aria-label="episodeLabel">
-          <option v-for="ep in episodes" :key="ep.id" :value="ep.id">第{{ ep.ep_no }}集</option>
+          <option v-for="ep in episodes" :key="ep.id" :value="ep.id">{{ t("editor.episodeNo", { n: ep.ep_no }) }}</option>
         </select>
         <span v-else class="rf-ep">{{ episodeLabel }}</span>
 
         <Tag v-if="exportStatus" :tone="exportStatus === 4 ? 'danger' : exportStatus === 3 ? 'success' : 'info'" size="sm" dot>
           {{ EXPORT_LABEL[exportStatus] }}
         </Tag>
-        <a v-if="exportUrl" :href="exportUrl" class="rf-download" download @click.prevent="downloadComposed">下载 mp4</a>
+        <a v-if="exportUrl" :href="exportUrl" class="rf-download" download @click.prevent="downloadComposed">{{ t("editor.downloadMp4") }}</a>
         <Button size="sm" variant="ghost" :disabled="!selectedEpisodeId || loading" @click="openPublish">
-          切片发布
+          {{ t("editor.publishSlice") }}
         </Button>
         <Button class="rf-export" :loading="exporting" :disabled="!clips.length || loading" @click="startExport">
-          {{ exporting ? "合成中…" : "导出" }}
+          {{ exporting ? t("editor.composing") : t("editor.export") }}
         </Button>
       </div>
     </header>
@@ -992,16 +993,16 @@ const episodeLabel = computed(() => {
       <!-- 左栏「剧集资产」 -->
       <aside class="rf-rail">
         <div class="rf-rail__head">
-          <b>剧集资产</b>
-          <select v-model="railFilter" class="rf-mini" aria-label="素材筛选">
-            <option value="finalized">已定稿</option>
-            <option value="all">全部</option>
+          <b>{{ t("editor.projectAssets") }}</b>
+          <select v-model="railFilter" class="rf-mini" :aria-label="t('editor.materialFilter')">
+            <option value="finalized">{{ t("editor.filterFinalized") }}</option>
+            <option value="all">{{ t("editor.filterAll") }}</option>
           </select>
         </div>
         <p class="rf-rail__hint">
-          只列<em>已定稿</em>（出片完成）的分镜素材——未定稿进不了时间线。
+          {{ t("editor.railHintPrefix") }}<em>{{ t("editor.railHintEm") }}</em>{{ t("editor.railHintSuffix") }}
           <span v-if="railFilter === 'finalized'">
-            共 {{ finalizedShots.length }} / {{ shots.length }} 个镜头。
+            {{ t("editor.railCount", { finalized: finalizedShots.length, total: shots.length }) }}
           </span>
         </p>
 
@@ -1015,7 +1016,7 @@ const episodeLabel = computed(() => {
             :data-finalized="row.finalized ? '1' : '0'"
             :role="row.finalized ? 'button' : undefined"
             :tabindex="row.finalized ? 0 : -1"
-            :title="row.finalized ? '点击加入时间线，或拖到下方轨道' : '未定稿：先去分镜页投递并等出片'"
+            :title="row.finalized ? t('editor.railItemTitleOk') : t('editor.railItemTitleLocked')"
             @pointerdown="onRailPointerDown($event, row.shot, row.finalized)"
             @keydown.enter="row.finalized && addShot(row.shot)"
           >
@@ -1024,10 +1025,10 @@ const episodeLabel = computed(() => {
               <span v-else>{{ row.shot.shot_no }}</span>
             </span>
             <span class="rf-asset__body">
-              <b>{{ row.shot.shot_desc || `分镜 ${row.shot.shot_no}` }}</b>
+              <b>{{ row.shot.shot_desc || t("editor.shotClip", { no: row.shot.shot_no }) }}</b>
               <em>
-                <template v-if="row.finalized">已定稿 · {{ row.shot.duration_s ?? 5 }}s</template>
-                <template v-else>未定稿 · 状态 {{ row.shot.status }}</template>
+                <template v-if="row.finalized">{{ t("editor.filterFinalized") }} · {{ row.shot.duration_s ?? 5 }}s</template>
+                <template v-else>{{ t("editor.railItemTitleLocked") }} · {{ row.shot.status }}</template>
               </em>
             </span>
             <span v-if="row.finalized" class="rf-asset__add" aria-hidden="true">＋</span>
@@ -1035,18 +1036,18 @@ const episodeLabel = computed(() => {
 
           <EmptyState
             v-if="!railRows.length"
-            :title="railFilter === 'finalized' ? '暂无素材' : '本集还没有分镜'"
+            :title="railFilter === 'finalized' ? t('editor.lockTitleNoMaterial') : t('editor.lockTitleNoShot')"
             :description="
               railFilter === 'finalized'
-                ? '本集还没有已定稿的分镜素材：去分镜页投递并等出片，再点「更新分镜」'
-                : '先去分镜页生成分镜，再投递出片'
+                ? t('editor.railLockedHintFinalized')
+                : t('editor.railLockedHintEmpty')
             "
           />
         </div>
 
         <div class="rf-rail__foot">
-          <Button size="sm" variant="ghost" :disabled="loading" @click="rebuildFromStoryboards">更新分镜</Button>
-          <span class="rf-rail__n">轨道 {{ clips.length }} 段</span>
+          <Button size="sm" variant="ghost" :disabled="loading" @click="rebuildFromStoryboards">{{ t("editor.updateStoryboards") }}</Button>
+          <span class="rf-rail__n">{{ t("editor.trackClips", { count: clips.length }) }}</span>
         </div>
       </aside>
 
@@ -1054,7 +1055,7 @@ const episodeLabel = computed(() => {
       <section class="rf-stage">
         <div v-if="previewComposed && exportUrl" class="rf-player">
           <video :src="exportUrl" class="rf-video" controls playsinline />
-          <button type="button" class="rf-switch" @click="previewComposed = false">回到分镜预览</button>
+          <button type="button" class="rf-switch" @click="previewComposed = false">{{ t("editor.backToPreview") }}</button>
         </div>
         <div v-else-if="activeClip && activeClip.url && !activeClip.unplayable" class="rf-player">
           <video
@@ -1070,46 +1071,46 @@ const episodeLabel = computed(() => {
         <div v-else class="rf-placeholder">
           <span class="rf-placeholder__icon">▶</span>
           <p v-if="activeClip">
-            {{ activeClip.name }} 暂无可用视频文件
-            <em v-if="activeClip.unplayable">（当前是 mock 适配器的占位字节，配真实 Key 后即可播放）</em>
+            {{ t("editor.clipNoVideo", { name: activeClip.name }) }}
+            <em v-if="activeClip.unplayable">{{ t("editor.mockPlaceholderNote") }}</em>
           </p>
-          <p v-else>请在左侧选择分镜资产加入至时间线</p>
+          <p v-else>{{ t("editor.pickAssetHint") }}</p>
         </div>
 
         <!-- 竞品同款紫色气泡：显式说明「不自动同步」 -->
         <div class="rf-bubble">
-          <b>更新分镜</b>
-          <span>时间线材料不会自动更新，点「更新分镜」将同步分镜创作页的全部定稿素材。</span>
+          <b>{{ t("editor.updateTitle") }}</b>
+          <span>{{ t("editor.updateHint") }}</span>
         </div>
 
         <div v-if="exportUrl" class="rf-exportdone">
-          <span>合成完成 · {{ EXPORT_LABEL[3] }}</span>
-          <button type="button" class="rf-exportdone__btn" @click="previewComposed = true">播放成片</button>
-          <button type="button" class="rf-exportdone__btn" @click="downloadComposed">下载 mp4</button>
+          <span>{{ t("editor.exportDone", { status: EXPORT_LABEL[3] }) }}</span>
+          <button type="button" class="rf-exportdone__btn" @click="previewComposed = true">{{ t("editor.playComposed") }}</button>
+          <button type="button" class="rf-exportdone__btn" @click="downloadComposed">{{ t("editor.downloadMp4") }}</button>
         </div>
       </section>
 
       <!-- 底部时间线 150 -->
       <footer class="rf-tl">
         <div class="rf-tl__bar">
-          <button type="button" class="rf-play" @click="togglePlay">{{ playing ? "暂停" : "播放" }}</button>
+          <button type="button" class="rf-play" @click="togglePlay">{{ playing ? t("editor.pause") : t("editor.play") }}</button>
           <span class="rf-time">{{ playheadLabel }} / {{ totalLabel }}</span>
-          <span class="rf-count">{{ clips.length }} 段 · 共 {{ Math.round(totalDuration) }}s</span>
+          <span class="rf-count">{{ t("editor.countLine", { clips: clips.length, seconds: Math.round(totalDuration) }) }}</span>
           <Button
             size="sm"
             variant="ghost"
             :disabled="!activeClip"
-            title="把资产/镜头产物挂到当前片段（wf/clip-bind-asset）"
+            :title="t('editor.clipAssetsTitle')"
             @click="activeClip && openClipAssets(activeClip)"
           >
-            片段资产
+            {{ t("editor.clipAssetsBtn") }}
           </Button>
           <span class="rf-spacer" />
           <label class="rf-zoom">
-            <span>缩放</span>
-            <button type="button" class="rf-zoom__btn" aria-label="缩小" @click="pxPerSec = Math.max(MIN_PX_PER_SEC, pxPerSec - 8)">−</button>
-            <input v-model.number="pxPerSec" type="range" :min="MIN_PX_PER_SEC" :max="MAX_PX_PER_SEC" step="4" aria-label="时间线缩放" />
-            <button type="button" class="rf-zoom__btn" aria-label="放大" @click="pxPerSec = Math.min(MAX_PX_PER_SEC, pxPerSec + 8)">＋</button>
+            <span>{{ t("editor.zoom") }}</span>
+            <button type="button" class="rf-zoom__btn" :aria-label="t('editor.zoomOut')" @click="pxPerSec = Math.max(MIN_PX_PER_SEC, pxPerSec - 8)">−</button>
+            <input v-model.number="pxPerSec" type="range" :min="MIN_PX_PER_SEC" :max="MAX_PX_PER_SEC" step="4" :aria-label="t('editor.zoomRange')" />
+            <button type="button" class="rf-zoom__btn" :aria-label="t('editor.zoomIn')" @click="pxPerSec = Math.min(MAX_PX_PER_SEC, pxPerSec + 8)">＋</button>
           </label>
         </div>
 
@@ -1138,23 +1139,23 @@ const episodeLabel = computed(() => {
               :data-clip-id="clip.clip_id"
               :data-shot-no="clip.shot_no"
               tabindex="0"
-              :aria-label="`${clip.name} ${clip.duration} 秒`"
+              :aria-label="t('editor.clipAria', { name: clip.name, seconds: clip.duration })"
               @pointerdown="onClipPointerDown($event, clip, 'reorder')"
               @keydown="onClipKeydown($event, clip)"
             >
               <b>{{ clip.name }}</b>
               <em>{{ clip.duration }}s</em>
-              <button type="button" class="rf-clip__rm" title="移除" @pointerdown.stop @click.stop="removeClip(clip.clip_id)">✕</button>
+              <button type="button" class="rf-clip__rm" :title="t('editor.remove')" @pointerdown.stop @click.stop="removeClip(clip.clip_id)">✕</button>
               <!-- 右边缘 = 出点裁剪（入点需后端 clip 契约扩展，这里不假装支持） -->
               <span
                 class="rf-clip__trim"
-                title="拖动调整时长（出点）"
+                :title="t('editor.dragDuration')"
                 @pointerdown.stop="onClipPointerDown($event, clip, 'trim')"
               />
             </div>
 
             <p v-if="!clips.length" class="rf-clips__empty">
-              时间线为空：从左侧点选分镜加入，或把分镜拖到这条轨道上
+              {{ t("editor.timelineEmptyTrack") }}
             </p>
             <div class="rf-head" :style="{ left: `${playhead * pxPerSec}px` }" />
           </div>
@@ -1163,33 +1164,32 @@ const episodeLabel = computed(() => {
     </div>
 
     <!-- ═════════ 切片发布（wf/publish + wf/video-slicing）═════════ -->
-    <div v-if="showPublish" class="rf-modal" role="dialog" aria-label="切片发布">
+    <div v-if="showPublish" class="rf-modal" role="dialog" :aria-label="t('editor.publishModalAria')">
       <div class="rf-modal__panel">
         <header class="rf-modal__head">
-          <b>切片发布</b>
+          <b>{{ t("editor.publishSlice") }}</b>
           <button type="button" class="rf-modal__x" @click="showPublish = false">✕</button>
         </header>
         <p class="rf-modal__hint">
-          发布是**对外作品**，与「导出」不同：会复制一份产物并生成 shareToken。前置是本集已有一次成功的
-          成片合成（status=3），否则返回 400105。
+          {{ t("editor.publishIntro") }}
         </p>
         <p v-if="pubError" class="rf-modal__err">{{ pubError }}</p>
 
         <div class="rf-form">
           <label>
-            <span>标题</span>
-            <input v-model="pubTitle" class="rf-input" maxlength="100" placeholder="切片标题" />
+            <span>{{ t("editor.publishTitleLabel") }}</span>
+            <input v-model="pubTitle" class="rf-input" maxlength="100" :placeholder="t('editor.publishTitlePlaceholder')" />
           </label>
           <label>
-            <span>开始（秒）</span>
+            <span>{{ t("editor.startLabel") }}</span>
             <input v-model.number="pubStartS" class="rf-input" type="number" min="0" step="1" />
           </label>
           <label>
-            <span>结束（秒）</span>
+            <span>{{ t("editor.endLabel") }}</span>
             <input v-model.number="pubEndS" class="rf-input" type="number" min="1" step="1" />
           </label>
           <Button size="sm" :loading="publishing" :disabled="!clips.length" @click="publishSlice">
-            发布切片
+            {{ t("editor.publishAction") }}
           </Button>
         </div>
 
@@ -1207,18 +1207,18 @@ const episodeLabel = computed(() => {
               {{ Math.round((item.slice.start_ms ?? 0) / 1000) }}s ~
               {{ Math.round((item.slice.end_ms ?? 0) / 1000) }}s
             </span>
-            <a v-if="item.download_url" :href="item.download_url" class="rf-pub__dl" download>下载</a>
+            <a v-if="item.download_url" :href="item.download_url" class="rf-pub__dl" download>{{ t("editor.download") }}</a>
             <button
               v-if="item.share_token"
               type="button"
               class="rf-pub__btn"
-              title="复制 shareToken"
+              :title="t('editor.copyTokenTitle')"
               @click="copyShareToken(item)"
             >
-              复制 token
+              {{ t("editor.copyToken") }}
             </button>
             <a v-if="item.status === 3" :href="`/share/${item.share_token}`" target="_blank" class="rf-pub__btn">
-              分享页
+              {{ t("editor.sharePage") }}
             </a>
             <button
               v-if="item.status !== 5"
@@ -1226,31 +1226,31 @@ const episodeLabel = computed(() => {
               class="rf-pub__btn is-danger"
               @click="unpublish(item)"
             >
-              下架
+              {{ t("editor.offline") }}
             </button>
           </div>
-          <p v-if="publications.length === 0" class="rf-modal__hint">还没有发布记录</p>
+          <p v-if="publications.length === 0" class="rf-modal__hint">{{ t("editor.noPublications") }}</p>
         </div>
       </div>
     </div>
 
     <!-- ═════════ 片段资产（wf/clip-bind-asset，快照语义）═════════ -->
-    <div v-if="showClipAssets && assetClip" class="rf-modal" role="dialog" aria-label="片段资产">
+    <div v-if="showClipAssets && assetClip" class="rf-modal" role="dialog" :aria-label="t('editor.clipAssetsModalAria')">
       <div class="rf-modal__panel">
         <header class="rf-modal__head">
-          <b>片段资产 · {{ assetClip.name }}</b>
+          <b>{{ t("editor.clipAssetsTitleWith", { name: assetClip.name }) }}</b>
           <button type="button" class="rf-modal__x" @click="showClipAssets = false">✕</button>
         </header>
         <p class="rf-modal__hint">
-          快照语义：每次提交会**整体替换**该片段的绑定（已有绑定会自动带上，不会被清空）。
+          {{ t("editor.clipAssetsIntro") }}
         </p>
         <p v-if="clipAssetError" class="rf-modal__err">{{ clipAssetError }}</p>
 
         <div class="rf-form">
           <Button size="sm" variant="ghost" :loading="clipAssetBusy" @click="bindShotProductToClip">
-            绑定镜头产物
+            {{ t("editor.bindShotOutput") }}
           </Button>
-          <Button size="sm" variant="ghost" :disabled="clipAssetBusy" @click="clearClipAssets">清空绑定</Button>
+          <Button size="sm" variant="ghost" :disabled="clipAssetBusy" @click="clearClipAssets">{{ t("editor.clearBinding") }}</Button>
         </div>
 
         <div class="rf-assets">
@@ -1259,10 +1259,10 @@ const episodeLabel = computed(() => {
             <span class="rf-asset-row__name">{{ asset.name }}</span>
             <span class="rf-asset-row__uri" :title="asset.uri">{{ asset.uri }}</span>
           </div>
-          <p v-if="!(assetClip.assets ?? []).length" class="rf-modal__hint">该片段还没有绑定资产</p>
+          <p v-if="!(assetClip.assets ?? []).length" class="rf-modal__hint">{{ t("editor.noClipAssets") }}</p>
         </div>
 
-        <p class="rf-modal__hint">从项目已定稿资产中选择：</p>
+        <p class="rf-modal__hint">{{ t("editor.pickFromFinalized") }}</p>
         <div class="rf-assets">
           <button
             v-for="asset in projectAssetList"
@@ -1274,7 +1274,7 @@ const episodeLabel = computed(() => {
           >
             {{ asset.name }} · {{ asset.kind }}
           </button>
-          <p v-if="projectAssetList.length === 0" class="rf-modal__hint">项目里还没有已定稿且有参考图的资产</p>
+          <p v-if="projectAssetList.length === 0" class="rf-modal__hint">{{ t("editor.noProjectAssets") }}</p>
         </div>
       </div>
     </div>
