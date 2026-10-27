@@ -73,6 +73,15 @@ const shots = ref<Shot[]>([]);
 const loading = ref(false);
 const busy = ref("");
 const quote = ref<{ credits?: number; quote_id?: string } | null>(null);
+/**
+ * 最近一次 `resources/generate` 返回的配对（分镜 → 重绘产物）。
+ *
+ * 为什么需要它：重绘产物是**项目资产**，生成时才知道哪张图属于哪个分镜；
+ * 而分镜上的 `asset_ids`（storyboard_assets 绑定）此时还是空的。
+ * 所以"生成→绑定"必须用这一次的响应做配对，否则绑定会拿到空数组、`bound=0`
+ * （用户看到"绑定成功"但实际一个都没绑，比报错更难查）。
+ */
+const lastPairs = ref<Array<{ storyboard_id: string; project_asset_id: string }>>([]);
 const recent = ref<Array<{ id: string; title: string }>>([]);
 const batchForm = reactive({ count: 3, episode_duration_s: 60 });
 const shotDuration = ref(3);
@@ -180,22 +189,37 @@ const planStoryboards = () =>
   );
 
 const generateResources = (target: "image" | "video") =>
-  run("generate", () =>
-    api.post(`/video-redraw/projects/${projectId.value}/resources/generate`, {
+  run("generate", async () => {
+    const result = await api.post<{
+      tasks?: Array<{ storyboard_id: string; project_asset_id: string; task_id: string }>;
+    }>(`/video-redraw/projects/${projectId.value}/resources/generate`, {
       episode_id: activeEpisodeId.value || undefined,
       target,
       ...(quote.value?.quote_id ? { quote_id: quote.value.quote_id } : {}),
-    }),
-  );
+    });
+    lastPairs.value = (result?.tasks ?? []).map((item) => ({
+      storyboard_id: item.storyboard_id,
+      project_asset_id: item.project_asset_id,
+    }));
+    return result;
+  });
 
 const bindAll = () =>
   run("bind", async () => {
     // 用"本集全部分镜 + 本集已产出的重绘资产"自动绑定：一段一段手点不现实
+    // 优先用"本次生成"的配对（此时分镜上的 asset_ids 还是空的），
+    // 没有生成记录时回退到分镜已有绑定
+    const byShot = new Map<string, string[]>();
+    for (const pair of lastPairs.value) {
+      const list = byShot.get(pair.storyboard_id) ?? [];
+      list.push(pair.project_asset_id);
+      byShot.set(pair.storyboard_id, list);
+    }
     const body = {
       episode_id: activeEpisodeId.value,
       binds: shots.value.map((shot) => ({
         storyboard_id: shot.id,
-        project_asset_ids: (shot.asset_ids ?? []).slice(0, 20),
+        project_asset_ids: (byShot.get(shot.id) ?? shot.asset_ids ?? []).slice(0, 20),
       })),
     };
     const result = await api.post<BindResult>(`/video-redraw/projects/${projectId.value}/asset/bind`, body);

@@ -73,10 +73,12 @@ async function pickImage(event: Event): Promise<void> {
       reader.onerror = () => reject(new Error("读取文件失败"));
       reader.readAsDataURL(file);
     });
+    // 契约要求 `filename`（不是 `name`）：`assetUploadSchema.filename` 必填，
+    // 传错字段会 400 "filename Required"，而前端只看到 toast、预览永远不出现。
     const asset = await api.post<AssetDto>("/assets/upload", {
       data_base64: base64,
       content_type: file.type,
-      name: file.name,
+      filename: file.name,
     });
     form.materialImage = asset.uri;
     imagePreview.value = URL.createObjectURL(file);
