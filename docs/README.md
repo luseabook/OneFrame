@@ -123,6 +123,39 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.9 · 多语言第 39 批：语言偏好持久到账号 · 2026-10-28）
+
+补掉 §5.3 第 7 行里最后一个"代码侧可做"的项：**语言偏好从"只在本设备 cookie"升级为"跟随账号"**。
+
+| 层 | 改动 |
+|---|---|
+| DB | 迁移 **0035**：`users.preferred_locale text not null default ''`（`''` = 从未显式选择） |
+| API | `POST /me/locale`（`setPreferredLocale`）：只接受 `zh-CN/en/ja/pt-BR/es` + 空串（清除），其它值 **400101 且不落库**；`GET /me` 返回 `user.preferred_locale` |
+| Web | `setLocale()` **best-effort 写账号**（未登录/网络失败静默吞掉，绝不让"切语言"因为接口失败而回滚）；`plugins/i18n.ts` 建立**四层优先级**：<br>`?lang=` > 本设备 cookie > 账号偏好 > 浏览器 → `zh-CN` |
+| Test | 新增 [account-locale.spec.ts](app/apps/api/test/account-locale.spec.ts) **5 例**：默认空串、存读幂等、空串清除、非法值 400101 且不落库、未登录 401101 |
+
+### 为什么优先级要这样排
+
+如果简单"账号偏好永远优先"，会出现：我在自己电脑上选了英文，结果登录后被我另一台设备设的日文顶掉；
+反过来"cookie 永远优先"，换设备就丢了账号设置。所以采用：**本设备显式选择（cookie）> 账号偏好**，
+账号偏好只在本设备"从没选过"时生效。这条语义写进了插件注释，避免以后被"图省事"改成单向覆盖。
+
+### 两个环境坑（都是跑起来才暴露）
+
+1. `ErrorCode.PARAM_ERROR` 在本仓**不存在**，正确值是 `INVALID_PARAM`（`400101`）；
+2. 本仓**没有 `refresh_tokens` 表**（refresh token 存 Redis），我照抄其他 spec 的清理语句直接报错 →
+   改成与 `auth-oauth.spec` 一致：只关连接池，不删测试用户。
+
+### 第三个坑（不是本轮代码引起的，但值得记）
+
+第一次跑 gate 时有 4 个用例假失败（canvas `sync-tasks`、timeline 导出 ×2、project-assets-image）——
+原因是**上一轮遗留的 worker 进程还在消费队列**，把测试里"任务停在 pending"的前置条件破坏掉。
+停掉 worker 后 815/815 全绿。这类"看起来是我改坏了、其实是环境残留"的失败，最容易诱发错误修复，
+所以 gate 脚本里停 worker 的那一步不能省。
+
+**验证**：`account-locale.spec` 5/5；`i18n-check.cjs` 全绿（2947 key / 43 页 + 20 组件）；
+`e2e-i18n-pages.cjs` **138/138**；`pnpm lint` 0 error；全量 **1,147 例**（api 815 + adapters 164 + cli 89 + worker 33 + db 26 + shared 14 + storage 6）全绿。
+
 ## 变更登记（v6.8 · 多语言第 38 批：watch 播放页 + 覆盖率口径修正 + 外部依赖清单 · 2026-10-28）
 
 ### 1. watch 分享播放页（最后一个非页面文案缺口）

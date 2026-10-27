@@ -91,6 +91,18 @@ export const useI18n = (): I18n => {
     // Set-Cookie，客户端时它落到 document.cookie，两条路径同一份语义
     cookie.value = resolved;
     if (import.meta.client) document.documentElement.setAttribute("lang", resolved);
+    // 账号级偏好（跨设备跟随账号）：尽力而为，失败不影响本地切换。
+    // 未登录调 /me/locale 会 401，这里静默吞掉——语言切换本身不能因为网络失败而回滚。
+    if (import.meta.client) {
+      void (async () => {
+        try {
+          const api = useApi();
+          await api.post("/me/locale", { locale: resolved });
+        } catch {
+          /* 未登录或网络失败：仅本设备生效（cookie 已写） */
+        }
+      })();
+    }
     return resolved;
   };
 

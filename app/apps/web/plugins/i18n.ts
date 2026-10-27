@@ -58,6 +58,31 @@ export default defineNuxtPlugin(() => {
   const resolved: Locale = fromQuery ?? fromCookie ?? fromBrowser ?? DEFAULT_LOCALE;
 
   state.value = { locale: resolved, ready: true };
+
+  /**
+   * 账号级偏好：登录后 `/me` 会带 `user.preferred_locale`。
+   * 优先级设计（避免"我明明在这台机器选了英文，却被账号里的日文顶掉"）：
+   *   1. URL `?lang=`（投放/分享链接，最强）
+   *   2. 本设备 cookie（用户最近一次显式选择）
+   *   3. 账号偏好（跨设备，仅当本设备从没选过时生效）
+   *   4. 浏览器语言 → 默认 zh-CN
+   */
+  if (import.meta.client) {
+    void (async () => {
+      if (fromQuery || fromCookie) return; // 本设备已有明确偏好，不覆盖
+      try {
+        const api = useApi();
+        const me = await api.get<{ user?: { preferred_locale?: string } }>("/me");
+        const account = normalizeLocale(me?.user?.preferred_locale);
+        if (account && account !== state.value.locale) {
+          state.value = { ...state.value, locale: account };
+          document.documentElement.setAttribute("lang", account);
+        }
+      } catch {
+        /* 未登录：保持按设备解析的语言 */
+      }
+    })();
+  }
   // 带 `?lang=` 进来（投放/分享链接）时把它记住：之后站内跳转不再需要该参数
   if (fromQuery && fromQuery !== fromCookie) cookie.value = fromQuery;
 

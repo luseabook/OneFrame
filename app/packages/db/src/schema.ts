@@ -35,6 +35,12 @@ export const users = pgTable("users", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   /** 新手引导是否已看过（PRD 增补 §3，用于回流引导条与激活口径） */
   onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+  /**
+   * 账号级语言偏好（zh-CN|en|ja|pt-BR|es）。
+   * 空串表示"从未显式选择过"，此时前端按 cookie（of_lang）→ 浏览器语言 → 默认 zh-CN 解析。
+   * 与 cookie 的分工：cookie 是本设备的即时偏好，本字段是跨设备跟随账号的偏好。
+   */
+  preferredLocale: text("preferred_locale").notNull().default(""),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

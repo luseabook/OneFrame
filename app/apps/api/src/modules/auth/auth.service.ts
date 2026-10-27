@@ -387,13 +387,34 @@ export class AuthService {
       .where(eq(creditAccounts.spaceId, BigInt(spaceId)));
     if (!user || !space || !account) throw new AppError(ErrorCode.NOT_FOUND, "account not found");
     return {
-      user: { id: String(user.id), nickname: user.nickname, avatar_uri: user.avatarUri ?? null },
+      user: {
+        id: String(user.id),
+        nickname: user.nickname,
+        avatar_uri: user.avatarUri ?? null,
+        /** 账号级语言偏好；空串=未设置（前端按 cookie/浏览器兜底） */
+        preferred_locale: user.preferredLocale ?? "",
+      },
       space: { id: String(space.id), name: space.name },
       credits: { balance: account.balance, frozen: account.frozen },
       vip: null,
       /** 新手引导是否已关闭（PRD 增补 §3）：false 时工作台展示引导条 */
       onboarded: user.onboardedAt !== null,
     };
+  }
+
+  /**
+   * 保存账号级语言偏好（跨设备跟随账号）。
+   * 只接受受支持的 5 语言；传空串表示清除（回到"跟随设备"）。
+   * 与 cookie 的关系：本接口只写库，cookie 仍由前端即时写入，二者不互相覆盖。
+   */
+  async setPreferredLocale(userId: string, locale: string): Promise<{ preferred_locale: string }> {
+    const allowed = ["", "zh-CN", "en", "ja", "pt-BR", "es"];
+    if (!allowed.includes(locale)) throw new AppError(ErrorCode.INVALID_PARAM, "unsupported locale");
+    await db
+      .update(users)
+      .set({ preferredLocale: locale, updatedAt: new Date() })
+      .where(eq(users.id, BigInt(userId)));
+    return { preferred_locale: locale };
   }
 
   /** 标记新手引导已读（关闭引导条时调用，幂等） */

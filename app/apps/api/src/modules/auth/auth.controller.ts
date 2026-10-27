@@ -124,6 +124,14 @@ export class AuthController {
     return this.auth.me(auth.userId, auth.spaceId);
   }
 
+  /** 保存账号级语言偏好（跨设备跟随账号；空串=清除，回到跟随设备） */
+  @Post("me/locale")
+  async setLocale(@Req() req: AuthedRequest, @Body() body: { locale?: string }) {
+    const auth = req.auth;
+    if (!auth) return null;
+    return this.auth.setPreferredLocale(auth.userId, String(body?.locale ?? ""));
+  }
+
   /** 标记新手引导已读（PRD 增补 §3.2） */
   @Post("me/onboarded")
   async onboarded(@Req() req: AuthedRequest) {

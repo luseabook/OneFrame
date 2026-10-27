@@ -26,7 +26,7 @@ type WatchState = "loading" | "ready" | "transcoding" | "off_shelf" | "not_found
 
 const route = useRoute();
 const api = useApi();
-const { t, locale } = useI18n();
+const { t } = useI18n();
 
 const state = ref<WatchState>("loading");
 const data = ref<WatchPublicationDto | null>(null);
