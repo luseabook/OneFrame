@@ -8,6 +8,6 @@ import { ModerationStatusService } from "./status.service";
 @Module({
   controllers: [ModerationController],
   providers: [ModerationService, ModerationDetectService, ModerationStatusService, CaptchaService],
-  exports: [ModerationService, ModerationDetectService],
+  exports: [ModerationService, ModerationDetectService, CaptchaService],
 })
 export class ModerationModule {}

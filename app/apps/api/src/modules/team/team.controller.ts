@@ -285,6 +285,7 @@ export class TeamController {
   @Patch("team/member/:user_id")
   async updateMember(@Req() req: AuthedRequest, @Param("user_id") userId: string, @Body() body: unknown) {
     const c = await this.ctx(req);
+    await this.team.requirePermission(c.spaceId, c.userId, "member.edit");
     this.team.requirePrivilege(c, "update member");
     return this.team.updateMember(c.spaceId, userId, parseOrThrow(memberUpdate, body));
   }
@@ -308,6 +309,7 @@ export class TeamController {
   @Delete("team/member/:user_id")
   async removeMember(@Req() req: AuthedRequest, @Param("user_id") userId: string) {
     const c = await this.ctx(req);
+    await this.team.requirePermission(c.spaceId, c.userId, "member.remove");
     this.team.requirePrivilege(c, "remove member");
     return this.team.removeMember(c.spaceId, userId);
   }
@@ -353,6 +355,7 @@ export class TeamController {
   @Post("team/points-allocation")
   async allocate(@Req() req: AuthedRequest, @Body() body: unknown) {
     const c = await this.ctx(req);
+    await this.team.requirePermission(c.spaceId, c.userId, "member.points");
     this.team.requirePrivilege(c, "allocate points");
     return this.team.allocate(c.spaceId, c.userId, parseOrThrow(allocateBody, body));
   }
@@ -368,6 +371,7 @@ export class TeamController {
   @Post("team/batch-points-allocation")
   async batchAllocate(@Req() req: AuthedRequest, @Body() body: unknown) {
     const c = await this.ctx(req);
+    await this.team.requirePermission(c.spaceId, c.userId, "member.points");
     this.team.requirePrivilege(c, "allocate points");
     return this.team.batchAllocate(c.spaceId, c.userId, parseOrThrow(batchAllocateBody, body));
   }

@@ -141,6 +141,15 @@ const envSchema = z.object({
   MASTER_TTL_S: z.coerce.number().int().min(3600).default(2_592_000), // 30 天
 
   /**
+   * 行为验证码是否在**登录/发码**入口强制校验（默认 0=关）。
+   *
+   * 为什么默认关：验证码只有本地算术题模式（无第三方 Key），强制校验会把"机器人防护"
+   * 变成"用户多答一道题"，而现有 13 套 e2e 与真机验收全都走无验证码路径。
+   * 运营决定开启时置 1（服务在**调用时**读 process.env，便于测试切态；此处仅登记）。
+   */
+  CAPTCHA_ENFORCE: z.enum(["0", "1"]).default("0"),
+
+  /**
    * 影视版离线通知 webhook（第 4 轮）：为空 = 只走广播面，不投递（响应 `delivery:"stored"`）。
    * 用途：把 `task.notified` 等事件推到企业微信/飞书机器人或客户自己的网关，不必接推送厂商。
    * `FILM_NOTIFY_SECRET` 用于 HMAC-SHA256 签名（`x-of-signature: sha256=<hex>`），接收方可验来源。

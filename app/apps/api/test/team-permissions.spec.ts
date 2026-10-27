@@ -430,7 +430,7 @@ describe("team permissions (cam) e2e", () => {
     return { owner, member, teamSpaceId };
   }
 
-  it("enforced 清单：正好 3 个码、与端点一一对应、且都在权限目录里", async () => {
+  it("enforced 清单：正好 6 个码、与端点一一对应、且都在权限目录里", async () => {
     const { owner, teamSpaceId } = await setupTeamWithMember("41", "42", 3, "producer");
 
     const res = await inject("GET", "/cam/permissions", undefined, owner.token, teamSpaceId);
@@ -440,26 +440,75 @@ describe("team permissions (cam) e2e", () => {
       enforced: Array<{ code: string; method: string; endpoint: string; note: string }>;
       enforced_count: number;
     };
-    expect(data.enforced_count).toBe(3);
+    expect(data.enforced_count).toBe(6);
     expect(data.enforced.map((item) => item.code).sort()).toEqual([
       "member.create",
+      "member.edit",
+      "member.points",
+      "member.remove",
       "team.edit",
       "team.permission",
     ]);
     // 每个 enforced 码必须真实存在于目录（否则前端矩阵无处显示"生效中"）
     const allCodes = new Set(data.list.map((entry) => entry.code));
     for (const item of data.enforced) expect(allCodes.has(item.code)).toBe(true);
-    // 逐码布尔位：3 个 true，其余 false
+    // 逐码布尔位：6 个 true，其余 false
     const byCode = new Map(data.list.map((entry) => [entry.code, entry.enforced]));
-    expect(byCode.get("team.edit")).toBe(true);
-    expect(byCode.get("team.permission")).toBe(true);
-    expect(byCode.get("member.create")).toBe(true);
+    for (const code of ["team.edit", "team.permission", "member.create", "member.remove", "member.edit", "member.points"]) {
+      expect(byCode.get(code), code).toBe(true);
+    }
     expect(byCode.get("project.view")).toBe(false);
     // 端点形状可直接对着 curl
     expect(data.enforced.find((item) => item.code === "team.edit")).toMatchObject({
       method: "PATCH",
       endpoint: "/v1/cam/team/info",
     });
+  });
+
+  it("显式收紧：power_list 缺 member.remove / member.edit / member.points → 三个端点都 403101", async () => {
+    const { owner, member, teamSpaceId } = await setupTeamWithMember("45", "46", 3, "producer");
+    // 只给 team.edit，缺这三码 → 三个端点都应拒绝
+    await setRolePowerList(teamSpaceId, "producer", ["team.edit"]);
+
+    const remove = await inject(
+      "DELETE",
+      `/cam/team/member/${member.userId}`,
+      undefined,
+      member.token,
+      teamSpaceId,
+    );
+    expect(remove.code).toBe(403101);
+    expect(String(remove.msg)).toContain("member.remove");
+
+    const patchMember = await inject(
+      "PATCH",
+      `/cam/team/member/${member.userId}`,
+      { role: 3 },
+      member.token,
+      teamSpaceId,
+    );
+    expect(patchMember.code).toBe(403101);
+    expect(String(patchMember.msg)).toContain("member.edit");
+
+    const allocate = await inject(
+      "POST",
+      "/cam/team/points-allocation",
+      { user_id: member.userId, credits: 10 },
+      member.token,
+      teamSpaceId,
+    );
+    expect(allocate.code).toBe(403101);
+    expect(String(allocate.msg)).toContain("member.points");
+
+    // owner 始终可（role_code=master 短路）：用 owner 打同一个分配端点应不是 403101
+    const ownerAllocate = await inject(
+      "POST",
+      "/cam/team/points-allocation",
+      { user_id: member.userId, credits: 1 },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(ownerAllocate.code).not.toBe(403101);
   });
 
   it("默认放行①：owner（role=1/master）短路 —— 角色被限制也照样能改团队设置", async () => {

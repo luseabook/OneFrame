@@ -12,9 +12,9 @@
  * 也是 `test/team-permissions.spec.ts` 的断言依据——**加新拦截时三处必须同步**：
  * 1) 本表加一行；2) 对应 controller 调 `requirePermission`；3) spec 加一条越权用例。
  *
- * 选这 3 个的理由：都是"低风险但边界清晰"的管理写入口——改动团队设置、
+ * 选这些的理由：都是"低风险但边界清晰"的管理写入口——改动团队设置、
  * 改角色权限矩阵、拉人进团队。它们错了的后果可控（不会删数据/不会扣积分），
- * 但恰好是权限模型最该先管住的三件事。
+ * 但恰好是权限模型最该先管住的事。第 6 轮再扩 3 个（移除成员 / 改成员角色 / 分配积分），\n * 都走同一套 requirePermission + 越权 403101 语义（spec 逐条覆盖）。
  */
 export interface EnforcedPermission {
   /** 权限码（必须在 `PERMISSION_CATALOG` 里存在，否则矩阵上无处显示） */
@@ -46,6 +46,24 @@ export const ENFORCED_PERMISSIONS: readonly EnforcedPermission[] = [
     method: "POST",
     endpoint: "/v1/cam/team/member/batch",
     note: "邀请/批量添加成员（= 邀请入口）",
+  },
+  {
+    code: "member.remove",
+    method: "DELETE",
+    endpoint: "/v1/cam/team/member/:user_id",
+    note: "移除成员（不可逆，但只影响成员关系，不删数据/不扣积分）",
+  },
+  {
+    code: "member.edit",
+    method: "PATCH",
+    endpoint: "/v1/cam/team/member/:user_id",
+    note: "改成员资料/角色（含角色变更，高危但边界清晰）",
+  },
+  {
+    code: "member.points",
+    method: "POST",
+    endpoint: "/v1/cam/team/points-allocation",
+    note: "给成员分配积分（走账本可审计；回收 points-recovery 同码）",
   },
 ] as const;
 

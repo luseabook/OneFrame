@@ -1735,3 +1735,29 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 
 **前端**：`SubjectLibrary` 的"应用模板"下拉来自 `GET /subjects/templates`，调 `POST /subjects/:id/apply-template`；
 提示文案明确"已追加风格前缀，原描述不变"（与自由填写的模板键 `template_key` 是两个不同动作）。
+
+### 17.13 权限拦截扩面 + 验证码入口闸门（2026-10-27 第 7 轮）
+
+**权限入口拦截（`ENFORCED_PERMISSIONS`，3 → 6 码）**
+
+| 码 | 端点 | 语义 |
+|---|---|---|
+| `team.edit` | `PATCH /cam/team/info` | 改团队设置 |
+| `team.permission` | `PUT /cam/roles/:role_id/permissions` | 改角色权限矩阵 |
+| `member.create` | `POST /cam/team/member/batch` | 邀请/批量添加成员 |
+| `member.remove` | `DELETE /cam/team/member/:user_id` | 移除成员 |
+| `member.edit` | `PATCH /cam/team/member/:user_id` | 改成员资料/角色 |
+| `member.points` | `POST /cam/team/points-allocation`（批量同码） | 分配积分 |
+
+口径：**默认放行**（成员无显式 `power_list` 视为全权；`role_code=master` 短路）——保证存量 e2e 零回归；
+显式收紧后越权返回 `403101` 且 `msg` 带缺失码。`GET /cam/permissions` 的 `enforced` 字段与 `enforced_count` 是唯一事实源。
+
+**验证码入口闸门（`CAPTCHA_ENFORCE`）**
+
+| 项 | 口径 |
+|---|---|
+| 适用入口 | `POST /auth/sms-code`、`POST /auth/login` |
+| 入参 | `captcha_ticket`（来自 `POST /moderation/captcha/ticket`）+ `captcha_answer` |
+| 开关 | `CAPTCHA_ENFORCE=1` 强制；默认 `0` 关闭（零回归）。服务**调用时**读 `process.env` 便于测试切态 |
+| 拒绝 | 缺票 → `400101 captcha_required`；答错 → `400101 captcha failed(wrong_answer)`；**答错也消耗票据**（防 10×10 枚举） |
+| 放行 | 答对且票据未被使用 → 正常发码/登录 |

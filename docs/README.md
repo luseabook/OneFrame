@@ -123,6 +123,21 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v3.7 · 权限拦截扩到 6 码 + 验证码接入登录入口 · 2026-10-27）
+
+**#7 团队 99% → 100%、#25 内容安全 85% → 92%**；全站 **97.1%** / 首发 **97.6%**。
+
+1. **权限入口拦截 3 → 6 个码**：新增 `member.remove`（移除成员）、`member.edit`（改成员角色/资料）、
+   `member.points`（分配/批量分配积分）。`GET /cam/permissions` 的 `enforced_count` 同步为 6，
+   前端角色矩阵自动对 6 个码显示"生效中"。spec 从"正好 3 个"改为逐码断言，并新增
+   "缺码 → 三个端点各自 403101（msg 带缺失码）+ owner(master) 短路可分配"。
+2. **验证码接入业务入口（开关式）**：`/auth/sms-code` 与 `/auth/login` 现在支持 `captcha_ticket`/`captcha_answer`；
+   `CAPTCHA_ENFORCE=1` 时强制校验（缺失 400101 `captcha_required`；答错 400101 `wrong_answer` 且票据作废；
+   答对放行），默认 0 = 关闭以保零回归。`CaptchaService` 从 @Global 的 ModerationModule 导出。
+   新增 `test/auth-captcha-gate.spec.ts` 5 例覆盖两态与四条拒绝/放行路径。
+3. **为什么默认关而不是默认开**：本地只有算术题模式（无第三方 Key），强制校验会把"机器人防护"变成
+   "用户多答一道题"，且现有 13 套 e2e 与真机验收全走无码路径；开关让"能力就绪"与"运营决定"分离。
+
 ## 变更登记（v3.6 · 三套浏览器 E2E 收尾（广告剧/转绘/模板 UI） · 2026-10-27）
 
 **#13 广告剧 90% → 97%、#14 视频转绘 90% → 97%**；全站 **97.0%** / 首发 **97.4%**。

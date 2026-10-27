@@ -9,11 +9,24 @@ import { parseOrThrow } from "../../common/zod";
 import type { AuthedRequest } from "../../common/auth.types";
 import { AuthService } from "./auth.service";
 import { OauthService } from "./oauth.service";
+import { CaptchaService } from "../moderation/captcha.service";
 
-const smsBody = smsCodeRequestSchema.extend({ invite_code: z.string().min(1).optional() });
+/**
+ * 发码入参：公共契约 + `invite_code` + **可选**行为验证码。
+ *
+ * 验证码是"开关式"的：`CAPTCHA_ENFORCE=1` 时必填，默认关（现有 e2e/真机验收全走无码路径）。
+ * 字段名 `captcha_ticket`/`captcha_answer` 与 `POST /moderation/captcha/verify` 同口径。
+ */
+const smsBody = smsCodeRequestSchema.extend({
+  invite_code: z.string().min(1).optional(),
+  captcha_ticket: z.string().min(1).max(2048).optional(),
+  captcha_answer: z.union([z.string().max(20), z.number()]).optional(),
+});
 const loginBody = loginRequestSchema.extend({
   invite_code: z.string().min(1).optional(),
   age_confirmed: z.boolean().optional(),
+  captcha_ticket: z.string().min(1).max(2048).optional(),
+  captcha_answer: z.union([z.string().max(20), z.number()]).optional(),
 });
 const waitlistBody = z.object({
   phone: z.string().regex(/^1\d{10}$/),
@@ -34,12 +47,40 @@ export class AuthController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(OauthService) private readonly oauth: OauthService,
-  ) {}
+    @Inject(CaptchaService) private readonly captcha: CaptchaService,
+  ) {
+    // 说明：验证码在本 controller 里是"可选闸门"，见 smsBody 注释与 enforceCaptcha()
+  }
+
+  /**
+   * 可选的行为验证码闸门（`CAPTCHA_ENFORCE=1` 时生效）。
+   *
+   * 为什么放在 controller 而不是 service：它只拦"发码/登录"这两个入口，
+   * 而 `AuthService` 本身还要被 OAuth/内部调用复用（那些路径不该被算术题挡住）。
+   * 读 `process.env` 而不是 `env` 常量：测试需要在同一进程里切"开/关"两态（与 OAuth 同口径）。
+   */
+  private async enforceCaptcha(input: { captcha_ticket?: string; captcha_answer?: unknown }): Promise<void> {
+    if (String(process.env.CAPTCHA_ENFORCE ?? "0") !== "1") return;
+    if (!input.captcha_ticket) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "captcha required (captcha_required)", {
+        field: "captcha_ticket",
+      });
+    }
+    const result = await this.captcha.verify(input.captcha_ticket, input.captcha_answer);
+    if (!result.passed) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `captcha failed (${result.reason ?? "wrong_answer"})`, {
+        field: "captcha_answer",
+        reason: result.reason,
+        retry_allowed: result.retry_allowed,
+      });
+    }
+  }
 
   @Public()
   @Post("auth/sms-code")
   async sms(@Body() body: unknown, @Req() req: FastifyRequest): Promise<{ debug_code?: string }> {
     const input = parseOrThrow(smsBody, body);
+    await this.enforceCaptcha(input);
     return this.auth.sendCode(input.phone, clientIp(req));
   }
 
@@ -47,6 +88,10 @@ export class AuthController {
   @Post("auth/login")
   async login(@Body() body: unknown, @Res({ passthrough: true }) res: FastifyReply) {
     const input = parseOrThrow(loginBody, body);
+    // 登录入口同样走可选验证码闸门（同一开关，避免"发码防住了、登录没防"的半吊子状态）
+    await this.enforceCaptcha(
+      input as { captcha_ticket?: string; captcha_answer?: unknown },
+    );
     const result = await this.auth.login(input.phone, input.code, input.invite_code, input.age_confirmed);
     this.setRefreshCookie(res, result.refresh_token);
     const { refresh_token: _ignored, ...payload } = result;
