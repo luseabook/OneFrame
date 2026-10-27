@@ -699,5 +699,97 @@
     "toastRedeemSuccess": "Redeemed: {credits} credits granted",
     "toastRedeemFailed": "Redemption failed",
     "loadFailed": "Failed to load invite information"
+  },
+  "home": {
+    "metaTitle": "Home · OneFrame",
+    "heroTitle": "Your own AI anime studio",
+    "unread": "{count} new updates",
+    "abCta": "Start creating",
+    "abCtaVariantB": "Start creating now",
+    "workflowTitle": "Short-drama workflow",
+    "workflowDesc": "From script to final cut — one pipeline for hit short dramas",
+    "canvasTitle": "Infinite canvas",
+    "canvasDesc": "Create a canvas and wire nodes into your own workflow",
+    "tools": {
+      "script": {
+        "label": "Script writing",
+        "desc": "Novel to storyboard in one pipeline"
+      },
+      "plaza": {
+        "label": "Script plaza",
+        "desc": "A large library of script ideas and templates",
+        "tag": "Coming soon"
+      },
+      "spark": {
+        "label": "Video redraw",
+        "desc": "Stylized redraw — many art styles from one video",
+        "tag": "1-week VIP"
+      },
+      "lips": {
+        "label": "Video translation",
+        "desc": "Multilingual video translation with lip sync",
+        "tag": "Coming soon"
+      },
+      "t2v": {
+        "label": "Video breakdown",
+        "desc": "Frame-by-frame analysis of hit shot language"
+      },
+      "i2v": {
+        "label": "Voice redesign",
+        "desc": "Clone a voice from one sample and reshape a character's timbre"
+      },
+      "hd": {
+        "label": "Typo re-dub",
+        "desc": "Detect typos in dialogue and re-dub automatically"
+      }
+    },
+    "banners": {
+      "pipelines": {
+        "title": "Script to final cut, twice as fast",
+        "sub": "The AI anime pipeline gets a full upgrade"
+      },
+      "consistency": {
+        "title": "Character consistency",
+        "sub": "The reference portrait is injected into every shot, so faces stay the same"
+      },
+      "pricing": {
+        "title": "Transparent pricing",
+        "sub": "Live quotes before generation; credits are refunded automatically on failure"
+      }
+    },
+    "comingSoon": "{name} is coming soon — stay tuned",
+    "prevBanner": "Previous",
+    "nextBanner": "Next",
+    "bannerIndex": "Slide {index}",
+    "recentTitle": "Recent projects",
+    "viewAll": "View all",
+    "loading": "Loading…",
+    "emptyRecent": "No projects yet — create your first one to start",
+    "createProject": "Create project",
+    "dramaType": {
+      "domestic": "Domestic live-action drama",
+      "overseas": "Overseas live-action drama",
+      "anime": "2D/3D anime"
+    },
+    "dramaFallback": "Short drama"
+  },
+  "onboarding": {
+    "title": "Your first episode in 3 steps",
+    "steps": {
+      "create": {
+        "title": "Create a project",
+        "desc": "Paste a novel or write a one-line idea"
+      },
+      "outline": {
+        "title": "Generate the outline",
+        "desc": "AI splits it into 3–6 episodes, editable one by one"
+      },
+      "render": {
+        "title": "Submit for rendering",
+        "desc": "Pick a model and budget, then batch it in one click"
+      }
+    },
+    "start": "Start creating",
+    "dismiss": "Don't show again"
   }
 }

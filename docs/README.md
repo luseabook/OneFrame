@@ -123,6 +123,24 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.2 · 多语言第 12 批：首页 + 新手引导条 · 2026-10-28）
+
+**#16 多语言 95% → 96%**；全站 **97.5%** / 首发 **97.6%**。
+
+| 文件 | namespace | 迁移内容 |
+|---|---|---|
+| [home.vue](app/apps/web/pages/home.vue) | `home`（46 key） | 主标题、未读徽标（带参）、AB 位 CTA（两变体）、双入口卡（短剧工作流/无限画布）、**工具矩阵 7 张卡**（label/desc/tag 三组嵌套 key）、**轮播 3 条**（title/sub）、剧型标签（3 种）、最近项目区（标题/查看全部/空态/创建按钮）、轮播 aria-label |
+| [OnboardingBar.vue](app/apps/web/components/OnboardingBar.vue) | `onboarding`（10 key） | 引导条标题、3 个步骤（title/desc）、开始创建、不再提示 |
+
+- 已迁移 **17 / 64 页 + 1 组件**，语言包 **596 → 668 key**。
+- **一处真实缺口是被 E2E 抓出来的**：首页本身迁完后英文页仍出现中文——来源是 `OnboardingBar` 组件（独立组件、不在页面里）。
+  把断言从"主标题/最近项目/空态"扩到"新手引导条"后才暴露；组件迁完断言转绿。
+- 两处数据数组的迁移手法：`tools` 与 `banners` 从常量改 `computed`（常量在 setup 期固化，切语言不更新）；
+  但 `banners.length` 在 **script** 里要写 `banners.value.length`（模板里自动解包，script 里不会）——这是本轮唯一一次类型报错。
+
+**验证**：`i18n-check.cjs` 全绿（668 key / 17 页 + 4 组件 key 齐全）；`e2e-i18n-pages.cjs` **36/36**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.1 · 多语言第 10–11 批：剧本工厂 + 邀请与兑换 · 2026-10-28）
 
 **#16 多语言 94% → 95%**；全站 **97.4%** / 首发 **97.6%**。

@@ -699,5 +699,97 @@
     "toastRedeemSuccess": "兑换成功，到账 {credits} 积分",
     "toastRedeemFailed": "兑换失败",
     "loadFailed": "邀请信息加载失败"
+  },
+  "home": {
+    "metaTitle": "首页 · 一帧",
+    "heroTitle": "您的专属AI漫剧工作室",
+    "unread": "{count} 条新动态",
+    "abCta": "开始创作",
+    "abCtaVariantB": "立即开始创作",
+    "workflowTitle": "短剧工作流",
+    "workflowDesc": "从剧本到成片，一站式创作爆款短剧",
+    "canvasTitle": "无限画布",
+    "canvasDesc": "创建画布，连接节点定制工作流",
+    "tools": {
+      "script": {
+        "label": "剧本创作",
+        "desc": "小说到分镜，一站式流水线"
+      },
+      "plaza": {
+        "label": "剧本广场",
+        "desc": "海量剧本灵感与模板",
+        "tag": "即将上线"
+      },
+      "spark": {
+        "label": "视频转绘",
+        "desc": "风格化重绘，一支视频多种画风",
+        "tag": "一周会员"
+      },
+      "lips": {
+        "label": "视频转译",
+        "desc": "多语种视频翻译与口型同步",
+        "tag": "即将上线"
+      },
+      "t2v": {
+        "label": "视频拉片",
+        "desc": "逐帧拆解，学习爆款镜头语言"
+      },
+      "i2v": {
+        "label": "音色修改",
+        "desc": "一句话克隆音色，重塑角色声线"
+      },
+      "hd": {
+        "label": "错字重读",
+        "desc": "智能识别台词错字并重新配音"
+      }
+    },
+    "banners": {
+      "pipelines": {
+        "title": "剧本到成片，效率翻倍",
+        "sub": "AI 漫剧流水线全新升级"
+      },
+      "consistency": {
+        "title": "角色一致性",
+        "sub": "定妆图注入每一镜，人物不再变脸"
+      },
+      "pricing": {
+        "title": "价格透明",
+        "sub": "生成前实时报价，失败自动退还积分"
+      }
+    },
+    "comingSoon": "{name}即将上线，敬请期待",
+    "prevBanner": "上一个",
+    "nextBanner": "下一个",
+    "bannerIndex": "第 {index} 张",
+    "recentTitle": "最近项目",
+    "viewAll": "查看全部",
+    "loading": "加载中…",
+    "emptyRecent": "还没有项目，创建第一个开始创作",
+    "createProject": "创建项目",
+    "dramaType": {
+      "domestic": "国内仿真人剧",
+      "overseas": "海外仿真人剧",
+      "anime": "2D/3D动漫"
+    },
+    "dramaFallback": "短剧"
+  },
+  "onboarding": {
+    "title": "3 步做出第一集",
+    "steps": {
+      "create": {
+        "title": "新建作品",
+        "desc": "粘贴小说或写一句话想法"
+      },
+      "outline": {
+        "title": "生成大纲",
+        "desc": "AI 拆成 3~6 集，可逐条改"
+      },
+      "render": {
+        "title": "投递出片",
+        "desc": "选模型与预算，一键批量"
+      }
+    },
+    "start": "开始创建",
+    "dismiss": "不再提示"
   }
 }

@@ -699,5 +699,97 @@
     "toastRedeemSuccess": "引き換え完了：{credits} クレジット付与",
     "toastRedeemFailed": "引き換えに失敗しました",
     "loadFailed": "招待情報の読み込みに失敗しました"
+  },
+  "home": {
+    "metaTitle": "ホーム · OneFrame",
+    "heroTitle": "あなた専用の AI アニメスタジオ",
+    "unread": "{count} 件の新着",
+    "abCta": "制作を始める",
+    "abCtaVariantB": "今すぐ制作を始める",
+    "workflowTitle": "ショートドラマ制作フロー",
+    "workflowDesc": "脚本から完成まで、ヒット作を一気通貫で制作",
+    "canvasTitle": "無限キャンバス",
+    "canvasDesc": "キャンバスを作成し、ノードをつないで独自のフローを組み立てる",
+    "tools": {
+      "script": {
+        "label": "脚本制作",
+        "desc": "小説から絵コンテまで一気通貫"
+      },
+      "plaza": {
+        "label": "脚本広場",
+        "desc": "豊富な脚本アイデアとテンプレート",
+        "tag": "近日公開"
+      },
+      "spark": {
+        "label": "動画リメイク",
+        "desc": "スタイル変換で 1 本の動画を多彩な画風に",
+        "tag": "1 週間会員"
+      },
+      "lips": {
+        "label": "動画翻訳",
+        "desc": "多言語の動画翻訳とリップシンク",
+        "tag": "近日公開"
+      },
+      "t2v": {
+        "label": "動画分解",
+        "desc": "フレーム単位でヒット作のカメラ言語を分析"
+      },
+      "i2v": {
+        "label": "声質変更",
+        "desc": "ひと言の音声サンプルから声を複製し、キャラクターの声を作り直す"
+      },
+      "hd": {
+        "label": "誤字の再収録",
+        "desc": "セリフの誤字を検出して自動で収録し直す"
+      }
+    },
+    "banners": {
+      "pipelines": {
+        "title": "脚本から完成まで、効率 2 倍",
+        "sub": "AI アニメ制作フローが全面刷新"
+      },
+      "consistency": {
+        "title": "キャラクターの一貫性",
+        "sub": "設定画像を各カットに反映し、顔が変わらない"
+      },
+      "pricing": {
+        "title": "明朗な料金",
+        "sub": "生成前にリアルタイム見積り、失敗時はクレジットを自動返還"
+      }
+    },
+    "comingSoon": "{name} は近日公開予定です。お楽しみに",
+    "prevBanner": "前へ",
+    "nextBanner": "次へ",
+    "bannerIndex": "{index} 枚目",
+    "recentTitle": "最近のプロジェクト",
+    "viewAll": "すべて見る",
+    "loading": "読み込み中…",
+    "emptyRecent": "プロジェクトはまだありません。最初の 1 本を作成しましょう",
+    "createProject": "プロジェクトを作成",
+    "dramaType": {
+      "domestic": "国内実写ドラマ",
+      "overseas": "海外実写ドラマ",
+      "anime": "2D/3D アニメ"
+    },
+    "dramaFallback": "ショートドラマ"
+  },
+  "onboarding": {
+    "title": "3 ステップで第 1 話を作る",
+    "steps": {
+      "create": {
+        "title": "作品を作成",
+        "desc": "小説を貼り付けるか、ひと言のアイデアを書く"
+      },
+      "outline": {
+        "title": "あらすじを生成",
+        "desc": "AI が 3〜6 話に分割し、各話ごとに修正できます"
+      },
+      "render": {
+        "title": "レンダリングへ送出",
+        "desc": "モデルと予算を選び、ワンクリックで一括実行"
+      }
+    },
+    "start": "制作を始める",
+    "dismiss": "今後表示しない"
   }
 }

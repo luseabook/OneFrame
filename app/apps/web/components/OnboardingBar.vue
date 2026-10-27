@@ -2,17 +2,19 @@
 // 新手引导条（PRD 增补 §3.2）：仅在未关闭且当前无任何作品时展示
 const emit = defineEmits<{ dismiss: [] }>();
 
-const steps = [
-  { n: 1, title: "新建作品", desc: "粘贴小说或写一句话想法" },
-  { n: 2, title: "生成大纲", desc: "AI 拆成 3~6 集，可逐条改" },
-  { n: 3, title: "投递出片", desc: "选模型与预算，一键批量" },
-];
+const { t } = useI18n();
+// 步骤文案走 i18n（computed：常量会在 setup 期固化，切语言不更新）
+const steps = computed(() => [
+  { n: 1, title: t("onboarding.steps.create.title"), desc: t("onboarding.steps.create.desc") },
+  { n: 2, title: t("onboarding.steps.outline.title"), desc: t("onboarding.steps.outline.desc") },
+  { n: 3, title: t("onboarding.steps.render.title"), desc: t("onboarding.steps.render.desc") },
+]);
 </script>
 
 <template>
   <aside class="onboard">
     <div class="left">
-      <p class="title">3 步做出第一集</p>
+      <p class="title">{{ t("onboarding.title") }}</p>
       <ol class="steps">
         <li v-for="s in steps" :key="s.n">
           <span class="n">{{ s.n }}</span>
@@ -24,8 +26,8 @@ const steps = [
       </ol>
     </div>
     <div class="right">
-      <NuxtLink to="/projects" class="go">开始创建</NuxtLink>
-      <button class="skip" @click="emit('dismiss')">不再提示</button>
+      <NuxtLink to="/projects" class="go">{{ t("onboarding.start") }}</NuxtLink>
+      <button class="skip" @click="emit('dismiss')">{{ t("onboarding.dismiss") }}</button>
     </div>
   </aside>
 </template>

@@ -699,5 +699,97 @@
     "toastRedeemSuccess": "Canjeado: {credits} créditos acreditados",
     "toastRedeemFailed": "Error en el canje",
     "loadFailed": "No se pudo cargar la información de invitación"
+  },
+  "home": {
+    "metaTitle": "Inicio · OneFrame",
+    "heroTitle": "Tu estudio de anime con IA",
+    "unread": "{count} novedades",
+    "abCta": "Empezar a crear",
+    "abCtaVariantB": "Empezar a crear ahora",
+    "workflowTitle": "Flujo de series cortas",
+    "workflowDesc": "Del guion al montaje final: un pipeline para series de éxito",
+    "canvasTitle": "Lienzo infinito",
+    "canvasDesc": "Crea un lienzo y conecta nodos para montar tu propio flujo",
+    "tools": {
+      "script": {
+        "label": "Creación de guion",
+        "desc": "De la novela al storyboard en un pipeline"
+      },
+      "plaza": {
+        "label": "Plaza de guiones",
+        "desc": "Una gran biblioteca de ideas y plantillas de guion",
+        "tag": "Próximamente"
+      },
+      "spark": {
+        "label": "Redibujado de vídeo",
+        "desc": "Redibujado estilizado: varios estilos a partir de un vídeo",
+        "tag": "VIP de 1 semana"
+      },
+      "lips": {
+        "label": "Traducción de vídeo",
+        "desc": "Traducción multilingüe de vídeo con sincronía labial",
+        "tag": "Próximamente"
+      },
+      "t2v": {
+        "label": "Análisis de vídeo",
+        "desc": "Análisis fotograma a fotograma del lenguaje de planos de éxito"
+      },
+      "i2v": {
+        "label": "Ajuste de timbre",
+        "desc": "Clona una voz con una muestra y reformula el timbre del personaje"
+      },
+      "hd": {
+        "label": "Redoblaje de erratas",
+        "desc": "Detecta erratas en el diálogo y las vuelve a doblar automáticamente"
+      }
+    },
+    "banners": {
+      "pipelines": {
+        "title": "Del guion al montaje, el doble de rápido",
+        "sub": "El pipeline de anime con IA se renueva por completo"
+      },
+      "consistency": {
+        "title": "Consistencia de personaje",
+        "sub": "El retrato de referencia se inyecta en cada plano y la cara no cambia"
+      },
+      "pricing": {
+        "title": "Precio transparente",
+        "sub": "Presupuesto en tiempo real antes de generar; los créditos se devuelven si falla"
+      }
+    },
+    "comingSoon": "{name} llega pronto: mantente al tanto",
+    "prevBanner": "Anterior",
+    "nextBanner": "Siguiente",
+    "bannerIndex": "Diapositiva {index}",
+    "recentTitle": "Proyectos recientes",
+    "viewAll": "Ver todos",
+    "loading": "Cargando…",
+    "emptyRecent": "Aún no hay proyectos: crea el primero para empezar",
+    "createProject": "Crear proyecto",
+    "dramaType": {
+      "domestic": "Drama de imagen real nacional",
+      "overseas": "Drama de imagen real internacional",
+      "anime": "Anime 2D/3D"
+    },
+    "dramaFallback": "Serie corta"
+  },
+  "onboarding": {
+    "title": "Tu primer episodio en 3 pasos",
+    "steps": {
+      "create": {
+        "title": "Crear un proyecto",
+        "desc": "Pega una novela o escribe una idea en una frase"
+      },
+      "outline": {
+        "title": "Generar el esquema",
+        "desc": "La IA lo divide en 3–6 episodios, editables uno a uno"
+      },
+      "render": {
+        "title": "Enviar a renderizar",
+        "desc": "Elige modelo y presupuesto y envía en lote con un clic"
+      }
+    },
+    "start": "Empezar a crear",
+    "dismiss": "No volver a mostrar"
   }
 }

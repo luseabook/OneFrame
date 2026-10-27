@@ -3,17 +3,25 @@ import type { HomeAbDto, HomeConfigDto, HomeUnreadDto, ProjectDto } from "~/type
 // 工作台首页：1:1 对齐竞品 ReelMate App 首页（home.png）
 // 结构：居中大标题 → 双工作流入口卡 → 工具矩阵 → 活动轮播 → 案例墙
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "首页 · 一帧" });
 
-const tools = [
-  { label: "剧本创作", desc: "小说到分镜，一站式流水线", to: "/projects", icon: "script", enabled: true, modal: true },
-  { label: "剧本广场", desc: "海量剧本灵感与模板", to: null, icon: "plaza", enabled: false, modal: false, tag: "即将上线" },
-  { label: "视频转绘", desc: "风格化重绘，一支视频多种画风", to: null, icon: "spark", enabled: false, modal: false, tag: "一周会员" },
-  { label: "视频转译", desc: "多语种视频翻译与口型同步", to: null, icon: "lips", enabled: false, modal: false, tag: "即将上线" },
-  { label: "视频拉片", desc: "逐帧拆解，学习爆款镜头语言", to: null, icon: "t2v", enabled: false, modal: false },
-  { label: "音色修改", desc: "一句话克隆音色，重塑角色声线", to: null, icon: "i2v", enabled: false, modal: false },
-  { label: "错字重读", desc: "智能识别台词错字并重新配音", to: null, icon: "hd", enabled: false, modal: false },
-];
+const { t, locale } = useI18n();
+useHead({ title: () => t("home.metaTitle") });
+
+/**
+ * 工具矩阵：**文案走 i18n**，行为（to/enabled/modal/icon）留在代码里。
+ *
+ * 用 `computed` 而不是常量：常量在 setup 期只算一次，切语言后卡片标题不会变
+ * （这是本批最容易漏的一处——页面数据数组里混着文案与行为）。
+ */
+const tools = computed(() => [
+  { label: t("home.tools.script.label"), desc: t("home.tools.script.desc"), to: "/projects", icon: "script", enabled: true, modal: true },
+  { label: t("home.tools.plaza.label"), desc: t("home.tools.plaza.desc"), to: null, icon: "plaza", enabled: false, modal: false, tag: t("home.tools.plaza.tag") },
+  { label: t("home.tools.spark.label"), desc: t("home.tools.spark.desc"), to: null, icon: "spark", enabled: false, modal: false, tag: t("home.tools.spark.tag") },
+  { label: t("home.tools.lips.label"), desc: t("home.tools.lips.desc"), to: null, icon: "lips", enabled: false, modal: false, tag: t("home.tools.lips.tag") },
+  { label: t("home.tools.t2v.label"), desc: t("home.tools.t2v.desc"), to: null, icon: "t2v", enabled: false, modal: false },
+  { label: t("home.tools.i2v.label"), desc: t("home.tools.i2v.desc"), to: null, icon: "i2v", enabled: false, modal: false },
+  { label: t("home.tools.hd.label"), desc: t("home.tools.hd.desc"), to: null, icon: "hd", enabled: false, modal: false },
+]);
 
 // 新建项目弹窗（参照产品：短剧工作流 / 剧本创作 → 新建项目）
 const showCreate = ref(false);
@@ -23,7 +31,7 @@ function openCreate(): void {
   showCreate.value = true;
 }
 function comingSoon(name: string): void {
-  toast.info(`${name}即将上线，敬请期待`);
+  toast.info(t("home.comingSoon", { name }));
 }
 function onProjectCreated(project: { id: string }): void {
   showCreate.value = false;
@@ -36,16 +44,17 @@ function onToolClick(tool: { enabled: boolean; modal: boolean; to: string | null
   else if (tool.to) void router.push(tool.to);
 }
 
-const banners = [
-  { title: "剧本到成片，效率翻倍", sub: "AI 漫剧流水线全新升级", from: "#3b2f6e", via: "#1f1f2e" },
-  { title: "角色一致性", sub: "定妆图注入每一镜，人物不再变脸", from: "#5a3a1e", via: "#241a12" },
-  { title: "价格透明", sub: "生成前实时报价，失败自动退还积分", from: "#1e4a3a", via: "#12241c" },
-];
+// 轮播：颜色是设计值（留在代码里），文案走 i18n
+const banners = computed(() => [
+  { title: t("home.banners.pipelines.title"), sub: t("home.banners.pipelines.sub"), from: "#3b2f6e", via: "#1f1f2e" },
+  { title: t("home.banners.consistency.title"), sub: t("home.banners.consistency.sub"), from: "#5a3a1e", via: "#241a12" },
+  { title: t("home.banners.pricing.title"), sub: t("home.banners.pricing.sub"), from: "#1e4a3a", via: "#12241c" },
+]);
 const bannerIndex = ref(0);
 let bannerTimer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   bannerTimer = setInterval(() => {
-    bannerIndex.value = (bannerIndex.value + 1) % banners.length;
+    bannerIndex.value = (bannerIndex.value + 1) % banners.value.length;
   }, 5000);
 });
 onUnmounted(() => {
@@ -56,7 +65,9 @@ onUnmounted(() => {
 const api = useApi();
 const recentProjects = ref<ProjectDto[]>([]);
 const recentLoading = ref(true);
-const DRAMA_LABEL: Record<number, string> = { 1: "国内仿真人剧", 2: "海外仿真人剧", 3: "2D/3D动漫" };
+const DRAMA_KEYS: Record<number, string> = { 1: "domestic", 2: "overseas", 3: "anime" };
+const dramaLabel = (type: number): string =>
+  DRAMA_KEYS[type] ? t(`home.dramaType.${DRAMA_KEYS[type]}`) : t("home.dramaFallback");
 const DRAMA_GRADIENT: Record<number, string> = {
   1: "linear-gradient(150deg, #3a2030, #12101c)",
   2: "linear-gradient(150deg, #14303e, #0e161c)",
@@ -152,7 +163,9 @@ async function loadAbAssignment(): Promise<void> {
 }
 
 /** AB 位只换文案：变体由服务端分配，前端不猜 */
-const abCtaLabel = computed(() => (abVariant.value === "variant_b" ? "立即开始创作" : "开始创作"));
+const abCtaLabel = computed(() =>
+  abVariant.value === "variant_b" ? t("home.abCtaVariantB") : t("home.abCta"),
+);
 
 async function pollUnread(since?: string): Promise<void> {
   if (unreadDisposed) return;
@@ -198,9 +211,9 @@ onUnmounted(() => {
     </ClientOnly>
 
     <h1 v-if="sectionVisible('hero')" class="hero-title" :style="sectionStyle('hero')">
-      您的专属AI漫剧工作室
+      {{ t("home.heroTitle") }}
       <button v-if="unreadCount > 0" type="button" class="unread-badge" @click="openUnread">
-        {{ unreadCount }} 条新动态
+        {{ t("home.unread", { count: unreadCount }) }}
       </button>
     </h1>
 
@@ -222,14 +235,14 @@ onUnmounted(() => {
           </svg>
         </div>
         <div class="flow-text">
-          <h2>短剧工作流</h2>
-          <p>从剧本到成片，一站式创作爆款短剧</p>
+          <h2>{{ t("home.workflowTitle") }}</h2>
+          <p>{{ t("home.workflowDesc") }}</p>
         </div>
         <span class="plus" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
       </button>
-      <button v-if="sectionVisible('canvas')" type="button" class="canvas-card" @click="comingSoon('无限画布')">
+      <button v-if="sectionVisible('canvas')" type="button" class="canvas-card" @click="comingSoon(t('home.canvasTitle'))">
         <div class="flow-icon flat" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 4v16M16 4v16M4 8h16M4 16h16" />
@@ -237,8 +250,8 @@ onUnmounted(() => {
           </svg>
         </div>
         <div class="flow-text">
-          <h2>无限画布</h2>
-          <p>创建画布，连接节点定制工作流</p>
+          <h2>{{ t("home.canvasTitle") }}</h2>
+          <p>{{ t("home.canvasDesc") }}</p>
         </div>
         <span class="plus" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -294,7 +307,7 @@ onUnmounted(() => {
     </section>
 
     <section v-if="sectionVisible('banner')" class="carousel" :style="sectionStyle('banner')">
-      <button class="arrow" aria-label="上一个" @click="bannerIndex = (bannerIndex + banners.length - 1) % banners.length">
+      <button class="arrow" :aria-label="t('home.prevBanner')" @click="bannerIndex = (bannerIndex + banners.length - 1) % banners.length">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 6-6 6 6 6" /></svg>
       </button>
       <div class="banner-clip">
@@ -312,7 +325,7 @@ onUnmounted(() => {
           <div class="banner-deco" aria-hidden="true" />
         </div>
       </div>
-      <button class="arrow" aria-label="下一个" @click="bannerIndex = (bannerIndex + 1) % banners.length">
+      <button class="arrow" :aria-label="t('home.nextBanner')" @click="bannerIndex = (bannerIndex + 1) % banners.length">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6 6 6-6 6" /></svg>
       </button>
     </section>
@@ -322,20 +335,20 @@ onUnmounted(() => {
         :key="i"
         class="dot"
         :class="{ on: i === bannerIndex }"
-        :aria-label="`第 ${i + 1} 张`"
+        :aria-label="t('home.bannerIndex', { index: i + 1 })"
         @click="bannerIndex = i"
       />
     </div>
 
     <section v-if="sectionVisible('recent')" class="cases" :style="sectionStyle('recent')">
       <div class="cases-head">
-        <h3>最近项目</h3>
-        <NuxtLink to="/projects" class="more">查看全部
+        <h3>{{ t("home.recentTitle") }}</h3>
+        <NuxtLink to="/projects" class="more">{{ t("home.viewAll") }}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
         </NuxtLink>
       </div>
 
-      <div v-if="recentLoading" class="recent-skeleton">加载中…</div>
+      <div v-if="recentLoading" class="recent-skeleton">{{ t("home.loading") }}</div>
 
       <div v-else-if="recentProjects.length" class="case-grid">
         <NuxtLink
@@ -345,17 +358,17 @@ onUnmounted(() => {
           class="case-card recent-card"
           :style="{ background: DRAMA_GRADIENT[p.drama_type] ?? DRAMA_GRADIENT[1] }"
         >
-          <span class="case-tag">{{ DRAMA_LABEL[p.drama_type] ?? "短剧" }}</span>
+          <span class="case-tag">{{ dramaLabel(p.drama_type) }}</span>
           <div class="recent-info">
             <p class="case-title">{{ p.title }}</p>
-            <p class="case-meta">{{ p.ratio }} · {{ new Date(p.created_at).toLocaleDateString("zh-CN") }}</p>
+            <p class="case-meta">{{ p.ratio }} · {{ new Date(p.created_at).toLocaleDateString(locale) }}</p>
           </div>
         </NuxtLink>
       </div>
 
       <div v-else class="recent-empty">
-        <p>还没有项目，创建第一个开始创作</p>
-        <button type="button" class="recent-create" @click="openCreate">创建项目</button>
+        <p>{{ t("home.emptyRecent") }}</p>
+        <button type="button" class="recent-create" @click="openCreate">{{ t("home.createProject") }}</button>
       </div>
     </section>
   </main>

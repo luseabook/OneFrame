@@ -699,5 +699,97 @@
     "toastRedeemSuccess": "Resgatado: {credits} créditos creditados",
     "toastRedeemFailed": "Falha no resgate",
     "loadFailed": "Falha ao carregar as informações de convite"
+  },
+  "home": {
+    "metaTitle": "Início · OneFrame",
+    "heroTitle": "Seu estúdio de anime com IA",
+    "unread": "{count} novidades",
+    "abCta": "Começar a criar",
+    "abCtaVariantB": "Começar a criar agora",
+    "workflowTitle": "Fluxo de séries curtas",
+    "workflowDesc": "Do roteiro à versão final: um pipeline para séries de sucesso",
+    "canvasTitle": "Canvas infinito",
+    "canvasDesc": "Crie um canvas e conecte nós para montar seu próprio fluxo",
+    "tools": {
+      "script": {
+        "label": "Criação de roteiro",
+        "desc": "Do romance ao storyboard em um pipeline"
+      },
+      "plaza": {
+        "label": "Praça de roteiros",
+        "desc": "Uma grande biblioteca de ideias e modelos de roteiro",
+        "tag": "Em breve"
+      },
+      "spark": {
+        "label": "Redesenho de vídeo",
+        "desc": "Redesenho estilizado: vários estilos a partir de um vídeo",
+        "tag": "VIP de 1 semana"
+      },
+      "lips": {
+        "label": "Tradução de vídeo",
+        "desc": "Tradução multilíngue de vídeo com sincronia labial",
+        "tag": "Em breve"
+      },
+      "t2v": {
+        "label": "Análise de vídeo",
+        "desc": "Análise quadro a quadro da linguagem de planos de sucesso"
+      },
+      "i2v": {
+        "label": "Ajuste de timbre",
+        "desc": "Clone uma voz com uma amostra e reformule o timbre do personagem"
+      },
+      "hd": {
+        "label": "Re-dublagem de erros",
+        "desc": "Detecta erros de digitação no diálogo e re-dubla automaticamente"
+      }
+    },
+    "banners": {
+      "pipelines": {
+        "title": "Do roteiro à versão final, o dobro da eficiência",
+        "sub": "O pipeline de anime com IA foi totalmente atualizado"
+      },
+      "consistency": {
+        "title": "Consistência de personagem",
+        "sub": "O retrato de referência entra em cada plano, e o rosto não muda"
+      },
+      "pricing": {
+        "title": "Preço transparente",
+        "sub": "Orçamento em tempo real antes de gerar; créditos devolvidos automaticamente em caso de falha"
+      }
+    },
+    "comingSoon": "{name} chega em breve — fique de olho",
+    "prevBanner": "Anterior",
+    "nextBanner": "Próximo",
+    "bannerIndex": "Slide {index}",
+    "recentTitle": "Projetos recentes",
+    "viewAll": "Ver todos",
+    "loading": "Carregando…",
+    "emptyRecent": "Ainda não há projetos — crie o primeiro para começar",
+    "createProject": "Criar projeto",
+    "dramaType": {
+      "domestic": "Drama live-action nacional",
+      "overseas": "Drama live-action internacional",
+      "anime": "Anime 2D/3D"
+    },
+    "dramaFallback": "Série curta"
+  },
+  "onboarding": {
+    "title": "Seu primeiro episódio em 3 passos",
+    "steps": {
+      "create": {
+        "title": "Criar um projeto",
+        "desc": "Cole um romance ou escreva uma ideia em uma frase"
+      },
+      "outline": {
+        "title": "Gerar o outline",
+        "desc": "A IA divide em 3–6 episódios, editáveis um a um"
+      },
+      "render": {
+        "title": "Enviar para renderização",
+        "desc": "Escolha o modelo e o orçamento e envie em lote com um clique"
+      }
+    },
+    "start": "Começar a criar",
+    "dismiss": "Não mostrar novamente"
   }
 }

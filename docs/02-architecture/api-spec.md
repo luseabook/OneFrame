@@ -1787,9 +1787,9 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | `common` / `nav` / `lang` / `sidebar` / `errors` | 壳层（布局、导航、错误页） | ~120 |
 | `auth` / `landing` / `pricing` / `settings` / `billing` | 登录、落地页、定价与订阅、设置 | ~150 |
 | `tools` / `tasks` / `works` / `share` | 工具箱、任务、全部项目、分享页 | ~120 |
-| `film` / `market` / `credits` / `assets` / `novel` / `invite`（第 9–11 批） | 影视版、剧本集市、积分流水、资产库、剧本工厂（含新建弹窗）、邀请与兑换 | 210 |
+| `film` / `market` / `credits` / `assets` / `novel` / `invite` / `home` / `onboarding`（第 9–12 批） | 影视版、剧本集市、积分流水、资产库、剧本工厂、邀请与兑换、**首页（工具矩阵/轮播/新手引导条）** | 266 |
 
-**已迁移页面 16 / 64**（第 8–11 批：film/index、novel-market/index、credits、assets、novel/index、invite）。
+**已迁移页面 17 / 64 + 1 组件**（第 8–12 批：film/index、novel-market/index、credits、assets、novel/index、invite、home + OnboardingBar）。
 **未迁移**：novel / creator-center / admin / team / agent / create(19 卡) / canvas / reelflow / 合集详情等（记在进度文档 §5）。
 
 **校验口径**：`_acceptance/i18n-check.cjs`（静态：key 一致 / 无空值 / 外语包无中文残留 / 占位符一致 / 页面 key 齐全）
