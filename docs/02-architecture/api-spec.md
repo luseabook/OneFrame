@@ -1429,3 +1429,129 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 | 0022 | `idempotency_records` 三态列（`status`/`error_body`/`updated_at`）+ 状态索引 |
 
 **表数**：49 → **96**；`schema.spec.ts` 锁表名与关键列（26 条 P1 契约不变量 + 第 0 批续 22 张 + 本轮新增）。
+
+---
+
+## 16. 第 2 轮新增端点总则（2026-10-27 · 生态/收尾/外延批次）
+
+> 本轮推进第 6 批（创作者生态 + 集市 + 知识库）、主线补全（小说原创链 / 剧集子链 / 项目聚合 / ReelFlow 发布）、
+> 首发补全（3D 导演台 / 账号 SSO / 团队权限）、收尾小项与多语言。端点 414 → **651**，页面 48 → **52**，
+> 表 96 → **110**（迁移 0024–0030）。逐条竞品证据见 `_acceptance/_team/report-*.md`。
+
+### 16.0 三条全局口径补充（第 2 轮定，适用于全部模块）
+
+1. **业务错误不下发结构化 `details`**：信封只有 `{code,msg,data}`，`AppError.details` 仅进日志。
+   需要让前端分支时，把原因写进 `msg`（如 `微信登录未配置（provider_not_configured）`），
+   或提供专门的查询端点（如 `GET /auth/oauth/providers` 的 `configured` 字段）。**不要**把 details 塞进 `data`
+   —— 那会让"成功 data / 失败 data"两种语义混用，前端判空逻辑必错。
+2. **双 token**（`auth` 域）：`access`（默认 2h）是业务唯一凭证；`master`（默认 30d）**只能**用于 `POST /auth/renew`
+   —— 用 master 打任何业务端点返回 `401101 wrong token type`（有用例钉住，防后续放宽）。`refresh_token` 仍只走 httpOnly Cookie 且轮换。
+3. **幂等沿用 §15.9**：登录态写操作支持 `Idempotency-Key`；批量类写另有确定性去重键（集市购买按 `(work_id,buyer)`、领奖按 `(user,reward_date)` 等，见各节）。
+
+### 16.1 小说链补完（`/v1/novel/*`，64 → 90 路由）
+
+| 子链 | 路由 | 语义 |
+|---|---|---|
+| 原创链 `original_script/*`（20） | `POST .../idea/generate`、`GET .../idea/list`、`POST .../idea/select`、`.../materials/{generate,list,select,patch}`、`.../summary_outline/{generate,get,patch}`、`.../chapters_outline/{generate,list,patch}`、`.../episodes_outline/{generate,list}`、`.../episodes/{generate,patch,confirm}`、`.../finalize`、`.../state` | **不依赖源小说**（`source_type=2`，入口是灵感）；方案/素材/总纲落 `novels.meta.original`，章纲/集纲/剧本复用既有表与版本不变式 |
+| 撤回定稿（1） | `POST /novel/:nt/reopen` | 16 → 1；未定稿 400100；**被拆集引用 → 400105 + `reason=referenced_by_split`**，状态一字节不动 |
+| 裂变薄路径（5） | `.../fission_script/{chapters_outline, idea/:ni_id, characters/:nc_id, episodes_outline/:neo_id(GET/PATCH)}` | 路径级 1:1（上一轮用同语义端点覆盖） |
+| 会话锁 | —（内部） | 进程内 Set → Redis `SET NX` + TTL 60s + Lua 比较删除；`746005` 语义不变（多副本安全） |
+
+**两级引用判据**：`reopen` 先查 `script_projects.source_novel_id = nt`（精确，含已归档项目，`matched_by:"source_novel_id"`），
+零命中才回落正文快照比对（`matched_by:"text_snapshot"`，兼容 0026 之前的历史项目）。
+`source_novel_id` 由 `POST /projects/:id/episodes/split` 在 novel 分支写入且**已存在不覆盖**（同项目被两个本子先后拆过时保留最初来源）；
+该列 `ON DELETE SET NULL`（删本子不被历史项目卡死，判据自动回落快照）。
+
+### 16.2 剧集子链 / 项目聚合 / ReelFlow 发布（`modules/script`）
+
+| 端点 | 语义 |
+|---|---|
+| `POST /projects/:id/episodes/:eid/quality-check` | **只读**质量检查：`{score, issues[{code,severity,shot_no?,message}], stats}`；五维加权（分镜完整 30 / 提示词 25 / 资产引用 25 / 时长 10 / 时间线 10）——**竞品只有路由、无字段证据，口径自建**（待取证） |
+| `POST /projects/:id/episodes/:eid/film-synthesis-export` | 分集合成导出：**同步**判成功镜比例 <80% → `400106`；通过后下发 zip 四态 job（复用 `exports`）+ 成片 mp4 水印 job（复用 `timeline_exports`）。zip 通道产不出 mp4，故双通道 |
+| `POST /projects/:id/episodes/parse` / `parse-reset` / `parse-retry` | 分镜表解析子链：**先备份再覆盖**（备份落 storage `u/<space>/parse-backups/<ep>/<ts>.json` + `latest.json`），reset 还原原始 id 与绑定；retry 仅失败/空态可用 |
+| `GET /works`（扩展） | `tab=workshop\|canvas\|all` + `kind/status/state/keyword/from/to` + `has_more` + `tabs{}`；画布侧**跨域只读投影**（node_count/running/failed），不跨域写 |
+| `POST .../timeline/publish`、`GET .../timeline/publications`、`DELETE .../publications/:pubId` | 切片发布（`timeline_publications`，1→2→3/4，shareToken 唯一键兜底）+ 下架（→5）；前置须有成片，否则 400105 |
+| `POST .../timeline/clips/:clipId/assets` | 片段资产绑定（快照语义）；`PUT timeline` 按 `clip_id` 保留绑定；`clips[].assets` 为**可选字段**（有绑定才出现，保既有 `timeline.spec` 键集合零回归） |
+
+**偏离**：切片"转码"当前是复制已合成产物 + 状态机，**真按 `start_ms/end_ms` ffmpeg 裁剪需 worker 新增 handler**（复用 timeline.export 队列，API 契约不变）；发布分享播放页未做（现有 `/share/[token]` 是任务分享 token 空间，不可混用）。
+
+### 16.3 3D 导演台（`/v1/director/*`，9 路由 · 模块 #19）
+
+| 端点 | 语义 |
+|---|---|
+| `POST /director/scenes`、`GET /director/scenes/:id`、`GET /director/scenes?project_id=`、`PUT /director/scenes/:id`、`DELETE`、`POST .../duplicate` | 场景快照：`payload` **不透明 JSON 对象**（服务端只校验"对象 + ≤512KB"，不解析语义，形状以 `Director3D.vue` 既有状态为准）；列表最近编辑优先 + 签名缩略图；`PUT` 带 `version` 乐观锁，冲突 `746002` 且 `msg` 带 `current=N`；删除为软删（删后 GET/PUT/duplicate 全 404） |
+| `POST/GET /director/pose-presets` | 姿态预设（`scope=1` 个人 / `2` 团队共享；别人的个人预设不可见） |
+| `POST /director/heartbeat` | 编辑心跳：Redis **每场景一个 HASH** + TTL 61s，读时按 60s 时间戳过滤，返回协作者昵称与 `last_seen_ms`；**不落库** |
+
+**两个实现坑（写进代码注释）**：心跳不能 `SCAN`（keyspace 万级时首轮 COUNT 命中不到，协作者恒 0）；"未保存修改"标志必须 `flush:"sync"` 深 watch（否则一打开即误判 dirty 并触发多余 PUT 把版本顶到 v2）。
+
+### 16.4 账号 SSO + 双 token + 团队权限（`/v1/auth/*`、`/v1/cam/*`）
+
+| 端点 | 语义 |
+|---|---|
+| `GET /auth/oauth/providers` | 4 渠道（wechat/qq/apple/douyin）各自 `configured`；前端据此置灰，不解析错误体 |
+| `POST /auth/oauth/:provider/url` | 返回 `authorize_url` + `state`（Redis 300s **一次性**，重放 → `400101 state_invalid`）；未配置 → `400101` 且消息带 `provider_not_configured` |
+| `POST /auth/oauth/:provider/callback` | code → token → 用户信息 → 绑定/创建 `identities`；下发 `access` + `master`；`OAUTH_MOCK=1`（仅非生产）短路且响应带 `mock:true`，不假装渠道已通 |
+| `POST /auth/renew` | 只续 `access`；master 唯一合法入口 |
+| `GET /cam/permissions` | 权限码目录 **70 条 / 11 组**：竞品实测 53 细码 + 10 粗码 + 5 film 扩展 + 2 团队管理扩展（`team.role`/`team.permission`，否则"谁能改权限"无法表达） |
+| `GET/PUT /cam/roles/:role_id/permissions` | 写 `team_roles.power_list=[{module,action,permission_code}]`（竞品真实形状）；同集合重复写 `changed=false` 且字节一致；未知码 400101 且**不落部分权限**；master 角色只读；跨 space 400102 |
+| `GET /cam/temp-info` | 团队模型开关矩阵：可推导给真值（`film_enabled`/`agent_whitelist`/模型族支持位），**3 个折扣白名单字段无取证 → `null` + `unverified`**（不用假 false 冒充"不支持"） |
+
+**边界（本批不做）**：权限只做**目录 + 存储**，不做接口级拦截（会打穿既有 13 个 e2e 的成员角色假设）；UI 上有横幅声明。做拦截前须先定"存量角色默认权限"。
+
+### 16.5 创作者中心 + 运营增长 + 活动（`/v1/crc/*`、`/v1/op/*`、`/v1/campaigns/*` · 模块 #10）
+
+| 组 | 要点 |
+|---|---|
+| `crc`（创作者中心） | 资料 GET/PUT、作品 list/get/create/edit/delete/submit、**审核态 1 草稿→2 待审→3 通过→4 驳回→5 下架（只有 3 进公开列表）**、点赞/取消（唯一键幂等）、关注/取关/粉丝/关注列表、我的资产、banner/pop_up 读取（读 `promo_slots`）、作品举报（`asset_reports`，一人一作品一次） |
+| `op`（运营增长） | 邀请码（`invite_codes.owner_user_id` 归属；注意与 `created_by`（admin_users）不是一张表）、单层分销（`commission_bps`，默认 0）、兑换码 CRUD + 兑换（`redeem_code_redemptions` 唯一键兜底）、每日奖励（`op_daily_rewards` 唯一键 `(user,reward_date)`，**抢到唯一键才 creditIn**，再回填 `flow_ref`）、问卷（`op_questionnaires`/`op_questionnaire_responses`）、定向发分、AB 实验（一人一变体，`ab_hits` 唯一键）、运营位后台 CRUD |
+| `campaigns` | 列表/详情/报名/取消/入围/获奖 + `GET/POST campaign/signup/draft`（`campaign_signup_drafts` 一人一活动一份，覆盖写）；`campaign_key` slug 支持 `/campaigns/:idOrKey` 双主键 |
+
+**安全修复（值得单列）**：问卷定义与答卷是**平台级**（`qkey` 全局唯一、答卷无 space 列），因此运营后台的问卷列表/审核加了 `join space_members` 收窄到本 space —— 否则任何团队管理员可翻别家团队留资（**跨租户泄露**）。
+**激励红线**：所有发分走 `creditIn` 记账（不许直接改 balance），`credit_flows.memo` 写清来源。
+
+### 16.6 剧本集市 + 集市 Admin + 团队知识库（`/v1/market/*`、`/v1/ops/market/*`、`/v1/knowledge/*`）
+
+| 组 | 端点 | 要点 |
+|---|---|---|
+| 集市 | 36（竞品 29 全覆盖 + 买断/账户提现/提现列表/撤销等 7） | 上架/编辑/下架、预售定金、列表/搜索/分类/标签、**购买走 `creditOut(kind="consume")` 事务内**（余额不足 745701 整事务回滚，余额/协议/销量/收益零副作用）、协议三类（购买/预售/授权）、收益只累计（`== Σ(生效协议价 − 抽成)`，取消预售同额减回）、提现状态机 **1 待审→2 通过→3 打款 / 4 驳回 / 5 撤销（跳步 400101）**、`pg_advisory_xact_lock` 串行化"查+插"保证同用户仅 1 笔待审、内容树购买后才可读（否则 403101） |
+| 集市 Admin | 22（竞品 12 全覆盖 + 提现审核 3 + 待审/详情/看板） | 独立服务域物理隔离；审核留痕 `market_review_logs`（提交/通过/驳回/下架） |
+| 知识库 | 29（竞品 25 条 1:1，4 条"知识库实体 CRUD"明确不做） | 目录树（深度 ≤5，删除级联软删）+ 标签 + 资产 CRUD/搜索/批量移动 + **与资产库双向导入**（`import-from-asset` / `to-asset`，校验同 space）；`asset_count` 由建树时写入（不是事后补） |
+
+**偏离**：抽成常量 `MARKET_COMMISSION_BPS=2000`（20%，**运营未拍板、仅初值**，由 `/market/scripts/config` 下发给前端，前端不写死）；提现不接资金通道（资质/合规），`payout` 只回填线下打款凭证 + 推进终态；买断后二次改编/再发布未做（许可范围未拍板）；作品解析只做**结构解析**（章节/字数/角色/摘要建议值），竞品 `parse` 产出未取证，不臆造。
+
+### 16.7 收尾小项（首页 / 运营位 / 内容安全 / 分享批量 / 画布恢复）
+
+| 端点 | 语义 |
+|---|---|
+| `GET /home/config` | 读 `home_configs` 最新 version（sections 显隐/排序 + ab_slots） |
+| `GET /home/unread?since=` | 长轮询：最多挂 `env.HOME_UNREAD_TIMEOUT_MS`（默认 25s，**低于常见反代 30s 读超时**），**可中断**；事件源 `task_events` + `task_shares` 增量；不用 WebSocket（理由：单实例、无双向需求、省一条连接通道） |
+| `GET /home/ab?key=` | 按 `ab_experiments` 权重哈希 userId 决定变体并落 `ab_hits`（一人一变体） |
+| `GET/POST/PUT/DELETE /ops/admin/promo-slots` | 运营位 banner/pop_up/activity/creator 四类；`created_by` FK 指向 **`admin_users`**（运营身份，与 `content_reports.handled_by` 同口径） |
+| `POST /moderation/captcha/{ticket,verify}` | 行为验证码：**无第三方 Key → `available:false` + 本地算术题模式 + 一次性 HMAC ticket**（不写"已接入腾讯云"）；高频登录/发码要求 ticket（429101 语义） |
+| `POST /moderation/text-detect` | 文本敏感检测 `{risky, hits[{word,index}], action}` |
+| `GET /moderation/status?task_id=` | 模型侧审核态只读（`reviewing`/`review_rejected`） |
+| `POST /share/:token/batch-download` | **公开只读**（只认 token，未撤销未过期），只打包该 share 关联任务的产物（越权读取=事故） |
+| `POST /canvas/canvases/:id/nodes-recover` | 从最近 `canvas_snapshots` 恢复**缺失**节点/边，不覆盖现存；无快照 400102 |
+
+### 16.8 多语言（模块 #16）
+
+- 自建轻量 i18n（**不引 `@nuxtjs/i18n`**）：`i18n/index.ts` 内核 + `i18n/locales/{zh-CN,en,ja,pt-BR,es}.json`（312 key）+ `composables/useI18n.ts`（`useState` 隔离 SSR）+ `plugins/i18n.ts`（协商 + `htmlAttrs.lang`）+ `components/i18n/LangSwitcher.vue`。
+- 协商顺序：`?lang=` → cookie `of_lang` → `Accept-Language` → `zh-CN`；切换不刷新页面。
+- `useApi` 只加一行 `X-Lang`；**服务端不翻译**：后端返回的是数据（工具目录、SKU label、space 名），翻译它需要多语言数据字段，属另一件事；`X-Lang` 用于日志/审核归档/将来运营位按语言返回。
+- 已迁 6 页（index/login/pricing/tools/tasks/settings）+ 壳层导航（`sidebar.*`）；`_acceptance/i18n-check.cjs` 校验 5 包 key 一致 / 无空值 / 无中文残留（**ja 用"简体专用字表"判残留**：日语正常书写含 CJK 汉字，硬套会把正确日语 100% 判错）。
+- **未做**：路径前缀 `/en /ja /br /es` + hreflang + sitemap、韩语、语言偏好持久到账号、页面内文案全覆盖（home/works/assets/admin/share/create/集市/创作者/novel/reelflow/team/projects 仍未迁）。
+
+### 16.9 数据层（迁移 0024–0030）
+
+| 迁移 | 内容 |
+|---|---|
+| 0024 | `promo_slots` / `home_configs` / `creator_likes` / `director_scenes` / `director_pose_presets` / `timeline_publications` |
+| 0025 | `campaigns.campaign_key` + `creator_assets.{category,reviewed_by,reviewed_at}` + `op_daily_rewards` / `op_questionnaires` / `op_questionnaire_responses` |
+| 0026 | `script_projects.source_novel_id`（FK novels，带索引） |
+| 0027 | `campaign_signup_drafts` / `asset_reports` / `invite_codes.owner_user_id` |
+| 0028 | `promo_slots.created_by` FK 由 `users` 改为 **`admin_users`**（运营身份；迁移内先清空非法值） |
+| 0029 | `script_projects.source_novel_id` 改 `ON DELETE SET NULL` |
+| 0030 | `market_categories` / `market_tags` / `market_review_logs` / `market_works.{category_id,tag_ids}` / `market_withdrawals.work_id`；`creditOut.kind` 放宽为 `"refund" \| "consume"`（购买记 `consume`，否则财务对账"退款金额"虚高） |
+
+**表数**：96 → **110**；`schema.spec.ts` 锁 P1 不变量 + 第 0 批/续 + 本轮新列。
