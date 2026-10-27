@@ -123,6 +123,30 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.0 · 第 40 批：`home_configs` 后台写入口 → 首页模块 100% · 2026-10-28）
+
+### 补的是"只有读、没有写"的最后一个缺口
+
+`GET /home/config` 早就支持「space 覆盖 > global > 内置默认」，但**全仓没有任何写入入口**——
+运营永远只能看到 `source=default`，首页板块实际上不可配。本轮补齐：
+
+| 层 | 改动 |
+|---|---|
+| API | `GET /ops/admin/home-config`（读 global；无行时返回 6 个内置板块 + `source=default`）<br>`POST /ops/admin/home-config`：**全量覆盖** `sections`（增量无法表达"删掉一个板块"）、**白名单**只允许 `hero/workflow/canvas/tools/banner/recent`（未知 key → 400101）、**去重**（重复 key → 400101）、**乐观锁**（version 不匹配 → 746002） |
+| Web | [admin/index.vue](app/apps/web/pages/admin/index.vue) 新增「首页板块」卡片：显隐勾选 + 排序输入 + 来源徽标（`已配置 · vN` / `内置默认`）+ 冲突提示；复用现有多语言词条（`adminUi.home*` 19 key × 5） |
+| Test | [admin-home-config.spec.ts](app/apps/api/test/admin-home-config.spec.ts) **5 例**：默认 6 板块、写入后 `source=db` 且表内容一致、版本推进与 746002 冲突、未知/重复 key 400101、非管理员拒绝 |
+
+### 一个熟悉的坑
+
+`home_configs.created_by` 外键指向 `users.id`，而运营 admin 存在**独立的 `admin_users` 表**——
+把 admin id 写进这一列直接撞 FK，接口返回 500/500000（与早前 cli-build 撞的是同一个外键）。
+处理方式：不写 `created_by`，并在代码注释里写明"审计线索走 admin 侧操作日志，不在业务表里塞假 user id"。
+
+**验证**：`admin-home-config.spec` 5/5；全量 **1,152 例**（api 820 + adapters 164 + cli 89 + worker 33 + db 26 + shared 14 + storage 6）全绿；
+`i18n-check.cjs` 全绿；`e2e-i18n-pages.cjs` **138/138**；`pnpm lint` 0 error。
+
+**进度**：首页模块 **99% → 100%**；全站 **201.00/206 = 97.6%**，剩余 **5.00**。
+
 ## 变更登记（v6.9 · 多语言第 39 批：语言偏好持久到账号 · 2026-10-28）
 
 补掉 §5.3 第 7 行里最后一个"代码侧可做"的项：**语言偏好从"只在本设备 cookie"升级为"跟随账号"**。

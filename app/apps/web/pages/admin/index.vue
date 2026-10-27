@@ -24,6 +24,8 @@ interface Dashboard {
 
 const token = ref("");
 const error = ref("");
+/** 成功提示（后台页没有 toast，用一行绿字） */
+const ok = ref("");
 // 菜单由 URL query 决定（layout 侧栏是唯一导航入口）
 const tab = useAdminTab();
 const dashboard = ref<Dashboard | null>(null);
@@ -240,6 +242,69 @@ const promoForm = reactive({
   ends_at: "",
 });
 
+// ── 首页板块配置（home_configs global 层）────────────────
+type HomeSection = { key: string; visible: boolean; sort: number };
+const homeConfig = ref<{ version: number | null; source: "db" | "default"; sections: HomeSection[] }>({
+  version: null,
+  source: "default",
+  sections: [],
+});
+const homeBusy = ref(false);
+
+/** 内置板块的中文/多语言名（key 是后端契约，不翻译） */
+function homeSectionLabel(key: string): string {
+  const map: Record<string, string> = {
+    hero: t("adminUi.homeSectionHero"),
+    workflow: t("adminUi.homeSectionWorkflow"),
+    canvas: t("adminUi.homeSectionCanvas"),
+    tools: t("adminUi.homeSectionTools"),
+    banner: t("adminUi.homeSectionBanner"),
+    recent: t("adminUi.homeSectionRecent"),
+  };
+  return map[key] ?? key;
+}
+
+async function loadHomeConfig(): Promise<void> {
+  try {
+    const data = await api<{ version: number | null; source: "db" | "default"; sections: HomeSection[] }>(
+      "/ops/admin/home-config",
+    );
+    homeConfig.value = data;
+  } catch {
+    error.value = t("adminUi.homeConfigLoadFailed");
+  }
+}
+
+async function saveHomeConfig(): Promise<void> {
+  homeBusy.value = true;
+  error.value = "";
+  ok.value = "";
+  try {
+    const res = await api<{ version: number }>("/ops/admin/home-config", {
+      method: "POST",
+      body: {
+        ...(homeConfig.value.version === null ? {} : { version: homeConfig.value.version }),
+        sections: homeConfig.value.sections.map((s) => ({
+          key: s.key,
+          visible: s.visible,
+          sort: Number(s.sort) || 0,
+        })),
+      },
+    });
+    homeConfig.value = { ...homeConfig.value, version: res.version, source: "db" };
+    // 后台页没有全局 toast：用 error 通道显示成功提示（红字会被当成错误，所以单独用 ok 字段）
+    ok.value = t("adminUi.homeConfigSaved");
+  } catch (e) {
+    const err = e as { code?: number; message?: string };
+    error.value =
+      err.code === 746002
+        ? t("adminUi.homeConfigConflict")
+        : err.message || t("adminUi.homeConfigSaveFailed");
+  } finally {
+    homeBusy.value = false;
+  }
+}
+
 async function loadPromo(): Promise<void> {
   try {
     const data = await api<PromoSlotListDto>("/ops/admin/promo-slots");
@@ -327,6 +392,7 @@ onMounted(async () => {
     return;
   }
   await loadPromo();
+  await loadHomeConfig();
   // 创作者审核队列不是首屏必需（省一次请求），但运营打开该 tab 时必须有数据
   if (tab.value === "creatorAudits") await loadCreatorAudits().catch(() => {});
   watch(
@@ -405,6 +471,36 @@ onMounted(async () => {
       </section>
 
       <section v-if="tab === 'models'" class="card">
+        <h2>{{ t("adminUi.homeConfigTitle") }}</h2>
+        <p class="muted small">{{ t("adminUi.homeConfigHint") }}</p>
+        <p class="muted small">
+          {{
+            homeConfig.source === "db"
+              ? t("adminUi.homeConfigSourceDb", { version: homeConfig.version ?? 0 })
+              : t("adminUi.homeConfigSourceDefault")
+          }}
+        </p>
+        <div class="row head-row">
+          <span>{{ t("adminUi.homeColKey") }}</span>
+          <span>{{ t("adminUi.homeColVisible") }}</span>
+          <span>{{ t("adminUi.homeColSort") }}</span>
+        </div>
+        <div v-for="(sec, idx) in homeConfig.sections" :key="sec.key" class="row">
+          <span>{{ homeSectionLabel(sec.key) }}</span>
+          <span>
+            <input v-model="homeConfig.sections[idx]!.visible" type="checkbox" />
+          </span>
+          <span>
+            <input v-model.number="homeConfig.sections[idx]!.sort" class="input sort" type="number" />
+          </span>
+        </div>
+        <p v-if="ok" class="muted small">{{ ok }}</p>
+        <div class="row">
+          <Button :disabled="homeBusy" @click="saveHomeConfig">
+            {{ homeBusy ? t("adminUi.homeConfigSaving") : t("adminUi.homeConfigSave") }}
+          </Button>
+        </div>
+
         <h2>{{ t("adminUi.modelsTitle") }}</h2>
         <div class="row head-row"><span>{{ t("adminUi.thName") }}</span><span>{{ t("adminUi.thCapability") }}</span><span>adapter</span><span>{{ t("adminUi.thSort") }}</span><span>{{ t("adminUi.thVisible") }}</span></div>
         <div v-for="m in models" :key="String(m.id)" class="row">

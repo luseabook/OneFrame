@@ -138,6 +138,42 @@ export class AdminController {
     return this.admin.reviewCreatorAudit(adminId, id, input);
   }
 
+  /** 首页板块配置（global 层）：读当前生效配置 */
+  @Get("home-config")
+  homeConfig() {
+    return this.admin.homeConfig();
+  }
+
+  /**
+   * 首页板块配置：全量覆盖写入（乐观锁 version）。
+   * 只写 global 层；space 覆盖属于团队空间运营，不在平台后台。
+   */
+  @Post("home-config")
+  async saveHomeConfig(
+    @Req() req: FastifyRequest & { adminAuth?: { adminId: string } },
+    @Body() body: unknown,
+  ) {
+    const adminId = req.adminAuth?.adminId;
+    if (!adminId) throw new AppError(ErrorCode.UNAUTHORIZED, "admin auth required");
+    const input = parseOrThrow(
+      z.object({
+        version: z.coerce.number().int().min(1).optional(),
+        sections: z
+          .array(
+            z.object({
+              key: z.string().min(1).max(32),
+              visible: z.boolean(),
+              sort: z.coerce.number().int().min(0).max(9999),
+            }),
+          )
+          .min(1)
+          .max(20),
+      }),
+      body ?? {},
+    );
+    return this.admin.saveHomeConfig(adminId, input);
+  }
+
   @Get("dashboard")
   dashboard() {
     return this.admin.dashboard();

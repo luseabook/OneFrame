@@ -1,11 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, sql } from "drizzle-orm";
 import {
   adminUsers,
   contentReports,
   creatorAssets,
   episodes,
   exportJobs,
+  homeConfigs,
   modelPrices,
   models,
   orders,
@@ -710,6 +711,116 @@ export class AdminService {
   //   active_now = status 启用 **且** 当前时间落在 [starts_at, ends_at] 内
   //   sort       = 同一 slot 内的展示顺序（升序，数字小的在前）
   // 列表把 `active_now` 一并算好返回，运营不必自己拿当前时间比时间戳。
+
+  // ── 首页板块配置（home_configs）──────────────────────────
+  //
+  // 背景：`GET /home/config` 早就支持「space 覆盖 > global > 内置默认」，但**没有任何写入入口**，
+  // 等于运营永远只能看到内置默认（source=default）。这里补平台侧写入，语义与读侧严格对齐：
+  //   · 只写 `scope='global'`（space 覆盖属于团队空间运营，不在平台后台职责内）；
+  //   · `version` 乐观锁：不匹配 → 746002，避免两个运营互相覆盖；
+  //   · `sections` 全量覆盖（不做增量合并）：前端要的就是"这一版首页长什么样"，
+  //     增量语义会让"删掉一个板块"变成不可表达；
+  //   · `key` 只允许内置集合内的值——写进未知 key 会让前端静默忽略，属于脏数据。
+
+  /** 首页板块的内置 key 集合（与 home.service 的 DEFAULT_SECTIONS 保持一致） */
+  private static readonly HOME_SECTION_KEYS = ["hero", "workflow", "canvas", "tools", "banner", "recent"] as const;
+
+  /** 读 global 配置；没有行时返回 source=default（与读侧同义） */
+  async homeConfig(): Promise<{
+    version: number | null;
+    source: "db" | "default";
+    sections: Array<{ key: string; visible: boolean; sort: number }>;
+    updated_at: string | null;
+  }> {
+    const [row] = await db
+      .select()
+      .from(homeConfigs)
+      .where(and(eq(homeConfigs.scope, "global"), isNull(homeConfigs.spaceId)));
+    if (!row) {
+      return {
+        version: null,
+        source: "default",
+        sections: AdminService.HOME_SECTION_KEYS.map((key, i) => ({
+          key,
+          visible: true,
+          sort: (i + 1) * 10,
+        })),
+        updated_at: null,
+      };
+    }
+    const payload = (row.payload ?? {}) as { sections?: unknown };
+    const sections = Array.isArray(payload.sections)
+      ? (payload.sections as Array<{ key?: unknown; visible?: unknown; sort?: unknown }>)
+          .filter((s) => typeof s?.key === "string")
+          .map((s) => ({
+            key: String(s.key),
+            visible: s.visible !== false,
+            sort: Number.isFinite(Number(s.sort)) ? Number(s.sort) : 0,
+          }))
+      : AdminService.HOME_SECTION_KEYS.map((key, i) => ({ key, visible: true, sort: (i + 1) * 10 }));
+    return {
+      version: row.version,
+      source: "db",
+      sections,
+      updated_at: row.updatedAt.toISOString(),
+    };
+  }
+
+  /** 全量覆盖 global 首页板块配置（乐观锁 + 白名单校验） */
+  async saveHomeConfig(
+    adminId: string,
+    input: {
+      version?: number;
+      sections: Array<{ key: string; visible: boolean; sort: number }>;
+    },
+  ): Promise<{ version: number }> {
+    // 白名单：未知 key 直接拒绝（前端会静默忽略，属于脏数据）
+    const allowed = new Set<string>(AdminService.HOME_SECTION_KEYS);
+    for (const s of input.sections) {
+      if (!allowed.has(s.key)) throw new AppError(ErrorCode.INVALID_PARAM, `unknown section key: ${s.key}`);
+    }
+    // 去重：同一 key 出现两次会让前端渲染重复板块
+    const keys = new Set<string>();
+    for (const s of input.sections) {
+      if (keys.has(s.key)) throw new AppError(ErrorCode.INVALID_PARAM, `duplicate section key: ${s.key}`);
+      keys.add(s.key);
+    }
+
+    const [row] = await db
+      .select()
+      .from(homeConfigs)
+      .where(and(eq(homeConfigs.scope, "global"), isNull(homeConfigs.spaceId)));
+
+    if (!row) {
+      await db.insert(homeConfigs).values({
+        // home_configs.id 没有默认值：与全仓一致用 newId() 生成雪花 id
+        id: newId(),
+        scope: "global",
+        spaceId: null,
+        payload: { sections: input.sections },
+        version: 1,
+        // created_by 外键指向 users.id，而运营 admin 是**独立的** admin_users 表，
+        // 写进来会直接撞 FK（cli-build 时踩过一次，表现为 500/500000）。
+        // 所以这里不写 created_by：审计线索走 admin 侧的操作日志，而不是在业务表里塞假 user id。
+        createdBy: null,
+      });
+      return { version: 1 };
+    }
+
+    if (input.version !== undefined && input.version !== row.version) {
+      throw new AppError(ErrorCode.VERSION_CONFLICT, "home config version conflict");
+    }
+    const nextVersion = row.version + 1;
+    await db
+      .update(homeConfigs)
+      .set({
+        payload: { ...(row.payload as Record<string, unknown>), sections: input.sections },
+        version: nextVersion,
+        updatedAt: new Date(),
+      })
+      .where(eq(homeConfigs.id, row.id));
+    return { version: nextVersion };
+  }
 
   private promoSlotDto(row: typeof promoSlots.$inferSelect, now = new Date()) {
     const startsOk = row.startsAt === null || row.startsAt.getTime() <= now.getTime();
