@@ -1,6 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ ssr: false });
 
+const { t } = useI18n();
+useHead({ title: () => t("report.metaTitle") });
+
 const api = useApi();
 const route = useRoute();
 const token = ref(String(route.query.token ?? ""));
@@ -12,7 +15,7 @@ const sending = ref(false);
 
 async function submit(): Promise<void> {
   if (!token.value) {
-    message.value = "缺少分享 token：请从被举报的作品分享链接进入本页";
+    message.value = t("report.missingToken");
     return;
   }
   sending.value = true;
@@ -23,9 +26,9 @@ async function submit(): Promise<void> {
       detail: detail.value || undefined,
       contact: contact.value || undefined,
     });
-    message.value = "举报已提交，我们会尽快核查并处置（违规内容将被下线）。";
+    message.value = t("report.submitted");
   } catch (e) {
-    message.value = e instanceof Error ? e.message : "提交失败，请稍后重试";
+    message.value = e instanceof Error ? e.message : t("report.failed");
   } finally {
     sending.value = false;
   }
@@ -35,47 +38,42 @@ async function submit(): Promise<void> {
 <template>
   <main class="page">
     <header class="head">
-      <h1>举报 / 投诉</h1>
-      <p class="sub">
-        如发现违规内容，请填写下方表单。平台将在核实后撤销对应分享链接、下架内容；
-        涉及违法犯罪的将依法移交主管部门。
-      </p>
+      <h1>{{ t("report.title") }}</h1>
+      <p class="sub">{{ t("report.sub") }}</p>
     </header>
 
     <section class="panel">
       <label class="field">
-        <span class="label">被举报的分享 token</span>
-        <input v-model="token" class="input" placeholder="从作品分享链接中复制 token" />
+        <span class="label">{{ t("report.tokenLabel") }}</span>
+        <input v-model="token" class="input" :placeholder="t('report.tokenPlaceholder')" />
       </label>
       <label class="field">
-        <span class="label">举报类型</span>
+        <span class="label">{{ t("report.reasonLabel") }}</span>
         <select v-model="reason" class="input">
-          <option value="illegal">违法违规</option>
-          <option value="porn">色情低俗</option>
-          <option value="violence">暴力血腥</option>
-          <option value="infringement">侵权盗用</option>
-          <option value="spam">垃圾广告</option>
-          <option value="other">其他</option>
+          <option value="illegal">{{ t("report.reasons.illegal") }}</option>
+          <option value="porn">{{ t("report.reasons.porn") }}</option>
+          <option value="violence">{{ t("report.reasons.violence") }}</option>
+          <option value="infringement">{{ t("report.reasons.infringement") }}</option>
+          <option value="spam">{{ t("report.reasons.spam") }}</option>
+          <option value="other">{{ t("report.reasons.other") }}</option>
         </select>
       </label>
       <label class="field">
-        <span class="label">补充说明（可选）</span>
+        <span class="label">{{ t("report.detailLabel") }}</span>
         <textarea v-model="detail" class="input textarea" maxlength="500" />
       </label>
       <label class="field">
-        <span class="label">联系方式（可选）</span>
+        <span class="label">{{ t("report.contactLabel") }}</span>
         <input v-model="contact" class="input" maxlength="100" />
       </label>
       <div class="actions">
-        <Button :loading="sending" @click="submit">{{ sending ? "提交中…" : "提交举报" }}</Button>
+        <Button :loading="sending" @click="submit">{{ sending ? t("report.submitting") : t("report.submit") }}</Button>
       </div>
       <p v-if="message" class="msg">{{ message }}</p>
     </section>
 
-    <p class="footnote">
-      也可以直接发送邮件至举报邮箱（上线后公示）；举报记录将进入运营后台处置队列并留痕。
-    </p>
-    <NuxtLink to="/" class="home">返回首页</NuxtLink>
+    <p class="footnote">{{ t("report.footnote") }}</p>
+    <NuxtLink to="/" class="home">{{ t("report.backHome") }}</NuxtLink>
   </main>
 </template>
 

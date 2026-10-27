@@ -9,7 +9,8 @@
  * 3. `POST /market/creator/works/parse`：选一个本子 → 拿建议标题/简介（不覆盖用户已填内容）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "发布作品 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("publish.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -37,11 +38,11 @@ const parsing = ref(false);
 const error = ref("");
 const missing = ref<string[]>([]);
 
-const KIND_OPTIONS = [
-  { value: 1, label: "小说" },
-  { value: 2, label: "剧本" },
-  { value: 3, label: "分镜包" },
-];
+const KIND_OPTIONS = computed(() => [
+  { value: 1, label: t("publish.kinds.novel") },
+  { value: 2, label: t("publish.kinds.script") },
+  { value: 3, label: t("publish.kinds.storyboard") },
+]);
 
 async function loadOptions(): Promise<void> {
   try {
@@ -70,9 +71,9 @@ async function parseFromNovel(): Promise<void> {
     if (suggestion.title && !form.title.trim()) form.title = suggestion.title;
     if (suggestion.summary && !form.summary.trim()) form.summary = suggestion.summary;
     if (suggestion.kind) form.kind = suggestion.kind;
-    toast.success("已从本子解析建议值（未覆盖你已填内容）");
+    toast.success(t("publish.parseOk"));
   } catch (err) {
-    toast.info((err as Error).message || "解析失败，可手填");
+    toast.info((err as Error).message || t("publish.parseFailed"));
   } finally {
     parsing.value = false;
   }
@@ -82,11 +83,11 @@ async function submit(asDraft: boolean): Promise<void> {
   error.value = "";
   missing.value = [];
   if (!form.title.trim()) {
-    error.value = "请填写标题";
+    error.value = t("publish.titleRequired");
     return;
   }
   if (!asDraft && form.price <= 0) {
-    error.value = "提审前必须设置售价（> 0 积分）";
+    error.value = t("publish.priceRequired");
     return;
   }
   saving.value = true;
@@ -104,12 +105,12 @@ async function submit(asDraft: boolean): Promise<void> {
     const created = asDraft
       ? await api.post<{ id?: string }>("/market/creator/works/save", body)
       : await api.post<{ id?: string }>("/market/creator/works", body);
-    toast.success(asDraft ? "草稿已保存" : "已提交审核");
+    toast.success(asDraft ? t("publish.draftSaved") : t("publish.submitted"));
     const id = created?.id;
     if (id) await router.push(`/creator-center/${id}`);
     else await router.push("/creator-center");
   } catch (err) {
-    const message = (err as Error).message || "提交失败";
+    const message = (err as Error).message || t("publish.submitFailed");
     error.value = message;
     // 后端把"上架前置条件缺什么"放在 missing[]：原样展示，不猜
     // 业务错误信封只下发 {code,msg}（见 api-spec §16.0），结构化原因不保证存在；
@@ -128,48 +129,46 @@ onMounted(loadOptions);
   <div class="publish">
     <header class="head">
       <div>
-        <h1>发布作品</h1>
-        <p class="muted">
-          把本子上架到剧本集市。提审要求：售价 &gt; 0，且关联本子已定稿（未关联本子可自由定价）。
-        </p>
+        <h1>{{ t("publish.title") }}</h1>
+        <p class="muted">{{ t("publish.sub") }}</p>
       </div>
-      <NuxtLink to="/creator-center" class="link">返回创作者中心 →</NuxtLink>
+      <NuxtLink to="/creator-center" class="link">{{ t("publish.backToCenter") }}</NuxtLink>
     </header>
 
     <section class="panel">
-      <h2>① 选择本子</h2>
+      <h2>{{ t("publish.stepPick") }}</h2>
       <div class="row">
         <select v-model="form.novelId" class="input">
-          <option value="">不关联本子（自由创作）</option>
+          <option value="">{{ t("publish.noNovel") }}</option>
           <option v-for="item in projects" :key="item.id" :value="item.id">{{ item.title }}</option>
         </select>
         <button type="button" class="btn" :disabled="!form.novelId || parsing" @click="parseFromNovel">
-          {{ parsing ? "解析中…" : "从本子解析建议值" }}
+          {{ parsing ? t("publish.parsing") : t("publish.parseSuggestion") }}
         </button>
       </div>
     </section>
 
     <section class="panel">
-      <h2>② 基本信息</h2>
+      <h2>{{ t("publish.stepBasic") }}</h2>
       <div class="grid">
         <label class="field">
-          <span>标题 <b>*</b></span>
-          <input v-model="form.title" maxlength="120" placeholder="例如：雨夜霓虹" />
+          <span>{{ t("publish.titleLabel") }} <b>*</b></span>
+          <input v-model="form.title" maxlength="120" :placeholder="t('publish.titlePlaceholder')" />
         </label>
         <label class="field">
-          <span>类型</span>
+          <span>{{ t("publish.kindLabel") }}</span>
           <select v-model.number="form.kind">
             <option v-for="item in KIND_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
         <label class="field wide">
-          <span>简介</span>
-          <textarea v-model="form.summary" rows="4" maxlength="2000" placeholder="一句话说清故事与卖点" />
+          <span>{{ t("publish.summaryLabel") }}</span>
+          <textarea v-model="form.summary" rows="4" maxlength="2000" :placeholder="t('publish.summaryPlaceholder')" />
         </label>
         <label class="field">
-          <span>分类</span>
+          <span>{{ t("publish.categoryLabel") }}</span>
           <select v-model="form.categoryId">
-            <option value="">不指定</option>
+            <option value="">{{ t("publish.noCategory") }}</option>
             <option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option>
           </select>
         </label>
@@ -177,35 +176,33 @@ onMounted(loadOptions);
     </section>
 
     <section class="panel">
-      <h2>③ 价格</h2>
+      <h2>{{ t("publish.stepPrice") }}</h2>
       <div class="grid">
         <label class="field">
-          <span>正式售价（积分） <b>*</b></span>
+          <span>{{ t("publish.priceLabel") }} <b>*</b></span>
           <input v-model.number="form.price" type="number" min="0" step="1" />
         </label>
         <label class="field">
-          <span>预售定金（积分，选填）</span>
+          <span>{{ t("publish.preorderLabel") }}</span>
           <input v-model.number="form.preorder" type="number" min="0" step="1" />
         </label>
       </div>
-      <p class="muted small">
-        收益按作品分账、不进入积分余额；提现走人工审核（见「收益」页）。
-      </p>
+      <p class="muted small">{{ t("publish.priceHint") }}</p>
     </section>
 
     <p v-if="error" class="err">{{ error }}</p>
     <ul v-if="missing.length" class="missing">
-      <li v-for="item in missing" :key="item">还缺：{{ item }}</li>
+      <li v-for="item in missing" :key="item">{{ t("publish.missing", { item }) }}</li>
     </ul>
 
     <div class="actions">
       <button type="button" class="btn" :disabled="saving" @click="submit(true)">
-        {{ saving ? "处理中…" : "保存草稿" }}
+        {{ saving ? t("publish.processing") : t("publish.saveDraft") }}
       </button>
       <button type="button" class="btn primary" :disabled="saving" @click="submit(false)">
-        {{ saving ? "处理中…" : "提交审核" }}
+        {{ saving ? t("publish.processing") : t("publish.submitReview") }}
       </button>
-      <NuxtLink to="/creator-center" class="link">稍后再说</NuxtLink>
+      <NuxtLink to="/creator-center" class="link">{{ t("publish.later") }}</NuxtLink>
     </div>
   </div>
 </template>

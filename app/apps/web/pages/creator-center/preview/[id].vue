@@ -15,7 +15,8 @@
  *    复制站内预览路径，并在 UI 说明"站内预览链接，非公开分享"——不假装已生成公开分享。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "作品预览 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("preview.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -83,7 +84,7 @@ async function load(): Promise<void> {
       tree.value = [];
     }
   } catch (err) {
-    error.value = (err as Error).message || "作品加载失败（可能不是你的作品）";
+    error.value = (err as Error).message || t("preview.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -94,10 +95,10 @@ async function copyShare(): Promise<void> {
   shareUrl.value = internal;
   try {
     await navigator.clipboard.writeText(internal);
-    toast.success("已复制站内预览链接（公开分享需作品在售）");
+    toast.success(t("preview.copied"));
   } catch {
     // 剪贴板权限被拒时退化：显示输入框让用户手动复制
-    toast.info("复制失败，请手动选择链接复制");
+    toast.info(t("preview.copyFailed"));
   }
 }
 
@@ -112,21 +113,20 @@ onMounted(load);
   <div class="preview">
     <header class="head">
       <div>
-        <h1>{{ work?.title || "作品预览" }}</h1>
+        <h1>{{ work?.title || t("preview.titleFallback") }}</h1>
         <p v-if="work" class="muted">
-          {{ work.kind_name }} · {{ work.price_credits }} 积分 ·
-          {{ work.status_name ?? `状态 ${work.status}` }}
-          <span v-if="work.audit_note"> · 审核意见：{{ work.audit_note }}</span>
+          {{ t("preview.meta", { kind: work.kind_name, credits: work.price_credits, status: work.status_name ?? t("preview.statusFallback", { status: work.status }) }) }}
+          <span v-if="work.audit_note"> · {{ t("preview.auditNote", { note: work.audit_note }) }}</span>
         </p>
       </div>
       <div class="head-actions">
-        <NuxtLink :to="`/creator-center/${workId}`" class="link">编辑作品</NuxtLink>
-        <button type="button" class="btn" @click="copyShare">复制分享链接</button>
+        <NuxtLink :to="`/creator-center/${workId}`" class="link">{{ t("preview.editWork") }}</NuxtLink>
+        <button type="button" class="btn" @click="copyShare">{{ t("preview.copyShare") }}</button>
       </div>
     </header>
 
     <p v-if="error" class="err">{{ error }}</p>
-    <p v-else-if="loading" class="muted">加载中…</p>
+    <p v-else-if="loading" class="muted">{{ t("preview.loading") }}</p>
 
     <template v-else-if="work">
       <div class="layout">
@@ -138,39 +138,39 @@ onMounted(load);
           <div v-else class="placeholder">
             <p class="ph-title">{{ work.kind_name }}</p>
             <p class="muted">
-              {{ kindKind === "script" ? "剧本类作品以文本预览，右侧显示内容结构" : "该作品没有可预览的封面图" }}
+              {{ kindKind === "script" ? t("preview.scriptPreview") : t("preview.noCover") }}
             </p>
             <p v-if="work.counts" class="muted small">
-              共 {{ work.counts.chapters ?? work.counts.episodes ?? 0 }} 章/集<template
+              {{ t("preview.counts", { count: work.counts.chapters ?? work.counts.episodes ?? 0 }) }}<template
                 v-if="work.counts.words"
-              > · {{ work.counts.words }} 字</template>
+              >{{ t("preview.countsWords", { words: work.counts.words }) }}</template>
             </p>
           </div>
         </section>
 
         <aside class="side">
-          <h2>简介</h2>
-          <p class="summary">{{ work.summary || "（无简介）" }}</p>
+          <h2>{{ t("preview.summary") }}</h2>
+          <p class="summary">{{ work.summary || t("preview.noSummary") }}</p>
 
-          <h2>内容结构</h2>
+          <h2>{{ t("preview.contentTree") }}</h2>
           <ol v-if="tree.length" class="tree">
             <li v-for="(node, index) in tree.slice(0, 20)" :key="node.id ?? index">
-              {{ node.title ?? node.name ?? `第 ${index + 1} 章` }}
-              <span v-if="node.word_count" class="muted small">（{{ node.word_count }} 字）</span>
+              {{ node.title ?? node.name ?? t("preview.chapterFallback", { index: index + 1 }) }}
+              <span v-if="node.word_count" class="muted small">{{ t("preview.words", { count: node.word_count }) }}</span>
             </li>
           </ol>
-          <p v-else class="muted">还没有内容结构（草稿阶段）。</p>
+          <p v-else class="muted">{{ t("preview.noTree") }}</p>
 
           <p v-if="shareUrl" class="share">
-            分享链接：<code>{{ shareUrl }}</code>
+            {{ t("preview.shareLink") }}<code>{{ shareUrl }}</code>
           </p>
         </aside>
       </div>
 
       <div class="actions">
-        <button type="button" class="btn ghost" @click="openBuyerPage">以买家视角查看</button>
+        <button type="button" class="btn ghost" @click="openBuyerPage">{{ t("preview.viewAsBuyer") }}</button>
         <span class="muted small">
-          站内预览只对你可见；作品上架后买家会看到购买页（含协议与内容树）。
+          {{ t("preview.previewHint") }}
         </span>
       </div>
     </template>

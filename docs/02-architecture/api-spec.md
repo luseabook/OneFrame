@@ -1789,7 +1789,7 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | `tools` / `tasks` / `works` / `share` | 工具箱、任务、全部项目、分享页 | ~120 |
 | `film` / `market` / `credits` / `assets` / `novel` / `invite` / `home` / `onboarding`（第 9–12 批） | 影视版、剧本集市、积分流水、资产库、剧本工厂、邀请与兑换、**首页（工具矩阵/轮播/新手引导条）** | 266 |
 
-**已迁移页面 24 / 64 + 1 组件**（第 8–18 批：film/index、novel-market/index、novel-market/[id]、credits、assets、novel/index、invite、home、activities、team/dashboard、agent、reelflow/list、canvas/index、creator-center/index + OnboardingBar）。
+**已迁移页面 27 / 64 + 1 组件**（第 8–19 批；用户面 27/45 = 60%）；法务页 privacy/terms 按原则不机翻。
 **未迁移**：novel / creator-center / admin / team / agent / create(19 卡) / canvas / reelflow / 合集详情等（记在进度文档 §5）。
 
 **校验口径**：`_acceptance/i18n-check.cjs`（静态：key 一致 / 无空值 / 外语包无中文残留 / 占位符一致 / 页面 key 齐全）

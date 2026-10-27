@@ -123,6 +123,33 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.9 · 多语言第 19 批：举报 / 发布作品 / 作品预览 + 新口径 · 2026-10-28）
+
+页面覆盖 **24 → 27/64**；**用户面页面 27/45 = 60%**（新口径）；全站 **97.6%** / 首发 **97.6%**。
+
+| 页面 | namespace | 迁移内容 |
+|---|---|---|
+| [report.vue](app/apps/web/pages/report.vue) | `report`（21 key） | 标题与说明、token/类型（6 种）/补充/联系方式四字段、提交与提交中、缺 token 与成功/失败提示、脚注、返回首页 |
+| [creator-center/publish.vue](app/apps/web/pages/creator-center/publish.vue) | `publish`（34 key） | 三步表单（选本子/基本信息/价格）、`KIND_OPTIONS` 改 computed、六处占位与校验、missing 列表、草稿与提审两个动作、四条 toast |
+| [creator-center/preview/[id].vue](app/apps/web/pages/creator-center/preview/[id].vue) | `preview`（22 key） | 标题回退、元信息（类型/积分/状态/审核意见）、编辑与复制链接、三类媒体占位（含「剧本以文本预览」）、内容结构（章节回退与字数）、分享链接、买家视角、复制成功/失败 |
+
+### 新增口径：用户面页面覆盖（§2.2.1）
+
+模块 #16 用整数百分比记分，而 i18n 剩余工作是可数的**页面数**——只看分数会以为「三轮没动」。因此新增：
+
+| 口径 | 分母 | 已迁 | 覆盖率 |
+|---|---:|---:|---:|
+| 用户面页面（排除 admin 2 页 + `/create/*` 17 页） | 45 | 27 | **60%** |
+| 全部页面 | 64 | 27 | 42% |
+
+### 一条明确的范围决定：法务文本不机翻
+
+`privacy` / `terms` 两页**不进入 i18n 翻译队列**：法律文本的译文需要法务审定，机翻会引入责任风险。
+已在文档中单列说明（待法务确认后人工翻译），而不是默默留在「未迁列表」里。
+
+**验证**：`i18n-check.cjs` 全绿（1114 key / 27 页 + 4 组件）；`e2e-i18n-pages.cjs` **81/81**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.8 · 多语言第 18 批：创作者中心 · 2026-10-28）
 
 页面覆盖 **23 → 24/64**；全站 **97.6%** / 首发 **97.6%**（#16 保持 99%）。
