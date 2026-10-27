@@ -23,6 +23,9 @@ interface BatchItem {
   reason?: string;
 }
 
+const { t, locale } = useI18n();
+useHead({ title: () => t("projectDetail.metaTitle") });
+
 const api = useApi();
 const route = useRoute();
 const projectId = computed(() => String(route.params.id));
@@ -75,7 +78,7 @@ async function run<T>(label: string, fn: () => Promise<T>): Promise<T | undefine
   try {
     return await fn();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "操作失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.opFailed");
     return undefined;
   } finally {
     busy.value = "";
@@ -146,24 +149,24 @@ async function loadModels(): Promise<void> {
 }
 
 async function generateOutline(): Promise<void> {
-  await run("生成大纲", async () => {
+  await run(t("projectDetail.views.outline"), async () => {
     const result = await api.post<EpisodeDto[]>(`/projects/${projectId.value}/outline/generate`);
     await loadProject();
-    info.value = `已生成 ${result.length} 集大纲，请确认`;
+    info.value = t("projectDetail.outlineGenerated", { count: result.length });
   });
 }
 
 async function saveOutline(): Promise<void> {
-  await run("确认大纲", async () => {
+  await run(t("projectDetail.views.outline"), async () => {
     await api.put(`/projects/${projectId.value}/outline`, {
       episodes: episodes.value.map((ep) => ({
         ep_no: ep.ep_no,
-        title: ep.title ?? `第${ep.ep_no}集`,
+        title: ep.title ?? t("projectDetail.autoEpisodeTitle", { n: ep.ep_no }),
         synopsis: ep.synopsis ?? "",
       })),
     });
     await loadProject();
-    info.value = "大纲已确认";
+    info.value = t("projectDetail.outlineConfirmed");
   });
 }
 
@@ -176,7 +179,7 @@ function saveEpisodeDebounced(ep: EpisodeDto): void {
         title: ep.title ?? undefined,
         synopsis: ep.synopsis ?? undefined,
       });
-      info.value = "大纲已自动保存";
+      info.value = t("projectDetail.outlineAutoSaved");
     } catch {
       /* 自动保存失败不打断编辑 */
     }
@@ -186,7 +189,7 @@ function saveEpisodeDebounced(ep: EpisodeDto): void {
 
 async function prefillBudget(): Promise<void> {
   if (!selectedEpisodeId.value || shots.value.length === 0) return;
-  await run("批量报价", async () => {
+  await run(t("projectDetail.views.batch"), async () => {
     const byId = new Map(characters.value.map((c) => [c.id, c]));
     // 续投场景：已投递/成功的镜头不再重复报价，只算「已消耗 + 剩余镜头报价」
     const spentShots = shots.value.filter((shot) => shot.video_task_id !== null);
@@ -225,42 +228,42 @@ async function prefillBudget(): Promise<void> {
     budgetTouched.value = false;
     info.value =
       spent > 0
-        ? `续投预算预填：已消耗 ${spent} + 剩余 ${pendingShots.length} 镜报价 ${quote.total_credits} = ${suggested} 积分`
-        : `批量报价 ${quote.total_credits} 积分；预算已预填`;
+        ? t("projectDetail.quoteContinued", { spent, shots: pendingShots.length, quoted: quote.total_credits, suggested })
+        : t("projectDetail.quoteDone", { quoted: quote.total_credits });
   });
 }
 
 async function promoteCharacter(character: CharacterDto): Promise<void> {
-  await run("转存通用资产", async () => {
+  await run(t("projectDetail.assetSaved"), async () => {
     const res = await api.post<{ asset_id: string; tags: string[] }>(
       `/projects/${projectId.value}/characters/${character.id}/to-asset`,
       {},
     );
-    info.value = `已转存为通用资产（${res.tags.join("、")}），可在资产库跨项目复用`;
+    info.value = t("projectDetail.assetTransferred", { tags: res.tags.join("、") });
   });
 }
 
 async function generateCharacters(): Promise<void> {
-  await run("生成角色", async () => {
+  await run(t("projectDetail.views.characters"), async () => {
     await api.post(`/projects/${projectId.value}/characters/generate`, { count: 5 });
     await loadProject();
-    info.value = "角色已生成；生成定妆图后可定稿";
+    info.value = t("projectDetail.charactersGenerated");
   });
 }
 
 async function generatePortrait(character: CharacterDto): Promise<void> {
-  await run("生成定妆图", async () => {
+  await run(t("projectDetail.views.characters"), async () => {
     const res = await api.post<{ task_id: string }>(
       `/projects/${projectId.value}/characters/${character.id}/portrait`,
       { count: portraitCount.value },
     );
-    info.value = `定妆图任务已提交（${res.task_id}），完成后自动定稿`;
+    info.value = t("projectDetail.lookSubmitted", { taskId: res.task_id });
     startPortraitPoll();
   });
 }
 
 async function loadCandidates(character: CharacterDto): Promise<void> {
-  await run("加载候选图", async () => {
+  await run(t("projectDetail.candidatesReady"), async () => {
     const data = await api.get<{ task_id: string; candidates: Array<{ index: number; url: string }> }>(
       `/projects/${projectId.value}/characters/${character.id}/portrait/candidates`,
     );
@@ -270,34 +273,34 @@ async function loadCandidates(character: CharacterDto): Promise<void> {
 
 async function chooseCandidate(item: { index: number }): Promise<void> {
   if (!candidates.value) return;
-  await run("选择定妆图", async () => {
+  await run(t("projectDetail.views.characters"), async () => {
     await api.post(
       `/projects/${projectId.value}/characters/${candidates.value!.charId}/portrait/select`,
       { task_id: candidates.value!.task_id, index: item.index },
     );
     candidates.value = null;
     await loadProject();
-    info.value = "已切换定妆图并定稿";
+    info.value = t("projectDetail.lookSwitched");
   });
 }
 
 async function retryExportJob(): Promise<void> {
   if (!exportJob.value || !selectedEpisodeId.value) return;
-  await run("重试导出", async () => {
+  await run(t("projectDetail.views.batch"), async () => {
     await api.post(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/exports/${exportJob.value!.export_id}/retry`,
     );
     exportJob.value = { ...exportJob.value!, status: 1, error: null, download_url: null };
-    info.value = "导出已重新排队";
+    info.value = t("projectDetail.exportRequeued");
     startExportPoll();
   });
 }
 
 async function finalizeCharacter(character: CharacterDto): Promise<void> {
-  await run("定稿", async () => {
+  await run(t("projectDetail.confirmFinalized"), async () => {
     await api.post(`/projects/${projectId.value}/characters/${character.id}/finalize`);
     await loadProject();
-    info.value = `${character.name} 已定稿，可被分镜引用`;
+    info.value = t("projectDetail.characterFinalized", { name: character.name });
   });
 }
 
@@ -320,30 +323,30 @@ function startPortraitPoll(): void {
 
 async function generateScriptDraft(): Promise<void> {
   if (!selectedEpisodeId.value) return;
-  await run("生成剧本", async () => {
+  await run(t("projectDetail.viewCards.outline"), async () => {
     await api.post(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/script-draft/generate`,
       {},
     );
     await loadEpisode();
-    info.value = "剧本草稿已生成";
+    info.value = t("projectDetail.scriptDraftReady");
   });
 }
 
 async function generateStoryboards(): Promise<void> {
   if (!selectedEpisodeId.value) return;
-  await run("生成分镜", async () => {
+  await run(t("projectDetail.views.storyboards"), async () => {
     shots.value = await api.post<StoryboardDto[]>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/generate`,
       { shot_count: shotCount.value },
     );
     await loadEpisode();
-    info.value = `已生成 ${shots.value.length} 个分镜`;
+    info.value = t("projectDetail.shotsGenerated", { count: shots.value.length });
   });
 }
 
 async function saveShot(shot: StoryboardDto): Promise<void> {
-  await run("保存分镜", async () => {
+  await run(t("projectDetail.shotSaved"), async () => {
     await api.patch(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}`,
       {
@@ -352,13 +355,13 @@ async function saveShot(shot: StoryboardDto): Promise<void> {
         duration_s: shot.duration_s,
       },
     );
-    info.value = `镜头 ${shot.shot_no} 已保存`;
+    info.value = t("projectDetail.shotSaved", { no: shot.shot_no });
   });
 }
 
 async function submitBatch(): Promise<void> {
   if (!selectedEpisodeId.value) return;
-  await run("批量投递", async () => {
+  await run(t("projectDetail.views.batch"), async () => {
     const res = await api.post<{ budget_exceeded: boolean; items: BatchItem[] }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/generate-videos`,
       {
@@ -374,15 +377,15 @@ async function submitBatch(): Promise<void> {
     const overBudget = res.items.filter((i) => i.code === 745703).length;
     // 全部失败时给出可行动的原因，而不是只报「已提交 0 个镜头」
     if (okCount === 0 && notReady > 0) {
-      error.value = `全部镜头未投递：${notReady} 个镜头的绑定角色未定稿。请先到「角色」步骤生成定妆图并定稿，再回来投递。`;
+      error.value = t("projectDetail.submitAllBlockedNotReady", { count: notReady });
       info.value = "";
     } else if (okCount === 0 && overBudget > 0) {
-      error.value = `全部镜头未投递：预算上限不足以覆盖 ${overBudget} 个镜头，请提高预算后再试。`;
+      error.value = t("projectDetail.submitAllBlockedOverBudget", { count: overBudget });
       info.value = "";
     } else {
-      const parts = [`已提交 ${okCount} 个镜头`];
-      if (notReady > 0) parts.push(`${notReady} 个因角色未定稿跳过`);
-      if (overBudget > 0) parts.push(`${overBudget} 个因超预算跳过`);
+      const parts = [t("projectDetail.submitPart", { ok: okCount })];
+      if (notReady > 0) parts.push(t("projectDetail.submitSkippedNotReady", { count: notReady }));
+      if (overBudget > 0) parts.push(t("projectDetail.submitSkippedOverBudget", { count: overBudget }));
       info.value = parts.join("，");
       error.value = "";
     }
@@ -424,10 +427,10 @@ async function submitExport(): Promise<void> {
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/exports`,
     );
     exportJob.value = created;
-    info.value = "导出任务已提交，正在打包…";
+    info.value = t("projectDetail.exportSubmitted");
     startExportPoll();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "导出失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.exportFailed");
   } finally {
     exporting.value = false;
   }
@@ -445,7 +448,7 @@ function startExportPoll(): void {
       exportJob.value = data;
       if (data.status === 3 || data.status === 4) {
         if (exportTimer) clearInterval(exportTimer);
-        info.value = data.status === 3 ? "导出完成，可下载 zip" : "导出失败：没有可用视频";
+        info.value = data.status === 3 ? t("projectDetail.exportDone") : t("projectDetail.exportNoVideo");
       }
     } catch {
       /* ignore */
@@ -455,7 +458,7 @@ function startExportPoll(): void {
 }
 
 onMounted(async () => {
-  await run("加载项目", async () => {
+  await run(t("projectDetail.metaTitle"), async () => {
     await loadProject();
     await loadModels();
     await loadMatrix();
@@ -465,9 +468,9 @@ onMounted(async () => {
   });
   // 首次进入空项目时给一条可行动提示（PRD 增补 §3.2 空态引导）
   if (!episodes.value.length) {
-    info.value = "这个项目还没有分集：先在第 ① 步点「生成大纲」，确认后进入角色与分镜。";
+    info.value = t("projectDetail.noEpisodesHint");
   } else if (characters.value.length && shots.value.length === 0) {
-    info.value = "大纲与角色已就绪：切到第 ③ 步「生成分镜」，再批量投递即可出片。";
+    info.value = t("projectDetail.readyHint");
   }
 });
 
@@ -478,10 +481,10 @@ onUnmounted(() => {
 
 // ── 流水线步骤（UI 编排层）──
 const steps = computed(() => [
-  { key: "outline" as const, label: "大纲", count: episodes.value.length || undefined },
-  { key: "characters" as const, label: "角色", count: characters.value.length || undefined },
-  { key: "storyboards" as const, label: "分镜", count: shots.value.length || undefined },
-  { key: "batch" as const, label: "投递", count: batchItems.value.length || undefined },
+  { key: "outline" as const, label: t("projectDetail.views.outline"), count: episodes.value.length || undefined },
+  { key: "characters" as const, label: t("projectDetail.views.characters"), count: characters.value.length || undefined },
+  { key: "storyboards" as const, label: t("projectDetail.views.storyboards"), count: shots.value.length || undefined },
+  { key: "batch" as const, label: t("projectDetail.views.batch"), count: batchItems.value.length || undefined },
 ]);
 
 function stepDone(key: "outline" | "characters" | "storyboards" | "batch"): boolean {
@@ -507,14 +510,14 @@ function epShortTitle(ep: EpisodeDto): string {
 // ══════════ 视图切换（剧本 / 资产 / 分镜 / 导出）══════════
 const viewMenu = ref(false);
 const viewOptions = [
-  { key: "outline" as const, label: "剧本", desc: "分集大纲与梗概，确认后进入资产" },
-  { key: "characters" as const, label: "资产", desc: "角色定妆（场景/道具需 AI 提取链路）" },
-  { key: "storyboards" as const, label: "分镜", desc: "单集工作台：分镜条 / 素材区 / 生成台" },
-  { key: "batch" as const, label: "导出", desc: "批量投递、分镜矩阵与整集 zip" },
-  { key: "timeline" as const, label: "时间线导出", desc: "合成预览、镜头排序与整集导出" },
-  { key: "confirm" as const, label: "资产校验", desc: "清单核对、批量定稿与批量生成参考图" },
+  { key: "outline" as const, label: t("projectDetail.viewCards.outline"), desc: t("projectDetail.viewCards.outlineDesc") },
+  { key: "characters" as const, label: t("projectDetail.viewCards.characters"), desc: t("projectDetail.viewCards.charactersDesc") },
+  { key: "storyboards" as const, label: t("projectDetail.viewCards.storyboards"), desc: t("projectDetail.viewCards.storyboardsDesc") },
+  { key: "batch" as const, label: t("projectDetail.viewCards.batch"), desc: t("projectDetail.viewCards.batchDesc") },
+  { key: "timeline" as const, label: t("projectDetail.viewCards.timeline"), desc: t("projectDetail.viewCards.timelineDesc") },
+  { key: "confirm" as const, label: t("projectDetail.viewCards.confirm"), desc: t("projectDetail.viewCards.confirmDesc") },
 ];
-const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.label ?? "分镜");
+const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.label ?? t("projectDetail.viewFallback"));
 function setView(key: "outline" | "characters" | "storyboards" | "batch" | "timeline" | "confirm"): void {
   tab.value = key;
   viewMenu.value = false;
@@ -528,31 +531,31 @@ function setView(key: "outline" | "characters" | "storyboards" | "batch" | "time
 // ══════════ 资产视图 ══════════
 const assetTab = ref<"character" | "scene" | "prop" | "other">("character");
 const assetTabOptions = [
-  { key: "character" as const, label: "角色" },
-  { key: "scene" as const, label: "场景" },
-  { key: "prop" as const, label: "道具" },
-  { key: "other" as const, label: "其他" },
+  { key: "character" as const, label: t("projectDetail.assetTabs.character") },
+  { key: "scene" as const, label: t("projectDetail.assetTabs.scene") },
+  { key: "prop" as const, label: t("projectDetail.assetTabs.prop") },
+  { key: "other" as const, label: t("projectDetail.assetTabs.other") },
 ];
-const assetTabLabel = computed(() => assetTabOptions.find((a) => a.key === assetTab.value)?.label ?? "角色");
+const assetTabLabel = computed(() => assetTabOptions.find((a) => a.key === assetTab.value)?.label ?? t("projectDetail.assetTabFallback"));
 const assetItems = computed(() => (assetTab.value === "character" ? characters.value : []));
 const assetDrawer = ref(false);
 
 // ══════════ 分镜工作台（三列）══════════
 const stageTab = ref<"all" | "image" | "video">("all");
 const stageTabOptions = [
-  { key: "all" as const, label: "全部" },
-  { key: "image" as const, label: "图片" },
-  { key: "video" as const, label: "视频" },
+  { key: "all" as const, label: t("projectDetail.assetFilters.all") },
+  { key: "image" as const, label: t("projectDetail.assetFilters.image") },
+  { key: "video" as const, label: t("projectDetail.assetFilters.video") },
 ];
 const genTab = ref<"image" | "video">("video");
 const mode = ref("reference");
 // 参照站 5 种生成模式：前 4 种已按 models.modes 接入，AI改视频需源视频输入、显式不支持
 const modeOptions = [
-  { key: "reference", apiMode: "universal_reference", label: "参考生视频", hint: "绑定资产图作为参考，逐镜生成" },
-  { key: "first_frame", apiMode: "first_frame", label: "首帧生视频", hint: "用第 1 个合格资产图作为首帧" },
-  { key: "first_last", apiMode: "first_last_frame", label: "首尾帧生视频", hint: "用前 2 个合格资产图作为首帧/尾帧" },
-  { key: "text", apiMode: "text2video", label: "文生视频", hint: "只用提示词生成，不需要参考图" },
-  { key: "ai_edit", apiMode: "video_edit", label: "AI改视频", hint: "需要源视频输入，当前不支持" },
+  { key: "reference", apiMode: "universal_reference", label: t("projectDetail.mediaModes.reference"), hint: t("projectDetail.mediaModes.referenceHint") },
+  { key: "first_frame", apiMode: "first_frame", label: t("projectDetail.mediaModes.firstFrame"), hint: t("projectDetail.mediaModes.firstFrameHint") },
+  { key: "first_last", apiMode: "first_last_frame", label: t("projectDetail.mediaModes.firstLast"), hint: t("projectDetail.mediaModes.firstLastHint") },
+  { key: "text", apiMode: "text2video", label: t("projectDetail.mediaModes.text"), hint: t("projectDetail.mediaModes.textHint") },
+  { key: "ai_edit", apiMode: "video_edit", label: t("projectDetail.mediaModes.aiEdit"), hint: t("projectDetail.mediaModes.aiEditHint") },
 ] as const;
 const modeApi = computed(
   () => modeOptions.find((m) => m.key === mode.value)?.apiMode ?? "universal_reference",
@@ -579,9 +582,9 @@ function modeEnabled(key: string): boolean {
 }
 const modeHint = computed(() => {
   const opt = modeOptions.find((m) => m.key === mode.value);
-  if (mode.value === "first_last" && boundImageCount.value < 2) return "首尾帧需要 2 张合格资产图（当前不足）";
-  if (mode.value === "first_frame" && boundImageCount.value < 1) return "首帧需要 1 张合格资产图（当前不足）";
-  if (mode.value === "text") return "文生视频只用提示词，不需要参考图";
+  if (mode.value === "first_last" && boundImageCount.value < 2) return t("projectDetail.modeBlockedFirstLast");
+  if (mode.value === "first_frame" && boundImageCount.value < 1) return t("projectDetail.modeBlockedFirstFrame");
+  if (mode.value === "text") return t("projectDetail.modeBlockedText");
   return opt?.hint ?? "";
 });
 const selectedShotId = ref("");
@@ -607,10 +610,10 @@ const stageMaterials = computed(() => {
 });
 const submittedShots = computed(() => batchItems.value);
 function batchReason(item: BatchItem): string {
-  if (item.code === 400105) return "资产未定稿";
-  if (item.code === 745703) return "超预算";
-  if (item.code === 745701) return "余额不足";
-  return "未提交";
+  if (item.code === 400105) return t("projectDetail.batchReasons.notFinalized");
+  if (item.code === 745703) return t("projectDetail.batchReasons.overBudget");
+  if (item.code === 745701) return t("projectDetail.batchReasons.insufficient");
+  return t("projectDetail.batchReasons.notSubmitted");
 }
 function shotNoOf(shotId: string): string {
   return String(shots.value.find((s) => s.id === shotId)?.shot_no ?? "-");
@@ -673,7 +676,7 @@ async function saveSelectedShot(): Promise<void> {
 async function submitShot(shot: StoryboardDto): Promise<void> {
   if (!selectedEpisodeId.value) return;
   await saveShot(shot);
-  await run("投递镜头", async () => {
+  await run(t("projectDetail.views.batch"), async () => {
     const res = await api.post<{ budget_exceeded: boolean; items: BatchItem[] }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/generate-videos`,
       { shot_ids: [shot.id], budget_credits_max: budget.value, model: modelName.value, mode: modeApi.value },
@@ -683,9 +686,9 @@ async function submitShot(shot: StoryboardDto): Promise<void> {
     if (res.budget_exceeded) budgetExceeded.value = true;
     const item = res.items[0];
     if (item?.submitted) {
-      info.value = `镜头 ${shot.shot_no} 已投递，可在「导出」视图查看进度`;
+      info.value = t("projectDetail.shotSubmitted", { no: shot.shot_no });
     } else {
-      error.value = `镜头 ${shot.shot_no} 未投递：${item ? batchReason(item) : "未知原因"}`;
+      error.value = t("projectDetail.shotSubmitFailed", { no: shot.shot_no, reason: item ? batchReason(item) : t("projectDetail.unknownReason") });
       info.value = "";
     }
     startTaskPoll();
@@ -789,10 +792,10 @@ function openAssetForm(kind: "scene" | "prop" | "other", asset?: ProjectAssetDto
 
 async function saveAssetForm(): Promise<void> {
   if (!assetForm.value.name.trim()) {
-    error.value = "请填写资产名称";
+    error.value = t("projectDetail.assetNameRequired");
     return;
   }
-  await run(assetFormId.value ? "保存资产" : "新建资产", async () => {
+  await run(assetFormId.value ? t("projectDetail.assetSaved") : t("projectDetail.views.characters"), async () => {
     const body = {
       name: assetForm.value.name.trim(),
       description: assetForm.value.description,
@@ -806,24 +809,24 @@ async function saveAssetForm(): Promise<void> {
     }
     assetFormOpen.value = false;
     await loadProjectAssets();
-    info.value = "资产已保存";
+    info.value = t("projectDetail.assetSaved");
   });
 }
 
 async function patchProjectAsset(asset: ProjectAssetDto, body: Record<string, unknown>): Promise<void> {
-  await run("更新资产", async () => {
+  await run(t("projectDetail.assetUpdated"), async () => {
     await api.patch(`/projects/${projectId.value}/assets/${asset.id}`, body);
     await loadProjectAssets();
-    info.value = body.status === 2 ? `「${asset.name}」已定稿，可作为参考图注入分镜` : "已更新";
+    info.value = body.status === 2 ? t("projectDetail.assetFinalized", { name: asset.name }) : t("projectDetail.assetUpdated");
   });
 }
 
 async function removeProjectAsset(asset: ProjectAssetDto): Promise<void> {
-  await run("删除资产", async () => {
+  await run(t("projectDetail.confirmDeleted"), async () => {
     await api.delete(`/projects/${projectId.value}/assets/${asset.id}`);
     await loadProjectAssets();
     await loadEpisode();
-    info.value = `已删除「${asset.name}」`;
+    info.value = t("projectDetail.assetDeleted", { name: asset.name });
   });
 }
 
@@ -835,7 +838,7 @@ async function onImportFile(event: Event): Promise<void> {
   const kind = assetTabKind.value;
   if (!file || !kind) return;
   if (file.size > 8 * 1024 * 1024) {
-    error.value = "图片需 ≤8MB";
+    error.value = t("projectDetail.imageTooLarge");
     return;
   }
   uploading.value = true;
@@ -844,7 +847,7 @@ async function onImportFile(event: Event): Promise<void> {
     const base64 = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("projectDetail.readFileFailed")));
       reader.readAsDataURL(file);
     });
     const asset = await api.post<{ id: string; uri: string }>("/assets/upload", {
@@ -854,13 +857,13 @@ async function onImportFile(event: Event): Promise<void> {
     });
     await api.post(`/projects/${projectId.value}/assets`, {
       kind,
-      name: file.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 50) || "导入资产",
+      name: file.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 50) || t("projectDetail.importAssetDefault"),
       ref_image_uri: asset.uri,
     });
     await loadProjectAssets();
-    info.value = "已导入，定稿后会作为参考图注入分镜生成";
+    info.value = t("projectDetail.assetImported");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "导入失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.importFailed");
   } finally {
     uploading.value = false;
   }
@@ -870,13 +873,13 @@ async function onImportFile(event: Event): Promise<void> {
 async function setShotAssets(ids: string[]): Promise<void> {
   const shot = selectedShot.value;
   if (!shot || !selectedEpisodeId.value) return;
-  await run("更新素材", async () => {
+  await run(t("projectDetail.materialUpdated"), async () => {
     const res = await api.put<{ asset_ids: string[] }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}/assets`,
       { asset_ids: ids },
     );
     shot.character_ids = res.asset_ids;
-    info.value = `素材已更新（${res.asset_ids.length} 个）`;
+    info.value = t("projectDetail.materialUpdated", { count: res.asset_ids.length });
   });
 }
 
@@ -934,11 +937,14 @@ async function extractAssets(scope: "episode" | "project"): Promise<void> {
       truncated?: boolean;
     }>(`/projects/${projectId.value}/assets/extract`, body);
     await loadProjectAssets();
-    const parts = [`新增 ${res.created}`, `更新 ${res.updated}`];
-    if (res.skipped) parts.push(`跳过重复 ${res.skipped}`);
-    info.value = `AI 提取完成：${parts.join("，")}${res.truncated ? "（已按单次上限截断）" : ""}；请校验并定稿后再用于分镜生成`;
+    const parts = [t("projectDetail.aiExtractPartsCreated", { count: res.created }), t("projectDetail.aiExtractPartsUpdated", { count: res.updated })];
+    if (res.skipped) parts.push(t("projectDetail.aiExtractPartsSkipped", { count: res.skipped }));
+    info.value = t("projectDetail.aiExtractDone", {
+      parts: parts.join("，"),
+      truncated: res.truncated ? t("projectDetail.aiExtractTruncated") : "",
+    });
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "AI 提取失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.aiExtractFailed");
   } finally {
     extracting.value = false;
   }
@@ -953,11 +959,11 @@ async function finalizeAllDrafts(): Promise<void> {
   const targets = draftsWithImage.value;
   if (!targets.length) {
     error.value = draftsWithoutImage.value.length
-      ? "待定稿的资产都还没有参考图：先点「生成图」（或导入图片）再定稿"
-      : "没有待定稿的资产";
+      ? t("projectDetail.batchFinalizeNoRefs")
+      : t("projectDetail.batchFinalizeNothing");
     return;
   }
-  await run("批量定稿", async () => {
+  await run(t("projectDetail.confirmFinalized"), async () => {
     let ok = 0;
     for (const a of targets) {
       try {
@@ -969,7 +975,11 @@ async function finalizeAllDrafts(): Promise<void> {
     }
     await loadProjectAssets();
     const missing = draftsWithoutImage.value.length;
-    info.value = `已定稿 ${ok}/${targets.length} 个资产${missing ? `；另有 ${missing} 个缺少参考图，先「生成图」再定稿才会被采纳` : ""}`;
+    info.value = t("projectDetail.batchFinalized", {
+      ok,
+      total: targets.length,
+      missing: missing ? t("projectDetail.batchFinalizedMissing", { count: missing }) : "",
+    });
   });
 }
 
@@ -1010,9 +1020,9 @@ async function onDirectorCaptured(dataUrl: string): Promise<void> {
       refreshed.first_frame_uri = uploaded.uri;
       refreshed.first_frame_url = uploaded.url;
     }
-    info.value = `已把 3D 定格设为镜头 ${shot.shot_no} 的首帧：切到「首帧生视频」即可用它出片`;
+    info.value = t("projectDetail.setFirstFrameDone", { no: shot.shot_no });
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "设置首帧失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.setFirstFrameFailed");
   } finally {
     firstFrameBusy.value = false;
   }
@@ -1022,7 +1032,7 @@ async function onDirectorCaptured(dataUrl: string): Promise<void> {
 async function clearFirstFrame(): Promise<void> {
   const shot = selectedShot.value;
   if (!shot || !selectedEpisodeId.value) return;
-  await run("清空首帧", async () => {
+  await run(t("projectDetail.clearFirstFrameDone"), async () => {
     await api.patch(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}`,
       { first_frame_uri: null },
@@ -1033,7 +1043,7 @@ async function clearFirstFrame(): Promise<void> {
       refreshed.first_frame_uri = null;
       refreshed.first_frame_url = null;
     }
-    info.value = "已清空该镜首帧，首帧模式将回退到绑定资产";
+    info.value = t("projectDetail.clearFirstFrameDone");
   });
 }
 const assetImageBusyId = ref("");
@@ -1047,10 +1057,10 @@ async function generateAssetImage(a: ProjectAssetDto): Promise<void> {
       `/projects/${projectId.value}/assets/${a.id}/generate-image`,
       {},
     );
-    info.value = `已提交生成（${res.model}），正在等待结果…`;
+    info.value = t("projectDetail.genSubmitted", { model: res.model });
     await pollAssetCandidates(a.id, res.task_id);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "生成失败";
+    error.value = e instanceof Error ? e.message : t("projectDetail.genFailed");
   } finally {
     assetImageBusyId.value = "";
   }
@@ -1066,14 +1076,14 @@ async function pollAssetCandidates(assetId: string, taskId: string): Promise<voi
       );
       if (res.candidates.length) {
         assetCandidates.value = { assetId, taskId: res.task_id ?? taskId, list: res.candidates };
-        info.value = "候选图已就绪：选择一张作为该资产的参考图（采纳即定稿）";
+        info.value = t("projectDetail.candidatesReady");
         return;
       }
     } catch {
       /* 任务未成功：继续轮询 */
     }
   }
-  error.value = "生成超时：稍后可在资产卡上点「候选图」再试";
+  error.value = t("projectDetail.genTimeout");
 }
 
 async function showAssetCandidates(a: ProjectAssetDto): Promise<void> {
@@ -1085,7 +1095,7 @@ async function showAssetCandidates(a: ProjectAssetDto): Promise<void> {
     );
     assetCandidates.value = { assetId: a.id, taskId: res.task_id, list: res.candidates };
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "暂无可选候选图";
+    error.value = e instanceof Error ? e.message : t("projectDetail.noCandidates");
   } finally {
     assetImageBusyId.value = "";
   }
@@ -1094,14 +1104,14 @@ async function showAssetCandidates(a: ProjectAssetDto): Promise<void> {
 async function selectAssetCandidate(item: { index: number; url: string }): Promise<void> {
   const cur = assetCandidates.value;
   if (!cur) return;
-  await run("采用参考图", async () => {
+  await run(t("projectDetail.refAdopted"), async () => {
     await api.post(`/projects/${projectId.value}/assets/${cur.assetId}/select`, {
       task_id: cur.taskId,
       index: item.index,
     });
     assetCandidates.value = null;
     await loadProjectAssets();
-    info.value = "已采用为参考图并定稿，可绑定到分镜后投递";
+    info.value = t("projectDetail.refAdopted");
   });
 }
 
@@ -1162,7 +1172,7 @@ function saveTimeline(silent = false): void {
   saveTimer = setTimeout(() => {
     void persistTimeline(silent);
   }, 700);
-  if (!silent) info.value = "时间线保存中…";
+  if (!silent) info.value = t("projectDetail.timelineSaving");
 }
 
 async function persistTimeline(silent = false): Promise<void> {
@@ -1186,10 +1196,13 @@ async function persistTimeline(silent = false): Promise<void> {
       cacheTimeline();
     }
     timelineDirty.value = false;
-    if (!silent) info.value = "时间线已保存（服务端）";
+    if (!silent) info.value = t("projectDetail.timelineSaved");
   } catch (e) {
     // 服务端接口不可用时保留本地缓存，不阻塞编辑
-    if (!silent) error.value = e instanceof Error ? `时间线仅保存在本地：${e.message}` : "时间线仅保存在本地";
+    if (!silent)
+      error.value = e instanceof Error
+        ? t("projectDetail.timelineLocalOnlyWith", { msg: e.message })
+        : t("projectDetail.timelineLocalOnly");
   }
 }
 
@@ -1249,7 +1262,7 @@ async function addShotClip(shot: StoryboardDto): Promise<void> {
     id: `${shot.id}-${Date.now()}`,
     shotId: shot.id,
     shotNo: shot.shot_no,
-    name: `分镜 ${shot.shot_no}`,
+    name: t("projectDetail.shotSaved", { no: shot.shot_no }),
     duration: shot.duration_s ?? 5,
     taskId: shot.video_task_id,
     url: null,
@@ -1265,7 +1278,7 @@ async function addShotClip(shot: StoryboardDto): Promise<void> {
 
 /** 更新分镜：按当前分集重建时间线（保留有出片结果的镜头） */
 async function rebuildTimeline(): Promise<void> {
-  await run("更新分镜", async () => {
+  await run(t("projectDetail.timelineRebuilt"), async () => {
     const list = shots.value.filter((s) => Boolean(s.video_task_id));
     const built: TimelineClip[] = [];
     for (const shot of list) {
@@ -1273,7 +1286,7 @@ async function rebuildTimeline(): Promise<void> {
         id: `${shot.id}-${Date.now()}-${built.length}`,
         shotId: shot.id,
         shotNo: shot.shot_no,
-        name: `分镜 ${shot.shot_no}`,
+        name: t("projectDetail.shotSaved", { no: shot.shot_no }),
         duration: shot.duration_s ?? 5,
         taskId: shot.video_task_id,
         url: shot.video_task_id ? await clipUrl(shot.video_task_id) : null,
@@ -1283,8 +1296,8 @@ async function rebuildTimeline(): Promise<void> {
     playhead.value = 0;
     saveTimeline(true);
     info.value = built.length
-      ? `已按本集 ${built.length} 个已出片镜头重建时间线`
-      : "本集还没有已出片镜头：先在「分镜」里投递并等任务完成";
+      ? t("projectDetail.timelineRebuilt", { count: built.length })
+      : t("projectDetail.timelineNoShots");
   });
 }
 
@@ -1311,7 +1324,7 @@ function seekTo(seconds: number): void {
 
 function togglePlay(): void {
   if (!clips.value.length) {
-    error.value = "时间线还是空的：从左侧点选分镜加入";
+    error.value = t("projectDetail.timelineEmptyAdd");
     return;
   }
   playing.value = !playing.value;
@@ -1342,13 +1355,20 @@ const tlExportUrl = ref<string | null>(null);
 const tlExportError = ref("");
 let tlExportTimer: ReturnType<typeof setInterval> | undefined;
 const tlExportLabel = computed(
-  () => ({ 0: "", 1: "排队中", 2: "渲染中", 3: "已完成", 4: "失败" })[tlExportStatus.value] ?? "",
+  () =>
+    ({
+      0: t("projectDetail.tlExportStatus.0"),
+      1: t("projectDetail.tlExportStatus.1"),
+      2: t("projectDetail.tlExportStatus.2"),
+      3: t("projectDetail.tlExportStatus.3"),
+      4: t("projectDetail.tlExportStatus.4"),
+    })[tlExportStatus.value] ?? "",
 );
 
 async function exportTimeline(): Promise<void> {
   if (!selectedEpisodeId.value) return;
   if (!clips.value.length) {
-    error.value = "时间线为空：先从左侧加入分镜";
+    error.value = t("projectDetail.timelineEmptyExport");
     return;
   }
   if (saveTimer) {
@@ -1365,10 +1385,10 @@ async function exportTimeline(): Promise<void> {
     );
     tlExportId.value = res.export_id;
     tlExportStatus.value = res.status ?? 1;
-    info.value = "已提交合成导出：服务端正在按时间线渲染…";
+    info.value = t("projectDetail.composeSubmitted");
     startTlExportPoll();
   } catch (e) {
-    tlExportError.value = e instanceof Error ? e.message : "提交失败";
+    tlExportError.value = e instanceof Error ? e.message : t("projectDetail.composeSubmitFailed");
     error.value = tlExportError.value;
   }
 }
@@ -1386,11 +1406,11 @@ function startTlExportPoll(): void {
       if (data.download_url) tlExportUrl.value = data.download_url;
       if (data.status === 3) {
         tlExportError.value = "";
-        info.value = "合成完成，可下载 mp4（含 AI 生成水印）";
+        info.value = t("projectDetail.composeDone");
         if (tlExportTimer) clearInterval(tlExportTimer);
       } else if (data.status === 4) {
-        tlExportError.value = data.error?.message ?? "合成失败";
-        error.value = `合成失败：${tlExportError.value}`;
+        tlExportError.value = data.error?.message ?? t("projectDetail.composeFailed");
+        error.value = t("projectDetail.composeFailedWith", { msg: tlExportError.value });
         if (tlExportTimer) clearInterval(tlExportTimer);
       }
     } catch {
@@ -1419,7 +1439,7 @@ const confirmBusy = ref(false);
 const confirmEpisodeIndex = computed(() => episodes.value.findIndex((e) => e.id === selectedEpisodeId.value));
 const confirmEpisodeLabel = computed(() => {
   const idx = confirmEpisodeIndex.value;
-  return idx >= 0 ? `第${episodes.value[idx]?.ep_no ?? idx + 1}集` : "本集";
+  return idx >= 0 ? t("projectDetail.episodeLabel", { n: episodes.value[idx]?.ep_no ?? idx + 1 }) : t("projectDetail.thisEpisode");
 });
 /** 校验清单：角色 + 场景/道具/其他（可搜索） */
 const confirmAssets = computed<ProjectAssetDto[]>(() => {
@@ -1479,7 +1499,7 @@ function nextEpisode(): void {
 async function batchConfirmStatus(status: 1 | 2): Promise<void> {
   const targets = confirmSelectedAssets.value.filter((a) => (status === 2 ? Boolean(a.ref_image_uri) : true));
   if (!targets.length) {
-    error.value = status === 2 ? "所选资产都还没有参考图：先批量生成图再定稿" : "请先勾选资产";
+    error.value = status === 2 ? t("projectDetail.confirmFinalizeNoRefs") : t("projectDetail.confirmSelectFirst");
     return;
   }
   confirmBusy.value = true;
@@ -1495,7 +1515,10 @@ async function batchConfirmStatus(status: 1 | 2): Promise<void> {
     }
     await loadProjectAssets();
     await loadProject();
-    info.value = status === 2 ? `已定稿 ${ok}/${targets.length} 个资产` : `已取消定稿 ${ok}/${targets.length} 个资产`;
+    info.value =
+      status === 2
+        ? t("projectDetail.confirmFinalized", { ok, total: targets.length })
+        : t("projectDetail.confirmUnfinalized", { ok, total: targets.length });
   } finally {
     confirmBusy.value = false;
   }
@@ -1508,8 +1531,8 @@ async function batchGenerateSelected(): Promise<void> {
   const skippedCharacters = picked.length - targets.length;
   if (!targets.length) {
     error.value = skippedCharacters
-      ? "所选都是角色资产：角色图请在「资产 → 角色」里用「生成定妆图」"
-      : "请先勾选要生成参考图的资产";
+      ? t("projectDetail.confirmGenCharactersOnly")
+      : t("projectDetail.confirmGenSelectFirst");
     return;
   }
   confirmBusy.value = true;
@@ -1525,9 +1548,9 @@ async function batchGenerateSelected(): Promise<void> {
       }
     }
     await loadProjectAssets();
-    info.value = `已提交 ${ok}/${targets.length} 个生成任务：完成后到「资产」视图逐个「候选图」采用（采用即定稿）${
-      skippedCharacters ? `；另有 ${skippedCharacters} 个角色已跳过（请用「生成定妆图」）` : ""
-    }`;
+    info.value =
+      t("projectDetail.confirmGenSubmitted", { ok, total: targets.length, skipped: "" }) +
+      (skippedCharacters ? t("projectDetail.confirmGenSkipped", { count: skippedCharacters }) : "");
   } finally {
     confirmBusy.value = false;
   }
@@ -1537,7 +1560,7 @@ async function batchGenerateSelected(): Promise<void> {
 async function batchDeleteSelected(): Promise<void> {
   const targets = confirmSelectedAssets.value;
   if (!targets.length) {
-    error.value = "请先勾选要删除的资产";
+    error.value = t("projectDetail.confirmDeleteSelectFirst");
     return;
   }
   confirmBusy.value = true;
@@ -1554,14 +1577,21 @@ async function batchDeleteSelected(): Promise<void> {
     confirmSelected.value = [];
     await loadProjectAssets();
     await loadEpisode();
-    info.value = `已删除 ${ok} 个资产`;
+    info.value = t("projectDetail.confirmDeleted", { count: ok });
   } finally {
     confirmBusy.value = false;
   }
 }
 /** 资产类型中文名 */
 function kindLabel(kind: string): string {
-  return ({ character: "角色", scene: "场景", prop: "道具", other: "其他" } as Record<string, string>)[kind] ?? kind;
+  return (
+    {
+      character: t("projectDetail.kindLabel.character"),
+      scene: t("projectDetail.kindLabel.scene"),
+      prop: t("projectDetail.kindLabel.prop"),
+      other: t("projectDetail.kindLabel.other"),
+    } as Record<string, string>
+  )[kind] ?? kind;
 }
 </script>
 
