@@ -123,6 +123,30 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.4 · 多语言第 14 批：团队数据看板 + 修 3 个真实前端 bug · 2026-10-28）
+
+**#16 多语言 97% → 98%**；全站 **97.5%** / 首发 **97.6%**。
+
+### 1. 数据看板 i18n（`teamDashboard` 49 key × 5 语言）
+
+迁移 [team/dashboard.vue](app/apps/web/pages/team/dashboard.vue)：标题与在岗副标题、时间范围三档、KPI 四卡（含
+"积分 · 本月 / 含全部状态 / 共 N 席位 / 冻结 N"）、积分消耗排名（含条形与"任务数"）、成员参与明细表头七列与分页、
+项目数据表头六列、画布消耗说明与两项 KPI、空态与导出 toast。已迁移 **19/64 页 + 1 组件**，语言包 **784 key**。
+
+### 2. E2E 顺带抓出的 3 个真实前端 bug（都不是文案问题）
+
+| # | Bug | 为什么难发现 | 修法 |
+|---|---|---|---|
+| 1 | `pages/team.vue` + `pages/team/dashboard.vue` 构成 Nuxt **父子路由**，而父级没有 `<NuxtPage/>` → `/team/dashboard` 渲染的是「团队管理」，**看板整页打不开** | HTTP 仍返回 **200**（SSR 壳层正常），"页面 200" 这类弱证据完全看不出来 | 改为 `pages/team/index.vue`，两个页面成为同级路由；文件头留了"不要再改回 team.vue"的注释 |
+| 2 | `useActiveSpaceId()` 用 `useState` + `localStorage` 初始化，但**带 SSR 时 hydration 不重跑 initializer** → 硬刷新后活动空间丢失，团队页提示"请先去团队管理选团队" | 只有"刷新/换设备/深链接"才复现；开发时先访问过团队管理就一直正常 | 新增 `plugins/active-space.client.ts`，客户端启动时把持久值同步进 state |
+| 3 | 深链接兜底取 `/cam/teams/mine` 的 `list[0]`，而**个人空间排在团队前面** → 看板显示个人消耗、X-Space-Id 也不是团队 | 页面"有数据"、不报错，只有对比口径才发现数字全错 | 新增 `composables/useEnsureTeamSpace.ts`：优先 `type=2`（团队），没有团队才回落 |
+
+**E2E 也因此升级**：不再手动写 `active_space_id`（那会把 bug 2/3 遮住），改为断言
+「深链接能自解析团队空间」+「副标题必须是团队名，不能是"我的空间"」。
+
+**验证**：`i18n-check.cjs` 全绿（784 key / 19 页 + 4 组件）；`e2e-i18n-pages.cjs` **47/47**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.3 · 多语言第 13 批：活动中心 · 2026-10-28）
 
 **#16 多语言 96% → 97%**；全站 **97.5%** / 首发 **97.6%**。

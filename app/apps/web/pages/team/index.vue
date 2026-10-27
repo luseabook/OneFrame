@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import type { TeamTempInfoDto } from "~/types/api";
 
+/**
+ * ⚠️ 文件位置说明（2026-10-28 修复）：本页原为 `pages/team.vue`，与 `pages/team/dashboard.vue`
+ * 构成 Nuxt 的**父子路由**（父级没有 `<NuxtPage/>`），导致 `/team/dashboard` 实际渲染的是
+ * 本页（团队管理）——数据看板**整页打不开**，而 HTTP 仍是 200（SSR 壳层正常），只有真浏览器能发现。
+ * 现改为 `pages/team/index.vue`，两个页面成为同级路由，`/team` 与 `/team/dashboard` 各自渲染。
+ * 不要再改回 `pages/team.vue`。
+ */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 /**

@@ -72,6 +72,9 @@ interface ParticipateRow {
   last_active: string | null;
 }
 
+const { t } = useI18n();
+useHead({ title: () => t("teamDashboard.metaTitle") });
+
 const api = useApi();
 const toast = useToast();
 const activeSpace = useActiveSpaceId();
@@ -87,7 +90,12 @@ const PAGE_SIZE = 20;
 /** 时间范围：默认本月（竞品默认就是本月，切换器在右上） */
 type RangeKey = "month" | "week" | "all";
 const range = ref<RangeKey>("month");
-const RANGE_LABEL: Record<RangeKey, string> = { month: "本月", week: "本周", all: "全部" };
+// 时间范围文案走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const RANGE_LABEL = computed<Record<RangeKey, string>>(() => ({
+  month: t("teamDashboard.rangeMonth"),
+  week: t("teamDashboard.rangeWeek"),
+  all: t("teamDashboard.rangeAll"),
+}));
 
 function fromISO(key: RangeKey): string | undefined {
   if (key === "all") return undefined;
@@ -111,10 +119,19 @@ const maxRankConsumed = computed(() =>
 );
 
 async function load() {
+  /**
+   * 深链接保护：活动空间为空时先用 `/cam/teams/mine` 兜底选第一个团队。
+   *
+   * 之前这里直接报"请先去团队管理选择"，等于**深链接坏链**——用户从通知/收藏点进来只能看到一句提示，
+   * 而他自己明明有团队。现在与团队管理页同一套兜底逻辑（见 `useEnsureTeamSpace`）。
+   */
   if (!spaceId.value) {
-    loading.value = false;
-    errorMsg.value = "请先在「团队管理」里选择或创建一个团队空间";
-    return;
+    const resolved = await ensureActiveTeamSpace(api);
+    if (!resolved) {
+      loading.value = false;
+      errorMsg.value = t("teamDashboard.needSpace");
+      return;
+    }
   }
   loading.value = true;
   errorMsg.value = "";
@@ -124,7 +141,7 @@ async function load() {
     data.value = await api.get<TeamQueryResp>(`/kds/da/team/${spaceId.value}/query${q}`);
     await loadParticipate();
   } catch (e) {
-    errorMsg.value = (e as Error).message || "看板加载失败";
+    errorMsg.value = (e as Error).message || t("teamDashboard.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -168,7 +185,7 @@ async function exportCsv(kind: "team" | "project") {
         "X-Space-Id": spaceId.value,
       },
     });
-    if (!res.ok) throw new Error(`导出失败（HTTP ${res.status}）`);
+    if (!res.ok) throw new Error(t("teamDashboard.exportFailedHttp", { status: res.status }));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -176,9 +193,9 @@ async function exportCsv(kind: "team" | "project") {
     a.download = kind === "team" ? "team-point-consume.csv" : "project-data.csv";
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("导出已开始");
+    toast.success(t("teamDashboard.exportStarted"));
   } catch (e) {
-    toast.error((e as Error).message || "导出失败");
+    toast.error((e as Error).message || t("teamDashboard.exportFailed"));
   }
 }
 
@@ -205,10 +222,10 @@ onMounted(load);
   <div class="kd">
     <header class="kd-head">
       <div>
-        <h1 class="kd-title">数据看板</h1>
+        <h1 class="kd-title">{{ t("teamDashboard.title") }}</h1>
         <p class="kd-sub">
-          <template v-if="data">{{ data.basic.name }} · {{ data.basic.member_active }}/{{ data.basic.member_total }} 位成员在岗</template>
-          <template v-else>团队生产与消耗概览</template>
+          <template v-if="data">{{ t("teamDashboard.subActive", { name: data.basic.name, active: data.basic.member_active, total: data.basic.member_total }) }}</template>
+          <template v-else>{{ t("teamDashboard.subDefault") }}</template>
         </p>
       </div>
       <div class="kd-head-actions">
@@ -224,46 +241,46 @@ onMounted(load);
             {{ label }}
           </button>
         </div>
-        <button type="button" class="kd-btn" @click="load">刷新</button>
+        <button type="button" class="kd-btn" @click="load">{{ t("teamDashboard.refresh") }}</button>
       </div>
     </header>
 
     <p v-if="errorMsg" class="kd-alert">{{ errorMsg }}</p>
 
-    <div v-if="loading" class="kd-skeleton">加载中…</div>
+    <div v-if="loading" class="kd-skeleton">{{ t("teamDashboard.loading") }}</div>
 
     <template v-else-if="data">
       <!-- KPI 四卡 -->
       <section class="kd-kpis">
         <div class="kd-kpi">
-          <span class="kd-kpi-label">团队总消耗</span>
+          <span class="kd-kpi-label">{{ t("teamDashboard.kpiConsume") }}</span>
           <strong class="kd-kpi-num">{{ data.kpi.total_consume.toLocaleString() }}</strong>
-          <span class="kd-kpi-hint">积分 · {{ RANGE_LABEL[range] }}</span>
+          <span class="kd-kpi-hint">{{ t("teamDashboard.kpiConsumeHint", { range: RANGE_LABEL[range] }) }}</span>
         </div>
         <div class="kd-kpi">
-          <span class="kd-kpi-label">生成任务数</span>
+          <span class="kd-kpi-label">{{ t("teamDashboard.kpiTasks") }}</span>
           <strong class="kd-kpi-num">{{ data.kpi.task_count.toLocaleString() }}</strong>
-          <span class="kd-kpi-hint">含全部状态</span>
+          <span class="kd-kpi-hint">{{ t("teamDashboard.kpiTasksHint") }}</span>
         </div>
         <div class="kd-kpi">
-          <span class="kd-kpi-label">活跃成员</span>
+          <span class="kd-kpi-label">{{ t("teamDashboard.kpiActive") }}</span>
           <strong class="kd-kpi-num">{{ data.kpi.active_member }}</strong>
-          <span class="kd-kpi-hint">共 {{ data.basic.member_total }} 席位</span>
+          <span class="kd-kpi-hint">{{ t("teamDashboard.kpiActiveHint", { count: data.basic.member_total }) }}</span>
         </div>
         <div class="kd-kpi">
-          <span class="kd-kpi-label">池余额</span>
+          <span class="kd-kpi-label">{{ t("teamDashboard.kpiPool") }}</span>
           <strong class="kd-kpi-num">{{ data.basic.pool_balance.toLocaleString() }}</strong>
-          <span class="kd-kpi-hint">冻结 {{ data.basic.pool_frozen.toLocaleString() }}</span>
+          <span class="kd-kpi-hint">{{ t("teamDashboard.kpiPoolHint", { frozen: data.basic.pool_frozen.toLocaleString() }) }}</span>
         </div>
       </section>
 
       <!-- 积分消耗排名（CSS 条形，不装图表库） -->
       <section class="kd-card">
         <header class="kd-card-head">
-          <h2>积分消耗排名</h2>
-          <button type="button" class="kd-link" @click="exportCsv('team')">导出 CSV</button>
+          <h2>{{ t("teamDashboard.rankTitle") }}</h2>
+          <button type="button" class="kd-link" @click="exportCsv('team')">{{ t("teamDashboard.exportCsv") }}</button>
         </header>
-        <p v-if="data.rank.length === 0" class="kd-empty">该时间范围内还没有消耗记录</p>
+        <p v-if="data.rank.length === 0" class="kd-empty">{{ t("teamDashboard.rankEmpty") }}</p>
         <ul v-else class="kd-bars">
           <li v-for="r in data.rank" :key="r.user_id" class="kd-bar-row">
             <span class="kd-bar-rank">{{ r.rank }}</span>
@@ -272,7 +289,7 @@ onMounted(load);
               <span class="kd-bar-fill" :style="{ width: `${Math.max(2, (r.consumed / maxRankConsumed) * 100)}%` }" />
             </span>
             <span class="kd-bar-val">{{ r.consumed.toLocaleString() }}</span>
-            <span class="kd-bar-tasks">{{ r.task_count }} 任务</span>
+            <span class="kd-bar-tasks">{{ t("teamDashboard.tasksCount", { count: r.task_count }) }}</span>
           </li>
         </ul>
       </section>
@@ -280,14 +297,14 @@ onMounted(load);
       <!-- 成员参与明细 -->
       <section class="kd-card">
         <header class="kd-card-head">
-          <h2>成员参与明细</h2>
-          <span class="kd-muted">共 {{ participateTotal }} 人</span>
+          <h2>{{ t("teamDashboard.participateTitle") }}</h2>
+          <span class="kd-muted">{{ t("teamDashboard.participateTotal", { total: participateTotal }) }}</span>
         </header>
-        <p v-if="participate.length === 0" class="kd-empty">该时间范围内还没有成员产出</p>
+        <p v-if="participate.length === 0" class="kd-empty">{{ t("teamDashboard.participateEmpty") }}</p>
         <table v-else class="kd-table">
           <thead>
             <tr>
-              <th>成员</th><th>角色</th><th>任务总数</th><th>成功</th><th>失败</th><th>消耗</th><th>最后活跃</th>
+              <th>{{ t("teamDashboard.colMember") }}</th><th>{{ t("teamDashboard.colRole") }}</th><th>{{ t("teamDashboard.colTaskTotal") }}</th><th>{{ t("teamDashboard.colDone") }}</th><th>{{ t("teamDashboard.colFailed") }}</th><th>{{ t("teamDashboard.colConsumed") }}</th><th>{{ t("teamDashboard.colLastActive") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -303,22 +320,22 @@ onMounted(load);
           </tbody>
         </table>
         <div v-if="participateTotal > PAGE_SIZE" class="kd-pager">
-          <button type="button" class="kd-btn" :disabled="participatePage === 1" @click="participatePage--; loadParticipate()">上一页</button>
+          <button type="button" class="kd-btn" :disabled="participatePage === 1" @click="participatePage--; loadParticipate()">{{ t("teamDashboard.prev") }}</button>
           <span class="kd-muted">{{ participatePage }} / {{ Math.ceil(participateTotal / PAGE_SIZE) }}</span>
-          <button type="button" class="kd-btn" :disabled="participatePage * PAGE_SIZE >= participateTotal" @click="participatePage++; loadParticipate()">下一页</button>
+          <button type="button" class="kd-btn" :disabled="participatePage * PAGE_SIZE >= participateTotal" @click="participatePage++; loadParticipate()">{{ t("teamDashboard.next") }}</button>
         </div>
       </section>
 
       <!-- 项目数据 -->
       <section class="kd-card">
         <header class="kd-card-head">
-          <h2>项目数据</h2>
-          <button type="button" class="kd-link" @click="exportCsv('project')">导出 CSV</button>
+          <h2>{{ t("teamDashboard.projectsTitle") }}</h2>
+          <button type="button" class="kd-link" @click="exportCsv('project')">{{ t("teamDashboard.exportCsv") }}</button>
         </header>
-        <p v-if="data.projects.length === 0" class="kd-empty">还没有关联剧集的任务</p>
+        <p v-if="data.projects.length === 0" class="kd-empty">{{ t("teamDashboard.projectsEmpty") }}</p>
         <table v-else class="kd-table">
           <thead>
-            <tr><th>剧集</th><th>任务数</th><th>成功</th><th>失败</th><th>成功率</th><th>消耗</th></tr>
+            <tr><th>{{ t("teamDashboard.colEpisode") }}</th><th>{{ t("teamDashboard.colTaskCount") }}</th><th>{{ t("teamDashboard.colDone") }}</th><th>{{ t("teamDashboard.colFailed") }}</th><th>{{ t("teamDashboard.colSuccessRate") }}</th><th>{{ t("teamDashboard.colConsumed") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in data.projects" :key="p.episode_id || i">
@@ -335,18 +352,16 @@ onMounted(load);
 
       <!-- 画布消耗（独立口径：非流水线任务） -->
       <section class="kd-card">
-        <header class="kd-card-head"><h2>画布消耗</h2></header>
-        <p class="kd-muted">
-          无限画布的节点生成消耗单独统计，与剧集流水线分开——团队排产时两条线的成本要拆开看。
-        </p>
+        <header class="kd-card-head"><h2>{{ t("teamDashboard.canvasTitle") }}</h2></header>
+        <p class="kd-muted">{{ t("teamDashboard.canvasHint") }}</p>
         <div class="kd-inline-kpi">
-          <span>总消耗 <strong>{{ data.canvas.total_point.toLocaleString() }}</strong> 积分</span>
-          <span>任务 <strong>{{ data.canvas.task_count }}</strong> 个</span>
+          <span>{{ t("teamDashboard.canvasConsume", { credits: data.canvas.total_point.toLocaleString() }) }}</span>
+          <span>{{ t("teamDashboard.canvasTasks", { count: data.canvas.task_count }) }}</span>
         </div>
       </section>
     </template>
 
-    <div v-else-if="!loading && !errorMsg" class="kd-empty">暂无数据</div>
+    <div v-else-if="!loading && !errorMsg" class="kd-empty">{{ t("teamDashboard.empty") }}</div>
   </div>
 </template>
 
