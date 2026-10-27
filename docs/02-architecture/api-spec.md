@@ -1677,3 +1677,19 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 **验证**：
 - `test/film-xlsx.spec.ts` 9 例（zip magic、6 个必需部件、多 sheet 名、inlineStr/数字/布尔、公式防护、XML 转义与控制字符剥离、表名清洗/重名、列号进位、空表拒绝）
 - `_acceptance/verify-film-xlsx.cjs` **15/15** 真实 HTTP：登录 → 开 film_enabled → 建两张表 → 导出 xlsx（2988B）→ 下载 → jszip 解出 7 个部件且 workbook 含两个 sheet 名
+
+### 17.9 影视版离线通知 webhook（模块 #8，2026-10-27 第 4 轮）
+
+`POST /film/projects/:project_id/task-tables/:table_id/tasks/:task_id/notify-assignees` 原有行为：广播面（进程内 WS 事件）+ 返回被通知人清单。本轮补**离线投递通道**：
+
+| 项 | 口径 |
+|---|---|
+| 通道 | 可配置 webhook（`FILM_NOTIFY_WEBHOOK_URL`），对接企业微信/飞书机器人或客户网关；**不接推送厂商 SDK** |
+| 签名 | `x-of-signature: sha256=<hex>`，HMAC-SHA256 over 原始 body，密钥 `FILM_NOTIFY_SECRET`；未配密钥则**不发签名头**（避免空密钥签出可伪造签名） |
+| 事件体 | `{id, type, space_id, project_id, table_id, created_at, payload}` |
+| 重试 | 3 次指数退避（80/240/720ms），每次 2s 超时 |
+| 未配置 | `delivery:"stored"`（广播/落库已发生，不假装推送） |
+| 失败 | `delivery:"failed"` + `attempts`，**不阻塞**通知主流程 |
+| 响应新增 | `delivery` / `delivery_attempts` |
+
+**测试**：`test/film-notify.spec.ts` 5 例（真实本地 HTTP 接收端验证签名可复算、500 重试 3 次、先失败后成功、未配置零请求）。
