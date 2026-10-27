@@ -87,9 +87,19 @@ export default defineNuxtPlugin(() => {
    * 输出的是**标准 URL 集合**（与 sitemap 同源 `buildAlternates`），与当前语言无关——
    * 这正是 hreflang 的语义："这页还有哪些语言版本"。
    */
+  /**
+   * SSR 请求头必须在插件 setup（= 请求上下文内）**立刻**取，不能放进 computed 里懒取。
+   *
+   * 踩过的坑：`useRequestHeaders()` 在 `computed` 体内调用时，computed 可能被延迟到
+   * 请求上下文销毁之后才求值（head 解析/流式渲染），于是抛
+   * `[nuxt] instance unavailable` → 整页 500（实测 `/admin/login` 就是这样挂的）。
+   */
+  const ssrRequestHeaders = import.meta.server
+    ? useRequestHeaders(["host", "x-forwarded-proto"])
+    : null;
   const origin = computed<string>(() => {
     if (import.meta.client) return window.location.origin;
-    const headers = useRequestHeaders(["host", "x-forwarded-proto"]);
+    const headers = ssrRequestHeaders ?? {};
     const proto = headers["x-forwarded-proto"] ?? "https";
     const host = headers.host ?? "localhost:3000";
     return `${proto}://${host}`;

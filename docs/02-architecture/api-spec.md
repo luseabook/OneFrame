@@ -1761,3 +1761,18 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | 开关 | `CAPTCHA_ENFORCE=1` 强制；默认 `0` 关闭（零回归）。服务**调用时**读 `process.env` 便于测试切态 |
 | 拒绝 | 缺票 → `400101 captcha_required`；答错 → `400101 captcha failed(wrong_answer)`；**答错也消耗票据**（防 10×10 枚举） |
 | 放行 | 答对且票据未被使用 → 正常发码/登录 |
+
+### 17.14 平台运营创作者审核（2026-10-27 第 7 轮）
+
+**为什么需要**：创作者作品此前只有空间管理员能审，平台运营域看不到队列（`creator.md` 侧只有 `crc/assets/audit`）。
+竞品把创作者内容视作平台内容池的一部分，运营必须能直接处置。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /ops/admin/creator-audits` | 查询参数 `status`(1..5，默认 2 待审)、`q`(标题模糊)、`page`/`page_size`(≤100)。排序 **FIFO**（最早待审在前，审核队列的常识顺序）。返回 `{list,total,page,page_size,status}`。 |
+| `POST /ops/admin/creator-audits/:id/review` | `{action:"approve"|"reject"|"offline", note?}`。通过 → status 3 + `published_at`；驳回 → 4 + `review_note`；下架 → 5。**跳步一律 400101**（待审态不可下架、已通过态不可再审）。 |
+
+**留痕（迁移 0034）**：`reviewed_by_admin`（→ `admin_users`）+ `reviewed_by_kind`（1 空间管理员 / 2 平台运营），
+与用户域的 `reviewed_by`（→ `users`）分开——两个身份域混用一列会让另一条路径无法记录"谁审的"。
+
+**前端**：运营后台 `?tab=creatorAudits` 页签（搜索 + 通过/驳回/下架）。

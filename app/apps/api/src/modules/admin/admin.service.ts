@@ -1,8 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
 import {
   adminUsers,
   contentReports,
+  creatorAssets,
   episodes,
   exportJobs,
   modelPrices,
@@ -36,6 +37,118 @@ export class AdminService {
       this.queue.exportQueue.getJobCounts("wait", "active", "failed", "completed", "delayed"),
     ]);
     return { "gen.submit": submit, "export.zip": exportJobsQueue };
+  }
+
+  /**
+   * 平台运营侧的创作者审核队列（模块 #10 收尾）。
+   *
+   * 背景：创作者作品此前**只有空间管理员能审**（`POST /crc/assets/audit`），平台运营域看不到队列。
+   * 竞品侧创作者内容是平台内容池的一部分，运营必须能直接处置（审/驳/下架），否则"内容安全"这条线
+   * 在最该有人管的地方没有人管。
+   *
+   * 口径：
+   * - 只读列表按状态过滤（默认 2=待审），带作者名便于运营判断；
+   * - 状态机复用创作者域同一套：2→3（通过，写 published_at）、2→4（驳回，写 review_note）、
+   *   3→5（下架）；不允许 1/4/5 直接过审（跳步会绕过审核记录）；
+   * - 审核人写 `reviewed_by_admin` + `reviewed_by_kind=2`，与空间管理员（`reviewed_by`）分开留痕。
+   */
+  async creatorAudits(opts: { status?: number; q?: string; page?: number; pageSize?: number } = {}) {
+    const status = opts.status ?? 2;
+    const page = opts.page ?? 1;
+    const pageSize = Math.min(opts.pageSize ?? 20, 100);
+    const conds = [eq(creatorAssets.status, status), sql`${creatorAssets.deletedAt} is null`];
+    // 标题搜索：审核队列按 FIFO（最早待审在前）翻页时，运营经常"只找某个作品"，
+    // 没有搜索就只能一页页翻（55 条待审时体验极差）。
+    if (opts.q && opts.q.trim()) conds.push(ilike(creatorAssets.title, `%${opts.q.trim()}%`));
+    const rows = await db
+      .select({
+        id: creatorAssets.id,
+        title: creatorAssets.title,
+        summary: creatorAssets.summary,
+        kind: creatorAssets.kind,
+        category: creatorAssets.category,
+        effect: creatorAssets.effect,
+        status: creatorAssets.status,
+        cover_uri: creatorAssets.coverUri,
+        uri: creatorAssets.uri,
+        creator_user_id: creatorAssets.creatorUserId,
+        space_id: creatorAssets.spaceId,
+        review_note: creatorAssets.reviewNote,
+        created_at: creatorAssets.createdAt,
+        published_at: creatorAssets.publishedAt,
+      })
+      .from(creatorAssets)
+      .where(and(...conds))
+      .orderBy(asc(creatorAssets.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+    const [agg] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(creatorAssets)
+      .where(and(...conds));
+    return {
+      list: rows.map((row) => ({
+        ...row,
+        id: String(row.id),
+        creator_user_id: String(row.creator_user_id),
+        space_id: String(row.space_id),
+        created_at: row.created_at?.toISOString?.() ?? row.created_at,
+        published_at: row.published_at?.toISOString?.() ?? row.published_at,
+      })),
+      total: Number(agg?.n ?? 0),
+      page,
+      page_size: pageSize,
+      status,
+    };
+  }
+
+  /** 平台运营处置一件创作者作品（通过/驳回/下架）；返回处置后的状态与留痕字段 */
+  async reviewCreatorAudit(
+    adminId: string,
+    assetId: string,
+    input: { action: "approve" | "reject" | "offline"; note?: string },
+  ) {
+    return db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(creatorAssets)
+        .where(and(eq(creatorAssets.id, BigInt(assetId)), sql`${creatorAssets.deletedAt} is null`))
+        .for("update");
+      if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+      const from = row.status;
+      if (input.action === "approve" || input.action === "reject") {
+        if (from !== 2) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "只有待审作品可以审核", {
+            field: "action",
+            status: from,
+          });
+        }
+      } else if (from !== 3) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "只有已通过作品可以下架", { field: "action", status: from });
+      }
+      const to = input.action === "approve" ? 3 : input.action === "reject" ? 4 : 5;
+      const [updated] = await tx
+        .update(creatorAssets)
+        .set({
+          status: to,
+          reviewNote: input.action === "reject" ? (input.note ?? "内容不符合规范") : row.reviewNote,
+          reviewedAt: new Date(),
+          reviewedByAdmin: BigInt(adminId),
+          reviewedByKind: 2,
+          ...(input.action === "approve" ? { publishedAt: new Date() } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(creatorAssets.id, row.id))
+        .returning();
+      return {
+        asset_id: String(updated!.id),
+        from_status: from,
+        status: updated!.status,
+        review_note: updated!.reviewNote,
+        reviewed_by_kind: 2,
+        published_at: updated!.publishedAt,
+      };
+    });
   }
 
   async dashboard() {

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { reportResolveSchema } from "@app/shared";
+import { AppError, ErrorCode, reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
 import { parseOrThrow } from "../../common/zod";
 import { BillingService } from "../billing/billing.service";
@@ -98,6 +98,45 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(BillingService) private readonly billing: BillingService,
   ) {}
+
+  /**
+   * 平台运营的创作者审核队列（模块 #10 收尾）。
+   * 路径刻意放在 `ops/admin/creator-audits` 而不是复用 `/crc/*`：后者是**用户 token** 域，
+   * 混用会让"谁审的"变成一笔糊涂账（两个身份域的外键不同，schema 有注释）。
+   */
+  @Get("creator-audits")
+  creatorAudits(@Query() query: unknown) {
+    const q = parseOrThrow(
+      z.object({
+        status: z.coerce.number().int().min(1).max(5).optional(),
+        q: z.string().max(80).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        page_size: z.coerce.number().int().min(1).max(100).optional(),
+      }),
+      query ?? {},
+    );
+    return this.admin.creatorAudits({ status: q.status, q: q.q, page: q.page, pageSize: q.page_size });
+  }
+
+  /** 运营处置：通过 / 驳回（带理由）/ 下架；状态机与创作者域一致，不允许跳步 */
+  @Post("creator-audits/:id/review")
+  async reviewCreatorAudit(
+    @Req() req: FastifyRequest & { adminAuth?: { adminId: string } },
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(
+      z.object({
+        action: z.enum(["approve", "reject", "offline"]),
+        note: z.string().max(500).optional(),
+      }),
+      body ?? {},
+    );
+    // AdminAuth 的字段是 `adminId`（不是 `id`）——写错会静默变成"无管理员身份"
+    const adminId = req.adminAuth?.adminId;
+    if (!adminId) throw new AppError(ErrorCode.UNAUTHORIZED, "admin auth required");
+    return this.admin.reviewCreatorAudit(adminId, id, input);
+  }
 
   @Get("dashboard")
   dashboard() {

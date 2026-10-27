@@ -30,6 +30,55 @@ const tasks = ref<Array<Record<string, unknown>>>([]);
 const shares = ref<Array<Record<string, unknown>>>([]);
 const reports = ref<Array<Record<string, unknown>>>([]);
 const orders = ref<Array<Record<string, unknown>>>([]);
+/**
+ * 创作者审核队列（模块 #10）：平台运营视角的待审作品。
+ *
+ * 为什么运营后台要有一份：创作者作品此前**只有空间管理员能审**，平台运营看不到队列，
+ * "内容安全"最该有人管的环节反而没人管。审核人写 `reviewed_by_admin`（与空间管理员的
+ * `reviewed_by` 分开留痕），两个身份域不混用。
+ */
+interface CreatorAuditRow {
+  id: string;
+  title: string;
+  summary: string;
+  kind: number;
+  category: string;
+  effect: string | null;
+  status: number;
+  cover_uri: string | null;
+  creator_user_id: string;
+  space_id: string;
+  created_at: string;
+}
+const creatorAudits = ref<CreatorAuditRow[]>([]);
+const creatorAuditBusy = ref("");
+const creatorAuditStatus = ref(2);
+const creatorAuditNote = ref("");
+const creatorAuditQuery = ref("");
+
+async function loadCreatorAudits(): Promise<void> {
+  const q = creatorAuditQuery.value.trim();
+  const data = await api<{ list: CreatorAuditRow[]; total: number }>(
+    `/ops/admin/creator-audits?status=${creatorAuditStatus.value}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+  );
+  creatorAudits.value = data.list;
+}
+
+async function reviewCreatorAudit(row: CreatorAuditRow, action: "approve" | "reject" | "offline"): Promise<void> {
+  creatorAuditBusy.value = row.id;
+  error.value = "";
+  try {
+    await api(`/ops/admin/creator-audits/${row.id}/review`, {
+      method: "POST",
+      body: { action, ...(action === "reject" ? { note: creatorAuditNote.value.trim() || undefined } : {}) },
+    });
+    await loadCreatorAudits();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "审核失败";
+  } finally {
+    creatorAuditBusy.value = "";
+  }
+}
 const refunding = ref("");
 const funnel = ref<
   Array<{ key: string; label: string; count: number; conversion_from_previous: number | null }>
@@ -273,6 +322,14 @@ onMounted(async () => {
     return;
   }
   await loadPromo();
+  // 创作者审核队列不是首屏必需（省一次请求），但运营打开该 tab 时必须有数据
+  if (tab.value === "creatorAudits") await loadCreatorAudits().catch(() => {});
+  watch(
+    () => tab.value,
+    (next) => {
+      if (next === "creatorAudits") void loadCreatorAudits().catch(() => {});
+    },
+  );
 });
 </script>
 
@@ -430,6 +487,57 @@ onMounted(async () => {
           <span v-else class="muted">{{ r.resolution }}</span>
         </div>
         <p v-if="reports.length === 0" class="muted">暂无举报。</p>
+      </section>
+
+      <section v-if="tab === 'creatorAudits'" class="card">
+        <h2>创作者审核（平台运营）</h2>
+        <p class="muted small">
+          空间管理员审过的作品不在这里重复出现；这里只列平台侧待处置的创作者作品。
+          通过会写 published_at；驳回会记录理由；只有待审可审、只有已通过可下架（不允许跳步）。
+        </p>
+        <p class="muted small">
+          当前状态：
+          <select v-model.number="creatorAuditStatus" class="mini" @change="loadCreatorAudits()">
+            <option :value="2">待审</option>
+            <option :value="3">已通过</option>
+            <option :value="4">已驳回</option>
+            <option :value="5">已下架</option>
+          </select>
+          <input v-model="creatorAuditNote" class="mini note" placeholder="驳回理由（可选）" maxlength="120" />
+          <!-- 队列按 FIFO 翻页；运营常"只找某个作品"，给搜索框免得一页页翻 -->
+          <input
+            v-model="creatorAuditQuery"
+            class="mini note"
+            placeholder="按标题搜索（回车）"
+            maxlength="80"
+            @keyup.enter="loadCreatorAudits()"
+          />
+        </p>
+        <div v-for="row in creatorAudits" :key="row.id" class="report-row">
+          <span class="badge" :data-status="row.status">
+            {{ row.status === 2 ? "待审" : row.status === 3 ? "已通过" : row.status === 4 ? "已驳回" : "已下架" }}
+          </span>
+          <span class="report-detail">{{ row.title }}</span>
+          <span class="muted">{{ row.category }}<template v-if="row.effect"> · {{ row.effect }}</template></span>
+          <span class="muted">user {{ row.creator_user_id.slice(-6) }}</span>
+          <template v-if="row.status === 2">
+            <button class="mini" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'approve')">
+              通过
+            </button>
+            <button class="mini danger" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'reject')">
+              驳回
+            </button>
+          </template>
+          <button
+            v-else-if="row.status === 3"
+            class="mini danger"
+            :disabled="creatorAuditBusy === row.id"
+            @click="reviewCreatorAudit(row, 'offline')"
+          >
+            下架
+          </button>
+        </div>
+        <p v-if="creatorAudits.length === 0" class="muted">当前状态下没有创作者作品。</p>
       </section>
 
       <section v-if="tab === 'orders'" class="card">

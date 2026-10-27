@@ -1,5 +1,13 @@
 // 运营后台菜单（唯一来源：layout 侧栏与页面标题共用，避免两处漂移）
-export type AdminTab = "dashboard" | "models" | "tasks" | "shares" | "reports" | "funnel" | "orders";
+export type AdminTab =
+  | "dashboard"
+  | "models"
+  | "tasks"
+  | "shares"
+  | "reports"
+  | "funnel"
+  | "orders"
+  | "creatorAudits";
 
 export interface AdminMenuEntry {
   key: AdminTab;
@@ -15,6 +23,7 @@ export const ADMIN_MENU: AdminMenuEntry[] = [
   { key: "reports", label: "举报处置", hint: "内容举报处理" },
   { key: "funnel", label: "流水线漏斗", hint: "各环节转化率" },
   { key: "orders", label: "订单 / 退款", hint: "支付与全额退款" },
+  { key: "creatorAudits", label: "创作者审核", hint: "平台侧审核创作者作品" },
 ];
 
 export function useAdminMenu(): AdminMenuEntry[] {

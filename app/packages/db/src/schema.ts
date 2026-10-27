@@ -2425,8 +2425,18 @@ export const creatorAssets = pgTable(
      * 可空：老数据与未设置效果的作品不参与效果筛选（不出现在任何 effect 过滤结果里）。
      */
     effect: text("effect"),
-    /** 审核人（人工审核留痕；未审为空） */
+    /** 审核人（空间管理员审核留痕；未审为空） */
     reviewedBy: bigint("reviewed_by", { mode: "bigint" }).references(() => users.id),
+    /**
+     * 平台运营审核人（迁移 0034）。
+     *
+     * 为什么与 `reviewed_by` 分开：两者是**不同身份域**（`users` vs `admin_users`），
+     * 竞品侧创作者作品既有空间管理员审、也有平台运营审。共用一个列会让外键只能指向其中一张表，
+     * 导致另一条路径无法留痕（"谁审的"查不到 = 审核不可追溯）。
+     */
+    reviewedByAdmin: bigint("reviewed_by_admin", { mode: "bigint" }).references(() => adminUsers.id),
+    /** 审核来源：1 空间管理员 / 2 平台运营（便于运营报表按来源统计） */
+    reviewedByKind: smallint("reviewed_by_kind"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     viewCount: integer("view_count").notNull().default(0),
     likeCount: integer("like_count").notNull().default(0),

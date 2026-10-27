@@ -123,6 +123,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v3.8 · 平台运营创作者审核队列 + SSR 500 修复 · 2026-10-27）
+
+**#10 活动/创作者 99% → 100%**；全站 **97.2%** / 首发 **97.6%**。
+
+1. **平台运营审核队列**：创作者作品此前**只有空间管理员能审**（`POST /crc/assets/audit`），平台运营域看不到队列、
+   无法处置 —— "内容安全"最该有人管的环节反而没人管。本轮补齐：
+   - 迁移 0034：`creator_assets.reviewed_by_admin`（→ `admin_users`）+ `reviewed_by_kind`（1 空间管理员 / 2 平台运营），
+     与既有的 `reviewed_by`（→ `users`）**分域留痕**，两条审核路径各自可追溯；
+   - `GET /ops/admin/creator-audits`（状态过滤 + 标题搜索 + FIFO 排序）与
+     `POST /ops/admin/creator-audits/:id/review`（通过写 `published_at`、驳回写理由、已通过可下架）；
+     状态机与创作者域一致，**不接受跳步**（待审直接下架 / 已通过再通过都 400101）；
+   - 运营后台新增第八个页签「创作者审核」，含搜索框与三动作按钮。
+2. **E2E 抓出一个 SSR 500**：`plugins/i18n.ts` 把 `useRequestHeaders()` 放在 `computed` 体内懒取，
+   head 在请求上下文销毁后才求值 → `[nuxt] instance unavailable`，`/admin/login` 直接 **500**。
+   已改为在插件 setup（请求上下文内）立即捕获 headers。这类"只在 SSR 首屏才炸"的 bug，单元测试与 API 测试都发现不了。
+3. **验证**：`test/admin-creator-audits.spec.ts` 6 例（队列过滤 / 通过留痕与 published_at / 驳回理由 /
+   跳步拒绝 / 用户 token 越权 403 / 清理前置）；`_acceptance/e2e-admin-creator-audit.cjs` **6/6**（真实浏览器）。
+   全仓门禁 12/12 全绿（1,136 用例）。
+
 ## 变更登记（v3.7 · 权限拦截扩到 6 码 + 验证码接入登录入口 · 2026-10-27）
 
 **#7 团队 99% → 100%、#25 内容安全 85% → 92%**；全站 **97.1%** / 首发 **97.6%**。
