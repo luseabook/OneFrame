@@ -1500,6 +1500,25 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 
 **边界（本批不做）**：权限只做**目录 + 存储**，不做接口级拦截（会打穿既有 13 个 e2e 的成员角色假设）；UI 上有横幅声明。做拦截前须先定"存量角色默认权限"。
 
+#### 16.4.1 Apple `id_token` 验签（`apps/api/src/modules/auth/apple-id-token.ts`）
+
+**为什么改**：旧实现只 `id_token.split(".")[1]` → base64 解码取 `sub`，理由是"token 由 TLS 直连的 token 端点换回、来源可信"。这把**唯一的安全边界放在网络路径上**：企业网关 / 排障抓包 / TLS 终止任一处被代理，`sub` 就与"随手 base64 的一段 JSON"同强度（可冒充任意 Apple 用户登录）。JWKS 验签是 OIDC 基本要求，成本仅一次 HTTP + 5 分钟缓存。
+
+| 校验项 | 规则 | 拒绝时 `details.reason` |
+|---|---|---|
+| `alg` | 仅 `RS256` / `ES256`；`none`、`HS256` 一律拒（防"用公钥当 HMAC 密钥"的经典攻击） | `bad_alg` |
+| `kid` | JWKS 定位公钥；未命中时**强制刷新一次**（否则 Apple 轮换密钥后最长 5 分钟全员登录失败） | `missing_kid` / `unknown_kid` |
+| 签名 | 用定位到的公钥验签 | `bad_signature` |
+| `iss` | 必须 `https://appleid.apple.com` | `bad_issuer` |
+| `aud` | 必须含 `APPLE_CLIENT_ID`（`aud` 允许字符串或数组） | `bad_audience` |
+| `exp` / `iat` | 过期即拒；`iat` 超前后 60s 容忍（时钟漂移） | `expired` / `issued_in_future` |
+| `nonce` | token 带 `nonce` 时必须与本次 OAuth 的 `state` 派生值一致 | `bad_nonce` |
+| JWKS 不可用 | 拉不到 JWKS 视为**不可验证**，拒绝登录（不降级放行） | `jwks_unavailable` |
+
+失败一律 `400101`，`details.oauth_error=id_token_invalid` + `details.reason`，**不回显 token 任何片段**。验签是纯函数且可注入 `{ jwks, now }`，故 19 例单测用本地生成的 RSA/EC 密钥对与 stub JWKS，**零网络**。
+
+**注意（曾经的错误结论）**：本文件在此前把「Apple `form_post` 回调会 415」列为缺口，**前提不成立**——Nest 的 `FastifyAdapter` 自 v10 起默认注册了 `application/x-www-form-urlencoded` 解析器。已用一条 e2e 验证（表单 POST + 真实 state → 登录成功；伪造 state → `400101 state_invalid`），故**未引入任何额外解析器**。
+
 ### 16.5 创作者中心 + 运营增长 + 活动（`/v1/crc/*`、`/v1/op/*`、`/v1/campaigns/*` · 模块 #10）
 
 | 组 | 要点 |

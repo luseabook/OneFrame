@@ -46,6 +46,32 @@ describe("auth oauth (SSO) + 双 token e2e", () => {
     }
   }
 
+  /**
+   * Apple `response_mode=form_post` 的真实形状：`application/x-www-form-urlencoded` 表单 POST。
+   * 单独一个 helper 是因为 `inject` 固定发 JSON —— 用 JSON 测这条路径，
+   * 测的就只是"JSON 也能解析"，与线上 Apple 回调不是同一件事。
+   */
+  const injectForm = async (url: string, fields: Record<string, string>) => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/v1${url}`,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams(fields).toString(),
+    });
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(res.body) as Record<string, unknown>;
+    } catch {
+      body = { raw: res.body };
+    }
+    return {
+      status: res.statusCode,
+      code: (body as { code?: number }).code ?? -1,
+      msg: (body as { msg?: string }).msg ?? "",
+      body,
+    };
+  };
+
   const inject = async (
     method: string,
     url: string,
@@ -212,6 +238,53 @@ describe("auth oauth (SSO) + 双 token e2e", () => {
         OAUTH_WECHAT_APP_ID: undefined,
         OAUTH_WECHAT_SECRET: undefined,
         OAUTH_WECHAT_REDIRECT_URI: undefined,
+        OAUTH_MOCK: undefined,
+      });
+    }
+  });
+
+  // ── 3.5 Apple form_post：表单 POST 能被解析 ──────────────
+
+  it("Apple form_post：urlencoded 回调被正确解析（不再 415），且 state 校验仍生效", async () => {
+    setOauthEnv({
+      OAUTH_APPLE_CLIENT_ID: "com.oneframe.web",
+      OAUTH_APPLE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nstub\n-----END PRIVATE KEY-----",
+      OAUTH_APPLE_REDIRECT_URI: "http://127.0.0.1:3002/v1/auth/oauth/apple/callback",
+      OAUTH_APPLE_TEAM_ID: "TEAM123456",
+      OAUTH_APPLE_KEY_ID: "KEY1234567",
+      OAUTH_MOCK: "1",
+    });
+    try {
+      const providers = await inject("GET", "/auth/oauth/providers");
+      const apple = (providers.data as { list: Array<{ provider: string; configured: boolean }> }).list.find(
+        (p) => p.provider === "apple",
+      );
+      expect(apple?.configured).toBe(true);
+
+      // 1) 表单 POST + 伪造 state：必须走到 state 校验并 400101（若没注册表单解析器，这里会是 415/400100）
+      const forged = await injectForm("/auth/oauth/apple/callback", {
+        code: "apple_code_1",
+        state: "22222222-2222-2222-2222-222222222222",
+      });
+      expect(forged.status).toBe(200);
+      expect(forged.code).toBe(400101);
+      expect(forged.msg).toContain("state_invalid");
+
+      // 2) 表单 POST + 真实 state：一路通过（mock 渠道那一跳），证明 code/state 两个字段都解析到了
+      const url = await inject("POST", "/auth/oauth/apple/url", {});
+      const state = (url.data as { state: string }).state;
+      const ok = await injectForm("/auth/oauth/apple/callback", { code: "apple_code_2", state, user: '{"name":"A"}' });
+      expect(ok.code).toBe(0);
+      const data = ok.body.data as { access_token?: string; user?: { id?: string } } | undefined;
+      expect(typeof data?.access_token).toBe("string");
+      expect(data?.user?.id).toBeTruthy();
+    } finally {
+      setOauthEnv({
+        OAUTH_APPLE_CLIENT_ID: undefined,
+        OAUTH_APPLE_PRIVATE_KEY: undefined,
+        OAUTH_APPLE_REDIRECT_URI: undefined,
+        OAUTH_APPLE_TEAM_ID: undefined,
+        OAUTH_APPLE_KEY_ID: undefined,
         OAUTH_MOCK: undefined,
       });
     }

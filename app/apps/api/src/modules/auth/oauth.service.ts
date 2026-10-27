@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { AppError, ErrorCode } from "@app/shared";
 import { RedisService } from "../../redis/redis.service";
+import { AppleIdTokenError, verifyAppleIdToken, type VerifiedAppleClaims } from "./apple-id-token";
 
 /**
  * 第三方登录（SSO）—— 竞品证据：`rea-reelmate/cmd/login.md`、`d-commerce-account.md`
@@ -164,8 +165,10 @@ const PROVIDER_SPECS: Record<OauthProvider, ProviderSpec> = {
       /**
        * Apple 的 token 端点要求 `client_secret` 是**用私钥 ES256 签出的 JWT**（而不是明文密钥），
        * 所以这里用私钥现签一个 5 分钟有效的 client_secret。
-       * 解析 id_token 时**不做签名校验**：该 token 是我们通过 TLS 直连 Apple token 端点换回来的，
-       * 来源可信；若将来要校验，需拉 Apple JWKS（多一次网络与缓存，本期不做）。
+       *
+       * id_token **必须验签**（见 `apple-id-token.ts` 的注释）：它是身份断言，
+       * 不验签时 `sub` 与一段随手 base64 的 JSON 等价；同时校验 iss/aud/exp。
+       * 失败一律走 `providerError`（400101 + 稳定 reason），**绝不降级为"信任解码结果"**。
        */
       const { createSign } = await import("node:crypto");
       const now = Math.floor(Date.now() / 1000);
@@ -199,14 +202,20 @@ const PROVIDER_SPECS: Record<OauthProvider, ProviderSpec> = {
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) providerError(payload);
       const idToken = String(payload.id_token ?? "");
-      const segment = idToken.split(".")[1];
-      if (!segment) providerError(payload);
-      const decoded = JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
-      const sub = String(decoded.sub ?? "");
-      if (!sub) providerError(decoded);
+      if (!idToken) providerError(payload);
+      const verified: VerifiedAppleClaims = await verifyAppleIdToken(idToken, {
+        clientId: cfg.OAUTH_APPLE_CLIENT_ID ?? "",
+      }).catch((err: unknown) => {
+        // reason 是稳定枚举（bad_signature/expired/bad_audience/...），可直接进 details 排障；
+        // 不回显 token 本身，避免把凭据写进日志与响应。
+        providerError({
+          oauth_error: "id_token_invalid",
+          reason: err instanceof AppleIdTokenError ? err.reason : "verify_failed",
+        });
+      });
       return {
-        external_id: sub,
-        nickname: typeof decoded.email === "string" ? decoded.email.split("@")[0] : "Apple用户",
+        external_id: verified.sub,
+        nickname: verified.email ? verified.email.split("@")[0] : "Apple用户",
         avatar: null,
       };
     },

@@ -748,6 +748,26 @@ gate 全绿（12/12）。`billing` 端点 15 → 16；#23 **99% → 99.3%**（2.
 **验证**：`i18n-check.cjs` 全绿（2158 key / 39 页 + 5 组件 / 1 页进行中）；`e2e-i18n-pages.cjs` **130/130**；
 `verify-round.ps1` 全绿（12/12；1,142 用例）。
 
+## 变更登记（v6.0 · 第 54 批：Apple `id_token` JWKS 验签 · 2026-10-29）
+
+> **台账口径变更**：从第 30 批起，逐批变更登记以
+> [implement-progress-vs-reelmate.md §9](07-plan/implement-progress-vs-reelmate.md) 为**唯一台账**（那里每条都带
+> 基线 HEAD、模块完成度变化与测试数量变化）。README 只登记"改动契约/开发规范/全局口径"的批次，
+> 避免两处各写一半导致读者看到互相矛盾的版本号（v5.x 期间就出现过：README 停在 v5.9，进度文档已到 v7.x）。
+
+**本批改动（契约相关，故登记在此）**：`POST /v1/auth/oauth/apple/callback` 的 `id_token` 处理从"只 base64 解码取 `sub`"改为**完整验签 + claims 校验**。
+
+| 项 | 改动 |
+|---|---|
+| 新增模块 | `apps/api/src/modules/auth/apple-id-token.ts`（`verifyAppleIdToken`）：alg 白名单 RS256/ES256（`none`/`HS256` 一律拒）、`kid` 定位公钥、`iss`/`aud`/`exp`/`iat` 校验、JWKS 5 分钟缓存 + `kid` 未命中强制刷新 |
+| 行为变化 | 验签失败不再"信任解码结果"，一律 `400101` 且 `details.oauth_error=id_token_invalid` + `details.reason∈{bad_alg,missing_kid,unknown_kid,bad_signature,bad_issuer,bad_audience,expired,issued_in_future,jwks_unavailable,bad_nonce,malformed}`；**不回显 token** |
+| 对客户端的影响 | 无（Apple 回调路径本来只有浏览器跳转；错误体形状仍是统一信封） |
+| 测试 | `apple-id-token.spec.ts` **19 例**（本地 RSA/EC 密钥对 + stub JWKS，零网络）；`auth-oauth.spec.ts` 新增 **1 例** `form_post` 表单回调（表单 POST + 真实 state 登录成功、伪造 state → `400101 state_invalid`） |
+| 一并纠正的错误结论 | 此前把「Apple `form_post` 回调会 415」列为缺口——实测前提不成立（Nest `FastifyAdapter` 自 v10 起默认注册 urlencoded 解析器），故未引入任何额外解析器，计划中的 `form-body.ts` 未落地 |
+
+**验证**：`verify-round.ps1` 全绿（12/12；**1,195** 用例，其中 api 863 / adapters 164 / cli 89 / worker 33 / db 26 / shared 14 / storage 6）；`pnpm --filter @app/api typecheck` + `lint` 干净。
+全站进度 **97.7%（201.26/206，剩余 4.74）**，#22 账号 **92% → 95%**。
+
 ## 变更登记（v5.9 · 多语言第 29 批：`projects/[id]` 第一阶段（脚本层）· 2026-10-28）
 
 **口径更新**：`projects/[id]` 记为 **进行中**（不计入"已迁移页面"分子）；用户面仍是 39/45 完成 + 1 进行中。
