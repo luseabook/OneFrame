@@ -17,7 +17,8 @@ import type { NovelDto, NovelListDto } from "~/types/api";
  * 交给 `POST /novel` 在服务端"上传即分章"（对齐竞品 analyze 入口的任务语义）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "剧本工厂 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("novel.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -30,14 +31,18 @@ const total = ref(0);
 const loading = ref(true);
 const error = ref("");
 
-const STATUS_LABEL: Record<number, string> = { 1: "草稿", 16: "已定稿" };
-const SOURCE_LABEL: Record<number, string> = {
-  1: "小说改编",
-  2: "想法起稿",
-  3: "导入剧本",
-  4: "创意裂变",
-  5: "海外改编",
+// 状态/来源文案走 i18n（函数而不是常量：语言切换后要跟着变）
+const statusLabel = (status: number): string =>
+  status === 1 ? t("novel.statusDraft") : status === 16 ? t("novel.statusFinalized") : t("novel.statusUnknown", { status });
+const SOURCE_KEYS: Record<number, string> = {
+  1: "adapt",
+  2: "idea",
+  3: "script",
+  4: "fission",
+  5: "overseas",
 };
+const sourceLabel = (sourceType: number): string =>
+  SOURCE_KEYS[sourceType] ? t(`novel.sources.${SOURCE_KEYS[sourceType]}`) : t("novel.sources.adapt");
 
 function queryOf(next: Tab): string {
   const params = new URLSearchParams({ page: "1", page_size: "48" });
@@ -55,7 +60,7 @@ async function load(): Promise<void> {
     list.value = data.list ?? [];
     total.value = data.total ?? 0;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("novel.loadFailed");
     list.value = [];
     total.value = 0;
   } finally {
@@ -98,7 +103,7 @@ async function onFile(event: Event): Promise<void> {
         const result = String(reader.result ?? "");
         resolve(result.slice(result.indexOf(",") + 1));
       };
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("novel.readFileFailed")));
       reader.readAsDataURL(file);
     });
     // 复用已有的解析端点（txt/md/docx/xlsx），不在前端重写一份解析器
@@ -109,9 +114,9 @@ async function onFile(event: Event): Promise<void> {
     form.source_text = parsed.text;
     fileName.value = file.name;
     if (!form.title.trim()) form.title = file.name.replace(/\.[^.]+$/, "").slice(0, 200);
-    if (parsed.truncated) toast.info(`文本超过上限，已截断到 ${parsed.chars} 字`);
+    if (parsed.truncated) toast.info(t("novel.parseTruncated", { chars: parsed.chars }));
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "文件解析失败");
+    toast.error(e instanceof Error ? e.message : t("novel.parseFailed"));
   } finally {
     parsing.value = false;
     input.value = "";
@@ -132,12 +137,14 @@ async function create(): Promise<void> {
       source_file_name: isOriginal ? undefined : fileName.value || undefined,
     });
     toast.success(
-      isOriginal ? "已创建原创本子，进入工作台的「原创链」开始生成创意方案" : `已创建并解析 ${novel.chapter_count ?? 0} 章`,
+      isOriginal
+        ? t("novel.createdOriginal")
+        : t("novel.createdAdapt", { count: novel.chapter_count ?? 0 }),
     );
     showCreate.value = false;
     await router.push(`/novel/${novel.id}`);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "创建失败");
+    toast.error(e instanceof Error ? e.message : t("novel.createFailed"));
   } finally {
     creating.value = false;
   }
@@ -150,7 +157,7 @@ function open(item: NovelDto): void {
 function fmtDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(locale.value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -166,25 +173,25 @@ onMounted(() => void load());
   <div class="novel-list">
     <header class="head">
       <div class="head__text">
-        <h1>剧本工厂</h1>
-        <p>粘贴或上传小说 → 分章 → 内容分析 → 大纲 → 剧本 → 编辑 Agent 逐集定稿</p>
+        <h1>{{ t("novel.title") }}</h1>
+        <p>{{ t("novel.sub") }}</p>
       </div>
       <div class="head__actions">
-        <Button data-testid="novel-create" variant="secondary" @click="openCreate('adapt')">新建改编</Button>
-        <Button data-testid="novel-create-original" @click="openCreate('original')">新建原创剧本</Button>
+        <Button data-testid="novel-create" variant="secondary" @click="openCreate('adapt')">{{ t("novel.createAdapt") }}</Button>
+        <Button data-testid="novel-create-original" @click="openCreate('original')">{{ t("novel.createOriginal") }}</Button>
       </div>
     </header>
 
     <nav class="tabs">
-      <button type="button" :class="{ on: tab === 'all' }" @click="tab = 'all'">全部 ({{ tab === "all" ? total : "·" }})</button>
-      <button type="button" :class="{ on: tab === 'draft' }" @click="tab = 'draft'">草稿</button>
-      <button type="button" :class="{ on: tab === 'finalized' }" @click="tab = 'finalized'">已定稿</button>
-      <button type="button" :class="{ on: tab === 'archived' }" @click="tab = 'archived'">已归档</button>
+      <button type="button" :class="{ on: tab === 'all' }" @click="tab = 'all'">{{ t("novel.tabAll", { total: tab === "all" ? total : "·" }) }}</button>
+      <button type="button" :class="{ on: tab === 'draft' }" @click="tab = 'draft'">{{ t("novel.tabDraft") }}</button>
+      <button type="button" :class="{ on: tab === 'finalized' }" @click="tab = 'finalized'">{{ t("novel.tabFinalized") }}</button>
+      <button type="button" :class="{ on: tab === 'archived' }" @click="tab = 'archived'">{{ t("novel.tabArchived") }}</button>
     </nav>
 
     <p v-if="error" class="err">
       {{ error }}
-      <button type="button" class="err__retry" @click="load">重试</button>
+      <button type="button" class="err__retry" @click="load">{{ t("common.retry") }}</button>
     </p>
 
     <div class="body">
@@ -203,82 +210,82 @@ onMounted(() => void load());
         >
           <div class="card__top">
             <span class="badge" :class="{ done: item.status === 16 }">
-              {{ STATUS_LABEL[item.status] ?? `状态${item.status}` }}
+              {{ statusLabel(item.status) }}
             </span>
-            <span class="card__source">{{ SOURCE_LABEL[item.source_type] ?? "改编" }}</span>
+            <span class="card__source">{{ sourceLabel(item.source_type) }}</span>
             <span class="card__ratio">{{ item.ratio }}</span>
           </div>
           <p class="card__title" :title="item.title">{{ item.title }}</p>
           <p class="card__meta">
-            <span>{{ item.episode_count }} 集</span>
+            <span>{{ t("novel.episodeCount", { count: item.episode_count }) }}</span>
             <span class="dot">·</span>
             <span>{{ fmtDate(item.updated_at) }}</span>
           </p>
-          <p v-if="item.archived_at" class="card__archived">已归档 · {{ fmtDate(item.archived_at) }}</p>
+          <p v-if="item.archived_at" class="card__archived">{{ t("novel.archivedAt", { time: fmtDate(item.archived_at) }) }}</p>
         </article>
       </div>
 
       <EmptyState
         v-else
         icon="✎"
-        title="还没有剧本项目"
-        description="粘贴一段小说正文（或上传 txt / docx），系统会自动按「第N章」切分，然后逐步生成世界观、角色卡、章节大纲与分集剧本。"
+        :title="t('novel.emptyTitle')"
+        :description="t('novel.emptyDesc')"
       >
         <div class="head__actions">
-          <Button variant="secondary" @click="openCreate('adapt')">粘贴小说改编</Button>
-          <Button @click="openCreate('original')">从一句灵感原创</Button>
+          <Button variant="secondary" @click="openCreate('adapt')">{{ t("novel.pasteAdapt") }}</Button>
+          <Button @click="openCreate('original')">{{ t("novel.fromIdea") }}</Button>
         </div>
       </EmptyState>
     </div>
 
     <!-- 新建弹窗：改编（粘贴/上传小说）与原创（一句灵感）共用同一张表单，只切换模式 -->
-    <Modal :open="showCreate" :title="mode === 'original' ? '新建原创剧本' : '新建改编剧本'" width="620px" @close="showCreate = false">
+    <Modal :open="showCreate" :title="mode === 'original' ? t('novel.modalOriginal') : t('novel.modalAdapt')" width="620px" @close="showCreate = false">
       <div class="form">
         <div class="segmented segmented--mode">
-          <button type="button" :class="{ on: mode === 'adapt' }" @click="mode = 'adapt'">小说改编</button>
-          <button type="button" :class="{ on: mode === 'original' }" @click="mode = 'original'">纯原创</button>
+          <button type="button" :class="{ on: mode === 'adapt' }" @click="mode = 'adapt'">{{ t("novel.modeAdapt") }}</button>
+          <button type="button" :class="{ on: mode === 'original' }" @click="mode = 'original'">{{ t("novel.modeOriginal") }}</button>
         </div>
         <TextField
           v-model="form.title"
-          label="剧本名称"
-          :placeholder="mode === 'original' ? '例如：替人写遗书的女孩' : '例如：雨夜当票'"
+          :label="t('novel.nameLabel')"
+          :placeholder="mode === 'original' ? t('novel.namePlaceholderOriginal') : t('novel.namePlaceholderAdapt')"
           :maxlength="200"
         />
         <div class="form__row">
-          <label class="form__label">画面比例</label>
+          <label class="form__label">{{ t("novel.ratioLabel") }}</label>
           <div class="segmented">
-            <button type="button" :class="{ on: form.ratio === '9:16' }" @click="form.ratio = '9:16'">9:16 竖屏</button>
-            <button type="button" :class="{ on: form.ratio === '16:9' }" @click="form.ratio = '16:9'">16:9 横屏</button>
+            <button type="button" :class="{ on: form.ratio === '9:16' }" @click="form.ratio = '9:16'">{{ t("novel.ratioPortrait") }}</button>
+            <button type="button" :class="{ on: form.ratio === '16:9' }" @click="form.ratio = '16:9'">{{ t("novel.ratioLandscape") }}</button>
           </div>
         </div>
         <div v-if="mode === 'adapt'" class="form__upload">
           <label class="upload">
             <input type="file" accept=".txt,.md,.docx,.xlsx" :disabled="parsing" @change="onFile" />
-            <span>{{ parsing ? "解析中…" : "上传小说文件（txt / md / docx）" }}</span>
+            <span>{{ parsing ? t("novel.parsing") : t("novel.uploadHint") }}</span>
           </label>
           <span v-if="fileName" class="form__file">{{ fileName }}</span>
         </div>
         <TextAreaField
           v-model="form.source_text"
-          :label="mode === 'original' ? '创作灵感（user_input）' : '小说正文'"
+          :label="mode === 'original' ? t('novel.textLabelOriginal') : t('novel.textLabelAdapt')"
           :rows="mode === 'original' ? 4 : 10"
           :maxlength="mode === 'original' ? 5000 : 50000"
           :placeholder="
             mode === 'original'
-              ? '一句话说清核心冲突，例如：一名替人写遗书的女孩，发现客户名单里有自己父亲的名字。'
-              : '把小说正文粘贴到这里（上限 5 万字）。含「第N章」标题会自动按章切分。'
+              ? t('novel.textPlaceholderOriginal')
+              : t('novel.textPlaceholderAdapt')
           "
           :hint="
             mode === 'original'
-              ? '原创链不需要小说原文：这句灵感会生成创意方案 → 素材 → 总纲 → 章纲 → 集纲 → 剧本。'
-              : '创建时会立刻完成分章；之后可以随时在详情页重新分章。'
+              ? t('novel.textHintOriginal')
+              : t('novel.textHintAdapt')
           "
         />
       </div>
       <template #footer>
-        <Button variant="ghost" @click="showCreate = false">取消</Button>
+        <Button variant="ghost" @click="showCreate = false">{{ t("common.cancel") }}</Button>
         <Button :disabled="!canCreate" :loading="creating" @click="create">
-          {{ mode === 'original' ? "创建原创本子" : "创建并分章" }}
+          {{ mode === 'original' ? t("novel.submitOriginal") : t("novel.submitAdapt") }}
         </Button>
       </template>
     </Modal>

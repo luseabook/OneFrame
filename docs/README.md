@@ -123,6 +123,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.1 · 多语言第 10–11 批：剧本工厂 + 邀请与兑换 · 2026-10-28）
+
+**#16 多语言 94% → 95%**；全站 **97.4%** / 首发 **97.6%**。
+
+| 页面 | namespace | 迁移内容 |
+|---|---|---|
+| [novel/index.vue](app/apps/web/pages/novel/index.vue) | `novel`（48 key） | 列表标题/副标题、三个 tab、`STATUS_LABEL`/`SOURCE_LABEL` 常量改函数、空态、卡片（集数/归档时间）、新建弹窗（模式切换、剧本名、画面比例、上传、正文/灵感两种占位与提示、提交按钮）、8 条 toast |
+| [invite.vue](app/apps/web/pages/invite.vue) | `invite`（60 key） | 邀请码卡片、补填邀请码、每日奖励、分销概览、兑换码两段式（查询/兑换/面额/剩余次数/有效期）、5 种不可兑换原因、17 条 toast |
+
+- 已迁移页面 **14 → 16 / 64**，语言包 **488 → 596 key**。
+- 两处"常量→函数"的改法值得记住：`STATUS_LABEL`、`SOURCE_LABEL`、`redeemReasonLabel` 若保留常量/`switch` 返回硬编码中文，
+  **语言切换后不会更新**（常量在 setup 期算一次）。统一改成 `t()` 调用，代价是多一次函数调用，收益是切语言立即生效。
+- 一处类型坑：`t("invite.resultSuccess", { credits, balance: redeemResult.balance_after })` ——
+  `balance_after` 是 `number | undefined`，vue-i18n 的插值参数不允许 undefined，已改为 `?? 0`（真实成功路径必有值，兜底只为类型）。
+
+**验证**：`i18n-check.cjs` 全绿（5 语言 key 一致 596 / 无空值 / 无中文残留 / 占位符一致 / 16 个页面 key 齐全）；
+`e2e-i18n-pages.cjs` 扩到 **30/30**（新增剧本工厂中英对照 + 新建弹窗英文、邀请页中英对照）；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.0 · CLI `task download` 补测试 + 资产库 i18n · 2026-10-27）
 
 **#9 CLI/MCP 90% → 92%、#16 多语言 93% → 94%**；全站 **97.4%** / 首发 **97.6%**。

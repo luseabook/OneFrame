@@ -24,6 +24,9 @@ import type {
   RedeemResultDto,
 } from "~/types/api";
 
+const { t, locale } = useI18n();
+useHead({ title: () => t("invite.metaTitle") });
+
 const api = useApi();
 const toast = useToast();
 
@@ -49,15 +52,15 @@ const inviteLink = computed(() => {
 const redeemReasonLabel = computed(() => {
   switch (redeemInfo.value?.reason) {
     case "not_found":
-      return "兑换码不存在";
+      return t("invite.reasons.notFound");
     case "disabled":
-      return "该码已停用";
+      return t("invite.reasons.disabled");
     case "expired":
-      return "该码已过期";
+      return t("invite.reasons.expired");
     case "exhausted":
-      return "该码已被兑换完了";
+      return t("invite.reasons.exhausted");
     case "already_redeemed":
-      return "你已经兑换过这个码";
+      return t("invite.reasons.alreadyRedeemed");
     default:
       return "";
   }
@@ -72,7 +75,7 @@ async function loadAll() {
     invite.value = mine.code ? mine : await api.post<InviteCodeDto>("/op/invite-code", {});
     distributor.value = await api.post<DistributorOverviewDto>("/op/distributor/overview", {});
   } catch (e) {
-    errorMsg.value = (e as Error).message || "邀请信息加载失败";
+    errorMsg.value = (e as Error).message || t("invite.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -82,17 +85,17 @@ async function copyLink() {
   if (!inviteLink.value) return;
   try {
     await navigator.clipboard.writeText(inviteLink.value);
-    toast.success("邀请链接已复制");
+    toast.success(t("invite.toastCopied"));
   } catch {
     // 剪贴板被浏览器拒绝时给出可手动复制的文案，而不是静默失败
-    toast.info(`复制失败，请手动复制：${inviteLink.value}`);
+    toast.info(t("invite.toastCopyFailed", { link: inviteLink.value }));
   }
 }
 
 async function verifyInvite() {
   const code = verifyCodeInput.value.trim();
   if (!code) {
-    toast.error("请输入邀请码");
+    toast.error(t("invite.toastCodeRequired"));
     return;
   }
   busy.value = "verify";
@@ -102,16 +105,16 @@ async function verifyInvite() {
     });
     if (res.replayed) {
       // 回放不是失败：竞品登录时已带过邀请码、用户又点一次是常见路径
-      toast.info("这个邀请码你已经用过了");
+      toast.info(t("invite.toastCodeReplayed"));
     } else if (res.credits > 0) {
-      toast.success(`邀请码已生效，到账 ${res.credits} 积分`);
+      toast.success(t("invite.toastCodeAppliedCredits", { credits: res.credits }));
     } else {
-      toast.success("邀请码已生效");
+      toast.success(t("invite.toastCodeApplied"));
     }
     verifyCodeInput.value = "";
     distributor.value = await api.post<DistributorOverviewDto>("/op/distributor/overview", {});
   } catch (e) {
-    toast.error((e as Error).message || "邀请码核销失败");
+    toast.error((e as Error).message || t("invite.toastVerifyFailed"));
   } finally {
     busy.value = "";
   }
@@ -122,10 +125,10 @@ async function claimDaily() {
   try {
     const res = await api.post<DailyRewardDto>("/op/daily-reward", {});
     daily.value = res;
-    if (res.rewarded) toast.success(`领取成功，到账 ${res.credits} 积分`);
-    else toast.info("今天已经领过了，明天再来");
+    if (res.rewarded) toast.success(t("invite.toastDailySuccess", { credits: res.credits }));
+    else toast.info(t("invite.toastDailyReplay"));
   } catch (e) {
-    toast.error((e as Error).message || "领取失败");
+    toast.error((e as Error).message || t("invite.toastDailyFailed"));
   } finally {
     busy.value = "";
   }
@@ -134,16 +137,16 @@ async function claimDaily() {
 async function queryRedeem() {
   const code = redeemInput.value.trim();
   if (!code) {
-    toast.error("请输入兑换码");
+    toast.error(t("invite.toastRedeemCodeRequired"));
     return;
   }
   busy.value = "redeem-info";
   redeemResult.value = null;
   try {
     redeemInfo.value = await api.post<RedeemCodeInfoDto>("/op/redeem-code/info", { code });
-    if (!redeemInfo.value.valid) toast.info(redeemReasonLabel.value || "该码当前不可兑换");
+    if (!redeemInfo.value.valid) toast.info(redeemReasonLabel.value || t("invite.toastNotRedeemableNow"));
   } catch (e) {
-    toast.error((e as Error).message || "查询失败");
+    toast.error((e as Error).message || t("invite.toastQueryFailed"));
   } finally {
     busy.value = "";
   }
@@ -156,12 +159,12 @@ async function doRedeem() {
   try {
     const res = await api.post<RedeemResultDto>("/redeem-code/redeem", { code });
     redeemResult.value = res;
-    if (res.replayed) toast.info("你之前已经兑换过这个码了，不重复发放");
-    else toast.success(`兑换成功，到账 ${res.credits} 积分`);
+    if (res.replayed) toast.info(t("invite.toastRedeemReplay"));
+    else toast.success(t("invite.toastRedeemSuccess", { credits: res.credits }));
     // 兑换后刷新码信息（used_count 会变），让按钮态立刻正确
     redeemInfo.value = await api.post<RedeemCodeInfoDto>("/op/redeem-code/info", { code });
   } catch (e) {
-    toast.error((e as Error).message || "兑换失败");
+    toast.error((e as Error).message || t("invite.toastRedeemFailed"));
   } finally {
     busy.value = "";
   }
@@ -174,90 +177,84 @@ onMounted(loadAll);
   <div class="inv">
     <header class="inv-head">
       <div>
-        <h1 class="inv-title">邀请与兑换</h1>
-        <p class="inv-sub">邀请码归因 → 分销关系（单层）→ 奖励走积分账本</p>
+        <h1 class="inv-title">{{ t("invite.title") }}</h1>
+        <p class="inv-sub">{{ t("invite.sub") }}</p>
       </div>
-      <button type="button" class="inv-btn" :disabled="loading" @click="loadAll">刷新</button>
+      <button type="button" class="inv-btn" :disabled="loading" @click="loadAll">{{ t("invite.refresh") }}</button>
     </header>
 
     <p v-if="errorMsg" class="inv-alert">
       {{ errorMsg }}
-      <button type="button" class="inv-link" @click="loadAll">重试</button>
+      <button type="button" class="inv-link" @click="loadAll">{{ t("common.retry") }}</button>
     </p>
 
-    <div v-if="loading" class="inv-skeleton">加载中…</div>
+    <div v-if="loading" class="inv-skeleton">{{ t("invite.loading") }}</div>
 
     <div v-else class="inv-grid">
       <!-- 我的邀请码 -->
       <section class="inv-card">
-        <h2 class="inv-card-title">我的邀请码</h2>
-        <p class="inv-hint">一人一码（重复生成返回同一个），被邀请人核销后你与他建立单层分销关系。</p>
+        <h2 class="inv-card-title">{{ t("invite.myCode") }}</h2>
+        <p class="inv-hint">{{ t("invite.myCodeHint") }}</p>
         <div v-if="invite?.code" class="inv-code-box">
           <code class="inv-code">{{ invite.code }}</code>
-          <button type="button" class="inv-btn primary sm" @click="copyLink">复制邀请链接</button>
+          <button type="button" class="inv-btn primary sm" @click="copyLink">{{ t("invite.copyLink") }}</button>
         </div>
-        <p v-else class="inv-muted">还没生成邀请码，点右上「刷新」触发一次生成。</p>
+        <p v-else class="inv-muted">{{ t("invite.noCode") }}</p>
         <p class="inv-link-text">{{ inviteLink }}</p>
         <dl class="inv-kv">
-          <div><dt>核销赠分</dt><dd>{{ invite?.credits ?? 0 }}</dd></div>
-          <div><dt>已邀请</dt><dd>{{ invite?.invitee_count ?? 0 }}</dd></div>
+          <div><dt>{{ t("invite.codeCredits") }}</dt><dd>{{ invite?.credits ?? 0 }}</dd></div>
+          <div><dt>{{ t("invite.invitedCount") }}</dt><dd>{{ invite?.invitee_count ?? 0 }}</dd></div>
         </dl>
       </section>
 
       <!-- 补填邀请码 -->
       <section class="inv-card">
-        <h2 class="inv-card-title">补填邀请码</h2>
-        <p class="inv-hint">
-          登录时没填邀请码？这里可以补。核销幂等：重复核销返回「已用过」，不会重复发分。
-        </p>
+        <h2 class="inv-card-title">{{ t("invite.fillCode") }}</h2>
+        <p class="inv-hint">{{ t("invite.fillCodeHint") }}</p>
         <div class="inv-form">
-          <input v-model="verifyCodeInput" class="inv-input" maxlength="64" placeholder="请输入邀请码，如 OFA1B2C3D4" />
+          <input v-model="verifyCodeInput" class="inv-input" maxlength="64" :placeholder="t('invite.codePlaceholder')" />
           <button type="button" class="inv-btn primary" :disabled="busy === 'verify'" @click="verifyInvite">
-            {{ busy === "verify" ? "核销中…" : "核销" }}
+            {{ busy === "verify" ? t("invite.verifying") : t("invite.verify") }}
           </button>
         </div>
       </section>
 
       <!-- 每日奖励 -->
       <section class="inv-card">
-        <h2 class="inv-card-title">每日奖励</h2>
-        <p class="inv-hint">每人每天 1 次，发 5 积分（运营可调的常量）。</p>
+        <h2 class="inv-card-title">{{ t("invite.dailyTitle") }}</h2>
+        <p class="inv-hint">{{ t("invite.dailyHint") }}</p>
         <button
           type="button"
           class="inv-btn primary"
           :disabled="busy === 'daily' || daily?.already_rewarded === true"
-          :title="daily?.already_rewarded ? '今天已领取' : ''"
+          :title="daily?.already_rewarded ? t('invite.dailyClaimedTitle') : ''"
           @click="claimDaily"
         >
-          {{ daily?.already_rewarded ? "今天已领取，明天再来" : busy === "daily" ? "领取中…" : "领取今日奖励" }}
+          {{ daily?.already_rewarded ? t("invite.dailyClaimed") : busy === "daily" ? t("invite.dailyClaiming") : t("invite.dailyClaim") }}
         </button>
-        <p v-if="daily?.balance_after != null" class="inv-ok">领取后余额：{{ daily.balance_after }}</p>
+        <p v-if="daily?.balance_after != null" class="inv-ok">{{ t("invite.balanceAfter", { balance: daily.balance_after }) }}</p>
       </section>
 
       <!-- 分销概览 -->
       <section class="inv-card">
-        <h2 class="inv-card-title">分销概览</h2>
-        <p class="inv-hint">
-          `commission_bps` 默认 0：佣金结算要接订单分账，本批只建立关系与口径，不计佣。
-        </p>
+        <h2 class="inv-card-title">{{ t("invite.distributorTitle") }}</h2>
+        <p class="inv-hint">{{ t("invite.distributorHint") }}</p>
         <dl v-if="distributor" class="inv-kv">
-          <div><dt>有效邀请人数</dt><dd>{{ distributor.invitee_count }}</dd></div>
-          <div><dt>佣金比例</dt><dd>{{ (distributor.me.commission_bps / 100).toFixed(2) }}%</dd></div>
-          <div><dt>已结算佣金</dt><dd>{{ distributor.income_credits }}</dd></div>
-          <div><dt>上级邀请人</dt><dd class="inv-mono">{{ distributor.me.parent_user_id ?? "—" }}</dd></div>
+          <div><dt>{{ t("invite.validInvitees") }}</dt><dd>{{ distributor.invitee_count }}</dd></div>
+          <div><dt>{{ t("invite.commissionRate") }}</dt><dd>{{ (distributor.me.commission_bps / 100).toFixed(2) }}%</dd></div>
+          <div><dt>{{ t("invite.settledIncome") }}</dt><dd>{{ distributor.income_credits }}</dd></div>
+          <div><dt>{{ t("invite.parentUser") }}</dt><dd class="inv-mono">{{ distributor.me.parent_user_id ?? "—" }}</dd></div>
         </dl>
       </section>
 
       <!-- 兑换码（两段式） -->
       <section class="inv-card inv-card-wide">
-        <h2 class="inv-card-title">兑换码</h2>
-        <p class="inv-hint">
-          两段式：先「查询」看到这是什么码、给多少分，再确认「兑换」。并发安全靠唯一键，不会重复到账。
-        </p>
+        <h2 class="inv-card-title">{{ t("invite.redeemTitle") }}</h2>
+        <p class="inv-hint">{{ t("invite.redeemHint") }}</p>
         <div class="inv-form">
-          <input v-model="redeemInput" class="inv-input" maxlength="32" placeholder="请输入兑换码" />
+          <input v-model="redeemInput" class="inv-input" maxlength="32" :placeholder="t('invite.redeemPlaceholder')" />
           <button type="button" class="inv-btn" :disabled="busy === 'redeem-info'" @click="queryRedeem">
-            {{ busy === "redeem-info" ? "查询中…" : "查询" }}
+            {{ busy === "redeem-info" ? t("invite.querying") : t("invite.query") }}
           </button>
           <button
             type="button"
@@ -266,25 +263,25 @@ onMounted(loadAll);
             :title="redeemInfo && !redeemInfo.valid ? redeemReasonLabel : ''"
             @click="doRedeem"
           >
-            {{ redeemInfo && !redeemInfo.valid ? redeemReasonLabel || "不可兑换" : busy === "redeem" ? "兑换中…" : "确认兑换" }}
+            {{ redeemInfo && !redeemInfo.valid ? redeemReasonLabel || t("invite.notRedeemable") : busy === "redeem" ? t("invite.redeeming") : t("invite.confirmRedeem") }}
           </button>
         </div>
 
         <div v-if="redeemInfo" class="inv-result">
           <template v-if="redeemInfo.found">
             <p>
-              面额 <strong>{{ redeemInfo.credits }}</strong> 积分 ·
-              剩余次数 <strong>{{ redeemInfo.remaining_uses < 0 ? "不限" : redeemInfo.remaining_uses }}</strong> ·
-              有效期至 {{ redeemInfo.expires_at ? new Date(redeemInfo.expires_at).toLocaleString("zh-CN", { hour12: false }) : "长期" }}
+              {{ t("invite.faceValue", { credits: redeemInfo.credits }) }} ·
+              {{ t("invite.remainingUses", { uses: redeemInfo.remaining_uses < 0 ? t("invite.unlimited") : String(redeemInfo.remaining_uses) }) }} ·
+              {{ t("invite.validUntil", { expiry: redeemInfo.expires_at ? new Date(redeemInfo.expires_at).toLocaleString(locale, { hour12: false }) : t("invite.longTerm") }) }}
             </p>
             <p v-if="!redeemInfo.valid" class="inv-warn">{{ redeemReasonLabel }}</p>
           </template>
-          <p v-else class="inv-warn">兑换码不存在，请检查是否输错。</p>
+          <p v-else class="inv-warn">{{ t("invite.notFound") }}</p>
         </div>
 
         <p v-if="redeemResult" class="inv-ok">
-          <template v-if="redeemResult.replayed">该码你之前已兑换过，本次未重复发放。</template>
-          <template v-else>兑换成功，到账 {{ redeemResult.credits }} 积分（余额 {{ redeemResult.balance_after }}）。</template>
+          <template v-if="redeemResult.replayed">{{ t("invite.resultReplayed") }}</template>
+          <template v-else>{{ t("invite.resultSuccess", { credits: redeemResult.credits, balance: redeemResult.balance_after ?? 0 }) }}</template>
         </p>
       </section>
     </div>
