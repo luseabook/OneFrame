@@ -16,6 +16,7 @@ import { AppError, ErrorCode, TaskStatus, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { RedisService } from "../../redis/redis.service";
 import { StorageService } from "../../storage/storage.service";
+import { trimVideoBuffer } from "./ffmpeg-trim";
 
 /**
  * ReelFlow 切片发布（`POST /projects/{id}/episodes/{eid}/timeline/publish` 等）。
@@ -35,11 +36,12 @@ import { StorageService } from "../../storage/storage.service";
  *    把已发布作品弄坏（与 schema 注释同因）。
  * 2. **必须已有可播放的成片**：发布前置是"本集有一次已成功的成片合成"（timelineExports
  *    status=3）。没有就 400105 并提示先导出——否则发布记录只能永远停在失败态。
- * 3. **转码状态机在 API 内同构实现**：worker 侧目前只有 `timeline.export` 处理器，
- *    没有 publication 处理器；本轮 worker 不在写权限内，所以这里按
- *    「1 排队 → 2 转码中 → 3 可播放 / 4 失败」原样实现（复制成片产物 = 切片的转码占位），
- *    **真正按 slice 区间用 ffmpeg 裁剪需要 worker 侧新增 handler（已在回报登记为 Lead TODO）**。
- *    契约（状态、error、shareToken）不会因此改变，下沉到 worker 时 API 无感。
+ * 3. **转码在 API 进程内完成（1 排队 → 2 转码中 → 3 可播放 / 4 失败）**，并且**真的按 slice 裁剪**：
+ *    运行时会探测 `ffmpeg`（`@app/shared probeFfmpeg`，也可经 `GET /meta/capabilities` 查看）——
+ *      · 可用 + slice 有入/出点 → `ffmpeg -ss/-to` 真裁剪，落 `transcode_mode="ffmpeg"`；
+ *      · 不可用（或 slice 覆盖全片）→ 复制成片，落 `transcode_mode="copy"` + `degrade_reason`。
+ *    **降级必须留痕**：不能"悄悄复制"还对外说裁剪过——`transcode_mode` 就是给审计与前端看的。
+ *    契约（状态、error、shareToken）不因裁剪方式改变；未来下沉 worker 时 API 无感。
  */
 
 export interface PublishSliceInput {
@@ -322,8 +324,22 @@ export class PublishService {
         .set({ status: PUB_STATUS.TRANSCODING, error: null, updatedAt: new Date() })
         .where(eq(timelinePublications.id, id));
 
-      const buffer = await this.storage.read(sourceKey);
-      if (!buffer || buffer.byteLength === 0) throw new Error("rendered product is empty");
+      const source = await this.storage.read(sourceKey);
+      if (!source || source.byteLength === 0) throw new Error("rendered product is empty");
+
+      // 真裁剪：能裁就裁（并留痕 transcode_mode="ffmpeg"），不能裁就复制 + 留降级原因
+      const slice = (row.slice ?? {}) as Record<string, unknown>;
+      let buffer = source;
+      let mode = "copy";
+      let degradeReason: string | null = null;
+      const trimmed = await trimVideoBuffer(source, Number(slice.start_ms ?? 0), Number(slice.end_ms ?? 0));
+      if (trimmed.ok && trimmed.buffer) {
+        buffer = trimmed.buffer;
+        mode = "ffmpeg";
+      } else {
+        degradeReason = trimmed.reason ?? "trim skipped";
+      }
+
       const key = `u/${spaceId}/publications/${publicationId}.mp4`;
       await this.storage.put(key, buffer, "video/mp4");
 
@@ -335,6 +351,8 @@ export class PublishService {
           fileUri: key,
           shareToken: token,
           publishedAt: new Date(),
+          transcodeMode: mode,
+          transcodeReason: degradeReason,
           error: null,
           updatedAt: new Date(),
         })

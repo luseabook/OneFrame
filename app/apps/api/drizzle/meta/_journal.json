@@ -253,6 +253,13 @@
       "when": 1793126334391,
       "tag": "0035_funny_lady_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793131623393,
+      "tag": "0036_slim_silver_centurion",
+      "breakpoints": true
     }
   ]
 }

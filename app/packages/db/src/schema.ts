@@ -2971,6 +2971,13 @@ export const timelinePublications = pgTable(
      * 是创作者/运营要看的历史指标，必须持久；Redis 只做 5 分钟去重（防刷）。
      */
     viewCount: integer("view_count").notNull().default(0),
+    /**
+     * 本次发布是怎么来的：`ffmpeg` = 按 slice 真裁剪；`copy` = 复制成片（未裁剪）。
+     * 空串 = 历史数据 / 尚未转码。**必须留痕**：不能"悄悄复制"却对外说裁剪过。
+     */
+    transcodeMode: text("transcode_mode").notNull().default(""),
+    /** 未裁剪时的可读原因（没 ffmpeg / 区间覆盖全片 / 裁剪失败）；成功裁剪时为 null */
+    transcodeReason: text("transcode_reason"),
     error: jsonb("error"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),

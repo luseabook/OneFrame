@@ -123,6 +123,34 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.8 · 第 49 批：#20 真 ffmpeg 裁剪落地 · 2026-10-29）
+
+### 上一批发现本机就有 ffmpeg，这一批把裁剪真正接上
+
+[`apps/api/src/modules/script/ffmpeg-trim.ts`](app/apps/api/src/modules/script/ffmpeg-trim.ts)：
+
+| 取舍 | 原因 |
+|---|---|
+| `-ss/-to` 放在 `-i` **之后**（解码后裁） | 放在前面是"关键帧前跳"，快但不精确；对外发布的切片时长必须准 |
+| **不用 `-c copy`** | copy 按关键帧对齐会把尾巴带进来（看着像对、实际多几帧） |
+| 重编码 `libx264 + aac + faststart` | 精确到帧 + 便于边下边播 |
+| 失败**不抛异常**，返回 `{ok:false, reason}` | 没装 ffmpeg / 片源不可解码 / 区间过短都是正常情况，不能把发布打成 500 |
+
+### 降级必须留痕（迁移 0036）
+
+`timeline_publications` 新增 `transcode_mode`（`ffmpeg` / `copy`）与 `transcode_reason`。
+**理由**：不能"悄悄复制"却对外说裁过——审计与前端都要能看出来这一次到底是裁了还是只复制了。
+
+### 验证：证明"真的裁了"，而不是"没报错"
+
+| 测试 | 断言 |
+|---|---|
+| [ffmpeg-trim.spec.ts](app/apps/api/test/ffmpeg-trim.spec.ts) 4 例 | 5s 源裁 1s–3s → 产物时长 **≈2s**（另用 ffprobe 独立复核得 **2.000000**）；区间 <200ms 拒绝并给原因；空 buffer 拒绝；不可解码字节返回 `ok:false` **不抛** |
+| 既有 `reelflow-publish.spec` 14 例 | 其 fixture 上传的是不可解码字节 → 走**降级复制**路径，仍全绿（说明降级不破坏契约） |
+
+**验证**：api **826 → 830**、worker 37、db 26、shared 19；全量 **1,168 例**；gate 全绿（12/12）。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**。#20 的功能性缺口到此清空，§3.5 的 **E 类（环境依赖）也清零**。
+
 ## 变更登记（v7.7 · 第 48 批：ffmpeg 改为运行时能力探测（E 类自助解锁）· 2026-10-29）
 
 ### 问题：能力被"写死"成假设
