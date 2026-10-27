@@ -1391,6 +1391,7 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 |---|---|---|
 | `GET /billing/plans` | 公开 | 13 档订阅（`skus.kind='vip'`），含活动价 |
 | `GET /billing/sku-price?sku=` | 公开 | 牌价 / 活动价 / 折扣来源（对照竞品 `sku-price`） |
+| `GET /billing/upgrade-quote?sku=` | 登录 | **升级补差价报价**（只读，不动钱）。口径自定并登记进度文档 §5.4 #1：`折抵 = 当前档有效价 × 剩余天数 / 当前档周期天数`（天数向上取整，对用户有利），`应付 = max(0, 目标价 − 折抵)`。**无生效订阅 / 同档 / 降价** 三种情况一律 `is_upgrade:false` 且 `credit_cents:0`，分别防「没买过也能抵」「反复调用抵到 0」「降级退钱」。下单仍走原价，折抵接入动钱路径待口径确认 |
 | `GET /billing/subscription` | 登录 | 当前生效订阅；**无订阅返回 null 而不是 404** |
 | `POST /billing/subscribe` | 登录 | 仅接受 VIP sku（充值包 → 400101）；复用普通下单链路 |
 | `POST /billing/subscription/cancel` | 登录 | 只关自动续费，到期前权益仍在 |

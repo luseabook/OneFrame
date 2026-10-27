@@ -128,6 +128,17 @@ export class BillingController {
     return this.billing.skuPrice(sku);
   }
 
+  /**
+   * 升级补差价**报价**（登录态；只读，不动钱）。
+   * 前端用它在定价页给出"补 ¥X"的明确数字；真正下单仍走 /billing/orders（原价），
+   * 折抵接入动钱路径需产品确认，已在进度文档 §5.4 第 1 条登记。
+   */
+  @Get("billing/upgrade-quote")
+  async upgradeQuote(@Req() req: AuthedRequest, @Query("sku") sku?: string) {
+    if (!sku) throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
+    return this.billing.quoteUpgrade(req.auth?.spaceId ?? "", sku);
+  }
+
   /** 当前订阅状态（登录态；无订阅返回 null，不是 404 —— 前端按 null 展示"未订阅"） */
   @Get("billing/subscription")
   async subscription(@Req() req: AuthedRequest) {

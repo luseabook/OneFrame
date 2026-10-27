@@ -302,6 +302,113 @@ export class BillingService {
     };
   }
 
+  /**
+   * **升级补差价报价**（按天折算，只报价不动钱）。
+   *
+   * 口径（竞品 ReelMate 有"升级"入口但没有折算规则可取证，故此处是自定口径，已登记
+   * §5.4 第 1 条待确认）：`折抵 = 当前档有效价 × 剩余天数 / 当前档周期天数`，
+   * `应付 = max(0, 目标档有效价 − 折抵)`。
+   *
+   * 为什么按"当前档有效价"而不是"用户实付"：subscriptions 不存实付金额，
+   * 而 orders 上"哪一单支撑了当前订阅"在有改价/退款时无法无歧义回溯。
+   * 用档位有效价可复现、可对账，代价是活动价买入的用户会少折抵一点——已在此注明。
+   *
+   * 为什么只报价不下单：动钱路径需要产品确认（是否允许"补差价换档"本身是策略问题）。
+   * 报价接口让前端能先给出"补 ¥X"的明确数字，且不改任何账目。
+   */
+  async quoteUpgrade(spaceId: string, targetSku: string) {
+    const [target] = await db
+      .select()
+      .from(skus)
+      .where(and(eq(skus.sku, targetSku), eq(skus.active, true)))
+      .limit(1);
+    if (!target) throw new AppError(ErrorCode.NOT_FOUND, "sku not found");
+    if (target.kind !== "vip") throw new AppError(ErrorCode.INVALID_PARAM, "only vip sku can be upgraded");
+
+    const promos = await this.activePromotions();
+    const effective = (row: typeof target): number => {
+      const promo = promos.get(row.sku);
+      if (!promo) return row.priceCents;
+      return promo.kind === 3 ? Math.max(1, row.priceCents - promo.priceCents) : Math.min(row.priceCents, promo.priceCents);
+    };
+
+    const [current] = await db
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.spaceId, BigInt(spaceId)), eq(subscriptions.status, 1)))
+      .limit(1);
+
+    const targetPrice = effective(target);
+    // 无生效订阅 / 已过期：这不是"升级"，就是普通新购，不能给折抵（否则等于白送）
+    if (!current || current.endAt.getTime() <= Date.now()) {
+      return {
+        is_upgrade: false,
+        reason: "no_active_subscription" as const,
+        current_sku: null,
+        target_sku: target.sku,
+        days_left: 0,
+        current_period_days: 0,
+        credit_cents: 0,
+        target_price_cents: targetPrice,
+        payable_cents: targetPrice,
+      };
+    }
+
+    if (current.sku === target.sku) {
+      return {
+        is_upgrade: false,
+        reason: "same_plan" as const,
+        current_sku: current.sku,
+        target_sku: target.sku,
+        days_left: 0,
+        current_period_days: 0,
+        credit_cents: 0,
+        target_price_cents: targetPrice,
+        payable_cents: targetPrice,
+      };
+    }
+
+    const [currentSku] = await db
+      .select()
+      .from(skus)
+      .where(eq(skus.sku, current.sku))
+      .limit(1);
+    if (!currentSku) throw new AppError(ErrorCode.NOT_FOUND, "current sku not found");
+
+    const currentPrice = effective(currentSku);
+    // 严格递增才算升级：目标价不高于当前价一律按"降级"拒绝（降级走续费到期自然生效，不退款）
+    if (targetPrice <= currentPrice) {
+      return {
+        is_upgrade: false,
+        reason: "not_an_upgrade" as const,
+        current_sku: current.sku,
+        target_sku: target.sku,
+        days_left: Math.max(0, Math.ceil((current.endAt.getTime() - Date.now()) / 86_400_000)),
+        current_period_days: 0,
+        credit_cents: 0,
+        target_price_cents: targetPrice,
+        payable_cents: targetPrice,
+      };
+    }
+
+    const currentPeriodDays = this.periodDays(currentSku.period);
+    const msLeft = Math.max(0, current.endAt.getTime() - Date.now());
+    // 天数向上取整：剩 2.3 天按 3 天折抵，对用户有利、且避免"剩几小时=折抵 0"
+    const daysLeft = Math.ceil(msLeft / 86_400_000);
+    const credit = Math.min(currentPrice, Math.round((currentPrice * daysLeft) / currentPeriodDays));
+    return {
+      is_upgrade: true,
+      reason: "ok" as const,
+      current_sku: current.sku,
+      target_sku: target.sku,
+      days_left: daysLeft,
+      current_period_days: currentPeriodDays,
+      credit_cents: credit,
+      target_price_cents: targetPrice,
+      payable_cents: Math.max(0, targetPrice - credit),
+    };
+  }
+
   /** 取消订阅 = 关自动续费（到期自然失效），不立即剥夺已付费权益 */
   async cancelSubscription(spaceId: string) {
     const [row] = await db
