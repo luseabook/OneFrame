@@ -1209,7 +1209,7 @@ function toggleSec(key: string): void {
               <p class="cv-hint">{{ t("canvasUi.modeHint") }}</p>
             </div>
             <div class="cv-field insp-field-prompt insp-prompt">
-              <label>提示词 prompt</label>
+              <label>{{ t("canvasUi.promptLabel2") }}</label>
               <textarea
                 class="cv-textarea insp-prompt"
                 :value="sAt(['prompt'])"
@@ -1218,11 +1218,11 @@ function toggleSec(key: string): void {
               />
             </div>
             <div class="cv-field insp-field-model">
-              <label>模型 model</label>
+              <label>{{ t("canvasUi.modelLabel2") }}</label>
               <input
                 class="cv-input insp-model"
                 :value="sAt(['model'])"
-                placeholder="模型展示名（model list 的 name）"
+                :placeholder="t('canvasUi.modelPlaceholder')"
                 @input="setP('model', onText($event))"
               />
             </div>
@@ -1310,7 +1310,7 @@ function toggleSec(key: string): void {
           <!-- video -->
           <template v-else-if="nodeType === 'video'">
             <div class="cv-field insp-field-mode">
-              <label>模式 mode</label>
+              <label>{{ t("canvasUi.modeLabel") }}</label>
               <div class="cv-seg insp-seg insp-seg--scroll">
                 <button
                   v-for="o in VIDEO_MODE_OPTS"
@@ -1325,7 +1325,7 @@ function toggleSec(key: string): void {
               </div>
             </div>
             <div class="cv-field insp-field-prompt insp-prompt">
-              <label>提示词 prompt</label>
+              <label>{{ t("canvasUi.promptLabel2") }}</label>
               <textarea
                 class="cv-textarea insp-prompt"
                 :value="sAt(['prompt'])"
@@ -1334,16 +1334,16 @@ function toggleSec(key: string): void {
               />
             </div>
             <div class="cv-field insp-field-model">
-              <label>模型 model</label>
+              <label>{{ t("canvasUi.modelLabel2") }}</label>
               <input
                 class="cv-input insp-model"
                 :value="sAt(['model'])"
-                placeholder="模型展示名（model list 的 name）"
+                :placeholder="t('canvasUi.modelPlaceholder')"
                 @input="setP('model', onText($event))"
               />
             </div>
             <div class="cv-field insp-field-count">
-              <label>生成条数 count</label>
+              <label>{{ t("canvasUi.countLabel") }}</label>
               <input
                 class="cv-input insp-count"
                 type="number"
@@ -1356,7 +1356,7 @@ function toggleSec(key: string): void {
 
             <div class="insp-subhead">settings</div>
             <div class="cv-field insp-field-ratio">
-              <label>画幅比 ratio</label>
+              <label>{{ t("canvasUi.ratioLabel") }}</label>
               <div class="cv-seg insp-seg">
                 <button
                   v-for="o in VIDEO_RATIO_OPTS"
@@ -1516,7 +1516,7 @@ function toggleSec(key: string): void {
               />
             </div>
             <div class="cv-field insp-field-model">
-              <label>模型 model</label>
+              <label>{{ t("canvasUi.modelLabel2") }}</label>
               <input
                 class="cv-input insp-model"
                 :value="sAt(['model'])"
@@ -1526,7 +1526,7 @@ function toggleSec(key: string): void {
             </div>
             <div class="insp-row">
               <div class="cv-field insp-field-duration">
-                <label>时长 duration（秒）</label>
+                <label>{{ t("canvasUi.durationLabel") }}</label>
                 <input
                   class="cv-input"
                   type="number"
@@ -1537,7 +1537,7 @@ function toggleSec(key: string): void {
                 />
               </div>
               <div class="cv-field insp-field-count">
-                <label>生成条数 count</label>
+                <label>{{ t("canvasUi.countLabel") }}</label>
                 <input
                   class="cv-input insp-count"
                   type="number"
@@ -1767,7 +1767,7 @@ function toggleSec(key: string): void {
               <p class="cv-hint">{{ t("canvasUi.runPhaseHint") }}</p>
             </div>
             <div class="cv-field insp-field-prompt insp-prompt">
-              <label>提示词 prompt</label>
+              <label>{{ t("canvasUi.promptLabel2") }}</label>
               <textarea
                 class="cv-textarea insp-prompt"
                 :value="sAt(['prompt'])"
@@ -1785,11 +1785,11 @@ function toggleSec(key: string): void {
               />
             </div>
             <div class="cv-field insp-field-model">
-              <label>模型 model</label>
+              <label>{{ t("canvasUi.modelLabel2") }}</label>
               <input
                 class="cv-input insp-model"
                 :value="sAt(['model'])"
-                placeholder="模型展示名（model list 的 name）"
+                :placeholder="t('canvasUi.modelPlaceholder')"
                 @input="setP('model', onText($event))"
               />
             </div>
@@ -1809,7 +1809,7 @@ function toggleSec(key: string): void {
             <section class="cv-section insp-sec-derive">
               <div class="cv-section__head">
                 <span>{{ t("canvasUi.textDeriveHead") }}</span>
-                <span class="cv-tag">按次计价</span>
+                <span class="cv-tag">{{ t("canvasUi.perRunPricing") }}</span>
               </div>
               <div class="insp-derive-row">
                 <Button
@@ -1863,7 +1863,7 @@ function toggleSec(key: string): void {
               <div v-if="assetCandidates.length" class="cv-field insp-asset-candidates">
                 <label>
                   {{ t("canvasUi.assetCandidatesLabel") }}
-                  <span class="cv-tag">{{ assetCandidates.length }} 个</span>
+                  <span class="cv-tag">{{ t("canvasUi.countItems", { n: assetCandidates.length }) }}</span>
                 </label>
                 <ul class="insp-assets__list">
                   <li v-for="(a, i) in assetCandidates" :key="i" class="insp-assets__item">
@@ -1914,7 +1914,7 @@ function toggleSec(key: string): void {
                 <p v-else class="cv-hint">{{ t("canvasUi.columnsStructHint") }}</p>
               </div>
               <div class="cv-field insp-field-spawnconfig">
-                <label>spawnConfig（JSON 对象）</label>
+                <label>{{ t("canvasUi.spawnConfigLabel") }}</label>
                 <textarea
                   class="cv-textarea insp-json"
                   :class="{ 'is-invalid': !!jsonErr(['spawnConfig']) }"
@@ -1926,7 +1926,7 @@ function toggleSec(key: string): void {
                 <p v-if="jsonErr(['spawnConfig'])" class="insp-json-err">{{ jsonErr(['spawnConfig']) }}</p>
               </div>
               <div class="cv-field insp-field-upstreamrefs">
-                <label>upstreamRefs（JSON 数组）</label>
+                <label>{{ t("canvasUi.upstreamRefsLabel") }}</label>
                 <textarea
                   class="cv-textarea insp-json"
                   :class="{ 'is-invalid': !!jsonErr(['upstreamRefs']) }"
@@ -1943,7 +1943,7 @@ function toggleSec(key: string): void {
           <!-- asset -->
           <template v-else-if="nodeType === 'asset'">
             <div class="cv-field insp-field-activetab">
-              <label>资产类别 activeTab</label>
+              <label>{{ t("canvasUi.assetTabLabel2") }}</label>
               <div class="cv-seg insp-seg">
                 <button
                   v-for="o in ACTIVE_TAB_OPTS"
@@ -1958,25 +1958,25 @@ function toggleSec(key: string): void {
               </div>
             </div>
             <div class="cv-field insp-field-sourcetext">
-              <label>原文 sourceText</label>
+              <label>{{ t("canvasUi.sourceTextLabel") }}</label>
               <textarea
                 class="cv-textarea"
                 :value="sAt(['sourceText'])"
-                placeholder="粘贴要抽取资产的文本"
+                :placeholder="t('canvasUi.assetSourceTextPlaceholder')"
                 @input="setP('sourceText', onText($event))"
               />
             </div>
             <div class="cv-field insp-field-model">
-              <label>模型 model</label>
+              <label>{{ t("canvasUi.modelLabel2") }}</label>
               <input
                 class="cv-input insp-model"
                 :value="sAt(['model'])"
-                placeholder="模型展示名（model list 的 name）"
+                :placeholder="t('canvasUi.modelPlaceholder')"
                 @input="setP('model', onText($event))"
               />
             </div>
             <div class="cv-field insp-field-extractcredits">
-              <label>抽取额度 extractCredits</label>
+              <label>{{ t("canvasUi.extractCreditsLabel") }}</label>
               <input
                 class="cv-input"
                 type="number"
@@ -1985,16 +1985,16 @@ function toggleSec(key: string): void {
                 :value="nAt(['extractCredits'], 0)"
                 @input="setP('extractCredits', clampInt(onNum($event), 0))"
               />
-              <p class="cv-hint">每次抽取会消耗额度，留 0 表示不额外限制。</p>
+              <p class="cv-hint">{{ t("canvasUi.extractCreditsHint") }}</p>
             </div>
 
             <button class="insp-sec-toggle" type="button" @click="toggleSec('adv')">
               <CanvasIcon :name="secOpen.adv ? 'chevron-down' : 'chevron-right'" :size="13" />
-              <span>高级（JSON）</span>
+              <span>{{ t("canvasUi.advancedJsonHead") }}</span>
             </button>
             <div v-if="secOpen.adv" class="insp-adv">
               <div class="cv-field insp-field-spawnconfig">
-                <label>spawnConfig（JSON 对象）</label>
+                <label>{{ t("canvasUi.spawnConfigLabel") }}</label>
                 <textarea
                   class="cv-textarea insp-json"
                   :class="{ 'is-invalid': !!jsonErr(['spawnConfig']) }"
@@ -2006,7 +2006,7 @@ function toggleSec(key: string): void {
                 <p v-if="jsonErr(['spawnConfig'])" class="insp-json-err">{{ jsonErr(['spawnConfig']) }}</p>
               </div>
               <div class="cv-field insp-field-upstreamrefs">
-                <label>upstreamRefs（JSON 数组）</label>
+                <label>{{ t("canvasUi.upstreamRefsLabel") }}</label>
                 <textarea
                   class="cv-textarea insp-json"
                   :class="{ 'is-invalid': !!jsonErr(['upstreamRefs']) }"
@@ -2024,10 +2024,10 @@ function toggleSec(key: string): void {
           <template v-else-if="nodeType === 'clip'">
             <div class="cv-field insp-field-shotorder">
               <label>
-                镜头顺序 shotOrder
-                <span class="cv-tag">{{ idListOf('shotOrder').length }} 个</span>
+                {{ t("canvasUi.shotOrderLabel") }}
+                <span class="cv-tag">{{ t("canvasUi.countItems", { n: idListOf('shotOrder').length }) }}</span>
               </label>
-              <div v-if="otherNodes.length === 0" class="cv-hint">画布上还没有别的节点可以入片</div>
+              <div v-if="otherNodes.length === 0" class="cv-hint">{{ t("canvasUi.noOtherNodesForClip") }}</div>
               <div v-else class="insp-check-list insp-check-list--tall">
                 <label v-for="nd in otherNodes" :key="nd.id" class="insp-check">
                   <input
@@ -2035,19 +2035,19 @@ function toggleSec(key: string): void {
                     :checked="idListOf('shotOrder').includes(nd.id)"
                     @change="toggleIdInParam('shotOrder', nd.id, onBool($event))"
                   />
-                  <span class="insp-check__name">{{ nd.name || "未命名" }}</span>
+                  <span class="insp-check__name">{{ nd.name || t("canvasUi.inspUnnamed") }}</span>
                   <span class="cv-tag">{{ typeLabelOf(nd.node_type) }}</span>
                   <span v-if="idListOf('shotOrder').includes(nd.id)" class="insp-check__order">
                     #{{ idListOf('shotOrder').indexOf(nd.id) + 1 }}
                   </span>
                 </label>
               </div>
-              <p class="cv-hint">勾选顺序即镜头顺序，取消再勾会排到末尾。</p>
+              <p class="cv-hint">{{ t("canvasUi.shotOrderHint") }}</p>
             </div>
 
             <div class="insp-subhead">exportSettings</div>
             <div class="cv-field insp-field-exporttarget">
-              <label>导出目标 exportTarget</label>
+              <label>{{ t("canvasUi.exportTargetLabel") }}</label>
               <div class="cv-seg insp-seg">
                 <button
                   v-for="o in EXPORT_TARGET_OPTS"
@@ -2062,7 +2062,7 @@ function toggleSec(key: string): void {
               </div>
             </div>
             <div class="cv-field insp-field-exportres">
-              <label>分辨率 resolution</label>
+              <label>{{ t("canvasUi.resolutionShortLabel") }}</label>
               <div class="cv-seg insp-seg">
                 <button
                   v-for="o in CLIP_RES_OPTS"
@@ -2076,7 +2076,7 @@ function toggleSec(key: string): void {
               </div>
             </div>
             <div class="cv-field insp-field-exportformat">
-              <label>封装格式 format</label>
+              <label>{{ t("canvasUi.formatLabel") }}</label>
               <div class="cv-seg insp-seg">
                 <button
                   v-for="o in EXPORT_FORMAT_OPTS"
@@ -2091,7 +2091,7 @@ function toggleSec(key: string): void {
             </div>
 
             <div class="cv-field insp-field-timeline">
-              <label>时间线 timeline（JSON 对象）</label>
+              <label>{{ t("canvasUi.timelineLabel") }}</label>
               <textarea
                 class="cv-textarea insp-json insp-json--tall"
                 :class="{ 'is-invalid': !!jsonErr(['timeline']) }"
@@ -2101,10 +2101,10 @@ function toggleSec(key: string): void {
                 @input="onJsonInput(['timeline'], 'object', $event)"
               />
               <p v-if="jsonErr(['timeline'])" class="insp-json-err">{{ jsonErr(['timeline']) }}</p>
-              <p v-else class="cv-hint">时间线含每段素材的入点/出点，结构复杂且后端未枚举，保留 JSON 编辑。</p>
+              <p v-else class="cv-hint">{{ t("canvasUi.timelineHint") }}</p>
             </div>
             <div class="cv-field insp-field-rate">
-              <label>预览倍速 previewPlaybackRate</label>
+              <label>{{ t("canvasUi.previewRateLabelB") }}</label>
               <input
                 class="cv-input"
                 type="number"
@@ -2119,7 +2119,7 @@ function toggleSec(key: string): void {
           <!-- director -->
           <template v-else-if="nodeType === 'director'">
             <p class="cv-hint insp-field-director-hint">
-              导演台没有专属生成参数，只有通用参考字段；机位/定格状态存在节点自身的 3D 场景里。
+              {{ t("canvasUi.directorNoParamsHint") }}
             </p>
             <label class="insp-check insp-field-isreference">
               <input
@@ -2127,23 +2127,23 @@ function toggleSec(key: string): void {
                 :checked="bAt(['isReference'])"
                 @change="setP('isReference', onBool($event))"
               />
-              <span>作为参考素材 isReference</span>
+              <span>{{ t("canvasUi.isReferenceLabel") }}</span>
             </label>
             <div class="cv-field insp-field-referencerole">
-              <label>参考角色 referenceRole</label>
+              <label>{{ t("canvasUi.referenceRoleLabel") }}</label>
               <input
                 class="cv-input"
                 :value="sAt(['referenceRole'])"
-                placeholder="例如 camera / pose"
+                :placeholder="t('canvasUi.referenceRolePlaceholder')"
                 @input="setP('referenceRole', onText($event))"
               />
             </div>
             <div class="cv-field insp-field-referencelabel">
-              <label>参考标签 referenceLabel</label>
+              <label>{{ t("canvasUi.referenceLabelLabel") }}</label>
               <input
                 class="cv-input"
                 :value="sAt(['referenceLabel'])"
-                placeholder="例如 镜头编排"
+                :placeholder="t('canvasUi.referenceLabelPlaceholder')"
                 @input="setP('referenceLabel', onText($event))"
               />
             </div>
@@ -2152,16 +2152,16 @@ function toggleSec(key: string): void {
           <!-- group -->
           <template v-else-if="nodeType === 'group'">
             <div class="cv-field insp-field-title">
-              <label>分组标题 title</label>
+              <label>{{ t("canvasUi.groupTitleLabel") }}</label>
               <input
                 class="cv-input"
                 :value="sAt(['title'])"
-                placeholder="分组标题"
+                :placeholder="t('canvasUi.groupTitlePlaceholder')"
                 @input="setP('title', onText($event))"
               />
             </div>
             <div class="cv-field insp-field-color">
-              <label>颜色 color</label>
+              <label>{{ t("canvasUi.colorLabel") }}</label>
               <div class="insp-color">
                 <span class="insp-color__swatch" :style="{ background: sAt(['color'], 'transparent') }" />
                 <input
@@ -2174,10 +2174,10 @@ function toggleSec(key: string): void {
             </div>
             <div class="cv-field insp-field-childnodes">
               <label>
-                包含节点 childNodeIds
-                <span class="cv-tag">{{ idListOf('childNodeIds').length }} 个</span>
+                {{ t("canvasUi.childNodesLabel") }}
+                <span class="cv-tag">{{ t("canvasUi.countItems", { n: idListOf('childNodeIds').length }) }}</span>
               </label>
-              <div v-if="otherNodes.length === 0" class="cv-hint">画布上还没有别的节点可以入组</div>
+              <div v-if="otherNodes.length === 0" class="cv-hint">{{ t("canvasUi.noOtherNodesForGroup") }}</div>
               <div v-else class="insp-check-list insp-check-list--tall">
                 <label v-for="nd in otherNodes" :key="nd.id" class="insp-check">
                   <input
@@ -2185,14 +2185,14 @@ function toggleSec(key: string): void {
                     :checked="idListOf('childNodeIds').includes(nd.id)"
                     @change="toggleIdInParam('childNodeIds', nd.id, onBool($event))"
                   />
-                  <span class="insp-check__name">{{ nd.name || "未命名" }}</span>
+                  <span class="insp-check__name">{{ nd.name || t("canvasUi.inspUnnamed") }}</span>
                   <span class="cv-tag">{{ typeLabelOf(nd.node_type) }}</span>
                 </label>
               </div>
             </div>
             <div class="insp-row">
               <div class="cv-field insp-field-gw">
-                <label>组宽 width</label>
+                <label>{{ t("canvasUi.groupWidthLabel") }}</label>
                 <input
                   class="cv-input"
                   type="number"
@@ -2202,7 +2202,7 @@ function toggleSec(key: string): void {
                 />
               </div>
               <div class="cv-field insp-field-gh">
-                <label>组高 height</label>
+                <label>{{ t("canvasUi.groupHeightLabel") }}</label>
                 <input
                   class="cv-input"
                   type="number"
@@ -2212,30 +2212,30 @@ function toggleSec(key: string): void {
                 />
               </div>
             </div>
-            <p class="cv-hint">这里的 width/height 是 params 里的分组框尺寸，与上方「基础」里的节点宽度是两个字段。</p>
+            <p class="cv-hint">{{ t("canvasUi.groupSizeHint") }}</p>
             <label class="insp-check insp-field-collapsed">
               <input
                 type="checkbox"
                 :checked="bAt(['collapsed'])"
                 @change="setP('collapsed', onBool($event))"
               />
-              <span>折叠 collapsed</span>
+              <span>{{ t("canvasUi.collapsedLabel") }}</span>
             </label>
             <label class="insp-check insp-field-locked">
               <input type="checkbox" :checked="bAt(['locked'])" @change="setP('locked', onBool($event))" />
-              <span>锁定 locked（组内节点不可拖动）</span>
+              <span>{{ t("canvasUi.lockedLabel") }}</span>
             </label>
             <div class="cv-field insp-field-servergroupid">
-              <label>服务端分组 ID serverGroupId</label>
-              <input class="cv-input" :value="sAt(['serverGroupId'])" readonly placeholder="保存后由后端回填" />
+              <label>{{ t("canvasUi.serverGroupIdLabel") }}</label>
+              <input class="cv-input" :value="sAt(['serverGroupId'])" readonly :placeholder="t('canvasUi.serverGroupIdPlaceholder')" />
             </div>
           </template>
 
           <!-- 未知类型兜底：node_type 是 string，后端加新类型时不能让面板崩 -->
           <template v-else>
             <p class="cv-hint insp-field-unknown">
-              未知节点类型「{{ nodeType || "空" }}」，本面板不认识它的参数。
-              现有 params 会原样保留并随保存提交，不会丢字段。
+              {{ t("canvasUi.unknownTypeA", { type: nodeType || t("canvasUi.unknownTypeEmpty") }) }}
+              {{ t("canvasUi.unknownTypeB") }}
             </p>
           </template>
         </section>
@@ -2243,22 +2243,22 @@ function toggleSec(key: string): void {
         <!-- 连线区 -->
         <section v-if="nodeEdges.length > 0" class="cv-section insp-sec-edges">
           <button class="cv-section__head insp-sec-toggle insp-sec-toggle--head" type="button" @click="toggleSec('edges')">
-            <span>连线（{{ nodeEdges.length }}）</span>
+            <span>{{ t("canvasUi.edgesHead", { n: nodeEdges.length }) }}</span>
             <CanvasIcon :name="secOpen.edges ? 'chevron-down' : 'chevron-right'" :size="13" />
           </button>
           <ul v-if="secOpen.edges" class="insp-edges">
             <li v-for="e in nodeEdges" :key="e.id" class="insp-edge">
               <span class="insp-edge__dir" :class="edgeIsOut(e) ? 'is-out' : 'is-in'">
-                {{ edgeIsOut(e) ? "出" : "入" }}
+                {{ edgeIsOut(e) ? t("canvasUi.edgeOut") : t("canvasUi.edgeIn") }}
               </span>
               <span class="insp-edge__name" :title="edgePeerName(e)">{{ edgePeerName(e) }}</span>
               <span class="cv-tag">{{ e.semantic }}</span>
-              <button class="insp-edge__del" type="button" aria-label="删除连线" @click="removeEdge(e.id)">
-                删除
+              <button class="insp-edge__del" type="button" :aria-label="t('canvasUi.deleteEdgeAria')" @click="removeEdge(e.id)">
+                 {{ t("canvasUi.deleteShort") }}
               </button>
             </li>
           </ul>
-          <p v-if="secOpen.edges" class="cv-hint">删除连线只断开数据流，不会删除节点。</p>
+          <p v-if="secOpen.edges" class="cv-hint">{{ t("canvasUi.edgesHint") }}</p>
         </section>
       </div>
 
@@ -2272,23 +2272,23 @@ function toggleSec(key: string): void {
         -->
         <section v-if="canGenerate" class="cv-section insp-sec-generate">
           <div class="cv-section__head">
-            <span>生成</span>
-            <span v-if="nodeStatus() === 2" class="cv-tag cv-tag--brand insp-gen-running">生成中…</span>
-            <span v-else-if="nodeStatus() === 3" class="cv-tag cv-tag--success">已完成</span>
+            <span>{{ t("canvasUi.genHead") }}</span>
+            <span v-if="nodeStatus() === 2" class="cv-tag cv-tag--brand insp-gen-running">{{ t("canvasUi.nodeGenerating") }}</span>
+            <span v-else-if="nodeStatus() === 3" class="cv-tag cv-tag--success">{{ t("canvasUi.nodeDone") }}</span>
           </div>
 
           <!-- 缺 mode/model 时给出明确指引，而不是让按钮"点了没反应" -->
-          <p v-if="!genMode()" class="cv-hint insp-gen-need-mode">先在「参数」里选一个 mode（如 text2image）。</p>
-          <p v-else-if="!genModel()" class="cv-hint insp-gen-need-model">先在「参数」里填模型名（model）。</p>
+          <p v-if="!genMode()" class="cv-hint insp-gen-need-mode">{{ t("canvasUi.needMode") }}</p>
+          <p v-else-if="!genModel()" class="cv-hint insp-gen-need-model">{{ t("canvasUi.needModel") }}</p>
 
           <!-- 上一次失败的错误：带错误码，便于对照文档排查 -->
-          <p v-if="lastError()" class="cv-hint insp-gen-error">上次失败：{{ lastErrorText() }}</p>
+          <p v-if="lastError()" class="cv-hint insp-gen-error">{{ t("canvasUi.lastFailed", { msg: lastErrorText() }) }}</p>
 
           <!-- 结果预览：有 result_uri 就显示，让用户确认"这张就是刚生成的" -->
           <div v-if="resultUri()" class="insp-gen-result">
-            <img v-if="isImageResult()" :src="resultUri()!" :alt="selectedNode?.name ?? '生成结果'" loading="lazy" />
+            <img v-if="isImageResult()" :src="resultUri()!" :alt="selectedNode?.name ?? t('canvasUi.resultAlt')" loading="lazy" />
             <video v-else :src="resultUri()!" controls preload="metadata" />
-            <p class="cv-hint">最近一次生成结果</p>
+            <p class="cv-hint">{{ t("canvasUi.lastResult") }}</p>
           </div>
 
           <Button
@@ -2299,10 +2299,10 @@ function toggleSec(key: string): void {
             :disabled="!genMode() || !genModel() || nodeStatus() === 2 || isLocalNode()"
             @click="doGenerate"
           >
-            {{ nodeStatus() === 2 ? "生成中…" : "生成" }}
+            {{ nodeStatus() === 2 ? t("canvasUi.nodeGenerating") : t("canvasUi.genHead") }}
           </Button>
           <p v-if="isLocalNode()" class="cv-hint insp-gen-local">
-            未保存的新节点不能投递，请先点顶栏「保存」。
+            {{ t("canvasUi.unsavedCannotSubmit") }}
           </p>
         </section>
 
@@ -2314,15 +2314,15 @@ function toggleSec(key: string): void {
             :class="{ 'is-on': mode === 'connect' }"
             @click="toggleConnect"
           >
-            {{ mode === "connect" ? "退出连线" : "连线模式" }}
+            {{ mode === "connect" ? t("canvasUi.exitConnect") : t("canvasUi.connectModeShort") }}
           </Button>
           <Button variant="ghost" size="sm" class="insp-pin" :class="{ 'is-on': isPinned() }" @click="togglePin">
-            {{ isPinned() ? "已钉住" : "钉住" }}
+            {{ isPinned() ? t("canvasUi.pinnedState") : t("canvasUi.pinAction") }}
           </Button>
-          <Button variant="ghost" size="sm" class="insp-duplicate" @click="duplicateOne">复制</Button>
+          <Button variant="ghost" size="sm" class="insp-duplicate" @click="duplicateOne">{{ t("canvasUi.duplicate") }}</Button>
         </div>
-        <Button variant="danger" size="sm" block class="insp-delete" @click="deleteOne">删除节点</Button>
-        <p class="cv-hint insp-foot__hint">删除只改本地，保存后才会同步到画布版本。</p>
+        <Button variant="danger" size="sm" block class="insp-delete" @click="deleteOne">{{ t("canvasUi.deleteNodeBtn") }}</Button>
+        <p class="cv-hint insp-foot__hint">{{ t("canvasUi.deleteLocalHint") }}</p>
       </footer>
     </template>
   </div>
