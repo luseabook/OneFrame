@@ -22,15 +22,19 @@ import type {
   Paged,
 } from "~/types/api";
 
+const { t, locale } = useI18n();
+useHead({ title: () => t("activities.metaTitle") });
+
 const api = useApi();
 const toast = useToast();
 
 type Mode = "public" | "mine";
 const mode = ref<Mode>("public");
-const MODES: Array<{ key: Mode; label: string }> = [
-  { key: "public", label: "可报名活动" },
-  { key: "mine", label: "我报名的" },
-];
+// tab 文案走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const MODES = computed<Array<{ key: Mode; label: string }>>(() => [
+  { key: "public", label: t("activities.tabPublic") },
+  { key: "mine", label: t("activities.tabMine") },
+]);
 
 const loading = ref(true);
 const errorMsg = ref("");
@@ -46,16 +50,16 @@ const awards = ref<{ list: Array<{ signup_id: string; user_id: string; nickname:
 const signupForm = reactive({ work_id: "", channel: "" });
 
 function fmtTime(v?: string | null) {
-  if (!v) return "长期";
+  if (!v) return t("activities.longTerm");
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("zh-CN", { hour12: false });
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString(locale.value, { hour12: false });
 }
 
 function statusLabel(c: CampaignDto) {
-  if (c.status === 2) return "进行中";
-  if (c.status === 3) return "已结束";
-  if (c.status === 1) return "未开始";
-  return "已下线";
+  if (c.status === 2) return t("activities.statusOngoing");
+  if (c.status === 3) return t("activities.statusEnded");
+  if (c.status === 1) return t("activities.statusNotStarted");
+  return t("activities.statusOffline");
 }
 
 async function loadList() {
@@ -70,7 +74,7 @@ async function loadList() {
       myWorks.value = works.list;
     }
   } catch (e) {
-    errorMsg.value = (e as Error).message || "活动列表加载失败";
+    errorMsg.value = (e as Error).message || t("activities.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -96,7 +100,7 @@ async function openDetail(c: CampaignDto) {
       `/campaigns/${encodeURIComponent(c.id)}/awards`,
     );
   } catch (e) {
-    toast.error((e as Error).message || "活动详情加载失败");
+    toast.error((e as Error).message || t("activities.detailLoadFailed"));
   } finally {
     busy.value = "";
   }
@@ -111,9 +115,9 @@ async function saveDraft() {
       work_id: signupForm.work_id || null,
       channel: signupForm.channel || null,
     });
-    toast.success("草稿已保存，可以稍后继续");
+    toast.success(t("activities.draftSaved"));
   } catch (e) {
-    toast.error((e as Error).message || "保存草稿失败");
+    toast.error((e as Error).message || t("activities.draftFailed"));
   } finally {
     busy.value = "";
   }
@@ -128,16 +132,16 @@ async function submitSignup() {
       { work_id: signupForm.work_id || null, channel: signupForm.channel || null },
     );
     if (res.replayed) {
-      toast.info(res.revived ? "已重新报名（奖励不重复发放）" : "你已经报名过了");
+      toast.info(res.revived ? t("activities.signupRevived") : t("activities.signupReplayed"));
     } else if (res.rewarded_credits > 0) {
-      toast.success(`报名成功，到账 ${res.rewarded_credits} 积分`);
+      toast.success(t("activities.signupRewarded", { credits: res.rewarded_credits }));
     } else {
-      toast.success("报名成功");
+      toast.success(t("activities.signupOk"));
     }
     await openDetail(selected.value);
     await loadList();
   } catch (e) {
-    toast.error((e as Error).message || "报名失败");
+    toast.error((e as Error).message || t("activities.signupFailed"));
   } finally {
     busy.value = "";
   }
@@ -145,15 +149,15 @@ async function submitSignup() {
 
 async function cancelSignup() {
   if (!selected.value) return;
-  if (!window.confirm("取消报名？已发放的奖励不会回收，但取消后重报不会再发一次。")) return;
+  if (!window.confirm(t("activities.cancelConfirm"))) return;
   busy.value = "cancel";
   try {
     await api.delete(`/campaigns/${encodeURIComponent(selected.value.id)}/signup`);
-    toast.success("已取消报名");
+    toast.success(t("activities.canceled"));
     await openDetail(selected.value);
     await loadList();
   } catch (e) {
-    toast.error((e as Error).message || "取消失败");
+    toast.error((e as Error).message || t("activities.cancelFailed"));
   } finally {
     busy.value = "";
   }
@@ -175,10 +179,10 @@ onMounted(loadList);
   <div class="act">
     <header class="act-head">
       <div>
-        <h1 class="act-title">活动中心</h1>
-        <p class="act-sub">投稿征集与命题创作：报名 → 投稿 → 入围 → 获奖</p>
+        <h1 class="act-title">{{ t("activities.title") }}</h1>
+        <p class="act-sub">{{ t("activities.sub") }}</p>
       </div>
-      <button type="button" class="act-btn" :disabled="loading" @click="loadList">刷新</button>
+      <button type="button" class="act-btn" :disabled="loading" @click="loadList">{{ t("activities.refresh") }}</button>
     </header>
 
     <nav class="act-tabs">
@@ -196,14 +200,14 @@ onMounted(loadList);
 
     <p v-if="errorMsg" class="act-alert">
       {{ errorMsg }}
-      <button type="button" class="act-link" @click="loadList">重试</button>
+      <button type="button" class="act-link" @click="loadList">{{ t("activities.retry") }}</button>
     </p>
 
-    <div v-if="loading" class="act-skeleton">加载中…</div>
+    <div v-if="loading" class="act-skeleton">{{ t("activities.loading") }}</div>
 
     <p v-else-if="campaigns.length === 0" class="act-empty">
-      <template v-if="mode === 'public'">当前没有进行中的活动。运营开活动后会出现在这里。</template>
-      <template v-else>你还没有报名任何活动。切到「可报名活动」看看。</template>
+      <template v-if="mode === 'public'">{{ t("activities.emptyPublic") }}</template>
+      <template v-else>{{ t("activities.emptyMine") }}</template>
     </p>
 
     <div v-else class="act-layout">
@@ -213,18 +217,18 @@ onMounted(loadList);
             <h2 class="act-card-title">{{ c.title }}</h2>
             <span class="act-tag">{{ statusLabel(c) }}</span>
           </div>
-          <p class="act-card-brief">{{ c.brief || "（暂无活动说明）" }}</p>
+          <p class="act-card-brief">{{ c.brief || t("activities.noBrief") }}</p>
           <p class="act-card-meta">
-            奖励 <strong>{{ c.reward_credits }}</strong> 积分 · {{ fmtTime(c.start_at) }} ~ {{ fmtTime(c.end_at) }}
-            <template v-if="c.campaign_key"> · 标识 {{ c.campaign_key }}</template>
+            {{ t("activities.reward", { credits: c.reward_credits, start: fmtTime(c.start_at), end: fmtTime(c.end_at) }) }}
+            <template v-if="c.campaign_key"> · {{ t("activities.campaignKey", { key: c.campaign_key }) }}</template>
           </p>
           <p v-if="c.my_signup" class="act-card-mine">
-            我的报名：<span>{{ c.my_signup.status_label }}</span>
-            <span v-if="c.my_signup.work_id" class="act-muted">（已提交作品）</span>
+            {{ t("activities.mySignup", { status: c.my_signup.status_label ?? "" }) }}
+            <span v-if="c.my_signup.work_id" class="act-muted">{{ t("activities.submittedWork") }}</span>
           </p>
           <div class="act-card-actions">
             <button type="button" class="act-btn sm" :disabled="busy === 'detail'" @click="openDetail(c)">
-              查看详情
+              {{ t("activities.viewDetail") }}
             </button>
             <button
               v-if="mode === 'public' && !c.my_signup"
@@ -233,7 +237,7 @@ onMounted(loadList);
               :disabled="busy === 'signup'"
               @click="selected = c; openDetail(c)"
             >
-              去报名
+              {{ t("activities.goSignup") }}
             </button>
           </div>
         </li>
@@ -241,62 +245,60 @@ onMounted(loadList);
 
       <aside v-if="selected" class="act-detail">
         <h2 class="act-detail-title">{{ selected.title }}</h2>
-        <div v-if="busy === 'detail'" class="act-skeleton">详情加载中…</div>
+        <div v-if="busy === 'detail'" class="act-skeleton">{{ t("activities.detailLoading") }}</div>
         <template v-else-if="detail">
-          <p class="act-card-brief">{{ detail.brief || "（暂无活动说明）" }}</p>
+          <p class="act-card-brief">{{ detail.brief || t("activities.noBrief") }}</p>
           <dl class="act-kv">
-            <div><dt>报名奖励</dt><dd>{{ detail.reward_credits }} 积分</dd></div>
-            <div><dt>报名窗口</dt><dd>{{ detail.open_for_signup ? "开放中" : "未开放" }}</dd></div>
-            <div><dt>已报名</dt><dd>{{ detail.signup_count ?? 0 }}</dd></div>
-            <div><dt>已入围</dt><dd>{{ detail.shortlist_count ?? 0 }}</dd></div>
+            <div><dt>{{ t("activities.signupReward") }}</dt><dd>{{ t("activities.reward", { credits: detail.reward_credits, start: fmtTime(detail.start_at), end: fmtTime(detail.end_at) }) }}</dd></div>
+            <div><dt>{{ t("activities.signupWindow") }}</dt><dd>{{ detail.open_for_signup ? t("activities.signupOpen") : t("activities.signupClosed") }}</dd></div>
+            <div><dt>{{ t("activities.signupCount") }}</dt><dd>{{ detail.signup_count ?? 0 }}</dd></div>
+            <div><dt>{{ t("activities.shortlistCount") }}</dt><dd>{{ detail.shortlist_count ?? 0 }}</dd></div>
           </dl>
 
           <!-- 报名表单 -->
           <section class="act-block">
-            <h3>报名</h3>
+            <h3>{{ t("activities.signupBlock") }}</h3>
             <template v-if="mySignup && mySignup.status !== 4">
               <p class="act-ok">
-                当前状态：{{ mySignup.status_label }}
-                <template v-if="mySignup.work_id"> · 作品 {{ mySignup.work_id }}</template>
+                {{ t("activities.currentStatus", { status: mySignup.status_label ?? "" }) }}
+                <template v-if="mySignup.work_id">{{ t("activities.workSuffix", { id: mySignup.work_id }) }}</template>
               </p>
-              <p class="act-hint">已入围/已获奖的报名不能自行取消（运营态）；取消后重报不会再发奖励。</p>
+              <p class="act-hint">{{ t("activities.cancelHint") }}</p>
               <button
                 type="button"
                 class="act-btn sm"
                 :disabled="busy === 'cancel' || mySignup.status !== 1"
-                :title="mySignup.status !== 1 ? '已入围/获奖的报名不可自行取消' : ''"
+                :title="mySignup.status !== 1 ? t('activities.cannotCancelTitle') : ''"
                 @click="cancelSignup"
               >
-                {{ mySignup.status !== 1 ? "不可取消（已入围/获奖）" : "取消报名" }}
+                {{ mySignup.status !== 1 ? t("activities.cannotCancel") : t("activities.cancelSignup") }}
               </button>
             </template>
             <template v-else>
               <label class="act-field">
-                <span>投稿作品（可选）</span>
+                <span>{{ t("activities.workField") }}</span>
                 <select v-model="signupForm.work_id" class="act-input">
-                  <option value="">先不选，报名后再投稿</option>
+                  <option value="">{{ t("activities.noWorkOption") }}</option>
                   <option v-for="w in myWorks" :key="w.id" :value="w.id">{{ w.title }}</option>
                 </select>
               </label>
               <label class="act-field">
-                <span>来源渠道（可选）</span>
-                <input v-model="signupForm.channel" class="act-input" maxlength="40" placeholder="如 douyin / wechat" />
+                <span>{{ t("activities.channelField") }}</span>
+                <input v-model="signupForm.channel" class="act-input" maxlength="40" :placeholder="t('activities.channelPlaceholder')" />
               </label>
-              <p v-if="myWorks.length === 0" class="act-hint">
-                你还没有「已通过」的作品可投稿：先去创作者中心创建并通过审核，再回来选作品。
-              </p>
+              <p v-if="myWorks.length === 0" class="act-hint">{{ t("activities.noWorksHint") }}</p>
               <div class="act-form-actions">
                 <button type="button" class="act-btn sm" :disabled="busy === 'draft'" @click="saveDraft">
-                  保存草稿
+                  {{ t("activities.saveDraft") }}
                 </button>
                 <button
                   type="button"
                   class="act-btn primary sm"
                   :disabled="busy === 'signup' || !detail.open_for_signup"
-                  :title="detail.open_for_signup ? '' : '活动未开放报名'"
+                  :title="detail.open_for_signup ? '' : t('activities.notOpenTitle')"
                   @click="submitSignup"
                 >
-                  {{ detail.open_for_signup ? "提交报名" : "未开放报名" }}
+                  {{ detail.open_for_signup ? t("activities.submitSignup") : t("activities.notOpen") }}
                 </button>
               </div>
             </template>
@@ -304,8 +306,8 @@ onMounted(loadList);
 
           <!-- 入围名单 -->
           <section class="act-block">
-            <h3>入围名单（{{ shortlist?.count ?? 0 }}）</h3>
-            <p v-if="!shortlist || shortlist.list.length === 0" class="act-muted">还没有入围名单。</p>
+            <h3>{{ t("activities.shortlistTitle", { count: shortlist?.count ?? 0 }) }}</h3>
+            <p v-if="!shortlist || shortlist.list.length === 0" class="act-muted">{{ t("activities.shortlistEmpty") }}</p>
             <ul v-else class="act-name-list">
               <li v-for="s in shortlist.list" :key="s.signup_id">
                 {{ s.nickname || s.user_id }} <span class="act-tag">{{ s.status_label }}</span>
@@ -315,20 +317,18 @@ onMounted(loadList);
 
           <!-- 获奖名单 -->
           <section class="act-block">
-            <h3>获奖名单（{{ awards?.count ?? 0 }}）</h3>
-            <p v-if="!awards || awards.list.length === 0" class="act-muted">还没有获奖名单。</p>
+            <h3>{{ t("activities.awardsTitle", { count: awards?.count ?? 0 }) }}</h3>
+            <p v-if="!awards || awards.list.length === 0" class="act-muted">{{ t("activities.awardsEmpty") }}</p>
             <ul v-else class="act-name-list">
               <li v-for="a in awards.list" :key="a.signup_id">{{ a.nickname || a.user_id }}</li>
             </ul>
-            <p class="act-hint">
-              奖项结构未取证（竞品 `campaign/awards` 只给了路径）；我方以获奖名单承载，额度见「报名奖励」。
-            </p>
+            <p class="act-hint">{{ t("activities.awardsHint") }}</p>
           </section>
         </template>
-        <p v-else class="act-alert">详情加载失败，请重试。</p>
+        <p v-else class="act-alert">{{ t("activities.detailFailed") }}</p>
       </aside>
       <aside v-else class="act-detail act-detail-empty">
-        <p class="act-muted">左侧选一个活动查看详情、报名与名单。</p>
+        <p class="act-muted">{{ t("activities.pickHint") }}</p>
       </aside>
     </div>
   </div>

@@ -123,6 +123,22 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.3 · 多语言第 13 批：活动中心 · 2026-10-28）
+
+**#16 多语言 96% → 97%**；全站 **97.5%** / 首发 **97.6%**。
+
+| 文件 | namespace | 迁移内容 |
+|---|---|---|
+| [activities.vue](app/apps/web/pages/activities.vue) | `activities`（67 key） | 标题/副标题、两个 tab（可报名 / 我报名的）、加载与空态、活动卡（说明/奖励与时间窗/标识/我的报名/已提交作品）、详情面板（报名奖励/窗口/已报名/已入围）、报名表单（作品选择、渠道、草稿、提交、未开放）、入围与获奖名单、活动状态机四态、13 条 toast 与确认框 |
+
+- 已迁移 **18 / 64 页 + 1 组件**，语言包 **668 → 735 key**。
+- 两处"常量数组"再中同一类坑：`MODES`（tab 文案）与 `statusLabel()`（活动状态）原本都是硬编码中文/常量，
+  迁移时同样改成 `computed` / `t()` ——这是本项目 i18n 迁移里**最高频**的返工点（目前已在前 3 批各遇到一次）。
+- 一处类型坑：`my_signup.status_label` 是 `string | null`，vue-i18n 插值不接受 `null`，已加 `?? ""` 兜底（两处）。
+
+**验证**：`i18n-check.cjs` 全绿（735 key / 18 页 + 4 组件）；`e2e-i18n-pages.cjs` **40/40**（新增活动中心中英 + tab/空态）；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.2 · 多语言第 12 批：首页 + 新手引导条 · 2026-10-28）
 
 **#16 多语言 95% → 96%**；全站 **97.5%** / 首发 **97.6%**。
