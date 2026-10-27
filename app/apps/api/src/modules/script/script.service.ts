@@ -76,6 +76,12 @@ function projectDto(row: ProjectRow) {
      * 而不是拿正文快照比对——项目正文被改写后快照就会漏判。
      */
     source_novel_id: row.sourceNovelId ? String(row.sourceNovelId) : null,
+    /**
+     * 项目编排模式（迁移 0031）：1 普通剧本 / 2 广告剧 / 3 视频转绘。
+     * 必须透出——否则前端「我的广告剧/转绘项目」列表只能靠猜（`source_type` 猜不准：
+     * 广告剧与普通项目都用 `source_type=2`）。
+     */
+    project_mode: row.projectMode,
     status: row.status,
     archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
     is_sample: row.isSample === 1,
