@@ -1883,10 +1883,10 @@ describe("film/影视版 e2e", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════
-  // 导出 2（格式偏离：xlsx → csv/zip，见 film.exports.service 头注释）
+  // 导出 2（`format=xlsx` → 真 OOXML；`format=csv` → csv/zip，见 film.exports.service 头注释）
   // ══════════════════════════════════════════════════════════════════
 
-  it("导出：单表 → CSV，多表 → ZIP；响应显式声明 delivered_format 并给现签下载 URL", async () => {
+  it("导出：xlsx 返回真 OOXML（单表/多表都是 xlsx），csv 仍走 csv/zip；delivered_format 如实声明", async () => {
     const ctx = await setup();
     const projectId = newProjectId();
     const t1 = await createTable(ctx, projectId, "导出表1");
@@ -1901,9 +1901,11 @@ describe("film/影视版 e2e", () => {
       ctx.teamSpaceId,
     );
     expect(single.code).toBe(0);
-    const s = single.data as { delivered_format: string; format_requested: string; download_url: string; row_count: number };
+    const s = single.data as { delivered_format: string; format_requested: string; download_url: string; row_count: number; file_uri: string };
     expect(s.format_requested).toBe("xlsx");
-    expect(s.delivered_format).toBe("csv"); // 偏离：无 xlsx 依赖
+    // 第 4 轮起：xlsx 是真 OOXML（不再降级成 csv）
+    expect(s.delivered_format).toBe("xlsx");
+    expect(s.file_uri.endsWith(".xlsx")).toBe(true);
     expect(s.row_count).toBe(2);
     expect(s.download_url).toBeTruthy();
 
@@ -1915,7 +1917,29 @@ describe("film/影视版 e2e", () => {
       ctx.teamSpaceId,
     );
     expect(multi.code).toBe(0);
-    expect((multi.data as { delivered_format: string }).delivered_format).toBe("zip");
+    const m = multi.data as { delivered_format: string; table_count: number };
+    expect(m.delivered_format).toBe("xlsx");
+    expect(m.table_count).toBe(2);
+
+    // csv 路径保持历史行为：单表 csv、多表 zip（零回归）
+    const csvSingle = await inject(
+      "POST",
+      `/film/projects/${projectId}/exports`,
+      { table_ids: [t1.id], format: "csv" },
+      ctx.token,
+      ctx.teamSpaceId,
+    );
+    expect(csvSingle.code).toBe(0);
+    expect((csvSingle.data as { delivered_format: string }).delivered_format).toBe("csv");
+    const csvMulti = await inject(
+      "POST",
+      `/film/projects/${projectId}/exports`,
+      { table_ids: [t1.id, t2.id], format: "csv" },
+      ctx.token,
+      ctx.teamSpaceId,
+    );
+    expect(csvMulti.code).toBe(0);
+    expect((csvMulti.data as { delivered_format: string }).delivered_format).toBe("zip");
 
     const list = await inject(
       "GET",
@@ -1925,7 +1949,8 @@ describe("film/影视版 e2e", () => {
       ctx.teamSpaceId,
     );
     expect(list.code).toBe(0);
-    expect((list.data as { list: unknown[] }).list.length).toBe(2);
+    // 本用例共建了 4 次导出（xlsx 单/多 + csv 单/多）
+    expect((list.data as { list: unknown[] }).list.length).toBe(4);
 
     // 导出别人的表 → 400101（导出是跨项目数据外带的口子，必须严校验）
     const other = await setup();

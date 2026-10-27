@@ -7,21 +7,26 @@ import { db } from "../../db/database";
 import type { FilmTableRow } from "./film.access";
 import { FilmAccessService } from "./film.access";
 import { StorageService } from "../../storage/storage.service";
+import { buildXlsx } from "./xlsx-writer";
 
 /**
  * 影视版导出 —— 契约 §3.5 的 `exports` GET/POST。
  *
- * ⚠️ **格式偏离（必须写进 api-spec 偏离说明）**：
- * 竞品导出 xlsx（契约 §7 A12 未取证具体库），但本仓库**没有 xlsx 写入依赖**
- * （package.json 只有 `jszip`），Lead 明确不引新依赖。因此本期产物是：
- *   - 单表 → `.csv`（UTF-8 BOM，Excel 双击不乱码）
- *   - 多表 → `.zip`（每表一个 csv，sheet≡文件）
- * 响应里用 `delivered_format` 显式告诉前端"你要的 xlsx 给到的是 zip/csv"，
- * 同时 `format_requested` 保留用户的选择。**不假装是 xlsx**（否则前端按 xlsx 解析会崩）。
+ * ## 格式
+ * - `format="xlsx"` → **真 .xlsx**（多表 = 多 worksheet；单表 = 单 worksheet）。
+ *   由本模块自带的 `xlsx-writer.ts` 生成（用已有 `jszip` 拼 OOXML，**不引第三方 xlsx 库**）。
+ *   竞品也是 xlsx（契约 §7 A12 未取证具体库），此前我方只给 CSV/ZIP 并在 `delivered_format`
+ *   里诚实标注"不假装 xlsx"；本轮补齐后 `delivered_format === "xlsx"` 名副其实。
+ * - `format="csv"`（或未指定）→ 单表 `.csv`（UTF-8 BOM，Excel 双击不乱码）/ 多表 `.zip`
+ *   （每表一个 csv）。这条路径**保持不变**，避免影响已对接的前端。
+ *
+ * ## 一致性
+ * CSV 与 XLSX 共用同一份 `tableToMatrix()` 产物：两种格式的**列序、单元格值、公式注入防护**
+ * 必须完全一致，否则同一份数据导出两次内容不同（对账会怀疑系统）。
  *
  * 生成是**同步**的（表量级是几十张、每表上限几千行）：异步 job 需要 worker 侧消费者，
- * 本期不新造队列（对齐 Lead 指示）；表数据过大时按 `EXPORT_ROW_CAP` 截断并在响应里
- * `truncated:true` 明示，绝不静默少行。
+ * 本期不新造队列；表数据过大时按 `EXPORT_ROW_CAP` 截断并在响应里 `truncated:true` 明示，
+ * 绝不静默少行。
  */
 
 const EXPORT_ROW_CAP = 5000;
@@ -76,8 +81,11 @@ export class FilmExportsService {
     return { list };
   }
 
-  /** 把一张表导成 CSV 文本（表头 = 字段名，行 = 任务；稀疏单元格留空） */
-  private async tableToCsv(table: FilmTableRow): Promise<{ csv: string; rows: number; truncated: boolean }> {
+  /**
+   * 把一张表读成**二维矩阵**（第一行表头）。CSV 与 XLSX 共用这一次读取：
+   * 两条导出路径若各读一次，会出现"同一次导出的两种格式内容不一致"的诡异 bug。
+   */
+  private async tableToMatrix(table: FilmTableRow): Promise<{ matrix: unknown[][]; rows: number; truncated: boolean }> {
     const fieldRows = (await db
       .select()
       .from(filmFields)
@@ -107,24 +115,27 @@ export class FilmExportsService {
       bucket.set(String(c.fieldId), c.value);
       byTask.set(String(c.taskId), bucket);
     }
-    const lines: string[] = [];
-    lines.push(fieldRows.map((f) => csvEscape(f.name)).join(","));
+    const matrix: unknown[][] = [fieldRows.map((f) => f.name)];
     for (const task of rows) {
       const bucket = byTask.get(String(task.id)) ?? new Map<string, unknown>();
-      lines.push(
-        fieldRows
-          .map((f) => {
-            const v = bucket.get(String(f.id));
-            if (v !== undefined) return csvEscape(v);
-            // 稀疏列没有 cell 行时回落系统列的派生值（title/task_status 一定有值）
-            if (f.key === "title") return csvEscape(task.title);
-            if (f.key === "task_status") return csvEscape(task.status);
-            return "";
-          })
-          .join(","),
+      matrix.push(
+        fieldRows.map((f) => {
+          const v = bucket.get(String(f.id));
+          if (v !== undefined) return v;
+          // 稀疏列没有 cell 行时回落系统列的派生值（title/task_status 一定有值）
+          if (f.key === "title") return task.title;
+          if (f.key === "task_status") return task.status;
+          return "";
+        }),
       );
     }
-    return { csv: `\uFEFF${lines.join("\r\n")}\r\n`, rows: rows.length, truncated };
+    return { matrix, rows: rows.length, truncated };
+  }
+
+  /** 矩阵 → CSV 文本（走 csvEscape：公式注入防护 + 引号/换行转义） */
+  private matrixToCsv(matrix: unknown[][]): string {
+    const lines = matrix.map((row) => row.map((value) => csvEscape(value)).join(","));
+    return `\uFEFF${lines.join("\r\n")}\r\n`;
   }
 
   /**
@@ -162,28 +173,43 @@ export class FilmExportsService {
     tables.sort((a, b) => a.sort - b.sort);
     const exportId = newId();
     let buffer: Buffer;
-    let delivered: "csv" | "zip";
+    let delivered: "csv" | "zip" | "xlsx";
     let contentType: string;
     let key: string;
     let totalRows = 0;
     let truncated = false;
 
-    const csvs = await Promise.all(tables.map((t) => this.tableToCsv(t)));
-    for (const c of csvs) {
-      totalRows += c.rows;
-      truncated = truncated || c.truncated;
+    const matrices = await Promise.all(tables.map((t) => this.tableToMatrix(t)));
+    for (const m of matrices) {
+      totalRows += m.rows;
+      truncated = truncated || m.truncated;
     }
 
-    if (tables.length === 1) {
+    /**
+     * 格式分支：
+     * - `xlsx` → 真 OOXML（每表一个 worksheet，表名即表名）—— 竞品同格式
+     * - `csv`  → 单表 csv / 多表 zip（历史行为，保持不变）
+     */
+    if (input.format === "xlsx") {
+      delivered = "xlsx";
+      buffer = await buildXlsx(
+        tables.map((t, i) => ({
+          name: t.name,
+          rows: matrices[i]!.matrix,
+        })),
+      );
+      contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      key = `film/exports/${String(exportId)}/tables.xlsx`;
+    } else if (tables.length === 1) {
       delivered = "csv";
-      buffer = Buffer.from(csvs[0].csv, "utf8");
+      buffer = Buffer.from(this.matrixToCsv(matrices[0]!.matrix), "utf8");
       contentType = "text/csv; charset=utf-8";
       key = `film/exports/${String(exportId)}/${tables[0].name}.csv`;
     } else {
       delivered = "zip";
       const zip = new JSZip();
       tables.forEach((t, i) => {
-        zip.file(`${String(i + 1).padStart(2, "0")}-${t.name}.csv`, csvs[i].csv);
+        zip.file(`${String(i + 1).padStart(2, "0")}-${t.name}.csv`, this.matrixToCsv(matrices[i]!.matrix));
       });
       buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
       contentType = "application/zip";
@@ -219,9 +245,11 @@ export class FilmExportsService {
       row_count: totalRows,
       truncated,
       note:
-        delivered === "csv"
-          ? "单表导出为 CSV（仓库无 xlsx 写入依赖，见 api-spec 偏离说明）"
-          : "多表导出为 ZIP（内含每表一个 CSV；仓库无 xlsx 写入依赖）",
+        delivered === "xlsx"
+          ? `xlsx（${tables.length} 个 sheet）`
+          : delivered === "csv"
+            ? "单表导出为 CSV"
+            : "多表导出为 ZIP（内含每表一个 CSV）",
       max_rows_per_table: EXPORT_ROW_CAP,
       max_batch: FILM_LIMITS.BATCH_MAX,
       created_at: row.createdAt.toISOString(),
