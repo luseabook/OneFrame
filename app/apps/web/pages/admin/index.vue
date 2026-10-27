@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 // 运营后台控制台：独立登录页（/admin/login）+ 独立侧栏菜单（layouts/admin.vue）
 import type { PromoSlotDto, PromoSlotListDto } from "~/types/api";
 
@@ -74,7 +76,7 @@ async function reviewCreatorAudit(row: CreatorAuditRow, action: "approve" | "rej
     });
     await loadCreatorAudits();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "审核失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.auditFailed");
   } finally {
     creatorAuditBusy.value = "";
   }
@@ -109,7 +111,7 @@ async function api<T>(path: string, options: Record<string, unknown> = {}): Prom
       ...(token.value ? { authorization: `Bearer ${token.value}` } : {}),
     },
   });
-  if (res.code !== 0) throw new Error(res.msg || `请求失败(${res.code})`);
+  if (res.code !== 0) throw new Error(res.msg || t("adminUi.requestFailed", { code: res.code }));
   return res.data as T;
 }
 
@@ -151,12 +153,12 @@ async function loadAll(): Promise<void> {
  */
 async function refundOrder(order: Record<string, unknown>): Promise<void> {
   const reason = window.prompt(
-    `全额退款 ¥${(Number(order.amount_cents) / 100).toFixed(2)} / ${String(order.credits)} 积分\n请填写工单号/审批说明：`,
+    t("adminUi.refundConfirm", { amount: (Number(order.amount_cents) / 100).toFixed(2), credits: String(order.credits) }),
   );
   if (reason === null) return;
   const trimmed = reason.trim();
   if (!trimmed) {
-    error.value = "退款必须填写工单号/审批说明";
+    error.value = t("adminUi.refundNeedNote");
     return;
   }
   refunding.value = String(order.order_id);
@@ -168,7 +170,7 @@ async function refundOrder(order: Record<string, unknown>): Promise<void> {
     });
     await loadAll();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "退款失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.refundFailed");
   } finally {
     refunding.value = "";
   }
@@ -179,7 +181,7 @@ async function downloadFailedCsv(): Promise<void> {
     const res = await fetch("/v1/ops/admin/failed-tasks.csv", {
       headers: token.value ? { authorization: `Bearer ${token.value}` } : {},
     });
-    if (!res.ok) throw new Error(`导出失败(${res.status})`);
+    if (!res.ok) throw new Error(t("adminUi.exportFailedWith", { status: res.status }));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -188,7 +190,7 @@ async function downloadFailedCsv(): Promise<void> {
     link.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "导出失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.exportFailed");
   }
 }
 
@@ -205,7 +207,10 @@ async function revokeShare(share: Record<string, unknown>): Promise<void> {
 async function resolveReport(report: Record<string, unknown>, action: "takedown" | "dismiss"): Promise<void> {
   await api(`/ops/admin/reports/${report.id}/resolve`, {
     method: "POST",
-    body: { action, note: action === "takedown" ? "举报成立，内容已下线" : "举报不成立" },
+    body: {
+      action,
+      note: action === "takedown" ? t("adminUi.reportTakedownNote") : t("adminUi.reportDismissNote"),
+    },
   });
   await loadAll();
 }
@@ -220,10 +225,10 @@ const promoSlots = ref<PromoSlotDto[]>([]);
 const promoBusy = ref("");
 const PROMO_KINDS = ["banner", "pop_up", "activity", "creator"] as const;
 const PROMO_KIND_LABEL: Record<string, string> = {
-  banner: "首页横幅",
-  pop_up: "弹窗",
-  activity: "活动入口",
-  creator: "创作者卡",
+  banner: t("adminUi.slotTypeBanner"),
+  pop_up: t("adminUi.slotTypePopUp"),
+  activity: t("adminUi.slotTypeActivity"),
+  creator: t("adminUi.slotTypeCreator"),
 };
 const promoForm = reactive({
   slot: "banner" as (typeof PROMO_KINDS)[number],
@@ -247,7 +252,7 @@ async function loadPromo(): Promise<void> {
 
 async function createPromo(): Promise<void> {
   if (!promoForm.title.trim()) {
-    error.value = "运营位需要标题";
+    error.value = t("adminUi.slotNeedTitle");
     return;
   }
   promoBusy.value = "create";
@@ -270,7 +275,7 @@ async function createPromo(): Promise<void> {
     promoForm.link_uri = "";
     await loadPromo();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "新建运营位失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.slotCreateFailed");
   } finally {
     promoBusy.value = "";
   }
@@ -286,21 +291,21 @@ async function togglePromo(slot: PromoSlotDto): Promise<void> {
     });
     await loadPromo();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "更新运营位失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.slotUpdateFailed");
   } finally {
     promoBusy.value = "";
   }
 }
 
 async function removePromo(slot: PromoSlotDto): Promise<void> {
-  if (!window.confirm(`删除运营位「${slot.title || slot.id}」？删除后公开页立即不再展示。`)) return;
+  if (!window.confirm(t("adminUi.slotDeleteConfirm", { name: slot.title || slot.id }))) return;
   promoBusy.value = slot.id;
   error.value = "";
   try {
     await api(`/ops/admin/promo-slots/${slot.id}`, { method: "DELETE" });
     await loadPromo();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "删除运营位失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.slotDeleteFailed");
   } finally {
     promoBusy.value = "";
   }
@@ -338,12 +343,12 @@ onMounted(async () => {
     <p v-if="error" class="error banner">{{ error }}</p>
 
       <section v-if="tab === 'dashboard' && dashboard" class="cards">
-        <div class="card"><span class="muted">用户</span><b>{{ dashboard.users }}</b></div>
-        <div class="card"><span class="muted">任务总数</span><b>{{ dashboard.tasks.total }}</b></div>
-        <div class="card"><span class="muted">导出</span><b>{{ dashboard.exports }}</b></div>
-        <div class="card"><span class="muted">有效分享</span><b>{{ dashboard.active_shares }}</b></div>
-        <div class="card"><span class="muted">管理员</span><b>{{ dashboard.admins }}</b></div>
-        <div class="card"><span class="muted">待处理举报</span><b>{{ dashboard.pending_reports ?? 0 }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statUsers") }}</span><b>{{ dashboard.users }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statTasks") }}</span><b>{{ dashboard.tasks.total }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statExports") }}</span><b>{{ dashboard.exports }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statShares") }}</span><b>{{ dashboard.active_shares }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statAdmins") }}</span><b>{{ dashboard.admins }}</b></div>
+        <div class="card"><span class="muted">{{ t("adminUi.statPendingReports") }}</span><b>{{ dashboard.pending_reports ?? 0 }}</b></div>
       </section>
       <section v-if="tab === 'dashboard' && dashboard?.queues" class="queues">
         <div v-for="(counts, queue) in dashboard.queues" :key="queue" class="queue-card">
@@ -354,10 +359,9 @@ onMounted(async () => {
 
       <!-- 运营位（模块 #27）：新建/停用后公开读接口 crc/banner_list 立即变化 -->
       <section v-if="tab === 'dashboard'" class="card promo">
-        <h2>运营位</h2>
+        <h2>{{ t("adminUi.slotsTitle") }}</h2>
         <p class="muted small">
-          配置后立即作用于公开读接口 <code>GET /crc/banner_list?type=…</code>（读取条件：
-          启用 + 当前时间在窗口内，按 sort 升序）。「生效中」由服务端按服务器时间判定。
+          {{ t("adminUi.slotsHint") }}
         </p>
 
         <div class="promo-form">
@@ -366,63 +370,63 @@ onMounted(async () => {
               {{ PROMO_KIND_LABEL[kind] }}（{{ kind }}）
             </option>
           </select>
-          <input v-model="promoForm.title" class="input" placeholder="标题（必填）" maxlength="120" />
-          <input v-model="promoForm.image_uri" class="input" placeholder="图片 key / URL（可选）" />
-          <input v-model="promoForm.link_uri" class="input" placeholder="跳转，如 /pricing（可选）" />
-          <input v-model.number="promoForm.sort" class="input sort" type="number" placeholder="排序" />
-          <input v-model="promoForm.starts_at" class="input time" placeholder="开始 ISO（可选）" />
-          <input v-model="promoForm.ends_at" class="input time" placeholder="结束 ISO（可选）" />
+          <input v-model="promoForm.title" class="input" :placeholder="t('adminUi.slotTitlePlaceholder')" maxlength="120" />
+          <input v-model="promoForm.image_uri" class="input" :placeholder="t('adminUi.slotImagePlaceholder')" />
+          <input v-model="promoForm.link_uri" class="input" :placeholder="t('adminUi.slotLinkPlaceholder')" />
+          <input v-model.number="promoForm.sort" class="input sort" type="number" :placeholder="t('adminUi.slotSortPlaceholder')" />
+          <input v-model="promoForm.starts_at" class="input time" :placeholder="t('adminUi.slotStartPlaceholder')" />
+          <input v-model="promoForm.ends_at" class="input time" :placeholder="t('adminUi.slotEndPlaceholder')" />
           <button class="mini" :disabled="promoBusy === 'create'" @click="createPromo">
-            {{ promoBusy === "create" ? "新建中…" : "新建" }}
+            {{ promoBusy === "create" ? t("adminUi.creating") : t("adminUi.create") }}
           </button>
         </div>
 
         <div class="row head-row">
-          <span>类型</span><span>标题</span><span>排序</span><span>时间窗口</span><span>生效</span><span>操作</span>
+          <span>{{ t("adminUi.thType") }}</span><span>{{ t("adminUi.thTitle") }}</span><span>{{ t("adminUi.thSort") }}</span><span>{{ t("adminUi.thWindow") }}</span><span>{{ t("adminUi.thLive") }}</span><span>{{ t("adminUi.thOps") }}</span>
         </div>
-        <p v-if="promoSlots.length === 0" class="muted small">还没有运营位，用上方表单新建一条。</p>
+        <p v-if="promoSlots.length === 0" class="muted small">{{ t("adminUi.slotsEmpty") }}</p>
         <div v-for="slot in promoSlots" :key="slot.id" class="row">
           <span>{{ PROMO_KIND_LABEL[slot.slot] ?? slot.slot }}</span>
-          <span>{{ slot.title || "（无标题）" }}</span>
+          <span>{{ slot.title || t("adminUi.noTitle") }}</span>
           <span class="muted">{{ slot.sort }}</span>
           <span class="muted small">
-            {{ slot.starts_at ? new Date(slot.starts_at).toLocaleString() : "不限" }}
+            {{ slot.starts_at ? new Date(slot.starts_at).toLocaleString() : t("adminUi.unlimited") }}
             →
-            {{ slot.ends_at ? new Date(slot.ends_at).toLocaleString() : "不限" }}
+            {{ slot.ends_at ? new Date(slot.ends_at).toLocaleString() : t("adminUi.unlimited") }}
           </span>
-          <span :class="slot.active_now ? 'state-on' : 'state-off'">{{ slot.active_now ? "生效中" : "未生效" }}</span>
+          <span :class="slot.active_now ? 'state-on' : 'state-off'">{{ slot.active_now ? t("adminUi.liveOn") : t("adminUi.liveOff") }}</span>
           <span class="ops">
             <button class="mini" :disabled="promoBusy === slot.id" @click="togglePromo(slot)">
-              {{ slot.status === 1 ? "停用" : "启用" }}
+              {{ slot.status === 1 ? t("adminUi.disable") : t("adminUi.enable") }}
             </button>
-            <button class="mini danger" :disabled="promoBusy === slot.id" @click="removePromo(slot)">删除</button>
+            <button class="mini danger" :disabled="promoBusy === slot.id" @click="removePromo(slot)">{{ t("adminUi.delete") }}</button>
           </span>
         </div>
       </section>
 
       <section v-if="tab === 'models'" class="card">
-        <h2>模型</h2>
-        <div class="row head-row"><span>名称</span><span>能力</span><span>adapter</span><span>排序</span><span>上架</span></div>
+        <h2>{{ t("adminUi.modelsTitle") }}</h2>
+        <div class="row head-row"><span>{{ t("adminUi.thName") }}</span><span>{{ t("adminUi.thCapability") }}</span><span>adapter</span><span>{{ t("adminUi.thSort") }}</span><span>{{ t("adminUi.thVisible") }}</span></div>
         <div v-for="m in models" :key="String(m.id)" class="row">
           <span>{{ m.display_name }}</span>
           <span class="muted">{{ m.capability }}</span>
           <span class="muted">{{ m.adapter_code }}</span>
           <span class="muted">{{ m.sort }}</span>
-          <button class="mini" @click="toggleModel(m)">{{ m.visible ? "下架" : "上架" }}</button>
+          <button class="mini" @click="toggleModel(m)">{{ m.visible ? t("adminUi.unlist") : t("adminUi.list") }}</button>
         </div>
       </section>
 
       <section v-if="tab === 'tasks' && metrics" class="card">
-        <h2>任务指标</h2>
+        <h2>{{ t("adminUi.metricsTitle") }}</h2>
         <div class="cards">
-          <div class="card"><span class="muted">失败率</span><b>{{ metrics.failure_rate }}%</b></div>
-          <div class="card"><span class="muted">成功 / 失败 / 取消</span><b>{{ metrics.succeeded }} / {{ metrics.failed }} / {{ metrics.canceled }}</b></div>
-          <button class="mini csv" @click="downloadFailedCsv">下载失败任务 CSV</button>
+          <div class="card"><span class="muted">{{ t("adminUi.failureRate") }}</span><b>{{ metrics.failure_rate }}%</b></div>
+          <div class="card"><span class="muted">{{ t("adminUi.succFailCancel") }}</span><b>{{ metrics.succeeded }} / {{ metrics.failed }} / {{ metrics.canceled }}</b></div>
+          <button class="mini csv" @click="downloadFailedCsv">{{ t("adminUi.downloadFailedCsv") }}</button>
         </div>
         <div v-if="metrics.adapter_latency.length > 0" class="latency">
           <div v-for="row in metrics.adapter_latency" :key="row.adapter" class="latency-row">
             <span class="mono">{{ row.adapter }}</span>
-            <span class="muted">{{ row.samples }} 样本</span>
+            <span class="muted">{{ t("adminUi.samplesN", { n: row.samples }) }}</span>
             <span>avg {{ row.avg_ms }}ms</span>
             <span>p95 {{ row.p95_ms }}ms</span>
           </div>
@@ -430,14 +434,14 @@ onMounted(async () => {
         <div v-if="metrics.errors_by_code.length > 0" class="latency">
           <div v-for="row in metrics.errors_by_code" :key="row.code" class="latency-row">
             <span class="mono">{{ row.code }}</span>
-            <span class="muted">{{ row.count }} 次</span>
+            <span class="muted">{{ t("adminUi.timesN", { n: row.count }) }}</span>
           </div>
         </div>
       </section>
 
       <section v-if="tab === 'tasks'" class="card">
-        <h2>任务审计（最近 20）</h2>
-        <div class="row task-row head-row"><span>task</span><span>space</span><span>mode</span><span>状态</span><span>积分</span><span>时间</span></div>
+        <h2>{{ t("adminUi.auditTitle") }}</h2>
+        <div class="row task-row head-row"><span>task</span><span>space</span><span>mode</span><span>{{ t("adminUi.thStatus") }}</span><span>积分</span><span>时间</span></div>
         <div v-for="t in tasks" :key="String(t.task_id)" class="row task-row">
           <span class="mono">{{ String(t.task_id).slice(-8) }}</span>
           <span class="mono">{{ String(t.space_id).slice(-6) }}</span>
@@ -449,83 +453,96 @@ onMounted(async () => {
       </section>
 
       <section v-if="tab === 'shares'" class="card">
-        <h2>分享管理</h2>
+        <h2>{{ t("adminUi.sharesTitle") }}</h2>
         <div v-for="s in shares" :key="String(s.id)" class="share-row">
           <span class="mono">{{ String(s.token).slice(0, 12) }}…</span>
           <span class="muted">task {{ String(s.task_id).slice(-8) }}</span>
-          <span class="muted">{{ s.revoked_at ? "已撤销" : `至 ${new Date(String(s.expires_at)).toLocaleDateString()}` }}</span>
-          <button v-if="!s.revoked_at" class="mini" @click="revokeShare(s)">下线</button>
+          <span class="muted">{{ s.revoked_at ? t("adminUi.revoked") : t("adminUi.untilDate", { date: new Date(String(s.expires_at)).toLocaleDateString() }) }}</span>
+          <button v-if="!s.revoked_at" class="mini" @click="revokeShare(s)">{{ t("adminUi.takeDown") }}</button>
         </div>
-        <p v-if="shares.length === 0" class="muted">暂无分享。</p>
+        <p v-if="shares.length === 0" class="muted">{{ t("adminUi.sharesEmpty") }}</p>
       </section>
 
       <section v-if="tab === 'funnel'" class="card">
-        <h2>流水线漏斗</h2>
+        <h2>{{ t("adminUi.funnelTitle") }}</h2>
         <div class="funnel">
           <div v-for="stage in funnel" :key="stage.key" class="funnel-stage">
             <span class="muted">{{ stage.label }}</span>
             <b>{{ stage.count }}</b>
             <span v-if="stage.conversion_from_previous !== null" class="muted">
-              转化 {{ stage.conversion_from_previous }}%
+              {{ t("adminUi.conversion", { percent: stage.conversion_from_previous }) }}
             </span>
           </div>
         </div>
-        <p v-if="funnel.length === 0" class="muted">暂无漏斗数据。</p>
+        <p v-if="funnel.length === 0" class="muted">{{ t("adminUi.funnelEmpty") }}</p>
       </section>
 
       <section v-if="tab === 'reports'" class="card">
-        <h2>举报处置</h2>
+        <h2>{{ t("adminUi.reportsTitle") }}</h2>
         <div v-for="r in reports" :key="String(r.id)" class="report-row">
-          <span class="badge" :data-status="r.status">{{ r.status === 1 ? "待处理" : r.status === 2 ? "已下线" : "已驳回" }}</span>
+          <span class="badge" :data-status="r.status">{{
+            r.status === 1
+              ? t("adminUi.reportPending")
+              : r.status === 2
+                ? t("adminUi.reportTakenDown")
+                : t("adminUi.reportRejected")
+          }}</span>
           <span class="muted">{{ r.reason }}</span>
           <span class="report-detail">{{ r.detail || "-" }}</span>
           <span class="muted">task {{ String(r.task_id).slice(-8) }}</span>
           <template v-if="r.status === 1">
-            <button class="mini danger" @click="resolveReport(r, 'takedown')">下线</button>
-            <button class="mini" @click="resolveReport(r, 'dismiss')">驳回</button>
+            <button class="mini danger" @click="resolveReport(r, 'takedown')">{{ t("adminUi.takeDown") }}</button>
+            <button class="mini" @click="resolveReport(r, 'dismiss')">{{ t("adminUi.reject") }}</button>
           </template>
           <span v-else class="muted">{{ r.resolution }}</span>
         </div>
-        <p v-if="reports.length === 0" class="muted">暂无举报。</p>
+        <p v-if="reports.length === 0" class="muted">{{ t("adminUi.reportsEmpty") }}</p>
       </section>
 
       <section v-if="tab === 'creatorAudits'" class="card">
-        <h2>创作者审核（平台运营）</h2>
+        <h2>{{ t("adminUi.creatorAuditTitle") }}</h2>
         <p class="muted small">
-          空间管理员审过的作品不在这里重复出现；这里只列平台侧待处置的创作者作品。
-          通过会写 published_at；驳回会记录理由；只有待审可审、只有已通过可下架（不允许跳步）。
+          {{ t("adminUi.creatorAuditHint") }}
         </p>
         <p class="muted small">
-          当前状态：
+          {{ t("adminUi.currentStatus") }}
           <select v-model.number="creatorAuditStatus" class="mini" @change="loadCreatorAudits()">
-            <option :value="2">待审</option>
-            <option :value="3">已通过</option>
-            <option :value="4">已驳回</option>
-            <option :value="5">已下架</option>
+            <option :value="2">{{ t("adminUi.statusPendingReview") }}</option>
+            <option :value="3">{{ t("adminUi.statusApproved") }}</option>
+            <option :value="4">{{ t("adminUi.statusRejected") }}</option>
+            <option :value="5">{{ t("adminUi.statusTakenDown") }}</option>
           </select>
-          <input v-model="creatorAuditNote" class="mini note" placeholder="驳回理由（可选）" maxlength="120" />
+          <input v-model="creatorAuditNote" class="mini note" :placeholder="t('adminUi.rejectReasonPlaceholder')" maxlength="120" />
           <!-- 队列按 FIFO 翻页；运营常"只找某个作品"，给搜索框免得一页页翻 -->
           <input
             v-model="creatorAuditQuery"
             class="mini note"
-            placeholder="按标题搜索（回车）"
+            :placeholder="t('adminUi.searchByTitle')"
             maxlength="80"
             @keyup.enter="loadCreatorAudits()"
           />
         </p>
         <div v-for="row in creatorAudits" :key="row.id" class="report-row">
           <span class="badge" :data-status="row.status">
-            {{ row.status === 2 ? "待审" : row.status === 3 ? "已通过" : row.status === 4 ? "已驳回" : "已下架" }}
+            {{
+              row.status === 2
+                ? t("adminUi.statusPendingReview")
+                : row.status === 3
+                  ? t("adminUi.statusApproved")
+                  : row.status === 4
+                    ? t("adminUi.statusRejected")
+                    : t("adminUi.statusTakenDown")
+            }}
           </span>
           <span class="report-detail">{{ row.title }}</span>
           <span class="muted">{{ row.category }}<template v-if="row.effect"> · {{ row.effect }}</template></span>
           <span class="muted">user {{ row.creator_user_id.slice(-6) }}</span>
           <template v-if="row.status === 2">
             <button class="mini" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'approve')">
-              通过
+              {{ t("adminUi.approve") }}
             </button>
             <button class="mini danger" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'reject')">
-              驳回
+              {{ t("adminUi.reject") }}
             </button>
           </template>
           <button
@@ -534,17 +551,16 @@ onMounted(async () => {
             :disabled="creatorAuditBusy === row.id"
             @click="reviewCreatorAudit(row, 'offline')"
           >
-            下架
+             {{ t("adminUi.takeDown") }}
           </button>
         </div>
-        <p v-if="creatorAudits.length === 0" class="muted">当前状态下没有创作者作品。</p>
+        <p v-if="creatorAudits.length === 0" class="muted">{{ t("adminUi.creatorEmpty") }}</p>
       </section>
 
       <section v-if="tab === 'orders'" class="card">
-        <h2>订单 / 全额退款</h2>
+        <h2>{{ t("adminUi.ordersTitle") }}</h2>
         <p class="muted small">
-          仅已支付订单可退（status=2）；退款需填写工单号，接口幂等（重复点击不会重复退钱/重复调渠道）。
-          已消耗积分导致余额不足时接口返回 400101，请按未消耗余额人工处理。
+          {{ t("adminUi.ordersHint") }}
         </p>
         <div v-for="o in orders" :key="String(o.order_id)" class="order-row">
           <span class="mono">{{ String(o.order_id).slice(-10) }}</span>
@@ -552,7 +568,15 @@ onMounted(async () => {
           <span class="muted">¥{{ (Number(o.amount_cents) / 100).toFixed(2) }}</span>
           <span class="muted">{{ o.channel }}</span>
           <span class="badge" :data-status="o.status">
-            {{ o.status === 1 ? "待支付" : o.status === 2 ? "已支付" : o.status === 3 ? "已关闭" : "已退款" }}
+            {{
+              o.status === 1
+                ? t("adminUi.orderPendingPay")
+                : o.status === 2
+                  ? t("adminUi.orderPaid")
+                  : o.status === 3
+                    ? t("adminUi.orderClosed")
+                    : t("adminUi.orderRefunded")
+            }}
           </span>
           <span v-if="o.refund_no" class="muted mono">{{ o.refund_no }} · {{ o.refund_status }}</span>
           <span v-else class="muted">-</span>
@@ -562,10 +586,10 @@ onMounted(async () => {
             :disabled="refunding === String(o.order_id)"
             @click="refundOrder(o)"
           >
-            {{ refunding === String(o.order_id) ? "退款中…" : "全额退款" }}
+            {{ refunding === String(o.order_id) ? t("adminUi.refunding") : t("adminUi.fullRefund") }}
           </button>
         </div>
-        <p v-if="orders.length === 0" class="muted">暂无订单。</p>
+        <p v-if="orders.length === 0" class="muted">{{ t("adminUi.ordersEmpty") }}</p>
       </section>
   </div>
 </template>

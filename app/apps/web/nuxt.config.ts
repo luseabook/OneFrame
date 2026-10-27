@@ -41,6 +41,8 @@ export default defineNuxtConfig({
     "/settings": { ssr: false },
     "/tools": { ssr: false },
     "/admin": { ssr: false },
+    // 子路径（/admin/login）不在 "/admin" 规则内，实测会 hydration mismatch，必须补 **
+    "/admin/**": { ssr: false },
     // 画布族（列表 + 编辑器）同样纯客户端渲染：数据来自登录态与 API，
     // 且 definePageMeta({ssr:false}) 对直接 URL 访问不足以保证首帧一致
     // （docs/03-frontend/conventions.md §1 已实测会 hydration mismatch），

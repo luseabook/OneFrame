@@ -1,4 +1,7 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
+useHead({ title: () => t("adminUi.loginMetaTitle") });
 // 运营后台独立登录页：与用户端登录页完全分离（独立 URL / 独立壳层 / 独立 token）
 definePageMeta({ ssr: false, layout: "admin-login" });
 
@@ -22,7 +25,7 @@ onMounted(() => {
 async function submit(): Promise<void> {
   error.value = "";
   if (!username.value.trim() || !password.value) {
-    error.value = "请输入用户名与密码";
+    error.value = t("adminUi.loginNeedCreds");
     return;
   }
   loading.value = true;
@@ -32,12 +35,12 @@ async function submit(): Promise<void> {
       body: { username: username.value.trim(), password: password.value },
     });
     if (!res || res.code !== 0 || !res.data?.token) {
-      throw new Error(res?.msg || `登录失败(${res?.code ?? "unknown"})`);
+      throw new Error(res?.msg || t("adminUi.loginFailedWith", { code: res?.code ?? "unknown" }));
     }
     localStorage.setItem("admin_token", res.data.token);
     await router.replace("/admin");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "登录失败";
+    error.value = e instanceof Error ? e.message : t("adminUi.loginFailed");
   } finally {
     loading.value = false;
   }
@@ -46,21 +49,21 @@ async function submit(): Promise<void> {
 
 <template>
   <section class="auth-card">
-    <h1>运营后台登录</h1>
-    <p class="sub">仅限授权运营人员；账号与用户端账号体系相互独立。</p>
+    <h1>{{ t("adminUi.loginTitle") }}</h1>
+    <p class="sub">{{ t("adminUi.loginSub") }}</p>
 
     <label class="field">
-      <span>用户名</span>
-      <input v-model="username" class="input" autocomplete="username" placeholder="运营账号" />
+      <span>{{ t("adminUi.loginUsername") }}</span>
+      <input v-model="username" class="input" autocomplete="username" :placeholder="t('adminUi.loginUsernamePlaceholder')" />
     </label>
     <label class="field">
-      <span>密码</span>
+      <span>{{ t("adminUi.loginPassword") }}</span>
       <input
         v-model="password"
         class="input"
         type="password"
         autocomplete="current-password"
-        placeholder="密码"
+        :placeholder="t('adminUi.loginPasswordPlaceholder')"
         @keyup.enter="submit"
       />
     </label>
@@ -68,11 +71,11 @@ async function submit(): Promise<void> {
     <p v-if="error" class="error">{{ error }}</p>
 
     <button class="submit" type="button" :disabled="loading" @click="submit">
-      {{ loading ? "登录中…" : "登录运营后台" }}
+      {{ loading ? t("adminUi.loggingIn") : t("adminUi.loginBtn") }}
     </button>
 
     <p class="hint">
-      非生产环境默认 admin / admin12345；生产必须通过 ADMIN_USERNAME / ADMIN_PASSWORD 配置。
+       {{ t("adminUi.loginFootnote") }}
     </p>
   </section>
 </template>

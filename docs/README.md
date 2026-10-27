@@ -123,6 +123,26 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.7 · 多语言第 37 批：admin 运营后台 2 页 · 2026-10-28）
+
+`adminUi`（**109 key** × 5 语言）；**运营后台 2/2 = 100%**，全部页面 **43/64 = 67%**。
+
+| 页面 | 迁移内容 |
+|---|---|
+| [admin/index.vue](app/apps/web/pages/admin/index.vue) | 六项 KPI；**运营位**（`GET /crc/banner_list` 读取条件说明、四种类型、六列表头、生效两态、启停与删除确认）；模型上下架；任务指标（失败率、成功/失败/取消、下载失败 CSV、`N 样本`/`N 次`）；任务审计；分享管理（已撤销/至某日/下线）；流水线漏斗（转化率）；举报处置（三态 + 下线/驳回 + 两条处置 note）；**创作者审核**（"只有待审可审、只有已通过可下架，不允许跳步"、四态、通过/驳回/下架、驳回理由）；**订单与全额退款**（"仅已支付可退、接口幂等、余额不足返回 400101 需人工"、四态、退款确认含金额与积分） |
+| [admin/login.vue](app/apps/web/pages/admin/login.vue) | 凭据校验、登录失败码、标题与副标题、用户名/密码与占位、登录中、脚注"生产必须配置 ADMIN_USERNAME/ADMIN_PASSWORD" |
+
+### 三处修复（都是"只有真跑才发现"的）
+
+1. **第 8 次变量遮蔽/命名撞车**：E2E 里 `adZh/adEn` 与已有的 `AD1..AD4`（广告剧）重名 → 改 `admZh/admEn` 并换 ID 前缀。
+2. **`/admin` 的 routeRules 不含子路径**：`/admin/login` 没有 `ssr:false` → 实测 `Hydration completed but contains mismatches`
+   → 在 [nuxt.config.ts](app/apps/web/nuxt.config.ts) 补 `"/admin/**": { ssr: false }`（与 `/team`、`/canvas/**` 同类问题的第 3 次）。
+3. **E2E 主 page 被上一个页面的 beforeunload 守卫挡住 goto**：广告剧页有离开守卫，导致后台登录页在同一个 page 上永远跳不过去
+   （body 仍是广告剧）→ 后台登录页改用 **`page.context().newPage()`** 独立验证。
+
+**验证**：`i18n-check.cjs` 全绿（2926 key / 43 页 + 20 组件）；`e2e-i18n-pages.cjs` **138/138**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v6.6 · 多语言第 36 批：canvas 七个面板 → **canvas 模块完成** · 2026-10-28）
 
 页面覆盖 **40 → 41/64**；**用户面 41/45 = 91%**；`canvasUi` 扩到 **513 key**。canvas 模块 5 轮收口。
