@@ -93,6 +93,37 @@ function snapshot(marker: string) {
   };
 }
 
+/**
+ * 结构指纹：把任意 JSON 折成"类型/键集/数组长度/数值是否有限"的递归描述串。
+ *
+ * 为什么不用像素比对做 3D 验收（竞品口径待取证时的替代方案）：WebGL 渲染结果对
+ * 显卡驱动 / DPR / 抗锯齿实现敏感，同一份 payload 在两台机器上必然出不同像素，
+ * 用它做断言只会得到 flaky 用例。而"场景被保存/复制后结构是否等价、关键对象
+ * 数量是否一致"是稳定可断言的——真正会毁数据的错误（丢字段、数组塌成对象、
+ * 数值变字符串）都能被它抓到。
+ */
+function shapeOf(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `[${value.map(shapeOf).join(",")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => `${key}:${shapeOf(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? "number" : "non-finite-number";
+  return typeof value;
+}
+
+/** 关键对象计数（3D 场景的"内容规模"）：立场 / 机位 / 是否选中机位 */
+function countsOfGate(payload: any) {
+  return {
+    positions: Array.isArray(payload?.positions) ? payload.positions.length : -1,
+    cameras: Array.isArray(payload?.cameras) ? payload.cameras.length : -1,
+    hasActiveCam: Number.isInteger(payload?.activeCamIndex),
+  };
+}
+
 beforeAll(async () => {
   app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false });
   await app.register(cookie as never);
@@ -209,6 +240,96 @@ describe("场景快照：保存 → 读回 → 列表", () => {
       otherToken,
     );
     expect(foreign.code).not.toBe(0);
+  });
+});
+
+describe("验收口径：结构等价 + 关键对象计数（替代像素比对）", () => {
+  /** 同形不同值：结构必须一致（断言不应依赖具体数值） */
+  function variant(marker: string, positions: number, cameras: number) {
+    return {
+      camPos: { x: positions, y: 2, z: 3 },
+      camTarget: { x: 0, y: 1, z: 0 },
+      fov: 45,
+      groundOpacity: 0.5,
+      positions: Array.from({ length: positions }, (_, index) => ({
+        id: `actor-${index}`,
+        name: `${marker}-${index}`,
+        x: index,
+        z: 0,
+        rot: 0,
+        pose: "stand",
+        image: null,
+      })),
+      cameras: Array.from({ length: cameras }, (_, index) => ({
+        id: `cam-${index}`,
+        name: `机位${index}`,
+        pos: { x: index, y: 2, z: 3 },
+        target: { x: 0, y: 1, z: 0 },
+        fov: 45,
+      })),
+      activeCamIndex: 0,
+      editorExtras: { futureField: [1, 2], nested: { a: marker } },
+    };
+  }
+
+  it("同形快照两次保存 → 读回结构指纹一致、关键对象计数一致", async () => {
+    const a = await inject("POST", "/director/scenes", {
+      project_id: projectId,
+      name: "结构等价A",
+      payload: variant("A", 2, 2),
+    });
+    const b = await inject("POST", "/director/scenes", {
+      project_id: projectId,
+      name: "结构等价B",
+      payload: variant("B", 2, 2),
+    });
+    expect(a.code, a.msg).toBe(0);
+    expect(b.code, b.msg).toBe(0);
+    createdSceneIds.push(String(a.data.id), String(b.data.id));
+
+    const readA = (await inject("GET", `/director/scenes/${a.data.id}`)).data.payload;
+    const readB = (await inject("GET", `/director/scenes/${b.data.id}`)).data.payload;
+
+    expect(shapeOf(readA)).toBe(shapeOf(readB));
+    expect(countsOfGate(readA)).toEqual({ positions: 2, cameras: 2, hasActiveCam: true });
+    expect(countsOfGate(readB)).toEqual(countsOfGate(readA));
+    // 值确实不同（否则上面的结构断言可能因为两边都是空壳而恒真）
+    expect(readA.positions[0].name).toBe("A-0");
+    expect(readB.positions[0].name).toBe("B-0");
+  });
+
+  it("结构指纹能区分规模差异（反证：多一个机位必须被检出）", async () => {
+    const wide = await inject("POST", "/director/scenes", {
+      project_id: projectId,
+      name: "结构等价C-3机位",
+      payload: variant("C", 3, 3),
+    });
+    expect(wide.code, wide.msg).toBe(0);
+    createdSceneIds.push(String(wide.data.id));
+
+    const readC = (await inject("GET", `/director/scenes/${wide.data.id}`)).data.payload;
+    // 与上面 B（2 立场 2 机位）相比：结构串与计数都必须不同，证明断言不是恒真
+    expect(shapeOf(readC)).not.toBe(shapeOf(variant("B", 2, 2)));
+    expect(countsOfGate(readC)).toEqual({ positions: 3, cameras: 3, hasActiveCam: true });
+  });
+
+  it("复制场景：payload 逐层等价、结构指纹与源场景相同", async () => {
+    const src = await inject("POST", "/director/scenes", {
+      project_id: projectId,
+      name: "待复制源",
+      payload: variant("D", 2, 1),
+    });
+    expect(src.code, src.msg).toBe(0);
+    createdSceneIds.push(String(src.data.id));
+
+    const dup = await inject("POST", `/director/scenes/${src.data.id}/duplicate`, {});
+    expect(dup.code, dup.msg).toBe(0);
+    createdSceneIds.push(String(dup.data.id));
+
+    const readDup = (await inject("GET", `/director/scenes/${dup.data.id}`)).data.payload;
+    expect(readDup).toEqual(variant("D", 2, 1));
+    expect(shapeOf(readDup)).toBe(shapeOf(variant("D", 2, 1)));
+    expect(countsOfGate(readDup)).toEqual({ positions: 2, cameras: 1, hasActiveCam: true });
   });
 });
 

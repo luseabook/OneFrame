@@ -123,6 +123,21 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v8.2 · 第 53 批：代码事实 vs 文档缺口对齐 · 2026-10-29）
+
+- **背景**：进度文档里的「缺口」是历轮手写的，代码却在持续前进 → 出现"缺口栏写着做不到、代码里其实早做了"的漂移。
+  本轮按"每条缺口去代码里找实现证据"复核，一次清了 3 条。
+- **#17 资产/主体 98% → 99%**：`episode_resources`（**迁移 0031**）早已是集级一等公民——
+  `match-resources`/`save-resource-matches` 写入即本集权威快照、读路径直接命中，分镜绑定只在"历史项目从未写过快照"时回落
+  （`apps/api/src/modules/script/asset-match.service.ts:632` 注释即此口径）。旧文档写"只能用绑定∪提及投影"，是迁移前的描述。
+- **#19 3D 验收口径落地**：像素级比对对显卡驱动/DPR 敏感、跨机必 flaky，改用 `shapeOf()` **结构指纹**
+  （类型/键集/数组长度/数值有限性）+ 关键对象计数 + 复制场景逐层等价，并用「多一个机位必须被检出」**反证断言非恒真**；
+  `director.spec.ts` **13 → 16 例**。
+- **修三处文档自相矛盾**：#16 行 99%×8=7.92 与得分 7.99 不符（→ 99.9%）；#27 缺口栏残留已完成的 `home_configs` 写入口
+  （第 40 批做了 `GET/POST /ops/admin/home-config`）；§3.4 分布表与 §5 缺口表按 28 行逐项重算（旧表还写着"100%×8""剩余 11.7 权重"）。
+- **数字**：全站 **201.17/206 = 97.7%**（剩余 **4.83**）；首发口径 **129.88/133 = 97.7%**；api 测试 **840 → 843**。
+- 复现：`pwsh _acceptance/verify-round.ps1`（12 门禁全绿）。
+
 ## 变更登记（v8.1 · 第 52 批：按秒计价转译层 · 2026-10-29）
 
 ### 修的是一个真会赔钱的缺陷
@@ -158,7 +173,7 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 | 20s（高于最高档） | 360，且**严格 > 180** |
 | 15s | 270，且必须是整数积分 |
 
-api 测试 **836 → 840**；全量 **1,183 例**（api 840 / adapters 164 / cli 91 / worker 37 / db 26 / shared 19 / storage 6）；gate 全绿（12/12）。
+api 测试 **836 → 840**；全量 **1,186 例**（api 843 / adapters 164 / cli 91 / worker 37 / db 26 / shared 19 / storage 6）；gate 全绿（12/12）。
 #23 **99.3% → 99.5%**（2.98 → 2.99）。**进度**：全站 **201.02/206 = 97.6%**，剩余 **4.98**。
 
 ## 变更登记（v8.0 · 第 51 批：升级补差价报价 · 2026-10-29）
@@ -193,7 +208,7 @@ api 测试 **836 → 840**；全量 **1,183 例**（api 840 / adapters 164 / cli
 
 ### 验证
 
-api 测试新增 `billing-upgrade-quote.spec` **6 例**；api **830 → 836**；全量 **1,183 例**（api 840 / adapters 164 / cli 91 / worker 37 / db 26 / shared 19 / storage 6）；
+api 测试新增 `billing-upgrade-quote.spec` **6 例**；api **830 → 836**；全量 **1,186 例**（api 843 / adapters 164 / cli 91 / worker 37 / db 26 / shared 19 / storage 6）；
 gate 全绿（12/12）。`billing` 端点 15 → 16；#23 **99% → 99.3%**（2.97 → 2.98 权重）。
 **进度**：全站 **201.01/206 = 97.6%**，剩余 **4.99**。
 
