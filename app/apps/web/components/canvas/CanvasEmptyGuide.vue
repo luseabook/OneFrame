@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasNodeType } from "~/types/canvas";
 import { NODE_TYPE_META } from "~/types/canvas";
 
@@ -43,18 +45,18 @@ interface Chip {
 
 /** 第一行：六个基础节点类型（顺序照参照站 DOM） */
 const row1: Chip[] = [
-  { label: "文本", type: "text", icon: "node-text", minWidth: 88 },
-  { label: "表格", type: "table", icon: "node-table", minWidth: 88 },
-  { label: "图像", type: "image", icon: "node-image", minWidth: 88 },
-  { label: "视频", type: "video", icon: "node-video", minWidth: 88 },
-  { label: "音频", type: "audio", icon: "node-audio", minWidth: 88 },
-  { label: "视频合成", type: "clip", icon: "node-clip", minWidth: 116 },
+  { label: t("canvasUi.nodeText"), type: "text", icon: "node-text", minWidth: 88 },
+  { label: t("canvasUi.nodeTable"), type: "table", icon: "node-table", minWidth: 88 },
+  { label: t("canvasUi.nodeImage"), type: "image", icon: "node-image", minWidth: 88 },
+  { label: t("canvasUi.nodeVideo"), type: "video", icon: "node-video", minWidth: 88 },
+  { label: t("canvasUi.nodeAudio"), type: "audio", icon: "node-audio", minWidth: 88 },
+  { label: t("canvasUi.nodeClip"), type: "clip", icon: "node-clip", minWidth: 116 },
 ];
 
 /** 第二行：两个剧本派生能力（都是 script 节点，靠 runPhase 区分）+ 新手引导 */
 const row2: Chip[] = [
-  { label: "剧本拆资产", type: "script", icon: "node-asset", minWidth: 130 },
-  { label: "剧本拆分镜", type: "script", icon: "node-script", minWidth: 130 },
+  { label: t("canvasUi.nodeScriptAssets"), type: "script", icon: "node-asset", minWidth: 130 },
+  { label: t("canvasUi.nodeScriptShots"), type: "script", icon: "node-script", minWidth: 130 },
 ];
 
 /**
@@ -62,9 +64,9 @@ const row2: Chip[] = [
  * 这里按画布主路径给最小集合；文案与 key 只用于上报，不改任何契约名字。
  */
 const tutorials: Array<{ key: string; label: string; icon: string }> = [
-  { key: "add-node", label: "如何添加节点", icon: "plus-lg" },
-  { key: "connect", label: "如何连接节点", icon: "link" },
-  { key: "shortcuts", label: "常用快捷键", icon: "more" },
+  { key: "add-node", label: t("canvasUi.tutorialAddNode"), icon: "plus-lg" },
+  { key: "connect", label: t("canvasUi.tutorialConnect"), icon: "link" },
+  { key: "shortcuts", label: t("canvasUi.tutorialShortcuts"), icon: "more" },
 ];
 
 function hintOf(c: Chip): string {
@@ -83,11 +85,11 @@ function hintOf(c: Chip): string {
   -->
   <div class="canvas-empty-guide" aria-live="polite" @pointerdown.stop @dblclick.stop>
     <div class="canvas-empty-guide__copy">
-      <p class="canvas-empty-guide__title">双击画布 / 单击 Tab</p>
-      <p class="canvas-empty-guide__desc">自由生成节点，一步步将创意变成现实</p>
+      <p class="canvas-empty-guide__title">{{ t("canvasUi.guideTitle") }}</p>
+      <p class="canvas-empty-guide__desc">{{ t("canvasUi.guideDesc") }}</p>
     </div>
 
-    <div class="canvas-empty-guide__nodes" role="toolbar" aria-label="画布快捷节点">
+    <div class="canvas-empty-guide__nodes" role="toolbar" :aria-label="t('canvasUi.guideToolbarAria')">
       <div class="canvas-empty-guide__nodes-row">
         <button
           v-for="(c, i) in row1"
@@ -116,7 +118,7 @@ function hintOf(c: Chip): string {
           :class="`guide-chip--${c.type}`"
           :style="{ '--node-min-width': `${c.minWidth}px`, '--enter-index': row1.length + i }"
           :data-type="c.type"
-          :data-phase="c.label === '剧本拆资产' ? 'asset_match' : 'storyboard'"
+          :data-phase="c.type === 'script' && c.icon === 'node-asset' ? 'asset_match' : 'storyboard'"
           :title="hintOf(c)"
           @click="emit('select', c.type)"
         >
@@ -139,7 +141,7 @@ function hintOf(c: Chip): string {
             <span class="canvas-empty-guide__node-icon" aria-hidden="true">
               <CanvasIcon name="play" :size="20" />
             </span>
-            <span class="canvas-empty-guide__node-label guide-chip-text">新手引导</span>
+            <span class="canvas-empty-guide__node-label guide-chip-text">{{ t("canvasUi.onboarding") }}</span>
             <span
               class="canvas-empty-guide__tutorial-caret"
               :class="{ 'is-open': tutorialOpen }"

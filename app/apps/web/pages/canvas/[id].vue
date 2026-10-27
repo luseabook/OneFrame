@@ -27,7 +27,8 @@ import { NODE_TYPE_META } from "~/types/canvas";
  */
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
-useHead({ title: "无限画布 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("canvasUi.metaTitle") });
 
 const route = useRoute();
 const canvasId = computed(() => String(route.params.id ?? ""));
@@ -268,7 +269,7 @@ const marqueeStyle = computed(() => {
 function handleConnectClick(nodeId: string): void {  const src = connectFrom.value;
   if (!src) {
     connectFrom.value = nodeId;
-    toast.info("已选起点，再点目标节点完成连线");
+    toast.info(t("canvasUi.connectStartHint"));
     return;
   }
   if (src === nodeId) {
@@ -279,7 +280,7 @@ function handleConnectClick(nodeId: string): void {  const src = connectFrom.val
   const created = editor.addEdge(src, nodeId);
   connectFrom.value = null;
   connectCursor.value = null;
-  toast[created ? "success" : "info"](created ? "已连线" : "这条连线已存在");
+  toast[created ? "success" : "info"](created ? t("canvasUi.connected") : t("canvasUi.edgeExists"));
 }
 
 // ── 连线路径（贝塞尔）──────────────────────────────────
@@ -390,7 +391,7 @@ function organize(): void {
   }
   dirty.value = true;
   nextTick(() => doFitView());
-  toast.success("已按连线整理画布");
+  toast.success(t("canvasUi.arranged"));
 }
 
 /** 小地图点击跳转：把目标世界坐标移到视口中心 */
@@ -492,7 +493,7 @@ function onAgentCreateNodes(
   nextTick(() => {
     created.forEach((id) => ensureVisible(id));
     agentPanel.value?.bindLastAppliedNodes(created);
-    toast.success(`已创建 ${created.length} 个节点，保存后生效`);
+    toast.success(t("canvasUi.nodesCreated", { n: created.length }));
   });
 }
 
@@ -510,17 +511,18 @@ function deleteSelection(): void {
 
 // ── 重命名 ──────────────────────────────────────────────
 async function onRename(next: string): Promise<void> {
-  const t = next.trim();
-  if (!t || t === title.value) return;
+  // 局部变量不能叫 `t`：会遮蔽 i18n 的 t()（本项目第 5 次踩同类）
+  const nextTitle = next.trim();
+  if (!nextTitle || nextTitle === title.value) return;
   try {
-    const res = await api.rename(canvasId.value, { title: t, version: version.value });
-    title.value = t;
+    const res = await api.rename(canvasId.value, { title: nextTitle, version: version.value });
+    title.value = nextTitle;
     version.value = res.version;
-    toast.success("已重命名");
+    toast.success(t("canvasUi.renamed"));
   } catch (e) {
     const err = e as { code?: number; message: string };
-    if (err.code === 746002) toast.error("画布已被他人修改（版本冲突），请重新加载");
-    else toast.error(err.message || "重命名失败");
+    if (err.code === 746002) toast.error(t("canvasUi.versionConflict"));
+    else toast.error(err.message || t("canvasUi.renameFailed"));
   }
 }
 
@@ -532,7 +534,7 @@ async function openHistory(): Promise<void> {
     const r = await api.snapshots(canvasId.value, 30);
     historyList.value = r.list;
   } catch (e) {
-    toast.error((e as Error).message || "读取历史版本失败");
+    toast.error((e as Error).message || t("canvasUi.historyLoadFailed"));
   } finally {
     historyLoading.value = false;
   }
@@ -540,7 +542,7 @@ async function openHistory(): Promise<void> {
 
 /** 恢复到某个历史版本：把快照里的节点/边/组载入本地，仍需点保存才落库 */
 async function restoreSnapshot(v: number): Promise<void> {
-  if (dirty.value && !confirm("当前有未保存修改，恢复历史版本会丢弃它们。继续？")) return;
+  if (dirty.value && !confirm(t("canvasUi.restoreConfirm"))) return;
   try {
     const snap = await api.snapshot(canvasId.value, v);
     const payload = snap.payload as {
@@ -579,9 +581,9 @@ async function restoreSnapshot(v: number): Promise<void> {
     }));    dirty.value = true;
     historyOpen.value = false;
     nextTick(() => doFitView());
-    toast.success(`已载入 v${v}，点保存后生效`);
+    toast.success(t("canvasUi.restored", { v }));
   } catch (e) {
-    toast.error((e as Error).message || "恢复失败");
+    toast.error((e as Error).message || t("canvasUi.restoreFailed"));
   }
 }
 
@@ -598,7 +600,7 @@ async function save(): Promise<void> {
 /** 批量投递选中的节点（Ctrl+Enter）；实际逻辑在 composable，这里只管入口 */
 async function generateSelection(): Promise<void> {
   if (selectedIds.value.length === 0) {
-    toast.info("先选中要生成的节点（可 Shift 多选）");
+    toast.info(t("canvasUi.selectNodesFirst"));
     return;
   }
   await editor.generateSelected();
@@ -700,7 +702,7 @@ function beforeUnload(e: BeforeUnloadEvent): void {
 
 /** 从编辑器返回列表：有未保存改动先问一句 */
 async function goBack(): Promise<void> {
-  if (dirty.value && !confirm("有未保存的修改，确定离开？")) return;
+  if (dirty.value && !confirm(t("canvasUi.leaveConfirm"))) return;
   await navigateTo("/canvas");
 }
 
@@ -760,15 +762,15 @@ onUnmounted(() => {
     <!-- ── 加载态 ─────────────────────────────────────── -->
     <div v-if="loading" class="canvas-editor__state">
       <Skeleton :rows="4" />
-      <p class="cv-hint">正在载入画布…</p>
+      <p class="cv-hint">{{ t("canvasUi.loadingCanvas") }}</p>
     </div>
 
     <!-- ── 错误态 ─────────────────────────────────────── -->
     <div v-else-if="loadError" class="canvas-editor__state">
       <p class="canvas-editor__err">{{ loadError }}</p>
       <div class="canvas-editor__state-actions">
-        <Button variant="secondary" @click="editor.load()">重试</Button>
-        <Button variant="text" @click="navigateTo('/canvas')">返回画布列表</Button>
+        <Button variant="secondary" @click="editor.load()">{{ t("canvasUi.retry") }}</Button>
+        <Button variant="text" @click="navigateTo('/canvas')">{{ t("canvasUi.backToList") }}</Button>
       </div>
     </div>
 
@@ -832,7 +834,7 @@ onUnmounted(() => {
         :tutorial-open="guideOpen"
         @select="addNodeAtCenter"
         @toggle-tutorial="guideOpen = !guideOpen"
-        @select-tutorial="toast.info('新手引导内容待接入（依赖 agent 域）')"
+        :select-tutorial="toast.info(t('canvasUi.tutorialPending'))"
       />
 
       <!-- 浮动顶栏 -->
@@ -858,7 +860,7 @@ onUnmounted(() => {
         :active-count="selectedIds.length"
         @update:mode="mode = $event"
         @add="addNodeAtCenter"
-        @layers="toast.info('图层树待接入（当前可在右侧检查器查看节点）')"
+        :layers="toast.info(t('canvasUi.layersPending'))"
         @templates="templateOpen = true"
         @materials="materialOpen = true"
         @downloads="downloadOpen = true"
@@ -912,8 +914,8 @@ onUnmounted(() => {
         class="canvas-editor__inspector"
         :style="{ width: `${inspectorWidth}px` }"
       >
-        <button class="canvas-editor__resize" aria-label="拖拽调整面板宽度" @pointerdown="startResize" />
-        <div class="canvas-editor__dock-tabs" role="tablist" aria-label="右侧面板">
+        <button class="canvas-editor__resize" :aria-label="t('canvasUi.resizeAria')" @pointerdown="startResize" />
+        <div class="canvas-editor__dock-tabs" role="tablist" :aria-label="t('canvasUi.dockAria')">
           <button
             role="tab"
             class="canvas-editor__dock-tab"
@@ -921,7 +923,7 @@ onUnmounted(() => {
             :aria-selected="rightTab === 'inspector'"
             @click="rightTab = 'inspector'"
           >
-            属性
+            {{ t("canvasUi.tabProps") }}
           </button>
           <button
             role="tab"
@@ -956,28 +958,28 @@ onUnmounted(() => {
       <button
         v-else
         class="canvas-editor__inspector-toggle cv-chrome"
-        aria-label="展开检查器"
+        :aria-label="t('canvasUi.expandInspector')"
         @click="inspectorOpen = true"
       >
         <CanvasIcon name="chevron-left" :size="16" />
       </button>
 
       <!-- 历史版本抽屉 -->
-      <div v-if="historyOpen" class="canvas-history" role="dialog" aria-label="历史版本">
+      <div v-if="historyOpen" class="canvas-history" role="dialog" :aria-label="t('canvasUi.historyAria')">
         <div class="canvas-history__panel cv-chrome">
           <header class="canvas-history__head">
-            <span>历史版本</span>
-            <button class="cv-glass-btn" aria-label="关闭" @click="historyOpen = false">
+            <span>{{ t("canvasUi.historyTitle") }}</span>
+            <button class="cv-glass-btn" :aria-label="t('canvasUi.close')" @click="historyOpen = false">
               <CanvasIcon name="close" :size="16" />
             </button>
           </header>
-          <p v-if="historyLoading" class="cv-hint">读取中…</p>
-          <p v-else-if="historyList.length === 0" class="cv-hint">还没有历史版本（每次保存会生成一个快照）</p>
+          <p v-if="historyLoading" class="cv-hint">{{ t("canvasUi.reading") }}</p>
+          <p v-else-if="historyList.length === 0" class="cv-hint">{{ t("canvasUi.historyEmpty") }}</p>
           <ul v-else class="canvas-history__list">
             <li v-for="s in historyList" :key="s.id" class="canvas-history__item">
               <span class="canvas-history__ver">v{{ s.version }}</span>
               <span class="canvas-history__time">{{ new Date(s.created_at).toLocaleString() }}</span>
-              <Button size="sm" variant="secondary" @click="restoreSnapshot(s.version)">载入</Button>
+              <Button size="sm" variant="secondary" @click="restoreSnapshot(s.version)">{{ t("canvasUi.load") }}</Button>
             </li>
           </ul>
         </div>

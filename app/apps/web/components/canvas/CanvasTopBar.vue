@@ -40,7 +40,8 @@ const draft = ref("");
 
 /** 后端可能给空标题（新建画布时 title 就是空串），展示层兜底但**不回写**，  */
 /** 否则用户一进来就被改成"未命名画布"，脏标记无端亮起。 */
-const displayTitle = computed(() => props.title.trim() || "未命名画布");
+const { t } = useI18n();
+const displayTitle = computed(() => props.title.trim() || t("canvasUi.untitled"));
 
 function startEdit(): void {
   draft.value = props.title;
@@ -80,11 +81,11 @@ const busy = computed(() => props.saving);
         <button
           type="button"
           class="topbar-chip__btn topbar-back"
-          aria-label="返回画布列表"
+          :aria-label="t('canvasUi.backToList')"
           @click="emit('back')"
         >
           <CanvasIcon name="back" :size="18" />
-          <span>返回</span>
+          <span>{{ t("canvasUi.back") }}</span>
         </button>
       </div>
 
@@ -94,7 +95,7 @@ const busy = computed(() => props.saving);
           v-if="!editing"
           type="button"
           class="topbar-chip__btn topbar-title__btn"
-          title="点击重命名画布"
+          :title="t('canvasUi.renameTip')"
           @click="startEdit"
         >
           <CanvasIcon name="map" :size="18" />
@@ -107,17 +108,17 @@ const busy = computed(() => props.saving);
           class="topbar-title__input"
           type="text"
           maxlength="60"
-          aria-label="画布标题"
+          :aria-label="t('canvasUi.titleAria')"
           @keydown.enter.prevent="commitEdit"
           @keydown.esc.prevent="cancelEdit"
           @blur="commitEdit"
         />
         <span class="topbar-chip__divider" aria-hidden="true" />
         <span class="topbar-meta">
-          <span v-if="version > 0" class="topbar-version" title="当前版本">v{{ version }}</span>
+          <span v-if="version > 0" class="topbar-version" :title="t('canvasUi.versionTip')">v{{ version }}</span>
           <!-- 未保存标记：参照站没有，但契约给了 dirty 就必须可见，否则用户不知道要不要保存 -->
-          <span v-if="dirty" class="topbar-dirty" title="有未保存的修改" aria-label="有未保存的修改" />
-          <span v-if="saving" class="topbar-saving">保存中…</span>
+          <span v-if="dirty" class="topbar-dirty" :title="t('canvasUi.dirtyTip')" :aria-label="t('canvasUi.dirtyTip')" />
+          <span v-if="saving" class="topbar-saving">{{ t("canvasUi.saving") }}</span>
         </span>
       </div>
     </div>
@@ -127,8 +128,8 @@ const busy = computed(() => props.saving);
         <button
           type="button"
           class="cv-glass-btn topbar-undo cv-tip"
-          data-tip="撤销 Ctrl+Z"
-          aria-label="撤销"
+          :data-tip="t('canvasUi.undoTip')"
+          :aria-label="t('canvasUi.undo')"
           :disabled="!canUndo || busy"
           @click="emit('undo')"
         >
@@ -137,8 +138,8 @@ const busy = computed(() => props.saving);
         <button
           type="button"
           class="cv-glass-btn topbar-redo cv-tip"
-          data-tip="重做 Ctrl+Y"
-          aria-label="重做"
+          :data-tip="t('canvasUi.redoTip')"
+          :aria-label="t('canvasUi.redo')"
           :disabled="!canRedo || busy"
           @click="emit('redo')"
         >
@@ -147,8 +148,8 @@ const busy = computed(() => props.saving);
         <button
           type="button"
           class="cv-glass-btn topbar-reload cv-tip"
-          data-tip="重新载入（丢弃未保存修改）"
-          aria-label="重新载入"
+          :data-tip="t('canvasUi.reloadTip')"
+          :aria-label="t('canvasUi.reload')"
           :disabled="busy"
           @click="emit('reload')"
         >
@@ -157,8 +158,8 @@ const busy = computed(() => props.saving);
         <button
           type="button"
           class="cv-glass-btn topbar-history cv-tip"
-          data-tip="历史版本"
-          aria-label="历史版本"
+          :data-tip="t('canvasUi.historyAria')"
+          :aria-label="t('canvasUi.historyAria')"
           :disabled="busy"
           @click="emit('history')"
         >
@@ -173,7 +174,7 @@ const busy = computed(() => props.saving);
           @click="emit('save')"
         >
           <CanvasIcon name="save" :size="16" />
-          <span>{{ saving ? "保存中…" : "保存" }}</span>
+          <span>{{ saving ? t("canvasUi.saving") : t("canvasUi.save") }}</span>
         </button>
       </div>
     </div>

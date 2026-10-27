@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasNodeType } from "~/types/canvas";
 import { NODE_TYPE_META, TOOLBAR_NODE_TYPES } from "~/types/canvas";
 
@@ -95,7 +97,7 @@ function iconOf(t: CanvasNodeType): string {
       type="button"
       class="tool-add"
       :class="{ 'is-open': menuOpen }"
-      aria-label="添加节点"
+      :aria-label="t('canvasUi.addNode')"
       :aria-expanded="menuOpen ? 'true' : 'false'"
       aria-haspopup="menu"
       @click="toggleMenu"
@@ -111,8 +113,8 @@ function iconOf(t: CanvasNodeType): string {
       type="button"
       class="tool-link cv-glass-btn cv-tip"
       :class="{ 'cv-glass-btn--active': mode === 'connect' }"
-      data-tip="连线模式"
-      aria-label="连线"
+      :data-tip="t('canvasUi.connectTip')"
+      :aria-label="t('canvasUi.connect')"
       :aria-pressed="mode === 'connect' ? 'true' : 'false'"
       @click="toggleConnect"
     >
@@ -123,8 +125,8 @@ function iconOf(t: CanvasNodeType): string {
     <button
       type="button"
       class="tool-layers cv-glass-btn cv-tip"
-      data-tip="图层"
-      aria-label="图层"
+      :data-tip="t('canvasUi.layers')"
+      :aria-label="t('canvasUi.layers')"
       @click="emit('layers')"
     >
       <CanvasIcon name="node-group" :size="20" />
@@ -135,8 +137,8 @@ function iconOf(t: CanvasNodeType): string {
     <button
       type="button"
       class="tool-templates cv-glass-btn cv-tip"
-      data-tip="模板库"
-      aria-label="模板库"
+      :data-tip="t('canvasUi.templates')"
+      :aria-label="t('canvasUi.templates')"
       @click="emit('templates')"
     >
       <CanvasIcon name="copy" :size="20" />
@@ -146,8 +148,8 @@ function iconOf(t: CanvasNodeType): string {
     <button
       type="button"
       class="tool-materials cv-glass-btn cv-tip"
-      data-tip="素材库"
-      aria-label="素材库"
+      :data-tip="t('canvasUi.materials')"
+      :aria-label="t('canvasUi.materials')"
       @click="emit('materials')"
     >
       <CanvasIcon name="node-image" :size="20" />
@@ -157,8 +159,8 @@ function iconOf(t: CanvasNodeType): string {
     <button
       type="button"
       class="tool-downloads cv-glass-btn cv-tip"
-      data-tip="下载记录"
-      aria-label="下载记录"
+      :data-tip="t('canvasUi.downloads')"
+      :aria-label="t('canvasUi.downloads')"
       @click="emit('downloads')"
     >
       <CanvasIcon name="download" :size="20" />
@@ -168,8 +170,8 @@ function iconOf(t: CanvasNodeType): string {
     <button
       type="button"
       class="tool-comments cv-glass-btn cv-tip"
-      data-tip="批注"
-      aria-label="批注"
+      :data-tip="t('canvasUi.comment')"
+      :aria-label="t('canvasUi.comment')"
       @click="emit('comments')"
     >
       <CanvasIcon name="node-text" :size="20" />
@@ -179,8 +181,8 @@ function iconOf(t: CanvasNodeType): string {
          按钮内**只放类型名一个文本节点**，说明文字走 title 属性：
          E2E 用 `button:has-text('视频')` 做子串匹配，DOM 里多一段说明文字
          会让「视频」同时命中「视频合成」等相邻项，选择器立刻歧义。 -->
-    <div v-if="menuOpen" class="tool-menu" role="menu" aria-label="添加节点类型">
-      <p class="tool-menu__head">添加节点</p>
+    <div v-if="menuOpen" class="tool-menu" role="menu" :aria-label="t('canvasUi.menuAria')">
+      <p class="tool-menu__head">{{ t("canvasUi.menuHead") }}</p>
       <button
         v-for="t in types"
         :key="t"

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasNodeDto } from "~/types/canvas";
 import { NODE_TYPE_META } from "~/types/canvas";
 
@@ -187,7 +189,7 @@ function onClick(ev: MouseEvent): void {
 
 <template>
   <div class="canvas-minimap" :class="{ 'is-empty': isEmpty }">
-    <div class="canvas-minimap__panel cv-chrome" role="img" aria-label="画布小地图" @click="onClick">
+    <div class="canvas-minimap__panel cv-chrome" role="img" :aria-label="t('canvasUi.minimapAria')" @click="onClick">
       <svg
         class="canvas-minimap__svg"
         :viewBox="`0 0 ${MAP_W} ${MAP_H}`"
@@ -225,7 +227,7 @@ function onClick(ev: MouseEvent): void {
       </svg>
 
       <!-- 空态：没有节点时小地图没有信息量，给一句话比给空白更诚实 -->
-      <p v-if="isEmpty" class="canvas-minimap__empty">暂无节点</p>
+      <p v-if="isEmpty" class="canvas-minimap__empty">{{ t("canvasUi.minimapEmpty") }}</p>
     </div>
   </div>
 </template>

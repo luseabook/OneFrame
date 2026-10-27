@@ -123,6 +123,29 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.2 · 多语言第 32 批：canvas 模块第一批 · 2026-10-28）
+
+`canvasUi`（**71 key** × 5 语言）——无限画布模块的第一批（模块共 **14 个文件、约 500 处**文案，记"进行中"）：
+
+| 文件 | 迁移内容 |
+|---|---|
+| [canvas/[id].vue](app/apps/web/pages/canvas/[id].vue) | 载入与错误态（正在载入/重试/返回画布列表）、10 条 toast（连线起点/已连线/连线已存在/整理画布/已创建 N 节点/重命名/版本冲突/重命名失败/历史读取失败/恢复）、恢复与离开确认、历史版本抽屉（标题/读取中/空态/载入）、dock 页签与三处 aria、两个"待接入"诚实提示（新手引导、图层树） |
+| [CanvasTopBar.vue](app/apps/web/components/canvas/CanvasTopBar.vue) | `未命名画布` 回退、返回/返回画布列表、重命名提示、画布标题 aria、版本与未保存标记、撤销/重做/重新载入/历史四个 data-tip + aria、保存中/保存 |
+| [CanvasToolbar.vue](app/apps/web/components/canvas/CanvasToolbar.vue) | 添加节点、连线（模式提示）、图层、模板库、素材库、下载记录、批注（全部 data-tip + aria）、菜单 aria 与标题 |
+| [CanvasEmptyGuide.vue](app/apps/web/components/canvas/CanvasEmptyGuide.vue) | 8 个节点类型标签（文本/表格/图像/视频/音频/视频合成/剧本拆资产/剧本拆分镜）、3 条教程（添加/连接/快捷键）、引导标题与副标题、工具栏 aria、新手引导 chip |
+| [CanvasMinimap.vue](app/apps/web/components/canvas/CanvasMinimap.vue) | 小地图 aria、`暂无节点` 空态 |
+
+### 两处工程细节
+
+1. **第 5 次撞到变量遮蔽**：`onRename` 里原有 `const t = next.trim()`，加 `useI18n()` 后 `t(...)` 直接 `TS2349`；
+   已改名 `nextTitle` 并在注释里记"本项目第 5 次踩同类"。
+2. **E2E fixture 契约**：创建画布返回 `{ id, version }`（不是 `{ canvas: {...} }`）；而且真实画布用例受
+   `X-Space-Id` 空间上下文影响（前端会带 localStorage 里的团队空间）→ 改为断言**不存在的画布**的稳定错误态，
+   这恰好覆盖本轮新迁移的错误态文案 + `document.title`。
+
+**验证**：`i18n-check.cjs` 全绿（2373 key / 40 页 + 9 组件 / canvas 进行中）；`e2e-i18n-pages.cjs` **134/134**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v6.1 · 多语言第 31 批：`projects/[id]` 收尾 → 该页完成 · 2026-10-28）
 
 页面覆盖 **39 → 40/64**；**用户面 40/45 = 89%**；全站 **97.6%** / 首发 **97.6%**。
