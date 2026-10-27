@@ -7,10 +7,17 @@ import { ScriptModule } from "../script/script.module";
 import { TasksModule } from "../tasks/tasks.module";
 import { AgentController } from "./agent.controller";
 import { AgentChatService } from "./agent-chat.service";
+import { AgentConversationsController } from "./agent-conversations.controller";
 import { AgentEventsService } from "./agent-events.service";
 import { AgentMessagesService } from "./agent-messages.service";
+import { AgentRecommendController } from "./agent-recommend.controller";
+import { AgentRecommendService } from "./agent-recommend.service";
 import { AgentReplyService } from "./agent-reply.service";
 import { AgentSessionsService } from "./agent-sessions.service";
+import { AgentSkillsController } from "./agent-skills.controller";
+import { AgentSkillsService } from "./agent-skills.service";
+import { AgentSttController, AgentSttRelayController } from "./agent-stt.controller";
+import { AgentSttService } from "./agent-stt.service";
 import { AgentStreamService } from "./agent-stream.service";
 import { AgentTaskService } from "./agent-task.service";
 import { CanvasChatController } from "./canvas-chat.controller";
@@ -26,10 +33,24 @@ import { CanvasChatController } from "./canvas-chat.controller";
  * - LLM → `ScriptModule` 导出的 `LlmService`（全站单一 LLM 入口，mock/real 同一开关）。
  *
  * `RedisModule`/`ModerationModule` 是 @Global，无需在此导入。
+ *
+ * 第 4 批新增（`/agent` 入口收口）：
+ * - `AgentSkillsController`：Skill 卡市场 8 端点 + `/details` 别名（竞品 `routes.txt:378-385`）；
+ * - `AgentSttController` / `AgentSttRelayController`：`stt-token` + 转写中继（`routes.txt:126`）；
+ * - `AgentRecommendController`：推荐卡（`routes.txt:378`）；
+ * - `AgentConversationsController`：独立创作会话（scope=1）的 CRUD / 消息 / SSE / 已读。
  */
 @Module({
   imports: [CreditsModule, GenerationsModule, ModelsModule, TasksModule, CanvasModule, ScriptModule],
-  controllers: [AgentController, CanvasChatController],
+  controllers: [
+    AgentController,
+    CanvasChatController,
+    AgentConversationsController,
+    AgentSkillsController,
+    AgentSttController,
+    AgentSttRelayController,
+    AgentRecommendController,
+  ],
   providers: [
     AgentEventsService,
     AgentSessionsService,
@@ -38,6 +59,9 @@ import { CanvasChatController } from "./canvas-chat.controller";
     AgentReplyService,
     AgentChatService,
     AgentTaskService,
+    AgentSkillsService,
+    AgentSttService,
+    AgentRecommendService,
   ],
   exports: [AgentSessionsService, AgentMessagesService, AgentEventsService],
 })

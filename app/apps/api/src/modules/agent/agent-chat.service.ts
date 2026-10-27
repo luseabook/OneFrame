@@ -22,6 +22,12 @@ export interface SendMessageInput {
   decision?: { interrupt_id: string; decision: "approve" | "reject"; edits?: unknown };
   /** 显式要求"等本轮结束再返回"；默认排队语义（裁决 D5） */
   wait?: boolean;
+  /**
+   * 额外写进用户消息 `payload` 的字段（不参与 LLM 提示词）。
+   * 用在独立创作页：把"这条发言用了哪几张 Skill 卡"留痕，
+   * 后续可按消息反查产物来源（与画布 node-binding 同一思路）。
+   */
+  extraPayload?: Record<string, unknown>;
 }
 
 @Injectable()
@@ -89,6 +95,7 @@ export class AgentChatService {
       payload: {
         ...(input.referenceNodeIds?.length ? { reference_node_ids: input.referenceNodeIds } : {}),
         ...(input.decision ? { decision: input.decision } : {}),
+        ...(input.extraPayload ?? {}),
       },
       createdBy: BigInt(auth.userId),
     });

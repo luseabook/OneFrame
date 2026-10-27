@@ -155,19 +155,22 @@ describe("maintenance", () => {
   });
 
   it("auditLedger detects a deliberate mismatch (count increases by 1)", async () => {
-    const before = await auditLedger(db, silent);
+    // 作用域限定到本用例刚造的 space：全局计数会被同库的并发写入与历史残留干扰，
+    // 导致"恰好 +1"的断言随机失败（实际就发生过 122 vs 123）。
+    const before = await auditLedger(db, silent, { spaceId });
+    expect(before).toBe(0);
     const [accountBefore] = await db.select().from(creditAccounts).where(eq(creditAccounts.spaceId, spaceId));
     await db
       .update(creditAccounts)
       .set({ balance: accountBefore.balance + 12345 })
       .where(eq(creditAccounts.spaceId, spaceId));
 
-    const after = await auditLedger(db, silent);
+    const after = await auditLedger(db, silent, { spaceId });
     expect(after).toBe(before + 1);
 
     // 还原
     await db.update(creditAccounts).set({ balance: accountBefore.balance }).where(eq(creditAccounts.spaceId, spaceId));
-    expect(await auditLedger(db, silent)).toBe(before);
+    expect(await auditLedger(db, silent, { spaceId })).toBe(before);
   });
 
   it("purgeOldData clears 90-day-old task results", async () => {

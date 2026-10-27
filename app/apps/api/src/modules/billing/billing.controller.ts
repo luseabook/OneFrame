@@ -104,6 +104,71 @@ export class BillingController {
     return this.billing.getOrder(req.auth?.spaceId ?? "", id);
   }
 
+  // ── 订阅制（竞品 VIP 13 档 + 动态价格；第 23 项计费补齐）────────────────
+
+  /**
+   * 订阅档位（公开）：定价页/升级弹窗用。
+   * 公开的理由与 `/billing/skus` 一致——未登录用户也要能看到价格档位。
+   */
+  @Public()
+  @Get("billing/plans")
+  async plans() {
+    return { plans: await this.billing.listPlans() };
+  }
+
+  /**
+   * 动态价格（公开，对照竞品 `sku-price`）。
+   * 与 `listPlans` 的分工：这个按单个 sku 返回"牌价/活动价/折扣来源"，
+   * 前端下单前用它展示"原价划掉 + 活动价"，避免把促销逻辑复制到前端。
+   */
+  @Public()
+  @Get("billing/sku-price")
+  async skuPrice(@Query("sku") sku?: string) {
+    if (!sku) throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
+    return this.billing.skuPrice(sku);
+  }
+
+  /** 当前订阅状态（登录态；无订阅返回 null，不是 404 —— 前端按 null 展示"未订阅"） */
+  @Get("billing/subscription")
+  async subscription(@Req() req: AuthedRequest) {
+    return this.billing.currentSubscription(req.auth?.spaceId ?? "");
+  }
+
+  /** 订阅下单：复用普通下单链路（VIP sku），支付成功由 markPaid 激活订阅 */
+  @Post("billing/subscribe")
+  async subscribe(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = (body ?? {}) as { sku?: unknown; channel?: unknown; mode?: unknown };
+    if (!input.sku || typeof input.sku !== "string") {
+      throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
+    }
+    const plans = await this.billing.listPlans();
+    if (!plans.some((plan) => plan.sku === input.sku)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "sku is not a subscription plan", { field: "sku" });
+    }
+    const channel = (input.channel ?? (env.PAYMENT_LIVE ? "" : "mock")) as string;
+    if (!CHANNELS.includes(channel as (typeof CHANNELS)[number])) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "channel must be one of mock|wechat|alipay", {
+        field: "channel",
+      });
+    }
+    const mode = typeof input.mode === "string" ? input.mode : undefined;
+    if (mode && !PAYMENT_MODES.includes(mode as PaymentMode)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "mode is invalid", { field: "mode", allowed: PAYMENT_MODES });
+    }
+    return this.billing.createOrder(req.auth?.spaceId ?? "", req.auth?.userId ?? "", {
+      sku: input.sku,
+      channel: channel as "wechat" | "alipay" | "mock",
+      mode: mode as PaymentMode | undefined,
+      clientIp: clientIp(req),
+    });
+  }
+
+  /** 取消订阅（关自动续费；到期自然失效，不立即剥夺已付费权益） */
+  @Post("billing/subscription/cancel")
+  async cancelSubscription(@Req() req: AuthedRequest) {
+    return this.billing.cancelSubscription(req.auth?.spaceId ?? "");
+  }
+
   /** 用户订单历史 */
   @Get("billing/orders")
   async list(@Req() req: AuthedRequest, @Query("page") page?: string, @Query("page_size") pageSize?: string) {

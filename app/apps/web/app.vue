@@ -15,6 +15,15 @@ const workspacePaths = [
   "/credits",
   "/settings",
   "/pricing",
+  // 2026-10-27：以下四页都是「登录后的工作台类页面」，必须走 app 壳。
+  // 之前它们不在这份白名单里 → 落在 default 营销壳（顶栏「定价/进入工作台」+ 页脚），
+  // 功能是全通的，只有壳不对（/team 自 v2.6 起就是这个问题，本轮 film 验收时发现）。
+  // 约定：新增整页工作台时，**页面文件 + nuxt.config routeRules + 本白名单** 三处一起加，
+  // 少一处就会出现「能点开但套错壳」或「直接打开白屏」。
+  "/team",
+  "/novel",
+  "/agent",
+  "/film",
 ];
 const adminPaths = ["/admin"];
 const adminLoginPaths = ["/admin/login"];
@@ -22,7 +31,9 @@ const toolPaths = ["/create"];
 // 画布族走裸壳：/canvas 列表与 /canvas/:id 编辑器都是全屏界面。
 // 不能并进 workspacePaths——那会套上 app 壳的 240px 侧栏 + 64px 顶栏，
 // 编辑器 100dvh 的世界坐标与框选范围会被挤变形（参照站 /canvas 同样无侧栏）。
-const blankPaths = ["/canvas"];
+// ReelFlow 剪辑台同理：三区布局（左栏 290 + 播放器 + 底部时间线 150）是固定视口高，
+// 套上 240 侧栏 + 64 顶栏后播放区只剩不到 500px 宽，与竞品实测（1424 视口铺满）差太远。
+const blankPaths = ["/canvas", "/reelflow"];
 // 落地页自带独立导航与页脚（含法务入口与 ICP），不再套公共壳层，避免出现两层顶栏/两层页脚
 const barePaths = ["/"];
 

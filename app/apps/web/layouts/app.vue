@@ -9,10 +9,15 @@ type NavItem = { key: string; to: string; label: string; icon: string; disabled?
 const mainNav: NavItem[] = [
   { key: "home", to: "/home", label: "首页", icon: "home" },
   { key: "create", to: "/projects?create=1", label: "剧本创作", icon: "script" },
-  { key: "agent", to: "", label: "创作 Agent", icon: "wand", disabled: true },
+  // 2026-10-27：小说改编链（第 2 批）落地，入口开放
+  { key: "novel", to: "/novel", label: "小说改编", icon: "script" },
+  // 2026-10-27：创作 Agent（第 4 批）落地（对话页 + Skill 卡市场），置灰改为可进入
+  { key: "agent", to: "/agent", label: "创作 Agent", icon: "wand" },
   // 2026-10-26：canvas 域后端已落地（27 路由 / 11 表），入口开放
   { key: "canvas", to: "/canvas", label: "无限画布", icon: "folder" },
   { key: "projects", to: "/projects", label: "全部项目", icon: "folder" },
+  // 2026-10-27：ReelFlow 剪辑台（出片之后的时间线编辑；对齐竞品 /reelflow/list）
+  { key: "reelflow", to: "/reelflow/list", label: "剪辑台", icon: "film" },
   { key: "tools", to: "/tools", label: "工具箱", icon: "wand" },
 ];
 const teamNav: NavItem[] = [
@@ -95,6 +100,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <path d="m5 19 9.5-9.5M16.5 4.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z" />
                 <path d="M12.8 6.8 5 14.6a2 2 0 0 0 0 2.8l1.6 1.6a2 2 0 0 0 2.8 0l7.8-7.8" />
               </template>
+              <template v-else-if="item.icon === 'film'">
+                <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                <path d="M7.5 5v14M16.5 5v14M3 9.5h4.5M3 14.5h4.5M16.5 9.5H21M16.5 14.5H21" />
+              </template>
               <template v-else>
                 <circle cx="12" cy="12" r="8.5" />
                 <path d="M12 7.5V12l3 2" />
@@ -130,7 +139,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       </nav>
 
       <div class="foot">
-        <span class="item disabled" title="影视版（申请内测）">
+        <!-- 2026-10-27：影视版（第 5 批）页面已落地；准入仍走 spaces.film_enabled
+             （竞品是商务开通制），未开通时页面内提示「联系商务开通」，入口不置灰。 -->
+        <NuxtLink to="/film" class="item" title="影视版（内测）">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
@@ -138,9 +149,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
             </svg>
           </span>
           <span v-if="!collapsed" class="foot-label">影视版</span>
-          <span v-if="!collapsed" class="tag-beta">申请内测</span>
-        </span>
-        <span class="item disabled">
+          <span v-if="!collapsed" class="tag-beta">内测</span>
+        </NuxtLink>
+        <span class="item disabled" title="CLI 已随包提供（apps/cli，196 条命令）；MCP 待取证，故 Web 侧无入口">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="4.5" width="18" height="15" rx="2.5" />

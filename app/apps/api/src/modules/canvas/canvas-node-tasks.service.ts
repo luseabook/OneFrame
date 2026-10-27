@@ -67,7 +67,20 @@ const CANVAS_MODE_MAP: Record<string, { mode: string; subMode?: string }> = {
   de_subtitle_auto: { mode: "video_edit", subMode: "de_subtitle_auto" },
   de_subtitle_region: { mode: "video_edit", subMode: "de_subtitle_region" },
   frame_capture: { mode: "video_edit", subMode: "frame_capture" },
-  // video_upscale 明确不在 MVP（api-spec §5「走独立能力 Ph2」）→ 不映射，直接拒
+  /**
+   * 视频超清（第 3 批补）：节点 mode `video_upscale` → `tasks.mode=video_upscale`。
+   *
+   * 为什么这里直接映射到真实 mode，而不像 de_subtitle_* 那样落 `video_edit + sub_mode`：
+   * 超清有**自己的价目维度**（1080p / 2K / 4K 三档，见 tool-catalog.ts），
+   * 塞进 video_edit 会让 4K 超清按普通视频编辑计价；而且它由独立适配器（`upscale`）
+   * 承接，产物仍是视频（同分辨率档位提升），不存在"子模式"这层语义。
+   *
+   * 能投递的前提是节点的模型选到声明了 `video_upscale` 的工具模型
+   * （`toolbox-video-upscale`，由 `tool-catalog.ts` 幂等落库）；选普通生成模型会被
+   * `generate()` 的目录校验挡住并提示 "model X does not support video_upscale"，
+   * 不会静默跑成一次普通生成。产物形态见 `_acceptance/_team/report-tools.md`。
+   */
+  video_upscale: { mode: "video_upscale" },
 };
 
 /** 每种节点类型允许的 mode 集合（防止"文本节点传 text2video"这类错配） */

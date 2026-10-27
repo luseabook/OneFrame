@@ -63,6 +63,18 @@ export default defineNuxtConfig({
     // 关掉 SSR 是唯一正确解，不需要给它们做一套登录态 SSR 首帧。
     "/create": { ssr: false },
     "/create/**": { ssr: false },
+    // ReelFlow 剪辑台（列表 + 编辑器）同一类"登录后才可用"的纯客户端页面：
+    // 时间线/分镜数据全部来自登录态接口，服务端首帧必然与客户端不一致。
+    "/reelflow": { ssr: false },
+    "/reelflow/**": { ssr: false },
+    // 新增三个"登录后才可用"的整页应用（第 2/4/5 批）：小说改编链、创作 Agent、影视版。
+    // 与 /canvas、/reelflow 同类——首帧全部依赖登录态与接口数据，服务端渲染只会产
+    // 生"服务端未登录 / 客户端已登录"的 hydration mismatch。按既有约定三处齐关。
+    "/novel": { ssr: false },
+    "/novel/**": { ssr: false },
+    "/agent": { ssr: false },
+    "/film": { ssr: false },
+    "/film/**": { ssr: false },
   },
   app: {
     head: {

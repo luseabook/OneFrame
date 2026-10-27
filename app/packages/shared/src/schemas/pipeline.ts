@@ -133,6 +133,15 @@ export const assetUploadSchema = z.object({
     "video/mp4",
     "video/quicktime",
     "video/webm",
+    /**
+     * 音频（第 3 批工具箱）：对口型的驱动人声、音色修改的源音轨、自动配乐的参考音轨
+     * 都必须先能上传成 asset。此前白名单只有图片/视频，音频工具"能点但永远上传失败"，
+     * 提交前的 `input.reference_uris` 也就永远凑不齐。
+     * 上限与视频同档（32MB base64），可以覆盖整集台词音频。
+     */
+    "audio/mpeg",
+    "audio/wav",
+    "audio/mp4",
   ]),
   data_base64: z.string().min(16).max(45_000_000),
 });

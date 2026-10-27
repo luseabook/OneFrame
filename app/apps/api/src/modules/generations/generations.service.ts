@@ -1,15 +1,31 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { taskEvents, tasks, freezeCredits, unfreezeCredits } from "@app/db";
-import { AppError, ErrorCode, newId, type GenerationRequest } from "@app/shared";
+import { AppError, ErrorCode, generationRequestSchema, newId, type GenerationRequest } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
 import { RedisService } from "../../redis/redis.service";
 import { CreditsService } from "../credits/credits.service";
 import { ModerationService } from "../moderation/moderation.service";
 import type { AuthContext } from "../../common/auth.types";
+import {
+  assertToolInput,
+  ensureToolCatalog,
+  isToolMode,
+  normalizeToolOptions,
+  ToolInputError,
+  toolForMode,
+} from "./tool-catalog";
 
 const IDEM_TTL_S = 300;
+
+/**
+ * 工具箱请求体：公共 `GenerationRequest` + 工具专有参数（见 generations.controller 的 toolOptionsSchema）。
+ * 用交叉类型而不是新接口，是为了让 `credits.price()` / `tasks.insert()` 对它的使用保持零改动。
+ */
+export type GeneratableRequest = GenerationRequest & {
+  options: GenerationRequest["options"] & Record<string, unknown>;
+};
 
 export interface CreateTaskResult {
   task_id: string;
@@ -28,8 +44,35 @@ export class GenerationsService {
     @Inject(ModerationService) private readonly moderation: ModerationService,
   ) {}
 
-  async create(auth: AuthContext, body: GenerationRequest, idempotencyKey: string): Promise<CreateTaskResult> {
+  async create(auth: AuthContext, body: GeneratableRequest, idempotencyKey: string): Promise<CreateTaskResult> {
     this.moderation.assertPrompt(body.input.prompt);
+
+    /**
+     * 工具箱 mode 的两道前置（第 3 批）。
+     *
+     * 1. **目录惰性 ensure**：工具能力是「一 model 一 mode」的独立目录行，
+     *    线上库（已有 46 个模型）不会因为发一次版就重跑 seed，所以这里补一次（幂等）。
+     * 2. **输入前置校验 + 档位归一**：缺素材/缺必填参数必须在这里拦住，
+     *    而不是等 worker 里的适配器 validate 抛错——那时积分已冻结、任务已落库，
+     *    用户要等一次"失败-退冻"才知道少传了东西（体验与对账都更差）。
+     */
+    let request: GeneratableRequest = body;
+    if (isToolMode(body.mode)) {
+      const tool = toolForMode(body.mode);
+      if (tool) {
+        await ensureToolCatalog();
+        try {
+          assertToolInput(tool, body.input, (body.options ?? {}) as Record<string, unknown>);
+        } catch (error) {
+          if (error instanceof ToolInputError) {
+            throw new AppError(ErrorCode.INVALID_PARAM, error.message, error.details);
+          }
+          throw error;
+        }
+        request = normalizeToolOptions(tool, body);
+      }
+    }
+
     const idemKey = `idem:gen:${auth.spaceId}:${idempotencyKey}`;
     const acquired = await this.redis.setNx(idemKey, "pending", IDEM_TTL_S);
     if (!acquired) {
@@ -39,12 +82,23 @@ export class GenerationsService {
     }
 
     try {
-      const priced = await this.credits.price(body, auth.spaceId);
+      const priced = await this.credits.price(request, auth.spaceId);
       if (!priced.sufficient) {
         throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
       }
-      if (body.quote_id) {
-        const quote = await this.credits.readQuote(body.quote_id, auth.spaceId, body);
+      if (request.quote_id) {
+        /**
+         * 报价指纹按**公共契约字段**算，不按工具扩展字段算。
+         *
+         * `POST /credits/quote` 用的是共享 `generationRequestSchema`（它会剥掉 voice/effect/
+         * region 这类工具专有键），而 `/generations` 用超集 schema。若把带工具参数的 body
+         * 直接丢给 `readQuote()`，同一笔请求的指纹必然对不上 → 每次提交都 745702。
+         * 用 base schema 再 parse 一遍还原"报价时看到的那份 body"，指纹即可对齐；
+         * 这不会削弱保护：影响价格的全在公共字段里（mode/model/scene/input/options 的
+         * ratio/resolution/duration/count），工具专有参数不参与计价。
+         */
+        const quoteShaped = generationRequestSchema.parse(request);
+        const quote = await this.credits.readQuote(request.quote_id, auth.spaceId, quoteShaped);
         if (quote.credits !== priced.credits) {
           throw new AppError(ErrorCode.QUOTE_MISMATCH, "price changed, re-quote", { field: "quote_id" });
         }
@@ -57,11 +111,11 @@ export class GenerationsService {
           spaceId: BigInt(auth.spaceId),
           userId: BigInt(auth.userId),
           capability: priced.model.capability,
-          mode: body.mode,
-          scene: body.scene ?? null,
+          mode: request.mode,
+          scene: request.scene ?? null,
           modelId: priced.model.id,
-          input: body.input,
-          options: body.options,
+          input: request.input,
+          options: request.options,
           status: 1,
           progress: 0,
           creditsFrozen: priced.credits,
@@ -71,13 +125,13 @@ export class GenerationsService {
           spaceId: BigInt(auth.spaceId),
           cost: priced.credits,
           taskId,
-          memo: `freeze for ${body.mode}`,
+          memo: `freeze for ${request.mode}`,
         });
         await tx.insert(taskEvents).values({
           id: newId(),
           taskId,
           type: "task.created",
-          payload: { mode: body.mode, model: body.model, scene: body.scene ?? null },
+          payload: { mode: request.mode, model: request.model, scene: request.scene ?? null },
         });
       });
 

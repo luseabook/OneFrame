@@ -350,11 +350,23 @@ export const idempotencyRecords = pgTable(
     requestHash: text("request_hash").notNull(),
     responseBody: jsonb("response_body"),
     expireAt: timestamp("expire_at", { withTimezone: true }).notNull(), // 创建后 5min
+    /**
+     * 三态账本（对照竞品 CLI `ledger` 的 applied/pending/in_doubt）：
+     *   1 = 处理中（已在执行，重放请求应稍后重试而不是再执行一次）
+     *   2 = 已完成（response_body / error_body 可原样重放）
+     *   3 = 状态不明（进程崩溃/超时导致无法判定；**自动重放危险**，需 `x-force-replay` 人工确认）
+     * 没有这三态时，"超时没拿到响应"与"请求还没开始"无法区分，重放就会变成重复扣费。
+     */
+    status: smallint("status").notNull().default(1),
+    /** 确定性业务失败的重放体（AppError 是确定结果，重放应返回同样的错误而不是再执行） */
+    errorBody: jsonb("error_body"),
+    updatedAt: updatedAt(),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("uq_idempotency_key_space").on(t.key, t.spaceId),
     index("idx_idem_expire").on(t.expireAt),
+    index("idx_idem_status").on(t.status, t.expireAt),
   ],
 );
 
@@ -500,6 +512,16 @@ export const storyboardAssets = pgTable(
     projectAssetId: bigint("project_asset_id", { mode: "bigint" })
       .notNull()
       .references(() => projectAssets.id),
+    /**
+     * 绑定顺序（0 = 未显式排序）。
+     *
+     * 为什么需要显式列：`PUT .../storyboards/:sid/assets` 的契约是**保留调用方传入顺序**
+     * （前端按"角色/场景/道具"顺序渲染，并由 `images[]` 注入到提示词，顺序会影响
+     * `[[@img1]]` 的编号）。原实现靠"删除后按数组顺序 insert"隐式表达顺序，
+     * 而 PostgreSQL 无 `ORDER BY` 的 SELECT 不保证堆序（DELETE 后的空槽会被复用），
+     * 实测出现过同一份数据两次读取顺序不同 —— 属于真缺陷，不是测试洁癖。
+     */
+    sort: integer("sort").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.storyboardId, t.projectAssetId] })],
 );
@@ -1248,4 +1270,1418 @@ export const agentMessageBindings = pgTable(
     uniqueIndex("uq_agent_msg_binding").on(t.messageId, t.nodeId),
     index("idx_agent_bindings_node").on(t.nodeId),
   ],
+);
+
+// ── 小说改编链（第 2 批地基；对照竞品 df/novel 域，NT_ID = novels.id）────────
+// 竞品 `df/novel` 共 86 端点，链序固定为：
+//   分章解析 split → 内容分析（世界观 + 角色卡）→ 章节大纲 → 分集大纲
+//   → 分集剧本 → 剧本编辑 Agent（会话式逐集 diff）→ 版本 finalize（status=16）
+// 多租户隔离口径与 film 域**故意不同**：novel 是唯一聚合根，只有 novels 带 space_id，
+// 子表一律通过 novel_id 追溯空间——因为 novel 下的章节/大纲/剧本不存在跨 space 的合法组合，
+// 每张子表再冗余一份 space_id 只会多出一致性风险（写错的 space_id 就是越权面）。
+// film 域相反：它的行/单元格/审核会被"按空间"直接列表查询，故冗余 space_id（见下方 film 段）。
+
+/** 剧本项目本体（对照竞品 NT_ID；`df/novel` 的聚合根） */
+export const novels = pgTable(
+  "novels",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    title: text("title").notNull().default("未命名剧本"),
+    /**
+     * 来源类型（对照竞品 NT.source_type）：
+     * 1 小说改编 / 2 一句话想法 / 3 导入剧本 / 4 创意裂变 / 5 海外改编。
+     * ⚠️ 与 `script_projects.source_type`（1..4，无 overseas）**不是同一套枚举**，勿混用：
+     * 那张表是"制片工坊的项目"，这张表是"剧本工厂的本子"，竞品的 5 值域只在这个域成立。
+     */
+    sourceType: smallint("source_type").notNull().default(1),
+    /**
+     * 1 草稿 / **16 已定稿**（对照竞品 NT.status）。
+     * 16 是竞品原值，不要"归一成 2"：§3.3 衔接契约以 status=16 作为"可被拆集引用"的判据，
+     * 归一化会让联调两端对不上（我方 API 出参同样原样透出 16）。
+     */
+    status: smallint("status").notNull().default(1),
+    /**
+     * 空间分区码（对照竞品 sp_type；`reelmate-feature-map.md:168`：建成不可改，决定模型目录分区）。
+     * 取值域竞品未取证（只观测到 `DC(sp_type)` 的展示格式化），故只落库、不参与任何判权或筛选；
+     * 取证后补枚举常量，**不回填历史行**（缺省 0 = 未设置）。
+     */
+    spType: smallint("sp_type").notNull().default(0),
+    /** 画面比例，建项时定；与 `script_projects.ratio` 同口径（9:16 / 16:9） */
+    ratio: text("ratio").notNull().default("9:16"),
+    /** 预计集数（分集大纲生成后回写，便于列表页展示进度分母） */
+    episodeCount: integer("episode_count").notNull().default(0),
+    /**
+     * 域内自由字段：{ genre, style, theme, adaptation, cover_uri, overseas:{lang,region}, ... }
+     * 竞品 NT 的 extras 是开放结构，故用 jsonb 承接；**服务端不解析语义**（只做长度上限），
+     * 避免我方 schema 变成对方私有字段的第二份真相。
+     */
+    meta: jsonb("meta").notNull().default(sql`'{}'::jsonb`),
+    /** 归档时间（软标记；归档后不出现在默认列表，但版本/会话仍可回溯） */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_novels_space").on(t.spaceId, t.status, t.createdAt.desc())],
+);
+
+/** 分章解析结果（对照竞品 `split` 子链；`POST /projects/parse-script` 的落点） */
+export const novelChapters = pgTable(
+  "novel_chapters",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    /** 章序号，从 1 起；重新解析时整体替换（应用层 DELETE + 批量 INSERT） */
+    chapterNo: integer("chapter_no").notNull(),
+    title: text("title").notNull().default(""),
+    content: text("content").notNull().default(""),
+    /** 字数（解析时按去空白口径统计；列表页展示用，不参与计费） */
+    wordCount: integer("word_count").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_novel_chapters_no").on(t.novelId, t.chapterNo),
+    index("idx_novel_chapters_novel").on(t.novelId, t.chapterNo),
+  ],
+);
+
+/** 世界观（对照竞品 `content-analysis` 的世界观产出；每本小说一份，重新分析走覆盖写） */
+export const novelWorldviews = pgTable(
+  "novel_worldviews",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    /** 世界观总述（LLM 输出版本，纯文本；结构化部分进 settings） */
+    summary: text("summary").notNull().default(""),
+    /**
+     * 结构化世界观（LLM 输出 schema 见 `shared/schemas/novel.ts` 的 worldviewSchema）：
+     * { era, geography, factions[], rules[], relations:[{from,to,kind,note}] }
+     * 人物关系/地理/时代三类齐备才允许进入下一步大纲生成（应用层校验）。
+     */
+    settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 每本小说只有一条世界观；重新分析 = 覆盖（upsert），不堆历史行（历史靠 novel_script_versions 留痕）
+    uniqueIndex("uq_novel_worldviews_novel").on(t.novelId),
+  ],
+);
+
+/** 角色卡（对照竞品 `novel_character_cards` / ncc_id；资产一致性的上游锚点） */
+export const novelCharacters = pgTable(
+  "novel_characters",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    name: text("name").notNull(),
+    /** 1 主角 / 2 配角 / 3 反派（对照竞品的角色类型；仅分层展示与提示词排序，不作判权） */
+    roleType: smallint("role_type").notNull().default(2),
+    description: text("description").notNull().default(""),
+    /** 外貌（生图提示词的稳定片段） */
+    appearance: text("appearance").notNull().default(""),
+    /** 性格（剧本创作提示词的稳定片段） */
+    personality: text("personality").notNull().default(""),
+    /** 生成用提示词；为空时按 appearance > description > name 兜底（与 project_assets 同口径） */
+    prompt: text("prompt").notNull().default(""),
+    /** 是否核心角色（竞品 `core_character` 子链单独生成/编辑的就是这批） */
+    isCore: boolean("is_core").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // 不建 name 唯一索引：LLM 重复生成同名卡时应当可落库再由用户合并，
+  // 唯一约束会把"生成成功但保存失败"变成不可恢复的 500。
+  (t) => [index("idx_novel_characters_novel").on(t.novelId, t.isCore, t.roleType)],
+);
+
+/** 章节大纲（对照竞品 `chapter_outline` 子链 / nco_id） */
+export const novelChapterOutlines = pgTable(
+  "novel_chapter_outlines",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    chapterNo: integer("chapter_no").notNull(),
+    title: text("title").notNull().default(""),
+    synopsis: text("synopsis").notNull().default(""),
+    sort: integer("sort").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_novel_chapter_outlines_no").on(t.novelId, t.chapterNo)],
+);
+
+/** 分集大纲（对照竞品 `episode_outline` 子链 / neo_id；人工可编辑） */
+export const novelEpisodeOutlines = pgTable(
+  "novel_episode_outlines",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    episodeNo: integer("episode_no").notNull(),
+    title: text("title").notNull().default(""),
+    synopsis: text("synopsis").notNull().default(""),
+    sort: integer("sort").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_novel_episode_outlines_no").on(t.novelId, t.episodeNo)],
+);
+
+/**
+ * 分集剧本（对照竞品 `script-generate` 产出；编辑 Agent 的 apply 目标）。
+ *
+ * ⚠️ 与 `episodes` 表**不是同一物**：`episodes` 是制片工坊的剧集（有分镜/出片），
+ * 这张表是剧本工厂里的"文字稿"。衔接点只有一个：`novels.status=16` 定稿后，
+ * 由 `POST /projects/:id/episodes/split` 把这里的内容搬进 `episodes`（§3.3 契约）。
+ */
+export const novelEpisodes = pgTable(
+  "novel_episodes",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    episodeNo: integer("episode_no").notNull(),
+    title: text("title").notNull().default(""),
+    scriptText: text("script_text").notNull().default(""),
+    /** 1 草稿 / 2 已确认（人工点过"这集可以"；apply 后置 2，再被改动回落 1） */
+    status: smallint("status").notNull().default(1),
+    /** 该集当前文本的版本号（= novel_script_versions 里最大的 version_no） */
+    version: integer("version").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_novel_episodes_no").on(t.novelId, t.episodeNo),
+    index("idx_novel_episodes_novel").on(t.novelId, t.episodeNo),
+  ],
+);
+
+/**
+ * 剧本版本（编辑 Agent `finalize` 与每次 apply 的留痕；对照竞品 `version/*` 端点）。
+ *
+ * 两级版本共用一张表：`episode_id` 非空 = 单集版本，为空 = 整本（NT 级）定稿快照。
+ * 为什么不做两张表：竞品的 `version/:vid/finalize|delete|restore` 用同一个 vid 空间，
+ * 拆表会让 vID 语义分叉，前端还要按类型分别请求。
+ */
+export const novelScriptVersions = pgTable(
+  "novel_script_versions",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    /** NULL = 整本快照；非空 = 该集版本 */
+    episodeId: bigint("episode_id", { mode: "bigint" }).references(() => novelEpisodes.id),
+    versionNo: integer("version_no").notNull(),
+    scriptText: text("script_text").notNull().default(""),
+    /** 定稿时间；NULL = 未定稿（可被 restore/覆盖） */
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    /**
+     * 版本唯一性必须拆两条**部分索引**，原因同 `model_prices` 那段注释：
+     * PostgreSQL 认为 NULL 互不相等，`(novel_id, episode_id, version_no)` 的普通唯一键
+     * 对 `episode_id IS NULL`（整本快照）**完全不生效**——整本版本号可以被重复插入，
+     * `ORDER BY version_no DESC LIMIT 1` 取到哪条不确定。故 NULL 侧单独用部分索引锁住。
+     */
+    uniqueIndex("uq_novel_script_versions_episode")
+      .on(t.episodeId, t.versionNo)
+      .where(sql`${t.episodeId} is not null`),
+    uniqueIndex("uq_novel_script_versions_novel")
+      .on(t.novelId, t.versionNo)
+      .where(sql`${t.episodeId} is null`),
+    index("idx_novel_script_versions_novel").on(t.novelId, t.versionNo.desc()),
+  ],
+);
+
+/**
+ * 剧本编辑 Agent 会话（对照竞品 `script_edit_agent/*` 13 端点）。
+ *
+ * 竞品这套的差异点是**会话式逐集 diff**：用户说"把第 3 集改成悲剧结局"，
+ * 返回的不是整篇重写，而是若干集的 pending 变更，用户逐集 apply/reject。
+ * 故会话/消息/待确认变更必须是三张表——把 pending 塞进消息 jsonb 会导致
+ * "apply 某集"无法用一条 UPDATE 带条件实现（也无法做唯一性约束）。
+ */
+export const novelEditSessions = pgTable(
+  "novel_edit_sessions",
+  {
+    id: pk(),
+    novelId: bigint("novel_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novels.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 1 active / 2 closed（进入编辑态 enter → 退出 exit；closed 后只读） */
+    status: smallint("status").notNull().default(1),
+    /**
+     * 心跳（`.../heartbeat`）。竞品用它判断"编辑态是否仍有活人"，
+     * 超时由维护任务置 closed——**不靠连接存活**，因为 SSE 断线不等于用户走了。
+     */
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    /** 会话上下文：{ base_version_no, instructions, scope:{episode_nos[]}, model } */
+    context: jsonb("context").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_novel_edit_sessions_novel").on(t.novelId, t.status, t.createdAt.desc()),
+    index("idx_novel_edit_sessions_user").on(t.userId, t.heartbeatAt.desc()),
+  ],
+);
+
+/** 编辑会话消息（对照竞品 `sessions/:sid/chat`） */
+export const novelEditMessages = pgTable(
+  "novel_edit_messages",
+  {
+    id: pk(),
+    sessionId: bigint("session_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novelEditSessions.id),
+    /** 1 user / 2 assistant（沿用 agent_messages.role 编码，不另立枚举） */
+    role: smallint("role").notNull(),
+    content: text("content").notNull().default(""),
+    /** 该条 assistant 消息产出的待确认变更摘要（真正的 diff 落 novel_edit_pendings） */
+    pendingChanges: jsonb("pending_changes").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_novel_edit_messages_session").on(t.sessionId, t.createdAt)],
+);
+
+/**
+ * 待确认的逐集 diff（对照竞品 `.../episodes/:eid/pending|apply|reject|apply_all|reject_all`）。
+ *
+ * `original_text` / `proposed_text` 都**整段存**而不是存 patch：竞品的 diff 是给人看的
+ * （前端双栏对照），存 patch 反而要自己实现渲染；整段存也让"驳回后原文不变"成为
+ * 天然事实（驳回 = 改 status，不碰 novel_episodes）。
+ */
+export const novelEditPendings = pgTable(
+  "novel_edit_pendings",
+  {
+    id: pk(),
+    sessionId: bigint("session_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novelEditSessions.id),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => novelEpisodes.id),
+    originalText: text("original_text").notNull().default(""),
+    proposedText: text("proposed_text").notNull().default(""),
+    /** 变更说明（"把结局改成悲剧"，回显给用户逐条确认） */
+    changeSummary: text("change_summary").notNull().default(""),
+    /** 1 pending / 2 applied / 3 rejected */
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 同一会话同一集**只允许一条待确认 diff**（apply/reject 即终结，再改再生成新的），
+    // 否则 `GET .../pending` 返回"一集多条"会让前端 diff 视图无法对应。
+    uniqueIndex("uq_novel_edit_pendings_pending")
+      .on(t.sessionId, t.episodeId)
+      .where(sql`${t.status} = 1`),
+    index("idx_novel_edit_pendings_session").on(t.sessionId, t.status, t.createdAt),
+  ],
+);
+
+// ── 影视版 film（第 5 批地基；对照竞品 film 域：table → fields → tasks → cells 四层）──
+// 四层结构 + 审核版本链，语义全部来自 bundle 逆向（contract-draft-cam-film.md §2.3）。
+// 多租户口径：**每张 film 表都冗余 space_id**（database.md §12.4 的既有决定），因为行/单元格/
+// 审核都会被"按空间"直接列表与统计（`tasks/stats`），若只靠 join 追溯，租户过滤会散在每个查询里。
+// 跨域指针故意不加 FK：`project_id` / `canvas_id` / `node_id` 见各自注释（沿用 schema.ts:752 的做法）。
+
+/**
+ * 任务表（对照竞品 film `task_tables`；`ensure-presets` 生成的是 `is_preset=1` 的系统预置列）。
+ *
+ * 表名用 `film_tables`（database.md §12.4 草案里曾叫 `film_task_tables`）：落库名统一后
+ * 索引/迁移里不会再出现一对同义词。列语义对照竞品 `p(e)`：table_id/project_id/name/is_preset/sort/version。
+ */
+export const filmTables = pgTable(
+  "film_tables",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /**
+     * 所属项目（不透明 ID，**故意无 FK**）：film 项目本体表随第 5 批端点一起建，
+     * 且同一"项目"既可能来自 film 自有项目、也可能来自剧本项目派生——跨域指针一加 FK
+     * 就把两个域的表结构绑死了（同 schema.ts:752 的既有做法）。
+     */
+    projectId: bigint("project_id", { mode: "bigint" }).notNull(),
+    name: text("name").notNull().default("任务表"),
+    /** 是否系统预置表（`ensure-presets` 一次生成；预置表不可删除，只可改名/隐藏列） */
+    isPreset: boolean("is_preset").notNull().default(false),
+    sort: integer("sort").notNull().default(0),
+    /** 表级乐观锁（结构变更必带；不匹配 → 746002，与 canvas version 同码） */
+    version: integer("version").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_film_tables_project").on(t.projectId, t.sort),
+    index("idx_film_tables_space").on(t.spaceId, t.createdAt.desc()),
+  ],
+);
+
+/**
+ * 字段（列）定义（对照竞品 film `fields`；列语义对照 `b(e)`）。
+ *
+ * `field_type` 11 种（竞品 bundle 实证 9 种 + 我方 2 种扩展）：
+ * text / date / user / select / multi_select / number / link / canvas_ref / asset_ref /
+ * review_ref / points_ro。`select` / `multi_select` / `number` 是竞品 9 种之外的
+ * 我方扩展（竞品把选项塞进 text 的 config_json，拆成独立类型才能做服务端校验）。
+ */
+export const filmFields = pgTable(
+  "film_fields",
+  {
+    id: pk(),
+    tableId: bigint("table_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTables.id),
+    /** 冗余租户列（见 film 段注释） */
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /**
+     * 稳定键（对照竞品 `key`）：系统字段固定为 title / assignees / produce /
+     * task_status / review / points，用户字段由服务端按 name 派生 slug。
+     * 前端筛选/排序/唯一标题校验都按 key 走，**不按 field_id**（field_id 重建会变）。
+     */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    /** text|date|user|select|multi_select|number|link|canvas_ref|asset_ref|review_ref|points_ro */
+    fieldType: text("field_type").notNull().default("text"),
+    /** 系统字段（title/assignees/produce/task_status/review/points）：不可删除、不可改类型 */
+    isSystem: boolean("is_system").notNull().default(false),
+    /**
+     * ⚠️⚠️ 反直觉点，必须写清（竞品 bundle `_e(t,e)` 逆向实证，contract-draft-cam-film.md §7 A1）：
+     * 语义是「**该 field_type 每表至多一个**」，**不是"该列的值唯一"**。
+     *
+     * 判定实现是"扫本表其它字段，看是否已有同 type 且 is_unique_type=1 的字段"——
+     * 即它约束的是**列的存在性**（例如"一张表最多一个 canvas_ref 列"），
+     * 与单元格里存什么值毫无关系。按"值唯一"去实现（加唯一索引校验 cell.value）会直接做错，
+     * 而且会让用户无法建第二个同类型列。
+     * 注意：它**也不是**"title 列的值唯一"那个语义——标题唯一是另一条独立链路
+     * （竞品在行层面按 key='title' 查重），两者互不影响，不要合并实现。
+     */
+    isUniqueType: boolean("is_unique_type").notNull().default(false),
+    sort: integer("sort").notNull().default(0),
+    /**
+     * 类型专属配置：文本校验规则、select 选项、number 精度、ref 目标域等。
+     * 【假设】竞品 config_json 的 schema 完全黑盒（A1），我方**只做类型白名单 + 长度上限**，
+     * 未知字段原样透传——不能因为不认识就把前端配置丢掉（前端会崩）。
+     */
+    configJson: jsonb("config_json").notNull().default(sql`'{}'::jsonb`),
+    hidden: boolean("hidden").notNull().default(false),
+    /** 列宽（px）；NULL = 用该类型的 defaultWidth */
+    width: integer("width"),
+    /** 软删（`fields/batch-restore` 要能恢复，故不能物理删——物理删会连带丢 film_cells） */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 回收站字段的 key 仍占位（恢复时按原 key 复原），故唯一键不排除 deleted_at；
+    // 若允许重复 key，"恢复"时会出现两条同 key 列，单元格归属立刻二义。
+    uniqueIndex("uq_film_fields_key").on(t.tableId, t.key),
+    index("idx_film_fields_table").on(t.tableId, t.sort),
+  ],
+);
+
+/**
+ * 任务行（对照竞品 film `tasks`；**不是** `tasks` 生成任务表，故加 `film_` 前缀）。
+ * 行 = 工单：一集/一镜/一个外包交付物都可能是行，取决于表的字段配置。
+ */
+export const filmTasks = pgTable(
+  "film_tasks",
+  {
+    id: pk(),
+    tableId: bigint("table_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTables.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /**
+     * 父子行（NULL = 根行；竞品用 "0" 表示根，落库归一为 NULL，出参再转回 0）。
+     * 自引用表不加自 FK：与 `team_groups` / `canvas_groups` / `asset_folders` 的既有做法一致
+     * ——自 FK 会让"删父行"必须先递归清子行，软删场景下反而是负担；悬空 parent 由查询侧归一为根行。
+     */
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    sort: integer("sort").notNull().default(0),
+    /** 行级乐观锁（PUT cells 必带；冲突 → 746002） */
+    version: integer("version").notNull().default(1),
+    /**
+     * 1 not_started / 2 in_progress / 3 pending_review / 4 rejected / 5 done。
+     * 与 `film_review_versions.status` 是**双轨**：行状态是"这活到哪一步"，
+     * 版本状态是"这一版过没过审"。一次通过后行=5 但旧版本行仍是 approved（不可变）。
+     */
+    status: smallint("status").notNull().default(1),
+    /**
+     * title 是系统字段的**冗余快照**：用于排序/搜索/"标题唯一"校验，
+     * 真值仍在 film_cells 里（field.key='title'）。冗余是竞品的设计（它按 title 建索引），
+     * 双写由应用层同事务保证；不一致时以 cells 为真相并记录告警。
+     */
+    title: text("title").notNull().default(""),
+    /** 最近一次提交的版本号（= 本行 film_review_versions 里最大的 version_no），列表页免 join */
+    reviewVersionNo: integer("review_version_no").notNull().default(0),
+    /** 指派人（对照竞品 assignees 系统字段；竞品允许多个，我方本期单值，多值留到第 5 批端点） */
+    assigneeUserId: bigint("assignee_user_id", { mode: "bigint" }).references(() => users.id),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    /** 软删（`batch-delete` / `batch-restore`） */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_film_tasks_table").on(t.tableId, t.parentId, t.sort),
+    index("idx_film_tasks_status").on(t.tableId, t.status),
+    index("idx_film_tasks_assignee").on(t.spaceId, t.assigneeUserId, t.status),
+  ],
+);
+
+/**
+ * 单元格（对照竞品 film `cells`；**稀疏**：无值 = 无行）。
+ *
+ * 竞品 API 以 `{field_id: value}` 映射返回，落库归一为行——不要按表结构暴露 API
+ * （contract-draft-cam-film.md §3.3：内外有别）。
+ * "清空单元格" = DELETE 行，**不是写 NULL**：写 NULL 会让稀疏表退化成稠密表（每行 N 列）。
+ */
+export const filmCells = pgTable(
+  "film_cells",
+  {
+    id: pk(),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTasks.id),
+    fieldId: bigint("field_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmFields.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 该类型 encodeCell 后的规范形（各类型 shape 见 field_type 注释；points_ro 只读聚合，不写账本） */
+    valueJson: jsonb("value_json"),
+    updatedBy: bigint("updated_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_film_cells").on(t.taskId, t.fieldId),
+    index("idx_film_cells_field").on(t.fieldId),
+  ],
+);
+
+/**
+ * 审核版本链（对照竞品 film `review` / `submit-result`）。
+ *
+ * 每次提交产生**不可变**版本号（V01/V02…，文本而非 int：竞品按原样展示 V 前缀，
+ * 落库成 int 再拼前缀会让"V01"与"V1"在导出/筛选里对不上）。
+ * 评论挂版本、已读回执按版本记——这是"一人看的是 V02、另一人还停在 V01"能被正确表达的前提。
+ */
+export const filmReviewVersions = pgTable(
+  "film_review_versions",
+  {
+    id: pk(),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTasks.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** V01 起（两位补零；>99 后自然进位为 V100，不截断） */
+    versionNo: text("version_no").notNull(),
+    /** 1 pending / 2 approved / 3 rejected（竞品缺 review/approve 端点，我方用 status 承载决策） */
+    status: smallint("status").notNull().default(1),
+    submittedBy: bigint("submitted_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedBy: bigint("decided_by", { mode: "bigint" }).references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /**
+     * 本版本提交的画布产物（`submit-result` 写入口，jsonb 数组存 asset id/uri）。
+     * 为什么放在版本行而不单开一张表：版本是不可变快照，产物集合随版本一起冻结；
+     * 单开表会让「产物加了一条」变成对已冻结版本的原地修改，审核依据就不可追溯了。
+     */
+    assetIds: jsonb("asset_ids").notNull().default(sql`'[]'::jsonb`),
+    /** 审核抽屉用的缩略图文件 id（可空：没有缩略图时前端回落到第一张产物） */
+    thumbFileId: text("thumb_file_id"),
+    /** 决策意见（approve/reject 时必填理由；写在版本上而不是评论里，便于「按决策筛选」） */
+    decisionComment: text("decision_comment"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 同一行同一版本号只能提交一次（同版本号重复提交 = 幂等键，返回既有版本而不是新建 V0x）
+    uniqueIndex("uq_film_review_versions_no").on(t.taskId, t.versionNo),
+    index("idx_film_review_versions_task").on(t.taskId, t.versionNo.desc()),
+    index("idx_film_review_versions_space").on(t.spaceId, t.status, t.submittedAt.desc()),
+  ],
+);
+
+/** 审核评论（挂版本；对照竞品 `review/comments` POST） */
+export const filmReviewComments = pgTable(
+  "film_review_comments",
+  {
+    id: pk(),
+    versionId: bigint("version_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmReviewVersions.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    authorId: bigint("author_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    content: text("content").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_film_review_comments_version").on(t.versionId, t.createdAt)],
+);
+
+/** 已读回执（按版本；对照竞品 `review/read` POST） */
+export const filmReviewReads = pgTable(
+  "film_review_reads",
+  {
+    id: pk(),
+    versionId: bigint("version_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmReviewVersions.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("uq_film_review_reads").on(t.versionId, t.userId)],
+);
+
+/**
+ * 行 ↔ 画布绑定（film 与 canvas 的唯一连接点；对照竞品 `canvas-bindings` 与
+ * `canvases/:id/task-bindings`、`canvases/:id/submit-result`）。
+ *
+ * `canvas_id` / `node_id` **故意不加 FK**：画布属于 canvas 域，film 只持有不透明指针
+ * ——加 FK 会让"删画布"变成"必须先删 film 绑定"，把两个域的删除顺序绑死
+ * （同 schema.ts:752 的既有做法：cam 不得依赖 film/script 表）。
+ * `submit-result` 是唯一的自动化衔接点：画布节点产物 → 登记 film_review_versions
+ * → 行状态推 3(pending_review)；没有它影视版就是外挂 Excel。
+ */
+export const filmCanvasBindings = pgTable(
+  "film_canvas_bindings",
+  {
+    id: pk(),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTasks.id),
+    /** 画布 ID（不透明，无 FK：跨域指针） */
+    canvasId: bigint("canvas_id", { mode: "bigint" }).notNull(),
+    /** 画布节点 ID（不透明，无 FK；同一行同一画布可绑多个节点，故进唯一键） */
+    nodeId: bigint("node_id", { mode: "bigint" }).notNull(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // 同一行的同一画布节点只绑一次（绑定是幂等操作；解绑走 DELETE）
+    uniqueIndex("uq_film_canvas_bindings").on(t.taskId, t.canvasId, t.nodeId),
+    index("idx_film_canvas_bindings_canvas").on(t.canvasId),
+    index("idx_film_canvas_bindings_task").on(t.taskId, t.createdAt.desc()),
+  ],
+);
+
+// ── 影视版（film）二等表（迁移 0020）：视图偏好 / 任务模板 / 导出 / 最近打开 ──
+/**
+ * 契约依据：`_acceptance/_gap/contract-draft-cam-film.md` §7（pref GET/PUT、
+ * task-templates 3、exports 2、recent-open 2）。这四张表在 0018 建 film 主表时被漏掉，
+ * 导致 48 个操作里 9 个无处落库 —— 补齐后 `submit-result` 的产物、审核抽屉缩略图、
+ * 导出 xlsx 才有真实载体。
+ */
+
+/** 表视图偏好（每人每表一行；隐藏列/筛选/UI 排序都是"看的人"的私有状态） */
+export const filmTablePrefs = pgTable(
+  "film_table_prefs",
+  {
+    id: pk(),
+    tableId: bigint("table_id", { mode: "bigint" })
+      .notNull()
+      .references(() => filmTables.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 隐藏的列 id 数组（不做布尔列：列的增删要跟着字段一起演进） */
+    hiddenFieldIds: jsonb("hidden_field_ids").notNull().default(sql`'[]'::jsonb`),
+    /** 筛选条件数组 [{field_id, op, value}]，服务端不解释语义，只回传 */
+    filterJson: jsonb("filter_json").notNull().default(sql`'[]'::jsonb`),
+    /** 列宽/排序等 UI 态 */
+    ui: jsonb("ui").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_film_table_prefs").on(t.tableId, t.userId)],
+);
+
+/** 任务模板（把"一组字段 + 一组行"存成可复用模板；apply-template 用它） */
+export const filmTaskTemplates = pgTable(
+  "film_task_templates",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 项目 id 是不透明指针（film 项目本体没有端点证据，见 task-3 说明） */
+    projectId: bigint("project_id", { mode: "bigint" }).notNull(),
+    name: text("name").notNull(),
+    /** 1 个人 / 2 团队（团队模板全 space 可见，个人模板只本人可见） */
+    scope: smallint("scope").notNull().default(1),
+    ownerId: bigint("owner_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** { fields: [...], tasks: [...] }：模板是快照，应用时深拷贝 */
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_film_templates_project").on(t.projectId, t.scope)],
+);
+
+/** 影视版导出（xlsx）；复用 export_jobs 的"排队→完成→过期"四态语义但独立成表 */
+export const filmExports = pgTable(
+  "film_exports",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    projectId: bigint("project_id", { mode: "bigint" }).notNull(),
+    /** 导出的表 id 数组（可一次导多表：每表一个 sheet） */
+    tableIds: jsonb("table_ids").notNull().default(sql`'[]'::jsonb`),
+    format: text("format").notNull().default("xlsx"),
+    /** 1 排队 / 2 处理中 / 3 完成 / 4 失败 */
+    status: smallint("status").notNull().default(1),
+    fileUri: text("file_uri"),
+    /** 现签链接过期时间（与 export_jobs 同口径，避免长期可下载的越权面） */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    error: jsonb("error"),
+    createdBy: bigint("created_by", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_film_exports_project").on(t.projectId, t.createdAt.desc())],
+);
+
+/** 最近打开（每人每项目一行；列表页首屏"继续上次"用它） */
+export const filmRecentOpens = pgTable(
+  "film_recent_opens",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    projectId: bigint("project_id", { mode: "bigint" }).notNull(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 上次打开的表（可空：只打开了项目没进表） */
+    tableId: bigint("table_id", { mode: "bigint" }).references(() => filmTables.id),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // 每人每项目只保留一行：最近打开是"覆盖"语义，不是历史流水
+  (t) => [uniqueIndex("uq_film_recent_opens").on(t.projectId, t.userId)],
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 第 0 批地基（续，迁移 0019）：主体库 / 抽取流水线 / Agent Skill / 知识库 /
+// 创作者生态 / 集市 / 运营增长。
+//
+// 建表顺序即依赖顺序：主体库与抽取是「出片一致性」的载体（第 1 批），
+// agent_skills 是 Agent 收口（第 4 批），knowledge/market/creator/campaign/op
+// 是生态（第 6 批）。**一次建全**的理由：每张表都要走一次迁移，分几次建会让
+// 并行开发的批次互相卡在「等迁移」；空表在 Postgres 里零成本。
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── 主体库（subject）：角色/场景/道具的一致性载体 ──────────────────
+/**
+ * 竞品证据：`cmd/subject.md:3`（生成模型按 subject_id 保持同一角色）、
+ * `business_list=[3]` 为 Seedance 主体线。**这是「角色一致性」真正的载体**——
+ * 角色卡（novel_characters）只是剧本侧的文字描述，主体库才是图像/视频侧的同一实体。
+ *
+ * 为什么审核态要落库：竞品对未过审主体投递直接拒（不排队、不扣费），
+ * 若只在服务层算，重启/多副本下判定会漂移。
+ */
+export const subjects = pgTable(
+  "subjects",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    name: text("name").notNull(),
+    /** 1 角色 / 2 场景 / 3 道具（竞品 subject 的三个业务维度） */
+    kind: smallint("kind").notNull().default(1),
+    desc: text("desc"),
+    coverUri: text("cover_uri"),
+    /** 1 审核中 / 2 已通过 / 3 已驳回；**只有 2 可用于生成** */
+    reviewStatus: smallint("review_status").notNull().default(1),
+    rejectReason: text("reject_reason"),
+    /**
+     * 供应商业务线白名单（jsonb 数组，例：[3]）。竞品把「这个主体能喂给哪些模型」
+     * 做成数组而不是单值——同一主体在 Seedance 与其它线上可用性不同，单值会丢信息。
+     */
+    businessList: jsonb("business_list").notNull().default(sql`'[]'::jsonb`),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** 归属项目（可空：主体库默认跨项目复用；指定后列表页可按项目筛） */
+    projectId: bigint("project_id", { mode: "bigint" }).references(() => scriptProjects.id),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_subjects_space").on(t.spaceId, t.kind, t.createdAt.desc()),
+    // 生成前的「可选主体」查询走这条：space + 审核态
+    index("idx_subjects_review").on(t.spaceId, t.reviewStatus),
+    index("idx_subjects_project").on(t.projectId),
+  ],
+);
+
+/** 主体参考图（一个主体多张：正面/侧面/全身/细节） */
+export const subjectFiles = pgTable(
+  "subject_files",
+  {
+    id: pk(),
+    subjectId: bigint("subject_id", { mode: "bigint" })
+      .notNull()
+      .references(() => subjects.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 来源资产（可空：可能是直接上传或从生成结果保存） */
+    assetId: bigint("asset_id", { mode: "bigint" }).references(() => assets.id),
+    uri: text("uri").notNull(),
+    /** 1 参考图 / 2 正面 / 3 侧面 / 4 背面 / 5 细节（竞品按 role 分组的语义） */
+    role: smallint("role").notNull().default(1),
+    sort: integer("sort").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("idx_subject_files_subject").on(t.subjectId, t.sort),
+    // 同一主体同一张图不重复挂（幂等保存）
+    uniqueIndex("uq_subject_files_subject_uri").on(t.subjectId, t.uri),
+  ],
+);
+
+// ── 抽取流水线（extraction）：从成片/资产里抽出角色、场景、道具 ──────────
+/**
+ * 竞品证据：`cmd/resource.md:552-556`（`task_type=1..5`）、`rt:489-514`（26 端点）。
+ * 四态 1 进行中 / 2 成功 / 3 失败 / 4 失效（源资产被删 → 失效而非失败：
+ * 失败可以重试，失效不能，重试只会一直失败）。
+ */
+export const extractionTasks = pgTable(
+  "extraction_tasks",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    projectId: bigint("project_id", { mode: "bigint" }).references(() => scriptProjects.id),
+    episodeId: bigint("episode_id", { mode: "bigint" }).references(() => episodes.id),
+    /** 源资产（可空：也支持直接从生成任务产物抽） */
+    sourceAssetId: bigint("source_asset_id", { mode: "bigint" }).references(() => assets.id),
+    sourceUri: text("source_uri"),
+    /** 1 角色 / 2 场景 / 3 道具 / 4 全部 / 5 自定义（竞品 task_type 五值） */
+    taskType: smallint("task_type").notNull().default(4),
+    /** 1 进行中 / 2 成功 / 3 失败 / 4 失效 */
+    status: smallint("status").notNull().default(1),
+    /** 抽取结果摘要（角色/场景/道具条数 + 草稿批次 id） */
+    result: jsonb("result").notNull().default(sql`'{}'::jsonb`),
+    error: jsonb("error"),
+    /** 草稿批次 id（与 extraction_drafts.eed_id 对应；竞品 eed_id 语义） */
+    eedId: text("eed_id"),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_extraction_tasks_space").on(t.spaceId, t.status, t.createdAt.desc()),
+    index("idx_extraction_tasks_project").on(t.projectId, t.createdAt.desc()),
+    index("idx_extraction_tasks_eed").on(t.eedId),
+  ],
+);
+
+/** 抽取草稿（人工确认前不落到主体库；保证「抽错了不污染主体库」） */
+export const extractionDrafts = pgTable(
+  "extraction_drafts",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => extractionTasks.id),
+    /** 草稿批次（一次抽取可产出多个批次：先出角色、再出场景） */
+    eedId: text("eed_id").notNull(),
+    /** 1 角色 / 2 场景 / 3 道具 */
+    kind: smallint("kind").notNull().default(1),
+    name: text("name").notNull(),
+    /** 抽取出的完整字段（描述/参考图 URI/候选主体 id 等），服务端不解析语义 */
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    /** 1 草稿 / 2 已导入主体库 / 3 已丢弃 */
+    state: smallint("state").notNull().default(1),
+    /** 主子形态：同一被抽对象的多形态（正/侧/背）归属同一 parent */
+    parentStateId: text("parent_state_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_extraction_drafts_task").on(t.taskId, t.kind, t.state),
+    index("idx_extraction_drafts_eed").on(t.eedId),
+  ],
+);
+
+// ── Agent Skill 卡（第 4 批）：可收藏、可复用的提示词/工作流模板 ──────────
+/**
+ * 竞品证据：`rt:378-385`（`agent-skills` 8 端点：list/mine/plaza/favorites/favorite/
+ * details/create/delete），实测 33 张卡。我方存「提示词模板 + 配置」，
+ * 卡片只读表；运行记录落 tasks/agent_sessions，不在这张表里堆历史。
+ */
+export const agentSkills = pgTable(
+  "agent_skills",
+  {
+    id: pk(),
+    /** 平台公共卡 space_id 为空；用户自建卡归属空间 */
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    ownerUserId: bigint("owner_user_id", { mode: "bigint" }).references(() => users.id),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverUri: text("cover_uri"),
+    category: text("category").notNull().default("general"),
+    promptTemplate: text("prompt_template").notNull().default(""),
+    /** 卡片参数定义 + 默认值（前端按它渲染表单） */
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    /** 1 私有 / 2 广场可见（广场卡才能被收藏与复用） */
+    visibility: smallint("visibility").notNull().default(1),
+    useCount: integer("use_count").notNull().default(0),
+    favoriteCount: integer("favorite_count").notNull().default(0),
+    /** 1 正常 / 2 下架（运营处置；删除走 deleted_at 软删，保留被引用关系） */
+    status: smallint("status").notNull().default(1),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_agent_skills_plaza").on(t.visibility, t.useCount.desc()),
+    index("idx_agent_skills_owner").on(t.ownerUserId, t.createdAt.desc()),
+  ],
+);
+
+export const agentSkillFavorites = pgTable(
+  "agent_skill_favorites",
+  {
+    id: pk(),
+    skillId: bigint("skill_id", { mode: "bigint" })
+      .notNull()
+      .references(() => agentSkills.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("uq_agent_skill_favorites").on(t.skillId, t.userId)],
+);
+
+// ── 团队知识库（第 6 批）：目录 / 标签 / 资产三层 ─────────────────────
+/**
+ * 竞品证据：`rt`（`user_knowledge` 29 端点）。三层结构与资产库**双向导入**：
+ * 知识库资产可引用资产库 uri，资产库条目也可挂进知识库目录。
+ *
+ * `parent_id` 不加自引用外键：目录树深度由服务层校验（最多 5 层），
+ * 数据库加自引用 FK 会让「删父目录」必须先递归删子目录（竞品是软删）。
+ */
+export const knowledgeDirs = pgTable(
+  "knowledge_dirs",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    name: text("name").notNull(),
+    sort: integer("sort").notNull().default(0),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_knowledge_dirs_space").on(t.spaceId, t.parentId, t.sort)],
+);
+
+export const knowledgeTags = pgTable(
+  "knowledge_tags",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("uq_knowledge_tags").on(t.spaceId, t.name)],
+);
+
+export const knowledgeAssets = pgTable(
+  "knowledge_assets",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    dirId: bigint("dir_id", { mode: "bigint" }).references(() => knowledgeDirs.id),
+    /** 指向资产库条目（可空：知识库也支持纯文本条目，如「设定集」「世界观」） */
+    assetId: bigint("asset_id", { mode: "bigint" }).references(() => assets.id),
+    title: text("title").notNull(),
+    content: text("content"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** 1 文本 / 2 资产引用 / 3 链接 */
+    sourceType: smallint("source_type").notNull().default(1),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_knowledge_assets_space").on(t.spaceId, t.dirId, t.createdAt.desc()),
+    index("idx_knowledge_assets_tags").using("gin", t.tags),
+  ],
+);
+
+// ── 创作者中心（第 6 批）：资料 / 关注粉丝 / 作品 ─────────────────────
+/**
+ * 竞品证据：`rt:275-304`（`crc` 30 端点）。**注意**：这一域的「作品」与「项目」不是同一实体
+ * ——作品是投稿到生态里的公开条目，项目是私有生产单元；合并会让「下架作品」误删项目。
+ */
+export const creatorProfiles = pgTable(
+  "creator_profiles",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    nickname: text("nickname").notNull().default(""),
+    bio: text("bio").notNull().default(""),
+    avatarUri: text("avatar_uri"),
+    /** 1 正常 / 2 冻结（违规处置；冻结后作品保留但不可被关注） */
+    status: smallint("status").notNull().default(1),
+    followerCount: integer("follower_count").notNull().default(0),
+    likeCount: integer("like_count").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_creator_profiles_user").on(t.userId)],
+);
+
+export const creatorFollows = pgTable(
+  "creator_follows",
+  {
+    id: pk(),
+    followerUserId: bigint("follower_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    creatorUserId: bigint("creator_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_creator_follows").on(t.followerUserId, t.creatorUserId),
+    index("idx_creator_follows_creator").on(t.creatorUserId, t.createdAt.desc()),
+  ],
+);
+
+export const creatorAssets = pgTable(
+  "creator_assets",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    creatorUserId: bigint("creator_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 1 视频 / 2 图片 / 3 剧本 */
+    kind: smallint("kind").notNull().default(1),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverUri: text("cover_uri"),
+    uri: text("uri"),
+    /** 1 草稿 / 2 待审 / 3 已通过 / 4 已驳回 / 5 已下架 */
+    status: smallint("status").notNull().default(1),
+    reviewNote: text("review_note"),
+    viewCount: integer("view_count").notNull().default(0),
+    likeCount: integer("like_count").notNull().default(0),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_creator_assets_creator").on(t.creatorUserId, t.status, t.createdAt.desc()),
+    index("idx_creator_assets_feed").on(t.status, t.publishedAt.desc()),
+  ],
+);
+
+// ── 活动/激励 campaign（第 6 批）────────────────────────────────────
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: pk(),
+    /** 平台级活动 space_id 为空；团队内活动归属空间 */
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    title: text("title").notNull(),
+    /** 1 征集 / 2 命题创作 / 3 拉新 / 4 每日奖励 */
+    kind: smallint("kind").notNull().default(1),
+    brief: text("brief").notNull().default(""),
+    coverUri: text("cover_uri"),
+    /** 报名奖励积分（0 = 无积分奖励；发分走 credit_flows 记账，不绕过账本） */
+    rewardCredits: integer("reward_credits").notNull().default(0),
+    startAt: timestamp("start_at", { withTimezone: true }),
+    endAt: timestamp("end_at", { withTimezone: true }),
+    /** 1 草稿 / 2 进行中 / 3 已结束 / 4 已下线 */
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_campaigns_status").on(t.status, t.startAt)],
+);
+
+export const campaignSignups = pgTable(
+  "campaign_signups",
+  {
+    id: pk(),
+    campaignId: bigint("campaign_id", { mode: "bigint" })
+      .notNull()
+      .references(() => campaigns.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 投稿作品（可空：先报名后投稿） */
+    workId: bigint("work_id", { mode: "bigint" }).references(() => creatorAssets.id),
+    /** 1 已报名 / 2 已入围 / 3 已获奖 / 4 已取消 */
+    status: smallint("status").notNull().default(1),
+    nominatedAt: timestamp("nominated_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_campaign_signups").on(t.campaignId, t.userId),
+    index("idx_campaign_signups_status").on(t.campaignId, t.status),
+  ],
+);
+
+// ── 剧本集市 novel_market（第 6 批）：上架 / 预售 / 协议 / 收益 / 提现 ──────
+/**
+ * 竞品证据：`rt:601-629`（`novel_market` 29 端点）。**收益不进 credit_accounts**：
+ * 集市收益是可提现的「收入」，与消耗型积分是两种钱（混在一起会让充值积分能被提现）。
+ * 故 market_works.revenue_credits 只记累计，结算走 market_agreements → 提现申请。
+ */
+export const marketWorks = pgTable(
+  "market_works",
+  {
+    id: pk(),
+    /** 关联本子（可空：外部投稿的本子不一定在我方 novel 域） */
+    novelId: bigint("novel_id", { mode: "bigint" }).references(() => novels.id),
+    ownerUserId: bigint("owner_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverUri: text("cover_uri"),
+    /** 1 小说 / 2 剧本 / 3 分镜包 */
+    kind: smallint("kind").notNull().default(1),
+    /** 售价（积分）。预售与正式价分开存：预售结束后正式价不覆盖历史成交价 */
+    priceCredits: integer("price_credits").notNull().default(0),
+    preorderPriceCredits: integer("preorder_price_credits"),
+    /** 1 草稿 / 2 待审 / 3 在售 / 4 已驳回 / 5 已下架 / 6 预售中 */
+    status: smallint("status").notNull().default(1),
+    auditNote: text("audit_note"),
+    salesCount: integer("sales_count").notNull().default(0),
+    revenueCredits: integer("revenue_credits").notNull().default(0),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_market_works_feed").on(t.status, t.publishedAt.desc()),
+    index("idx_market_works_owner").on(t.ownerUserId, t.createdAt.desc()),
+  ],
+);
+
+/** 交易/授权协议（一次成交一行；退款加一行反向记录，不改原行） */
+export const marketAgreements = pgTable(
+  "market_agreements",
+  {
+    id: pk(),
+    workId: bigint("work_id", { mode: "bigint" })
+      .notNull()
+      .references(() => marketWorks.id),
+    buyerUserId: bigint("buyer_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 关联订单（现金支付时走 orders；积分购买时为空） */
+    orderId: bigint("order_id", { mode: "bigint" }).references(() => orders.id),
+    /** 1 购买 / 2 预售 / 3 授权（分成） / 4 退款（反向记录） */
+    kind: smallint("kind").notNull().default(1),
+    priceCredits: integer("price_credits").notNull().default(0),
+    /** 1 待支付 / 2 已生效 / 3 已退款 */
+    status: smallint("status").notNull().default(1),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_market_agreements_work").on(t.workId, t.createdAt.desc())],
+);
+
+/** 提现申请（集市收益 → 提现；人工审核 + 渠道打款，状态机不可跳步） */
+export const marketWithdrawals = pgTable(
+  "market_withdrawals",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    amountCredits: integer("amount_credits").notNull(),
+    /** 1 待审 / 2 已通过 / 3 已打款 / 4 已驳回 / 5 已撤销 */
+    status: smallint("status").notNull().default(1),
+    channel: text("channel").notNull().default("alipay"),
+    accountInfo: jsonb("account_info").notNull().default(sql`'{}'::jsonb`),
+    reviewNote: text("review_note"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_market_withdrawals_user").on(t.userId, t.status, t.createdAt.desc())],
+);
+
+// ── 运营增长 op（第 6 批）：兑换码 / 分销关系 / AB 实验 ────────────────
+export const redeemCodes = pgTable(
+  "redeem_codes",
+  {
+    id: pk(),
+    code: text("code").notNull(),
+    /** 平台码 space_id 为空；团队定向码归属空间 */
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    credits: integer("credits").notNull().default(0),
+    /** 0 = 不限次数（运营活动码）；>0 = 硬上限 */
+    maxUses: integer("max_uses").notNull().default(1),
+    usedCount: integer("used_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** 1 有效 / 2 停用 */
+    status: smallint("status").notNull().default(1),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_redeem_codes_code").on(t.code)],
+);
+
+export const redeemCodeRedemptions = pgTable(
+  "redeem_code_redemptions",
+  {
+    id: pk(),
+    codeId: bigint("code_id", { mode: "bigint" })
+      .notNull()
+      .references(() => redeemCodes.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    credits: integer("credits").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  // 同一用户同一码只能兑一次（并发下靠唯一键兜底，不靠先查后写）
+  (t) => [uniqueIndex("uq_redeem_code_redemptions").on(t.codeId, t.userId)],
+);
+
+/** 分销关系（父级唯一：单层分销，避免多级分佣的合规风险） */
+export const distributorRelations = pgTable(
+  "distributor_relations",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    parentUserId: bigint("parent_user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 分佣比例（万分比，例：500 = 5%） */
+    commissionBps: integer("commission_bps").notNull().default(0),
+    /** 1 有效 / 2 已解绑 */
+    status: smallint("status").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_distributor_relations_user").on(t.userId)],
+);
+
+/** AB 实验定义（变体与权重存 jsonb：实验配置是运营数据，不是结构） */
+export const abExperiments = pgTable(
+  "ab_experiments",
+  {
+    id: pk(),
+    key: text("key").notNull(),
+    name: text("name").notNull().default(""),
+    /** [{ name:"control", weight:50 }, ...] */
+    variants: jsonb("variants").notNull().default(sql`'[]'::jsonb`),
+    /** 1 草稿 / 2 运行中 / 3 已结束 */
+    status: smallint("status").notNull().default(1),
+    startAt: timestamp("start_at", { withTimezone: true }),
+    endAt: timestamp("end_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_ab_experiments_key").on(t.key)],
+);
+
+export const abHits = pgTable(
+  "ab_hits",
+  {
+    id: pk(),
+    experimentId: bigint("experiment_id", { mode: "bigint" })
+      .notNull()
+      .references(() => abExperiments.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    variant: text("variant").notNull(),
+    createdAt: createdAt(),
+  },
+  // 一个用户在一次实验里只命中一个变体（否则统计口径无法收敛）
+  (t) => [uniqueIndex("uq_ab_hits").on(t.experimentId, t.userId)],
+);
+
+// ── 订阅制（第 23 项计费 75% → 补齐 VIP/订阅，迁移 0021）────────────────
+/**
+ * 订阅实体（对照竞品 VIP/DF-VIP 13 档，`d-commerce-account.md`）。
+ *
+ * 为什么订阅单独成表而不是复用 `skus.kind='vip'` 一个字段：
+ *   - `skus` 是**商品**（价目），订阅是**关系**（谁在什么区间享有什么）；
+ *   - 同一商品可以被同一空间反复购买（续期），需要一个随时间演进的区间行；
+ *   - "是否 VIP"这个判权每天要查几百次，必须有一条带索引的当前态行，
+ *     不能靠 orders 里翻最近一次支付。
+ *
+ * 为什么 `uq_subscriptions_active_space` 是**部分唯一索引**：
+ *   同一 space 同时只能有一份生效中的订阅，否则等级/权益会变成"看查询顺序"；
+ *   但历史订阅（已过期/已取消）必须能共存，所以约束只作用于 status=1。
+ */
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    skuId: bigint("sku_id", { mode: "bigint" })
+      .notNull()
+      .references(() => skus.id),
+    /** 冗余 sku 字符串：判权时只读这一行，不用回表 skus */
+    sku: text("sku").notNull(),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull().defaultNow(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    /** 1 生效 / 2 已过期 / 3 已取消（取消=到期不续，仍可在 endAt 前继续用） */
+    status: smallint("status").notNull().default(1),
+    /** 自动续费（竞品订阅默认开；取消订阅只关这个开关，不立即失效） */
+    autoRenew: boolean("auto_renew").notNull().default(false),
+    orderId: bigint("order_id", { mode: "bigint" }).references(() => orders.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_subscriptions_space").on(t.spaceId, t.status, t.endAt.desc()),
+    uniqueIndex("uq_subscriptions_active_space")
+      .on(t.spaceId)
+      .where(sql`status = 1`),
+  ],
+);
+
+/**
+ * SKU 动态价格（对照竞品 `sku-price` 端点：同一 SKU 在不同渠道/活动/首购下价格不同）。
+ *
+ * 为什么不做成 `skus.price_cents` 上的一次性折扣字段：
+ *   活动有区间与叠加规则（限时特价 / 首购 / 立减），三者的可叠加性由服务层判定；
+ *   落成独立的行才能"回放某个时间点为什么是这个价"（对账/客诉都需要）。
+ */
+export const skuPromotions = pgTable(
+  "sku_promotions",
+  {
+    id: pk(),
+    sku: text("sku").notNull(),
+    /** 1 限时特价 / 2 首购优惠 / 3 立减（叠加规则在 billing 服务里显式写死） */
+    kind: smallint("kind").notNull().default(1),
+    /** 活动价（分）；立减类此值为"减多少" */
+    priceCents: integer("price_cents").notNull(),
+    label: text("label").notNull().default(""),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_sku_promotions_sku").on(t.sku, t.active, t.startsAt)],
 );

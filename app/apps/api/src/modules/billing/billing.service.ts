@@ -7,7 +7,9 @@ import {
   creditOut,
   lockCreditAccount,
   orders,
+  skuPromotions,
   skus,
+  subscriptions,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { randomBytes } from "node:crypto";
@@ -123,6 +125,196 @@ export class BillingService {
   /** 前端可用渠道（PAYMENT_LIVE + 凭据是否齐全），公开端点 */
   listChannels() {
     return { live: env.PAYMENT_LIVE, channels: this.channels.available() };
+  }
+
+  // ── 订阅制（竞品 VIP / DF-VIP 13 档；第 23 项计费补齐）─────────────────
+
+  /** 周期 → 天数。竞品 period 只有 month/year 两值，其余按 `<n>d` 解析 */
+  private periodDays(period: string | null | undefined): number {    if (!period) return 30;
+    if (period === "month") return 30;
+    if (period === "year") return 365;
+    if (period === "quarter") return 90;
+    const matched = /^(\d+)d$/.exec(period);
+    if (matched) return Number(matched[1]);
+    return 30;
+  }
+
+  /**
+   * 激活/续期订阅（只在 markPaid 的事务里调用）。
+   *
+   * 续期起点取 `max(现在, 当前到期日)`：过期后再买不能从过去补，
+   * 否则用户"断档三个月后再买一个月"只买到一段早已过去的区间。
+   * 升级档位（同 space 换更高档）直接改写 sku 字段并在回报里登记为已知简化
+   * ——竞品的按比例补差价规则未取证，不臆造。
+   */
+  private async activateSubscription(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: {
+      spaceId: bigint;
+      userId: bigint;
+      skuId: bigint;
+      sku: string;
+      period: string | null;
+      orderId: bigint;
+    },
+  ): Promise<void> {
+    const now = new Date();
+    const days = this.periodDays(input.period);
+    const [existing] = await tx
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.spaceId, input.spaceId), eq(subscriptions.status, 1)))
+      .for("update")
+      .limit(1);
+    if (existing) {
+      const base = existing.endAt.getTime() > now.getTime() ? existing.endAt : now;
+      const endAt = new Date(base.getTime() + days * 86_400_000);
+      await tx
+        .update(subscriptions)
+        .set({
+          sku: input.sku,
+          skuId: input.skuId,
+          endAt,
+          autoRenew: true,
+          orderId: input.orderId,
+          updatedAt: now,
+        })
+        .where(eq(subscriptions.id, existing.id));
+      return;
+    }
+    await tx.insert(subscriptions).values({
+      id: newId(),
+      spaceId: input.spaceId,
+      userId: input.userId,
+      skuId: input.skuId,
+      sku: input.sku,
+      startAt: now,
+      endAt: new Date(now.getTime() + days * 86_400_000),
+      status: 1,
+      autoRenew: true,
+      orderId: input.orderId,
+    });
+  }
+
+  /** 当前生效中的活动（同一 sku 只取优先级最高的一条：限时 > 首购 > 立减） */  private async activePromotions(): Promise<Map<string, typeof skuPromotions.$inferSelect>> {
+    const now = new Date();
+    const rows = await db
+      .select()
+      .from(skuPromotions)
+      .where(eq(skuPromotions.active, true))
+      .orderBy(skuPromotions.kind);
+    const picked = new Map<string, typeof skuPromotions.$inferSelect>();
+    for (const row of rows) {
+      const started = !row.startsAt || row.startsAt.getTime() <= now.getTime();
+      const notEnded = !row.endsAt || row.endsAt.getTime() > now.getTime();
+      if (!started || !notEnded) continue;
+      // kind 已按 1→3 排序，先到先得 = 限时特价优先；同 kind 取后插入的（新活动覆盖旧活动）
+      picked.set(row.sku, row);
+    }
+    return picked;
+  }
+
+  /**
+   * 动态价格（对照竞品 `sku-price`）：返回牌价 + 活动价 + 折扣说明。
+   *
+   * 叠加规则**显式写死**（不做通用促销引擎）：活动价与牌价取低，立减在此之上再减，
+   * 且最终价不低于 1 分（0 元订单会被支付渠道拒）。规则写在这里是为了可审计——
+   * 客诉时能回答"这个价是怎么算出来的"。
+   */
+  async skuPrice(skuValue: string) {
+    const [sku] = await db.select().from(skus).where(eq(skus.sku, skuValue));
+    if (!sku || !sku.active) {
+      throw new AppError(ErrorCode.NOT_FOUND, "sku not found or inactive", { field: "sku" });
+    }
+    const promo = (await this.activePromotions()).get(skuValue);
+    const listPrice = sku.priceCents;
+    let final = listPrice;
+    let promoLabel: string | null = null;
+    if (promo) {
+      if (promo.kind === 1 || promo.kind === 2) {
+        final = Math.min(final, promo.priceCents);
+      } else {
+        final = Math.max(1, final - promo.priceCents);
+      }
+      promoLabel = promo.label || null;
+    }
+    return {
+      sku: sku.sku,
+      label: sku.label,
+      kind: sku.kind,
+      list_price_cents: listPrice,
+      price_cents: final,
+      discount_cents: listPrice - final,
+      promotion: promo ? { kind: promo.kind, label: promoLabel, price_cents: promo.priceCents } : null,
+      period: sku.period,
+      credits: sku.credits,
+    };
+  }
+
+  /** 订阅档位列表（13 档 VIP，含活动价） */
+  async listPlans() {
+    const rows = await db
+      .select()
+      .from(skus)
+      .where(and(eq(skus.active, true), eq(skus.kind, "vip")))
+      .orderBy(skus.priceCents);
+    const promos = await this.activePromotions();
+    return rows.map((row) => {
+      const promo = promos.get(row.sku);
+      let final = row.priceCents;
+      if (promo) {
+        final = promo.kind === 3 ? Math.max(1, row.priceCents - promo.priceCents) : Math.min(final, promo.priceCents);
+      }
+      return {
+        id: String(row.id),
+        sku: row.sku,
+        label: row.label,
+        period: row.period,
+        credits: row.credits,
+        list_price_cents: row.priceCents,
+        price_cents: final,
+        promotion_label: promo?.label ?? null,
+      };
+    });
+  }
+
+  /** 当前生效订阅（无则 null；过期行顺带落状态，避免"过期了还显示生效"） */
+  async currentSubscription(spaceId: string) {
+    const [row] = await db
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.spaceId, BigInt(spaceId)), eq(subscriptions.status, 1)))
+      .limit(1);
+    if (!row) return null;
+    if (row.endAt.getTime() <= Date.now()) {
+      await db
+        .update(subscriptions)
+        .set({ status: 2, updatedAt: new Date() })
+        .where(eq(subscriptions.id, row.id));
+      return null;
+    }
+    return {
+      sku: row.sku,
+      start_at: row.startAt.toISOString(),
+      end_at: row.endAt.toISOString(),
+      auto_renew: row.autoRenew,
+      days_left: Math.max(0, Math.ceil((row.endAt.getTime() - Date.now()) / 86_400_000)),
+    };
+  }
+
+  /** 取消订阅 = 关自动续费（到期自然失效），不立即剥夺已付费权益 */
+  async cancelSubscription(spaceId: string) {
+    const [row] = await db
+      .select()
+      .from(subscriptions)
+      .where(and(eq(subscriptions.spaceId, BigInt(spaceId)), eq(subscriptions.status, 1)))
+      .limit(1);
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "no active subscription");
+    await db
+      .update(subscriptions)
+      .set({ autoRenew: false, updatedAt: new Date() })
+      .where(eq(subscriptions.id, row.id));
+    return { ok: true, auto_renew: false, end_at: row.endAt.toISOString() };
   }
 
   /**
@@ -338,6 +530,21 @@ export class BillingService {
         orderId: row.id,
         memo: `recharge ${row.sku}`,
       });
+
+      // VIP 商品同时激活/续期订阅。放在**同一事务**里：
+      // 若订阅写失败而积分已入账，用户会拿着钱却没有权益（反之则会白送权益），
+      // 两种不一致都要靠人工对账，所以必须同生共死。
+      const [skuRow] = await tx.select().from(skus).where(eq(skus.id, row.skuId));
+      if (skuRow?.kind === "vip") {
+        await this.activateSubscription(tx, {
+          spaceId: row.spaceId,
+          userId: row.userId,
+          skuId: row.skuId,
+          sku: skuRow.sku,
+          period: skuRow.period,
+          orderId: row.id,
+        });
+      }
 
       return { orderId: String(row.id), credited: true, credits: row.credits };
     });

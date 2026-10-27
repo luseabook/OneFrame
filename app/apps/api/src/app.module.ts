@@ -15,9 +15,15 @@ import { ModelsModule } from "./modules/models/models.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { ScriptModule } from "./modules/script/script.module";
+import { SubjectsModule } from "./modules/subjects/subjects.module";
+import { ExtractionModule } from "./modules/extraction/extraction.module";
 import { TeamModule } from "./modules/team/team.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
 import { AgentModule } from "./modules/agent/agent.module";
+import { KdsModule } from "./modules/kds/kds.module";
+import { NovelModule } from "./modules/novel/novel.module";
+import { FilmModule } from "./modules/film/film.module";
+import { WorkflowModule } from "./modules/workflow/workflow.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -43,6 +49,13 @@ import { StorageModule } from "./storage/storage.module";
     TeamModule,
     CanvasModule,
     AgentModule,
+    KdsModule,
+    // 第 1 批「出片质量」：主体库 + 抽取流水线（迁移 0019 已建表）
+    SubjectsModule,
+    ExtractionModule,
+    NovelModule,
+    FilmModule,
+    WorkflowModule,
     ReportsModule,
   ],
   controllers: [AppController, HealthController, MetricsController],

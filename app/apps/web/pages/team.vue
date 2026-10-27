@@ -105,6 +105,12 @@ const tabs = computed(() => [
   { value: "rules", label: "规则说明" },
 ]);
 
+/** 数据看板入口（kds 域，对照参照产品 /team/dashboard） */
+const router = useRouter();
+function openDashboard() {
+  void router.push("/team/dashboard");
+}
+
 const canManage = computed(() => perm.value?.privileged === true);
 const roleName = (code: string | null): string => roles.value.find((r) => r.role_code === code)?.role_name ?? (code ?? "—");
 const groupName_ = (id: string | null): string => groups.value.find((g) => g.id === id)?.name ?? "未分组";
@@ -559,7 +565,10 @@ onMounted(bootstrap);
       你当前是团队成员（{{ perm?.role_code ?? "member" }}），只能查看；编辑需管理员/制片等特权角色。
     </p>
 
-    <TabBar v-model="tab" :tabs="tabs" />
+    <div class="tm-tabbar-row">
+      <TabBar v-model="tab" :tabs="tabs" />
+      <button type="button" class="tm-dash-entry" @click="openDashboard">数据看板 →</button>
+    </div>
 
     <!-- 成员管理 -->
     <section v-if="tab === 'members'" class="tm-panel">
@@ -847,6 +856,17 @@ onMounted(bootstrap);
 .tm-title { font-size: 24px; font-weight: 700; margin: 0; }
 .tm-sub { color: var(--text-2); margin: var(--space-1) 0 0; font-size: 13px; }
 .tm-head-actions { display: flex; gap: var(--space-2); }
+.tm-tabbar-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); border-bottom: 1px solid var(--border-1);
+}
+.tm-tabbar-row :deep(.tabs) { border-bottom: 0; }
+.tm-dash-entry {
+  border: 1px solid var(--border-1); background: var(--surface-1); color: var(--text-2);
+  font-size: 13px; padding: 6px 12px; border-radius: var(--radius-2); cursor: pointer;
+  white-space: nowrap; margin-bottom: 4px;
+}
+.tm-dash-entry:hover { color: var(--text-1); border-color: var(--brand-500); }
 .tm-panel { display: flex; flex-direction: column; gap: var(--space-4); }
 .tm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tm-table th {

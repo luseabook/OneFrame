@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req, Res, ParseIntPipe, Inje
 import { createHash } from "node:crypto";
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
+import { AppError, ErrorCode } from "@app/shared";
 import { parseOrThrow } from "../../common/zod";
 import type { AuthedRequest } from "../../common/auth.types";
 import { TasksService } from "./tasks.service";
@@ -49,6 +50,46 @@ export class TasksController {
       body,
     );
     return this.tasks.batchDownload(req.auth?.spaceId ?? "", input.task_ids);
+  }
+
+  /**
+   * 批量任务结果（对照竞品 `POST /task/result`）。
+   * 用 POST 而不是 GET：id 列表可能到 100 条，放 query 会撞 URL 长度上限；
+   * 它是**只读快照**（不写库、不做 304），CLI/脚本用它一次拿全量状态。
+   */
+  @Post("task/result")
+  async resultMany(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(
+      z.object({ task_ids: z.array(z.string().min(1)).min(1).max(100) }),
+      body,
+    );
+    return this.tasks.resultMany(req.auth?.spaceId ?? "", input.task_ids);
+  }
+
+  /** 重新生成（成功态也允许；与失败重试 retry 分开，语义见 tasks.service.regenerate） */
+  @Post("tasks/:id/regenerate")
+  async regenerate(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(
+      z.object({ idempotency_key: z.string().min(1).max(128).optional() }).default({}),
+      body ?? {},
+    );
+    return this.tasks.regenerate(req.auth?.spaceId ?? "", id, input.idempotency_key);
+  }
+
+  /** 结果反馈（1..5 星 + 标签 + 备注；同一用户重复提交覆盖，不叠加） */
+  @Post("tasks/:id/feedback")
+  async feedback(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(
+      z.object({
+        rating: z.number().int().min(1).max(5),
+        comment: z.string().max(2000).optional(),
+        tags: z.array(z.string().max(32)).max(10).optional(),
+      }),
+      body,
+    );
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.tasks.feedback(auth.spaceId, auth.userId, id, input);
   }
 
   @Get("tasks/:id")

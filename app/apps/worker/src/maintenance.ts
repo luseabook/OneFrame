@@ -219,22 +219,50 @@ export async function expireShares(db: Db, log: MaintenanceLogger): Promise<numb
 /**
  * 资金对账：balance == Σdelta、frozen == Σfrozen_delta（PRD F6 不变式）。
  * 不平即为严重故障（资金账目错乱），必须告警。
+ *
+ * 返回**真实不平的空间总数**，而不是"打出来的日志条数"。
+ *
+ * 为什么改：原实现把 `limit 100` 同时当日志上限和返回值，一旦历史脏数据超过 100 个
+ * （dev 库积累测试残留后很容易超过），返回值被钉死在 100 —— 对账口径失真，
+ * 运维看到"恰好 100 个"会和"只有 100 个"混淆，告警也就失去意义。
+ * 现在拆成两步：先 count 出真实总数，再取前 100 条打日志（日志量大时截断但要说明）。
  */
-export async function auditLedger(db: Db, log: MaintenanceLogger): Promise<number> {
+/** 单次对账最多打多少条明细日志（总数不受此限制） */
+const LEDGER_LOG_LIMIT = 100;
+
+export async function auditLedger(
+  db: Db,
+  log: MaintenanceLogger,
+  scope?: { spaceId?: bigint },
+): Promise<number> {
+  // 可选作用域：定时任务走全库，测试与排障按单个 space 精确对账。
+  // 没有作用域时全局统计会被并发写入（同时在跑的另一套 API/worker、dev 库历史残留）干扰，
+  // 断言"总数 +1"这类用例因此天然不稳定；带上 spaceId 后同一断言是确定性的。
+  const scopeFilter = scope?.spaceId !== undefined ? sql`where a.space_id = ${scope.spaceId}` : sql``;
   const rows = (await db.execute(sql`
-    select a.space_id,
-           a.balance,
-           a.frozen,
-           coalesce(sum(f.delta), 0) as sum_delta,
-           coalesce(sum(f.frozen_delta), 0) as sum_frozen_delta
-      from credit_accounts a
-      left join credit_flows f on f.space_id = a.space_id
-     group by a.space_id, a.balance, a.frozen
-    having a.balance <> coalesce(sum(f.delta), 0)
-        or a.frozen <> coalesce(sum(f.frozen_delta), 0)
-     limit 100
+    with mismatch as (
+      select a.space_id,
+             a.balance,
+             a.frozen,
+             coalesce(sum(f.delta), 0) as sum_delta,
+             coalesce(sum(f.frozen_delta), 0) as sum_frozen_delta
+        from credit_accounts a
+        left join credit_flows f on f.space_id = a.space_id
+        ${scopeFilter}
+       group by a.space_id, a.balance, a.frozen
+      having a.balance <> coalesce(sum(f.delta), 0)
+          or a.frozen <> coalesce(sum(f.frozen_delta), 0)
+    )
+    select *, count(*) over () as total from mismatch order by space_id limit ${LEDGER_LOG_LIMIT}
   `)) as {
-    rows?: Array<{ space_id: string; balance: number; frozen: number; sum_delta: number; sum_frozen_delta: number }>;
+    rows?: Array<{
+      space_id: string;
+      balance: number;
+      frozen: number;
+      sum_delta: number;
+      sum_frozen_delta: number;
+      total: string | number;
+    }>;
   };
 
   const mismatched = rows.rows ?? [];
@@ -250,7 +278,16 @@ export async function auditLedger(db: Db, log: MaintenanceLogger): Promise<numbe
       "LEDGER MISMATCH — balance/frozen does not equal flow sums",
     );
   }
-  return mismatched.length;
+
+  // 没有明细行 = 没有不平；有明细行时 total 是窗口函数算的全量计数
+  const total = mismatched.length === 0 ? 0 : Number(mismatched[0]!.total);
+  if (total > mismatched.length) {
+    log.error(
+      { total, logged: mismatched.length, limit: LEDGER_LOG_LIMIT },
+      "LEDGER MISMATCH — 明细已截断，实际不平空间数见 total",
+    );
+  }
+  return total;
 }
 
 /** 结果文件 90 天清理 + 回收站 7 天物理删 + 注销 30 天物理清理 */

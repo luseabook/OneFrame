@@ -406,6 +406,185 @@ export class TasksService {
     };
   }
 
+  /**
+   * 批量任务结果（对照竞品 `POST /task/result`，`task.md` 的 result 语义）。
+   *
+   * 与 `GET /tasks?ids=` 的分工：那个是**轮询**通道（ETag + 304 省流量），
+   * 这个是**一次性快照**（CLI / 脚本 / 批处理用）——所以：
+   *   1. 不做 304，永远返回当前状态；
+   *   2. 缺失/越权的 id 进 `missing[]`，不让整批 404（批量接口最怕"一条坏全批废"）；
+   *   3. 只返回结果字段，不返回 userId/spaceId 等内部字段（最小暴露面）。
+   */
+  async resultMany(spaceId: string, taskIds: string[]) {
+    if (taskIds.length === 0 || taskIds.length > 100) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task_ids must be 1..100", { field: "task_ids" });
+    }
+    const ids = taskIds.map((id) => {
+      try {
+        return BigInt(id);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, `invalid task id: ${id}`, { field: "task_ids" });
+      }
+    });
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.id, ids)));
+
+    const byId = new Map(rows.map((row) => [String(row.id), row]));
+    const items = taskIds
+      .map((id) => byId.get(id))
+      .filter((row): row is TaskRow => Boolean(row))
+      .map((row) => ({
+        task_id: String(row.id),
+        status: row.status,
+        progress: row.progress,
+        mode: row.mode,
+        capability: row.capability,
+        results: row.results,
+        error: row.error,
+        finished_at: row.finishedAt?.toISOString() ?? null,
+      }));
+    const missing = taskIds.filter((id) => !byId.has(id));
+    return { items, missing };
+  }
+
+  /**
+   * 重新生成（对照竞品 `task regenerate`）。
+   *
+   * 与 `retry` 的语义差别（竞品把两者分得很清楚，我们照做）：
+   *   - `retry`：**失败重试**，只允许失败/超时态，attempt_no = 原 +1，同一 dedupe 家族；
+   *   - `regenerate`：**同参再来一次**，成功态也允许（"这张不满意，再出一版"），
+   *     是新任务的起点（attempt_no=1，origin_task_id 指向原任务，便于"看同一提示词的历史版本"）。
+   * 幂等：传 `idempotency_key` 时 dedupe_key = `regen:<origin>:<key>`，重复点只产生一个任务。
+   */
+  async regenerate(spaceId: string, id: string, idempotencyKey?: string): Promise<TaskDto> {
+    const origin = await this.findTask(spaceId, id);
+    if (origin.status === TaskStatus.PENDING || origin.status === TaskStatus.RUNNING) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task still running; wait or cancel it first", {
+        field: "id",
+      });
+    }
+    const dedupeKey = `regen:${origin.id}:${idempotencyKey?.trim() || newId()}`;
+    const [existing] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.spaceId, origin.spaceId), eq(tasks.dedupeKey, dedupeKey)));
+    if (existing) return this.toDto(existing);
+
+    const model = await this.models.findById(origin.modelId);
+    const request: GenerationRequest = {
+      mode: origin.mode as GenerationMode,
+      model: model.name,
+      scene: (origin.scene as SceneKey | null) ?? null,
+      input: origin.input as GenerationInput,
+      options: origin.options as GenerationOptions,
+    };
+    const priced = await this.credits.price(request, spaceId);
+    if (!priced.sufficient) throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
+
+    const taskId = newId();
+    const row = await db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(tasks)
+        .values({
+          id: taskId,
+          spaceId: origin.spaceId,
+          userId: origin.userId,
+          episodeId: origin.episodeId,
+          shotId: origin.shotId,
+          attemptNo: 1,
+          originTaskId: origin.id,
+          capability: origin.capability,
+          mode: origin.mode,
+          scene: origin.scene,
+          modelId: origin.modelId,
+          input: origin.input,
+          options: origin.options,
+          status: TaskStatus.PENDING,
+          progress: 0,
+          creditsFrozen: priced.credits,
+          dedupeKey,
+        })
+        .returning();
+      await freezeCredits(tx, {
+        spaceId: origin.spaceId,
+        cost: priced.credits,
+        taskId,
+        memo: "regenerate freeze",
+      });
+      await tx.insert(taskEvents).values({
+        id: newId(),
+        taskId,
+        type: "task.regenerated",
+        payload: { origin_task_id: String(origin.id) },
+      });
+      if (!inserted) throw new Error("insert task failed");
+      return inserted;
+    });
+
+    await this.queue.enqueueTask(String(taskId));
+    return this.toDto(row);
+  }
+
+  /**
+   * 结果反馈（对照竞品 `task feedback`）。
+   *
+   * 双写是**故意的**，两处各有唯一职责：
+   *   1. `tasks.feedback`（读侧）：agent 域已在这个 jsonb 上提供写口（`{reaction,comment}`），
+   *      页面/agent 读同一列就能拿到"最近一次反馈"，不能再开第二份真相；
+   *   2. `task_events`（审计侧）：反馈是事件流里的一条，重复提交要能追溯"改过什么"。
+   * 合并而非覆盖 `tasks.feedback`：agent 写的 `reaction` 不会被这里的 `rating` 冲掉。
+   */
+  async feedback(
+    spaceId: string,
+    userId: string,
+    id: string,
+    input: { rating: number; comment?: string; tags?: string[] },
+  ) {
+    const row = await this.findTask(spaceId, id);
+    const payload = {
+      rating: input.rating,
+      comment: input.comment ?? "",
+      tags: input.tags ?? [],
+      user_id: userId,
+    };
+    const existingFeedback =
+      row.feedback && typeof row.feedback === "object" ? (row.feedback as Record<string, unknown>) : {};
+    await db
+      .update(tasks)
+      .set({
+        feedback: { ...existingFeedback, ...payload },
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, row.id));
+
+    const [previous] = await db
+      .select()
+      .from(taskEvents)
+      .where(and(eq(taskEvents.taskId, row.id), eq(taskEvents.type, "task.feedback")))
+      .orderBy(desc(taskEvents.createdAt))
+      .limit(1);
+    if (previous) {
+      const previousPayload =
+        previous.payload && typeof previous.payload === "object"
+          ? (previous.payload as Record<string, unknown>)
+          : {};
+      await db
+        .update(taskEvents)
+        .set({ payload: { ...previousPayload, ...payload }, createdAt: new Date() })
+        .where(eq(taskEvents.id, previous.id));
+      return { ok: true, updated: true, rating: input.rating };
+    }
+    await db.insert(taskEvents).values({
+      id: newId(),
+      taskId: row.id,
+      type: "task.feedback",
+      payload,
+    });
+    return { ok: true, updated: false, rating: input.rating };
+  }
+
   private async findTask(spaceId: string, id: string): Promise<TaskRow> {
     let bigId: bigint;
     try {

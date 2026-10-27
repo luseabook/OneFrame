@@ -27,11 +27,28 @@ export interface ExecutorDeps {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 任务产物落库的 Content-Type / 扩展名。
+ *
+ * 第 3 批补 `speech` / `music`：工具箱的配音、音乐、音效、音色修改产出的都是音轨，
+ * 若不单独映射会被当成 `application/octet-stream` 存成 `.bin`——前端 `<audio>` 拿到的
+ * 是 `.bin`，浏览器按内容类型拒绝播放，看起来像"生成失败"，实际是文件类型错了。
+ */
 function contentTypeFor(task: TaskRow): string {
   if (task.capability === "video") return "video/mp4";
   if (task.capability === "image") return "image/png";
   if (task.capability === "text") return "text/plain; charset=utf-8";
+  if (task.capability === "speech" || task.capability === "music") return "audio/mpeg";
   return "application/octet-stream";
+}
+
+/** 产物扩展名必须跟 Content-Type 一致（见 contentTypeFor 的注释） */
+function extFor(contentType: string): string {
+  if (contentType.startsWith("video")) return "mp4";
+  if (contentType.startsWith("image")) return "png";
+  if (contentType.startsWith("audio")) return "mp3";
+  if (contentType.startsWith("text")) return "txt";
+  return "bin";
 }
 
 export async function transferResult(
@@ -54,7 +71,7 @@ export async function transferResult(
       // 已经是存储 key（适配器/上游已转存）
       return result;
     }
-    const ext = contentType.startsWith("video") ? "mp4" : contentType.startsWith("image") ? "png" : "bin";
+    const ext = extFor(contentType);
     const key = `u/${task.spaceId}/tasks/${task.id}/r${index}.${ext}`;
     const stored = await deps.storage.put(key, data, contentType);
     return {

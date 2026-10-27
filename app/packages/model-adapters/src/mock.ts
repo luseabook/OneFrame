@@ -1,4 +1,4 @@
-import { ImageMode, SyncTextMode } from "@app/shared";
+import { ImageMode, SpeechMode, SyncTextMode } from "@app/shared";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 export interface MockAdapterOptions {
@@ -64,22 +64,26 @@ export class MockAdapter implements ModelAdapter {
     }
 
     /**
-     * 结果形状必须跟能力一致：图像任务返回 `.png`，不能一律返回 `.mp4`。
+     * 结果形状必须跟能力一致：图像任务返回 `.png`、语音任务返回 `.mp3`，不能一律返回 `.mp4`。
      *
-     * 前端图片工具直接把它塞进 `<img src>`，`.mp4` 会渲染成裂图；
-     * 而"裂图"和"生成失败"在界面上很难区分——mock 形状错了会把真问题盖住
+     * 前端图片工具直接把它塞进 `<img src>`、语音工具塞进 `<audio src>`，`.mp4` 会渲染成裂图 /
+     * 静默不播；而"裂图/不播"和"生成失败"在界面上很难区分——mock 形状错了会把真问题盖住
      * （与 mock 文本分支同一个教训）。
+     *
+     * 判据是 **mode 语义**而不是 adapter_code：同一个适配器也可能被拿来跑别的形态。
+     * `music` / `lip-sync` 等后处理能力不走这里（它们有自己的适配器与 mock 形状），
+     * 只有 `SpeechMode` 落的 `tts` / `voice_clone` 借用本分支——它们产出也是音频。
      */
     const isImage = (ImageMode as readonly string[]).includes(job.mode);
-    const ext = isImage ? "png" : "mp4";
+    const isAudio = (SpeechMode as readonly string[]).includes(job.mode);
+    const ext = isImage ? "png" : isAudio ? "mp3" : "mp4";
     const previewExt = isImage ? "png" : "jpg";
     const suffix = (index: number): string => (job.count === 1 ? "" : `-${index}`);
     const results: GenResult[] = Array.from({ length: job.count }, (_, index) => ({
       uri: `mock://results/${job.taskId}${suffix(index)}.${ext}`,
       preview_uri: `mock://results/${job.taskId}-${index}.${previewExt}`,
-      ...(isImage ? {} : { duration_s: 5 }),
-      width: 720,
-      height: 1280,
+      ...(isImage || isAudio ? {} : { duration_s: 5 }),
+      ...(isAudio ? {} : { width: 720, height: 1280 }),
       meta: { mock: true, mode: job.mode, candidate_index: index },
     }));
     return { status: "succeeded", results };

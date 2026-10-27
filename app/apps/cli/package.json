@@ -1,0 +1,22 @@
+{
+  "name": "@app/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OneFrame CLI —— API 的薄壳（不新增业务逻辑）",
+  "bin": {
+    "oneframe": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}

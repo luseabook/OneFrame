@@ -1,65 +1,54 @@
 <script setup lang="ts">
 // 工具箱：对齐参照产品工具箱页（tools.png）
-// 标题 + 分类 Tab + 右上「工具箱创作资产」入口 + 4 列工具卡片（两行均分竖向空间）
+//
+// **卡清单来自服务端目录**（`GET /generations/tools` → `tool-catalog.ts`）。
+// 为什么不在前端写死：卡是给用户看的入口，mode 是任务脊柱的枚举，两者是同一份事实。
+// 前端硬编码一份、后端再硬编码一份的话，每加一张卡都要改两处，而"卡能点但没人接"
+// 这类漂移在编译期发现不了（这正是本批之前 8/18 张卡只能置灰的成因）。
+//
+// 19 张卡的依据（逐条可追）：
+//   - 17 条 `/create/*`：`rea-reelmate/routes.txt:25-41`
+//   - 「灵感成片」：`routes.txt:42`（/creation-agent，报告点名无独立 /create 路由）
+//   - 「音色修改」：`reelmate-feature-map.md §3.5`（报告点名无独立路由的工具）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 useHead({ title: "工具箱 · 一帧" });
 
-type Tool = {
-  label: string;
-  desc: string;
-  to?: string;
-  cat: "video" | "image" | "audio";
-};
+import type { ToolCardDto, ToolCatalogDto } from "~/types/api";
 
-/**
- * 工具箱卡片集
- *
- * 口径：照着参照站工具箱的卡片集来（`tools.png` + `routes.txt` 的 17 条 `/create/*`，
- * 外加「灵感成片」这条没有独立路由的 Agent 工具）。
- * 卡片数量先对齐，能点进哪一张由 `to` 决定——**不做空壳页面**：
- * 没有落地页的卡片是静默态，点了只提示"开发中"（参照站同类入口也是置灰）。
- */
-const tools: Tool[] = [
-  // AI 视频
-  { label: "文生视频", desc: "主流高质量模型，风格、动作轻松…", to: "/create/text-to-video", cat: "video" },
-  { label: "图生视频", desc: "一键让静态图动出电影感", to: "/create/image-to-video", cat: "video" },
-  { label: "视频对口型", desc: "视频对口型一键搞定，唇形贴合超…", cat: "video" },
-  { label: "参考生视频", desc: "多图参考，让画面自然动起来", to: "/create/reference-to-video", cat: "video" },
-  { label: "视频参考", desc: "照着参考视频的运镜与节奏再创作", to: "/create/video-refer", cat: "video" },
-  { label: "灵感成片", desc: "Agent 智能规划，从创意到完整短片", cat: "video" },
-  { label: "视频超清", desc: "AI 重建高清细节，影视工业级画质…", cat: "video" },
-  { label: "视频续写", desc: "AI 延续创作灵感，让故事无限精彩…", to: "/create/video-extend", cat: "video" },
-  { label: "视频编辑", desc: "多模态智能编辑，自由修改视频内容", to: "/create/video-edit", cat: "video" },
-  { label: "视频特效", desc: "一键套用电影级特效与转场", cat: "video" },
-  // AI 图片
-  { label: "文生图", desc: "一句话出图，风格与画质随心控制", to: "/create/text-to-image", cat: "image" },
-  { label: "图生图", desc: "参考图打底，重绘出新的画面", to: "/create/image-to-image", cat: "image" },
-  { label: "涂抹重绘", desc: "圈出要改的地方，局部重绘", cat: "image" },
-  { label: "文字重绘", desc: "保留画面结构，替换其中的文字", cat: "image" },
-  // AI 音频
-  { label: "文生语音", desc: "多音色配音，情绪与语速可控", cat: "audio" },
-  { label: "文生音乐", desc: "按描述生成配乐，风格与时长可选", cat: "audio" },
-  { label: "文生音效", desc: "环境声、动作声一键生成", cat: "audio" },
-  { label: "自动配乐", desc: "成片自动匹配 BGM 与节奏点", cat: "audio" },
-];
+const api = useApi();
 
-const tabs = [
+const loading = ref(true);
+const loadError = ref("");
+const cards = ref<ToolCardDto[]>([]);
+
+type TabKey = "all" | "video" | "image" | "audio";
+const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "all", label: "全部" },
   { key: "video", label: "AI视频" },
   { key: "image", label: "AI图片" },
   { key: "audio", label: "AI音频" },
-] as const;
-const active = ref<(typeof tabs)[number]["key"]>("all");
-const shown = computed(() => (active.value === "all" ? tools : tools.filter((t) => t.cat === active.value)));
+];
+const active = ref<TabKey>("all");
+const shown = computed(() => (active.value === "all" ? cards.value : cards.value.filter((c) => c.category === active.value)));
 
 const showTip = ref(true);
-const router = useRouter();
-const toast = useToast();
 
-function openTool(t: Tool): void {
-  if (t.to) void router.push(t.to);
-  else toast.info(`${t.label}正在开发中，敬请期待`);
+async function load(): Promise<void> {
+  loading.value = true;
+  loadError.value = "";
+  try {
+    const data = await api.get<ToolCatalogDto>("/generations/tools");
+    cards.value = data.cards;
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : "工具箱目录加载失败";
+  } finally {
+    loading.value = false;
+  }
 }
+
+onMounted(() => {
+  void load();
+});
 </script>
 
 <template>
@@ -89,18 +78,17 @@ function openTool(t: Tool): void {
       </button>
     </nav>
 
-    <div v-if="shown.length" class="grid">
-      <button
-        v-for="t in shown"
-        :key="t.label"
-        type="button"
-        class="tool-card"
-        :class="{ muted: !t.to }"
-        @click="openTool(t)"
-      >
-        <h3>{{ t.label }}</h3>
-        <p>{{ t.desc }}</p>
-      </button>
+    <div v-if="loading" class="state">正在加载工具箱…</div>
+    <div v-else-if="loadError" class="state">
+      <p>{{ loadError }}</p>
+      <button type="button" class="retry" @click="load">重试</button>
+    </div>
+
+    <div v-else-if="shown.length" class="grid">
+      <NuxtLink v-for="card in shown" :key="card.key" :to="card.route" class="tool-card">
+        <h3>{{ card.title }}</h3>
+        <p>{{ card.desc }}</p>
+      </NuxtLink>
     </div>
     <EmptyState v-else title="该分类暂无工具" description="该分类暂未开放工具，敬请期待" style="margin-top: 80px" />
   </div>
@@ -112,7 +100,7 @@ function openTool(t: Tool): void {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 64px);
-  padding: 28px 32px 40px;
+  padding: 20px 24px 40px;
   box-sizing: border-box;
 }
 
@@ -137,10 +125,10 @@ h1 {
 
 .tip {
   position: relative;
-  max-width: 280px;
+  width: 280px;
   padding: 10px 30px 10px 14px;
   border-radius: 8px;
-  background: #2c1d63;
+  background: #2a1744;
   color: #d9d2ff;
 }
 
@@ -157,9 +145,9 @@ h1 {
 
 .tip-title {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: #b9aeff;
+  color: #a78bfa;
 }
 
 .tip-text {
@@ -171,36 +159,36 @@ h1 {
 
 .asset-btn {
   flex: 0 0 auto;
-  height: 34px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   padding: 0 18px;
   border-radius: 8px;
-  background: var(--brand-500);
+  background: #9b46ff;
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
 }
 
 .asset-btn:hover {
-  background: var(--brand-600);
+  filter: brightness(1.08);
 }
 
 .tabs {
   display: flex;
-  gap: 6px;
+  gap: 26px;
   margin: 22px 0 0;
 }
 
 .tab {
-  height: 34px;
-  padding: 0 18px;
+  height: 30px;
+  padding: 0 16px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--text-2);
+  color: #ffffff99;
   font-size: 14px;
   cursor: pointer;
 }
@@ -210,7 +198,7 @@ h1 {
 }
 
 .tab.on {
-  background: var(--bg-raised);
+  background: #232328;
   color: var(--text-1);
   font-weight: 600;
 }
@@ -220,8 +208,8 @@ h1 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-content: start;
-  gap: 24px 32px;
-  padding: 24px 0 0;
+  gap: 20px;
+  padding: 20px 0 0;
 }
 
 .tool-card {
@@ -230,7 +218,7 @@ h1 {
   justify-content: center;
   gap: 6px;
   height: 84px;
-  padding: 16px 22px;
+  padding: 16px 16px;
   border-radius: 16px;
   border: 0;
   background: linear-gradient(180deg, #060608, #020203);
@@ -255,21 +243,32 @@ h3 {
 
 .tool-card p {
   margin: 0;
-  font-size: 12px;
-  color: var(--text-3);
+  font-size: 13px;
+  color: #ffffff80;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tool-card.muted {
-  cursor: default;
-  opacity: 0.72;
+.state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 13px;
 }
 
-.tool-card.muted:hover {
-  background: linear-gradient(180deg, #060608, #020203);
-  transform: none;
+.retry {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid #ffffff24;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 @media (max-width: 1100px) {

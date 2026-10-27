@@ -1,0 +1,1 @@
+ALTER TABLE "storyboard_assets" ADD COLUMN "sort" integer DEFAULT 0 NOT NULL;

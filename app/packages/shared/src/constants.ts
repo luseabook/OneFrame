@@ -51,8 +51,45 @@ export const ImageMode = [
   "outpaint",
   "inpaint",
   "erase",
+  // 文字重绘（工具箱「文字重绘」卡）：保留画面结构、替换画面里的文字。
+  // 与 `inpaint` 的差别是**指令来源**：inpaint 给蒙版（改哪儿），文字重绘给文字内容（改成什么），
+  // 因此它是独立 mode 而不是 inpaint 的参数——计价口径也不同（按次 vs 按面积）。
+  "text_repaint",
 ] as const;
 export const SpeechMode = ["tts", "voice_clone"] as const;
+
+/**
+ * 音乐 / 音效 / 音频后处理模式（第 3 批工具箱）。
+ *
+ * 为什么独立成组而不是塞进 `SpeechMode`：`SpeechMode` 是「说人话」（TTS/音色克隆），
+ * 计价按字符或次；音乐/音效是「配氛围」，计价按时长档，产物用途也不同
+ * （台词轨 vs BGM 轨）。放进同一个枚举会让价目表分不清两种计价口径。
+ *
+ * ⚠️ 这几个 mode 目前只到**适配器层**（`model-adapters` 的 tts/music/…），
+ * 还没有进 `model_prices` 的目录条目——第 3 批接 UI 时才需要给它们配模型与价。
+ * 列在这里是为了让 `GenerationMode` 的类型闭包完整，避免第 3 批再改一次公共契约。
+ */
+export const AudioToolMode = ["text2music", "text2sfx", "auto_bgm", "audio_timbre_modify"] as const;
+
+/**
+ * 视频后处理模式（第 3 批工具箱）。
+ *
+ * 与 `VideoMode` 的区别：`VideoMode` 是「生成」（从文本/图片/参考素材造出新画面），
+ * 这里全是「改造已有视频」（不改内容语义，只改画质/字幕/结构）。分开的好处：
+ * 价目表能对「生成」与「后处理」用不同计价策略，且任务列表能分开统计。
+ *
+ * 注意 `video_upscale` 与 `ImageMode` 的 `upscale` 是两回事（视频 vs 图片）。
+ */
+export const VideoToolMode = [
+  "video_upscale",
+  "lip_sync",
+  "video_effects",
+  "de_subtitle_auto",
+  "de_subtitle_region",
+  "video_slicing",
+  "fps_duration_unify",
+  "video_audio_separation",
+] as const;
 
 /**
  * 文本模式（LLM 步骤，按次计价）。
@@ -99,6 +136,8 @@ export const GenerationMode = [
   ...SpeechMode,
   ...TextMode,
   ...AnalysisMode,
+  ...AudioToolMode,
+  ...VideoToolMode,
 ] as const;
 export type GenerationMode = (typeof GenerationMode)[number];
 

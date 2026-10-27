@@ -108,6 +108,15 @@ const envSchema = z.object({
   DEEPSEEK_BASE_URL: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default("deepseek-chat"),
 
+  // 语音转写（Agent STT，第 4 批）：竞品 `agent/stt-token`（rt:126）。
+  // 我方策略：**厂商 Key 不下发浏览器**，只下发短期会话令牌；缺 Key 时 /
+  // `AGENT_STT_PROVIDER` 为 browser 时端点返回 available=false，前端回落到
+  // 浏览器内置识别（Web Speech / 录音后本地转写），不抛 500。
+  AGENT_STT_PROVIDER: z.enum(["browser", "volc", "minimax", "custom"]).default("browser"),
+  AGENT_STT_API_KEY: z.string().optional(),
+  AGENT_STT_BASE_URL: z.string().optional(),
+  AGENT_STT_MODEL: z.string().optional(),
+
   // 运营后台（独立 admin_users；生产必须显式配置）
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),

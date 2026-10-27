@@ -52,6 +52,14 @@ export interface ModelFilters {
 
 @Injectable()
 export class ModelsService {
+  /**
+   * 列出用户可选的模型。
+   *
+   * `visible` 缺省时**只返回可见模型**（而不是返回全部行）：目录里有内部能力行
+   * （工具箱的 `toolbox-*`，`visible=false`），它们有 models 行只是为了满足
+   * `tasks.model_id` 的外键与计价维度，绝不该出现在任何模型选择器里。
+   * 显式传 `visible=false` 仍能拿到内部行（运营排查用）。
+   */
   async list(filters: ModelFilters): Promise<ModelDto[]> {
     const rows = await db.select().from(models).orderBy(models.sort);
     return rows
@@ -65,9 +73,17 @@ export class ModelsService {
       .map((row) => this.toDto(row));
   }
 
+  /**
+   * 按协议名取模型（内部计价/编排入口）。
+   *
+   * 这里**不过滤 visible**：`credits.price()`、画布节点派生、Agent 投递都靠它按名
+   * 解析模型行，其中包含 `visible=false` 的内部能力行（工具箱）。用户可见性由
+   * `list()` 与 `GET /models` 控制——用户拿不到不可见模型的名字，就没法自己选到它。
+   * 若这里也按 visible 拦，工具箱任务会直接 "model not found"，表单能填但投不出去。
+   */
   async findByName(name: string): Promise<ModelRow> {
     const [row] = await db.select().from(models).where(eq(models.name, name));
-    if (!row || !row.visible) {
+    if (!row) {
       throw new AppError(ErrorCode.INVALID_PARAM, `model not found: ${name}`, { field: "model" });
     }
     return row;

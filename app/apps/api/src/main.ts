@@ -6,6 +6,7 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/http/exception.filter";
 import { EnvelopeInterceptor } from "./common/http/envelope.interceptor";
+import { IdempotencyInterceptor } from "./common/http/idempotency.interceptor";
 import { env } from "./config/env";
 
 /** 优雅停机等待上限：超过则强制退出，避免容器停不下来（deployment.md §5） */
@@ -41,7 +42,9 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix("v1");
   app.useGlobalFilters(new AllExceptionsFilter());
-  app.useGlobalInterceptors(new EnvelopeInterceptor());
+  // 顺序有意义：幂等账本必须在信封**外层**（重放时缓存的是裸 data，
+  // 仍要让 EnvelopeInterceptor 包一次，否则重放响应形状与首次不一致）。
+  app.useGlobalInterceptors(new IdempotencyInterceptor(), new EnvelopeInterceptor());
   app.enableShutdownHooks();
 
   await app.listen(env.PORT, "0.0.0.0");

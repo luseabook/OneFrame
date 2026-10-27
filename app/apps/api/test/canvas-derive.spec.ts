@@ -333,12 +333,25 @@ describe("canvas text derive + admin pricing e2e", () => {
     expect(withKey.code).toBe(0);
   }, 60_000);
 
-  it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {    const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
+  it("后台可改价：改金额后同一请求的报价立刻变（证明价格没写死）", async () => {
+    // 目录扩到 46 条后价目 997 行：必须按模型过滤，否则 page=1&page_size=100
+    // 只覆盖前几个视频模型，拿不到文本类（deepseek 等 id 更大、排在后面）的价目。
+    // 且必须取 pickTextModel 实际选中的那个模型——patch 别人的价不会影响本次报价。
+    const models = await admin("GET", "/ops/admin/models");
+    const textModel = (models.data as Array<{ id: string; name: string; capability: string; sort: number }>)
+      .filter((row) => row.capability === "text")
+      .sort((a, b) => a.sort - b.sort)[0];
+    expect(textModel, "目录里应有可见文本模型").toBeTruthy();
+
+    const list = await admin(
+      "GET",
+      `/ops/admin/model-prices?model_id=${textModel!.id}&page=1&page_size=100`,
+    );
     expect(list.code).toBe(0);
     const price = (list.data.list as Array<{ id: string; mode: string; credits: number; model_id: string }>).find(
       (row) => row.mode === "script_optimization",
     );
-    expect(price).toBeTruthy();
+    expect(price, `${textModel!.name} 应有 script_optimization 价目`).toBeTruthy();
 
     const doubled = await admin("PATCH", `/ops/admin/model-prices/${price!.id}`, { credits: 7 });
     expect(doubled.code).toBe(0);
@@ -391,11 +404,15 @@ describe("canvas text derive + admin pricing e2e", () => {
     expect(badDuration.code).toBe(400101);
 
     // 先摘掉 seed 里的这一档，才有"新建"的空间
-    const list = await admin("GET", "/ops/admin/model-prices?page=1&page_size=100");
+    //
+    // 必须按 model_id 过滤：目录扩到 46 条后价目有 997 行，
+    // 不带过滤的 `page=1&page_size=100` 取不到 deepseek 那几行
+    // （列表按 model_id 升序，100 行只覆盖前几个模型）。
+    const list = await admin("GET", `/ops/admin/model-prices?model_id=${model!.id}&page=1&page_size=100`);
     const seedRow = (list.data.list as Array<{ id: string; mode: string; resolution: string }>).find(
       (row) => row.mode === "script_optimization" && row.resolution === "per_call",
     );
-    expect(seedRow).toBeTruthy();
+    expect(seedRow, "seed 里应有 deepseek 的 script_optimization/per_call 价目").toBeTruthy();
     const removed = await admin("DELETE", `/ops/admin/model-prices/${seedRow!.id}`);
     expect(removed.code).toBe(0);
 

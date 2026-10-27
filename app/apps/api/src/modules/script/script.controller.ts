@@ -24,6 +24,7 @@ import {
 } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import { AssetMatchService } from "./asset-match.service";
 import { ScriptService } from "./script.service";
 import { timelinePutSchema } from "./timeline.schema";
 
@@ -36,9 +37,51 @@ const parseScriptSchema = z.object({
 /** P2 项目资产列表过滤：kind 省略时返回该项目全部资产（含角色） */
 const projectAssetsQuerySchema = z.object({ kind: projectAssetKindSchema.optional() });
 
+/**
+ * 拆集来源（completion-plan §3.3 衔接契约）：传了 `source.kind=novel` 就走小说链，
+ * 只接受已定稿（status=16）的本子，由 `NovelService.assertSplittable` 判定；
+ * 不传则保持原有行为（用脚本正文/项目原文拆集）。
+ */
+const splitWithSourceSchema = splitEpisodesRequestSchema.extend({
+  source: z
+    .object({
+      kind: z.literal("novel"),
+      nt_id: z.string().min(1),
+    })
+    .optional(),
+});
+
+const matchDryRunSchema = z.object({ dry_run: z.boolean().optional() });
+
+/** 匹配项：`resource_id` 是项目资产 id；`name` 可选（服务端以资产名为准） */
+const matchResourceEntrySchema = z.object({
+  resource_id: z.string().min(1),
+  name: z.string().max(80).optional(),
+});
+
+/**
+ * `save-resource-matches` 的**完整快照**入参（`episode.md:368-388`）：
+ * 三个数组必须同时给，空类别显式传 `[]`；漏传类别一律 400101（不会被清空）。
+ */
+const saveResourceMatchesSchema = z.object({
+  resources: z.object({
+    characters: z.array(matchResourceEntrySchema).max(100),
+    scenes: z.array(matchResourceEntrySchema).max(100),
+    props: z.array(matchResourceEntrySchema).max(100),
+  }),
+});
+
+const supplementMissingSchema = z.object({
+  asset_ids: z.array(z.string().min(1)).max(100).optional(),
+  dry_run: z.boolean().optional(),
+});
+
 @Controller()
 export class ScriptController {
-  constructor(@Inject(ScriptService) private readonly script: ScriptService) {}
+  constructor(
+    @Inject(ScriptService) private readonly script: ScriptService,
+    @Inject(AssetMatchService) private readonly match: AssetMatchService,
+  ) {}
 
   @Post("projects")
   async create(@Req() req: AuthedRequest, @Body() body: unknown) {
@@ -112,8 +155,77 @@ export class ScriptController {
 
   @Post("projects/:id/episodes/split")
   async split(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
-    const input = parseOrThrow(splitEpisodesRequestSchema, body ?? {});
-    return this.script.splitEpisodes(req.auth?.spaceId ?? "", id, input);
+    const input = parseOrThrow(splitWithSourceSchema, body ?? {});
+    const { source, ...rest } = input;
+    return this.script.splitEpisodes(req.auth?.spaceId ?? "", id, rest, source);
+  }
+
+  // ── 环节 4：资产 × 分镜匹配（asset-match）────────────────────────────
+
+  /**
+   * 执行本集资产匹配（竞品 `episode match-resources` 的「资产匹配」半段）。
+   * 组合任务里服务端匹配完会自动拆镜；我方拆镜仍由
+   * `POST .../storyboards/generate` 显式触发（偏离已登记）。
+   */
+  @Post("projects/:id/episodes/:eid/match-resources")
+  async matchResources(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(matchDryRunSchema, body ?? {});
+    return this.match.matchResources(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /** 匹配结果：characters/scenes/props 三数组 + 三态统计 + 智能补充三选项 */
+  @Get("projects/:id/episodes/:eid/match-result")
+  async matchResult(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.match.matchResult(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  /** 匹配重置（破坏性；`dry_run=true` 只预演不写） */
+  @Post("projects/:id/episodes/:eid/match-reset")
+  async matchReset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(matchDryRunSchema, body ?? {});
+    return this.match.resetMatches(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /** 保存匹配关系（**完整快照**：三类数组必须同时给，空类别显式 `[]`） */
+  @Post("projects/:id/episodes/:eid/save-resource-matches")
+  async saveResourceMatches(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(saveResourceMatchesSchema, body);
+    return this.match.saveResourceMatches(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /**
+   * 缺失资产智能补充（7 条件全满足才进候选；三选项默认「保持现状」）。
+   * 生图不在本端点扣费：需要生图的目标以 `next_actions` 返回，由既有
+   * `POST /projects/{id}/assets/{aid}/generate-image` 走报价确认。
+   */
+  @Post("projects/:id/episodes/:eid/supplement-missing")
+  async supplementMissing(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(supplementMissingSchema, body ?? {});
+    return this.match.supplementMissing(req.auth?.spaceId ?? "", id, eid, input);
   }
 
   @Post("projects/:id/outline/generate")

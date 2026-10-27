@@ -21,6 +21,7 @@ import {
   LIMITS,
   PROJECT_ASSETS_EXTRACT_MAX,
   ProjectAssetStatus,
+  ProjectSourceType,
   TaskStatus,
   newId,
   type CharactersGenerateRequest,
@@ -46,8 +47,10 @@ import { QueueService } from "../../queue/queue.service";
 import { CreditsService } from "../credits/credits.service";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
+import { NovelService } from "../novel/novel.service";
 import { StorageService } from "../../storage/storage.service";
 import { ModerationService } from "../moderation/moderation.service";
+import { AssetGatesService } from "./asset-gates.service";
 import { LlmService } from "./llm.service";
 import type { TimelineClipDto, TimelineClipInput, TimelinePutRequest } from "./timeline.schema";
 
@@ -70,6 +73,8 @@ function projectDto(row: ProjectRow) {
     archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
     is_sample: row.isSample === 1,
     created_at: row.createdAt.toISOString(),
+    // 列表页要展示「最后编辑于 …」：用项目行的 updatedAt（任何写操作都会刷新它）
+    updated_at: row.updatedAt.toISOString(),
   };
 }
 
@@ -147,6 +152,8 @@ export class ScriptService {
     @Inject(QueueService) private readonly queue: QueueService,
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(ModerationService) private readonly moderation: ModerationService,
+    @Inject(AssetGatesService) private readonly gates: AssetGatesService,
+    @Inject(NovelService) private readonly novels: NovelService,
   ) {}
 
   async createProject(
@@ -268,7 +275,19 @@ export class ScriptService {
                     from assets ast
                     join project_assets pa on pa.portrait_asset_id = ast.id
                    where pa.project_id = p.id and ast.deleted_at is null
-                   order by ast.id desc limit 1) as portrait_uri
+                   order by ast.id desc limit 1) as portrait_uri,
+                 -- ReelFlow 列表卡要显示「时长」：项目全部时间线片段时长之和。
+                 -- 用 jsonb_array_elements 展开后 sum；无时间线的项目返回 0（不是 null，
+                 -- 免得前端还要区分"还没剪"与"查询失败"）。
+                 coalesce((
+                   select sum(coalesce((c->>'duration')::numeric, 0))::int
+                     from project_timelines pt
+                     cross join lateral jsonb_array_elements(pt.clips) c
+                    where pt.project_id = p.id
+                 ), 0) as timeline_duration_s,
+                 -- 有服务端时间线的分集数（剪辑台干过活的集数）
+                 (select count(*)::int from project_timelines pt2 where pt2.project_id = p.id)
+                   as timeline_episode_count
             from script_projects p
            where p.id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
         `)
@@ -301,6 +320,9 @@ export class ScriptService {
           shot_count: shotCount,
           done_count: doneCount,
           cover_uri: coverUrl,
+          // ReelFlow 列表卡：时间线总时长（秒）与已入时间线的集数（0 = 还没剪）
+          timeline_duration_s: Number(s.timeline_duration_s ?? 0),
+          timeline_episode_count: Number(s.timeline_episode_count ?? 0),
           // 用户可理解的四态（PRD 增补 §1.2）
           work_state:
             row.archivedAt !== null
@@ -453,13 +475,58 @@ export class ScriptService {
     return { ok: true };
   }
 
-  async splitEpisodes(spaceId: string, projectId: string, input: SplitEpisodesRequest) {
+  /**
+   * `POST /projects/:id/episodes/split` —— 拆集。
+   *
+   * 两种来源（completion-plan §3.3 衔接口径）：
+   * 1. 默认：用请求里的 `source_text`，没有则用项目原文；按 `第N集/章/回` 标记或等分切；
+   * 2. `source = {kind:'novel', nt_id}`：调 `NovelService.assertSplittable(spaceId, nt_id)`
+   *    校验并取已定稿剧本。**只有 `status=16`（已定稿）的本子可作拆集源**，否则
+   *    novel 侧抛 `AppError`（未定稿 / 不是该 space 的本子 / 不存在），这里原样透出——
+   *    不要在 script 侧重写一遍判定，否则两处口径一定会漂。
+   *
+   * 为什么优先用返回的 `episodeScripts[]` 而不是把 `sourceText` 再切一次：剧本工厂的
+   * 集边界是用户确认过的，再切一次必然对不上（novel 侧注释同因）。
+   */
+  async splitEpisodes(
+    spaceId: string,
+    projectId: string,
+    input: SplitEpisodesRequest,
+    source?: { kind: "novel"; nt_id: string },
+  ) {
     const project = await this.findProject(spaceId, projectId);
-    const sourceText = (input.source_text ?? project.sourceText ?? "").trim();
-    if (!sourceText) throw new AppError(ErrorCode.INVALID_PARAM, "source_text is empty", { field: "source_text" });
-    if (sourceText.length > 50_000) throw new AppError(ErrorCode.SOURCE_TOO_LONG, "source text exceeds 50000 chars");
 
-    const chunks = this.splitSource(sourceText, input.ep_count);
+    let chunks: Array<{ title?: string; text: string }>;
+    if (source?.kind === "novel") {
+      const novel = await this.novels.assertSplittable(spaceId, source.nt_id);
+      const scripts = novel.episodeScripts;
+      chunks =
+        scripts.length > 0
+          ? scripts.map((episode) => ({
+              title: episode.title?.trim() || `第${episode.epNo}集`,
+              text: episode.text,
+            }))
+          : this.splitSource(novel.sourceText, input.ep_count ?? novel.episodeCount).map((text) => ({
+              text,
+            }));
+      if (chunks.length === 0) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "novel has no splittable episode text", {
+          field: "source",
+          nt_id: source.nt_id,
+          reason: "episodes_empty",
+        });
+      }
+    } else {
+      const sourceText = (input.source_text ?? project.sourceText ?? "").trim();
+      if (!sourceText) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "source_text is empty", { field: "source_text" });
+      }
+      if (sourceText.length > 50_000) {
+        throw new AppError(ErrorCode.SOURCE_TOO_LONG, "source text exceeds 50000 chars");
+      }
+      chunks = this.splitSource(sourceText, input.ep_count).map((text) => ({ text }));
+    }
+
     const created = await db.transaction(async (tx) => {
       const existing = await tx.select().from(episodes).where(eq(episodes.projectId, project.id));
       if (existing.some((ep) => ep.status >= 2)) {
@@ -473,13 +540,20 @@ export class ScriptService {
             id: newId(),
             projectId: project.id,
             epNo: index + 1,
-            title: `第${index + 1}集`,
-            synopsis: chunk.slice(0, 120),
-            scriptText: chunk,
+            title: chunk.title ?? `第${index + 1}集`,
+            synopsis: chunk.text.slice(0, 120),
+            scriptText: chunk.text,
             status: 1,
           })),
         )
         .returning();
+      // 小说来源的集边界是用户确认过的，落库后把项目来源标成 novel（便于详情页区分）
+      if (source?.kind === "novel") {
+        await tx
+          .update(scriptProjects)
+          .set({ sourceType: ProjectSourceType.NOVEL, updatedAt: new Date() })
+          .where(eq(scriptProjects.id, project.id));
+      }
       return rows;
     });
     return created.map(episodeDto);
@@ -705,6 +779,8 @@ export class ScriptService {
                 shots.map((s) => s.id),
               ),
             )
+            // 绑定顺序是契约（images[] 注入的 [[@imgN]] 编号依赖它）：显式按 sort 排，不依赖堆序
+            .orderBy(storyboardAssets.storyboardId, storyboardAssets.sort, storyboardAssets.projectAssetId)
         : [];
     const linkMap = new Map<string, string[]>();
     for (const link of links) {
@@ -1070,9 +1146,11 @@ export class ScriptService {
         await tx
           .insert(storyboardAssets)
           .values(
-            orderedBigints.map((projectAssetId) => ({
+            orderedBigints.map((projectAssetId, index) => ({
               storyboardId: storyboard.id,
               projectAssetId,
+              // 显式落顺序：无 ORDER BY 的堆序在 DELETE 后会被空槽复用打乱（见 schema 注释）
+              sort: index,
             })),
           );
       }
@@ -1507,6 +1585,8 @@ export class ScriptService {
                 shots.map((s) => s.id),
               ),
             )
+            // 同上：矩阵/匹配视图也按绑定顺序出图，避免同一份数据两次渲染顺序不同
+            .orderBy(storyboardAssets.storyboardId, storyboardAssets.sort, storyboardAssets.projectAssetId)
         : [];
     const linkMap = new Map<string, string[]>();
     for (const link of links) {
@@ -1535,8 +1615,27 @@ export class ScriptService {
       code?: number;
       reason?: string;
       duration_adjusted?: { from: number; to: number };
+      /** 一致性三闸门定位（只有被闸门拦下的项才有） */
+      gate?: "finalize" | "match" | "subject" | "generate";
+      blocked?: unknown;
+      retryable?: boolean;
     }> = [];
     let balance = 0;
+
+    // ── 一致性三闸门（completion-plan §2 任务 1.4）────────────────────────
+    // 闸门 2「匹配」只对参考生视频生效：图生视频/文生视频可以用分镜定格图或纯提示词，
+    // 此时没有「集级资产匹配」这回事，硬拦会把 P9 定格图链路打坏。
+    const matchGate =
+      generateMode === "universal_reference"
+        ? await this.gates.matchGate(project.id, episode.id)
+        : null;
+    // 闸门 1.5「主体审核」批量判一次：逐镜查会退化成 N+1
+    const batchLinkedAssets = input.shot_ids.flatMap((shotId) =>
+      (linkMap.get(shotId) ?? [])
+        .map((id) => assetById.get(id))
+        .filter((asset): asset is ProjectAssetRow => Boolean(asset)),
+    );
+    const subjectGate = await this.gates.subjectGate(spaceId, batchLinkedAssets);
 
     for (const shotId of input.shot_ids) {
       const shot = shotById.get(shotId);
@@ -1554,6 +1653,26 @@ export class ScriptService {
       const readyAssets = linked.filter((asset) => asset.status === 2 && Boolean(asset.refImageUri));
       const refs = readyAssets.map((asset) => asset.refImageUri!);
 
+      // 闸门 1.5 · 主体审核：绑定的资产若显式关联了未过审主体 → 400105
+      // （reviewing 可等待重试；rejected 明确 retryable=false，禁止自动重试）
+      if (!subjectGate.ok) {
+        const shotAssetIds = new Set(linked.map((asset) => String(asset.id)));
+        const blockedHere = subjectGate.blocked.filter((item) => shotAssetIds.has(item.resource_id));
+        if (blockedHere.length > 0) {
+          items.push({
+            shot_id: shotId,
+            task_id: null,
+            submitted: false,
+            code: ErrorCode.ASSET_NOT_READY,
+            reason: "subject_not_approved",
+            gate: "subject",
+            blocked: blockedHere,
+            retryable: blockedHere.some((item) => item.retryable),
+          });
+          continue;
+        }
+      }
+
       // 各模式的资产/提示词前置条件（沿用既有逐镜 400105 语义）
       // P9：3D 导演台定格图优先——shot.firstFrameUri/lastFrameUri 为空才回退绑定资产；
       //     storage key 与资产 refImageUri 同口径直接写入 input（由下游按现有约定处理）
@@ -1564,14 +1683,30 @@ export class ScriptService {
       let lastFrameUri: string | null = null;
       let frameSource: { first: "shot_frame" | "asset"; last: "shot_frame" | "asset" } | null = null;
       if (generateMode === "universal_reference") {
-        // 参考生视频：绑定资产必须全部定稿且有参考图
-        if (refs.length === 0 || linked.length !== readyAssets.length) {
+        // 闸门 1 · 定稿：绑定资产必须全部 status=2 且有参考图文件（file_id）
+        const finalizeGate = this.gates.finalizeGate(linked);
+        if (refs.length === 0 || linked.length !== readyAssets.length || !finalizeGate.ok) {
           items.push({
             shot_id: shotId,
             task_id: null,
             submitted: false,
             code: ErrorCode.ASSET_NOT_READY,
             reason: "asset_not_ready",
+            gate: "finalize",
+            blocked: finalizeGate.blocked,
+          });
+          continue;
+        }
+        // 闸门 2 · 匹配：本集必须已跑过资产匹配（status 1/2/3），否则一致性无保障
+        if (matchGate && !matchGate.ok) {
+          items.push({
+            shot_id: shotId,
+            task_id: null,
+            submitted: false,
+            code: ErrorCode.ASSET_NOT_READY,
+            reason: "asset_not_ready",
+            gate: "match",
+            blocked: { match_status: matchGate.status, hint: matchGate.reason ?? null },
           });
           continue;
         }
@@ -1634,6 +1769,11 @@ export class ScriptService {
       }
       let durationAdjusted =
         duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;
+      // 闸门 3 · 生成注入：已定稿资产按绑定顺序展开成 images[]，并给出
+      // 「名称 → [[@imgN]]」映射（storyboard.md:308-310）。原 prompt 不被改写，
+      // 标记版只作为附加字段，避免用户可见提示词被悄悄替换。
+      const injection =
+        generateMode === "universal_reference" ? this.gates.injectImages(prompt, linked) : null;
       const request: GenerationRequest = {
         mode: generateMode,
         model: model.name,
@@ -1648,7 +1788,17 @@ export class ScriptService {
                   first_frame_uri: firstFrameUri!,
                   last_frame_uri: lastFrameUri!,
                 }
-              : { prompt, reference_uris: generateMode === "universal_reference" ? refs : [] },
+              : {
+                  prompt,
+                  reference_uris: generateMode === "universal_reference" ? refs : [],
+                  ...(injection
+                    ? {
+                        images: injection.images,
+                        image_subjects: injection.image_subjects,
+                        prompt_with_images: injection.prompt_with_images,
+                      }
+                    : {}),
+                } as GenerationRequest["input"],
         options: {
           ratio: input.ratio ?? shot.ratio ?? project.ratio,
           resolution: input.resolution ?? shot.resolution ?? "720p",
@@ -2311,3 +2461,4 @@ export class ScriptService {
     );
   }
 }
+

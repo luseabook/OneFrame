@@ -5,6 +5,18 @@ definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 useHead({ title: "资产库 · 一帧" });
 
 const api = useApi();
+/**
+ * 三个视图共用 /assets 路由（不改 layouts/app.vue 侧栏，由 Lead 决定是否加分入口）：
+ * 1. 资产：空间级资产库（原有行为，未改动）；
+ * 2. 主体库：角色/场景/道具的一致性载体（subject 6 端点）；
+ * 3. 抽取与匹配：项目维度的抽取流水线 + 资产×分镜匹配（extraction / asset-match 端点）。
+ */
+const tab = ref<"assets" | "subjects" | "quality">("assets");
+const TABS = [
+  { value: "assets", label: "资产" },
+  { value: "subjects", label: "主体库" },
+  { value: "quality", label: "抽取与匹配" },
+] as const;
 const list = ref<AssetDto[]>([]);
 const total = ref(0);
 const loading = ref(false);
@@ -126,12 +138,18 @@ onMounted(async () => {
   <div class="assets">
     <header class="head">
       <div class="head-main">
-        <h1>{{ showDeleted ? "回收站" : "资产库" }}</h1>
+        <h1>{{ tab === "assets" ? (showDeleted ? "回收站" : "资产库") : tab === "subjects" ? "主体库" : "抽取与匹配" }}</h1>
         <p class="sub">
-          共 {{ total }} 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。
+          {{
+            tab === "assets"
+              ? `共 ${total} 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。`
+              : tab === "subjects"
+                ? "主体是「同一角色跨镜长得一样」的载体；只有审核通过（approved）的主体可用于生成。"
+                : "从项目内容抽取角色/场景/道具草稿，并把资产匹配到分镜（缺失项可智能补充）。"
+          }}
         </p>
       </div>
-      <div class="head-actions">
+      <div v-if="tab === 'assets'" class="head-actions">
         <Button variant="ghost" size="sm" @click="switchDeleted">
           {{ showDeleted ? "返回资产库" : "回收站" }}
         </Button>
@@ -143,6 +161,25 @@ onMounted(async () => {
       </div>
     </header>
 
+    <!-- 视图切换：资产 / 主体库 / 抽取与匹配 -->
+    <nav class="tabs" role="tablist">
+      <button
+        v-for="item in TABS"
+        :key="item.value"
+        class="tab"
+        :class="{ on: tab === item.value }"
+        role="tab"
+        :aria-selected="tab === item.value"
+        @click="tab = item.value"
+      >
+        {{ item.label }}
+      </button>
+    </nav>
+
+    <SubjectLibrary v-if="tab === 'subjects'" />
+    <ProjectQualityPanel v-else-if="tab === 'quality'" />
+
+    <template v-else>
     <!-- 过滤条 -->
     <div class="filters">
       <select v-model="folderFilter" class="mini-select" @change="load">
@@ -203,6 +240,7 @@ onMounted(async () => {
         </EmptyState>
       </div>
     </template>
+    </template>
   </div>
 </template>
 
@@ -238,6 +276,41 @@ onMounted(async () => {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+}
+
+/* 视图切换（资产 / 主体库 / 抽取与匹配）：下划线式 tab，不改侧栏结构 */
+.tabs {
+  display: flex;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--border-1);
+  margin-bottom: var(--space-4);
+}
+.tab {
+  position: relative;
+  padding: 8px 0 10px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.tab:hover {
+  color: var(--text-1);
+}
+.tab.on {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--brand-500);
+  border-radius: var(--radius-full);
 }
 
 .filters {
