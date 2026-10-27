@@ -470,7 +470,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section v-if="tab === 'models'" class="card">
+      <section v-if="tab === 'dashboard'" class="card home-config">
         <h2>{{ t("adminUi.homeConfigTitle") }}</h2>
         <p class="muted small">{{ t("adminUi.homeConfigHint") }}</p>
         <p class="muted small">
@@ -485,7 +485,7 @@ onMounted(async () => {
           <span>{{ t("adminUi.homeColVisible") }}</span>
           <span>{{ t("adminUi.homeColSort") }}</span>
         </div>
-        <div v-for="(sec, idx) in homeConfig.sections" :key="sec.key" class="row">
+        <div v-for="(sec, idx) in homeConfig.sections" :key="sec.key" class="row home-section-row">
           <span>{{ homeSectionLabel(sec.key) }}</span>
           <span>
             <input v-model="homeConfig.sections[idx]!.visible" type="checkbox" />
@@ -500,7 +500,9 @@ onMounted(async () => {
             {{ homeBusy ? t("adminUi.homeConfigSaving") : t("adminUi.homeConfigSave") }}
           </Button>
         </div>
+      </section>
 
+      <section v-if="tab === 'models'" class="card">
         <h2>{{ t("adminUi.modelsTitle") }}</h2>
         <div class="row head-row"><span>{{ t("adminUi.thName") }}</span><span>{{ t("adminUi.thCapability") }}</span><span>adapter</span><span>{{ t("adminUi.thSort") }}</span><span>{{ t("adminUi.thVisible") }}</span></div>
         <div v-for="m in models" :key="String(m.id)" class="row">

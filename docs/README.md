@@ -123,6 +123,30 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.6 · 第 47 批：首页板块配置浏览器验收 9/9 + 修两个真问题 · 2026-10-29）
+
+### 起因
+
+上一批（第 40 批）给 `home_configs` 补了写入口，API 有 5 例 spec，但**页面从没被浏览器点过**。
+补 E2E [e2e-admin-home-config.cjs](_acceptance/e2e-admin-home-config.cjs) 时抓到两个真 bug：
+
+| # | Bug | 表现 | 根因 |
+|---|---|---|---|
+| 1 | **UI 位置错** | 打开后台完全看不到「首页板块」 | 上一批把整块插进了 `tab === 'models'` 的 section **内部** —— 只有切到「模型」页签才渲染；已改为独立的 `tab === 'dashboard'` section |
+| 2 | **运行中的 API 是旧构建** | `GET /ops/admin/home-config` 在 :3002 返回 **404** | 代码里路由存在，但 `dist/main.js` 是几小时前启动、从未重编；重编重启后立即 200 |
+
+第 2 条特别值得记：**"代码写了" ≠ "服务在跑"**。排查时我先怀疑路由写错、又怀疑鉴权，最后才发现
+浏览器请求的就是 404 —— 服务端跑的是旧产物。以后 E2E 报 404 时，先确认 `dist` 与源码同步。
+
+### E2E 覆盖（9/9）
+
+卡片渲染 / 六个内置板块齐（hero·workflow·canvas·tools·banner·recent）/ 勾选框可操作 /
+保存成功提示 / 服务端 `visible=false` 且 `version` 递增 / **刷新后仍保持未勾选**（这一条才证明
+是写库而不是只改了本地 ref）/ 控制台无未预期错误 / 测试后还原配置（不污染开发库首页）。
+
+**验证**：`e2e-admin-home-config.cjs` **9/9**；api **824**、worker 37、db 26；全量 **1,160 例**；gate 全绿（12/12）。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**（验收补齐，模块分不变）。
+
 ## 变更登记（v7.5 · 第 45 批：#4 分享侧只读实时流 · 2026-10-28）
 
 ### 补的是什么
