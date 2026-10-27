@@ -338,13 +338,20 @@ GET  /exports/{id}                                      // 状态查询；轮询
 GET /works?status=archived&page=1&page_size=24
   ← {list:[{
        id,title,ratio,source_type,archived_at,is_sample,created_at,
+       updated_at,               // 最后写操作时间（ReelFlow 列表卡「最后编辑于 …」用它）
        episode_count,            // 集数
        shot_count,               // 分镜总数
        done_count,               // 已成功出片镜头数
        cover_uri,                // 已签名的封面 URL（优先已转存图片资产，退化角色定妆图）
+       timeline_duration_s,      // ReelFlow：项目所有时间线片段时长之和（秒）；0 = 还没剪过
+       timeline_episode_count,   // ReelFlow：已保存时间线的集数
        work_state                // draft | producing | ready | archived
      }], total, page, page_size}
 ```
+
+> `timeline_duration_s` / `timeline_episode_count` 由 `project_timelines.clips`（jsonb 有序数组）
+> 聚合而来，供 `/reelflow/list` 卡片显示「成片时长 / 已剪集数」，避免列表页对每张卡片再发一次
+> timeline 请求（N+1）。无时间线记录的项目返回 `0`（不是 null），前端无需区分「没剪」与「查询失败」。
 
 **work_state 判定**：`archived_at != null → archived`；`shot_count === 0 → draft`；`done_count >= shot_count → ready`；否则 `producing`。
 
@@ -1243,3 +1250,182 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 
 
 
+
+
+---
+
+### 14.10 `kds` 端点族（团队数据看板，2026-10-27）
+
+> 对照参照产品 `/web/v1/kds/da/*` **13 条**（`routes.txt` 的 kds 段）+ 页面 `/team/dashboard`（`rt:91`）。
+> **纯读聚合，不新建表**：数据源全是既有表（`credit_flows` / `credit_accounts` / `tasks` / `space_members` / `spaces`）。
+> 实现落点：`apps/api/src/modules/kds/`（module + controller + service）；页面 `apps/web/pages/team/dashboard.vue`。
+
+#### 14.10.1 端点（13 条）
+
+| # | 方法 | 路径 | 语义 | 权限 |
+|---:|---|---|---|---|
+| 1 | GET | `/kds/da/canvas/total-point-consume` | 画布总消耗（只算无 `episode_id` 的任务，即非流水线） | 成员 |
+| 2 | GET | `/kds/da/team/{team_id}/basic-info` | 团队信息 + 成员数 + 池余额/冻结 | 成员 |
+| 3 | GET | `/kds/da/team/{team_id}/point-consume-rank` | 按成员消耗排名（降序，rank 从 1） | 成员 |
+| 4 | GET | `/kds/da/team/{team_id}/member-participate-detail` | 成员参与明细（任务数/成功/失败/消耗/最后活跃） | 成员 |
+| 5 | GET | `/kds/da/team/{team_id}/point-manage-flow` | 积分分配/回收流水（`kind=adjust`） | 成员 |
+| 6 | GET | `/kds/da/team/{team_id}/project-data/basic-info` | 按剧集聚合的任务与消耗 | 成员 |
+| 7 | GET | `/kds/da/team/{team_id}/project-data/query` | 同 6（保留独立路径以便覆盖核对） | 成员 |
+| 8 | GET | `/kds/da/team/{team_id}/project-data/export` | 导出 CSV（剧集维度） | 成员 |
+| 9 | GET | `/kds/da/team/{team_id}/project-member-point-detail?episode_id=` | 某剧集内各成员消耗 | 成员 |
+| 10 | GET | `/kds/da/team/{team_id}/query` | **看板首屏聚合**（basic + kpi + rank + canvas + projects，一次取完） | 成员 |
+| 11 | GET | `/kds/da/team/{team_id}/query/export` | 导出 CSV（成员维度） | 成员 |
+| 12 | GET | `/kds/da/team/member/{op_user_id}/point-consume-detail` | 某成员消耗流水明细 | 成员 |
+| 13 | GET | `/kds/da/team/member/{op_user_id}/point-quota-detail` | 某成员配额（quota / 已分配 / 已消耗 / 剩余） | 成员 |
+
+#### 14.10.2 四条口径（写清以免被"优化"掉）
+
+1. **「消耗」只认 `kind='settle'`**：`freeze` 只是占用（失败会解冻），把它算进消耗会让看板数字虚高且与 `GET /credits/flows?tab=consume` 对不上。
+2. **消耗人必须 join `tasks`**：`credit_flows` **没有** `user_id` 列，只有 `op_user_id`（分配操作者）与 `ref_user_id`（分配目标）。按人聚合一律 `innerJoin(tasks, credit_flows.ref_task_id = tasks.id)` 后按 `tasks.user_id` 分组——用 `leftJoin` 会把无主流水错归到别人头上。
+3. **成功率分母是「已终态」**：`status in (3,4,5,6)`，不含 PENDING(1)/RUNNING(2)。否则跑批中途看板永远偏低，运营会误判。
+4. **`team_id` 必须等于 token 空间**：路径参数与 `X-Space-Id` 双向校验，不一致一律 `403101`（且不泄露该 space 是否存在）。只信 token 会让路径参数变成摆设，只信路径则越权。
+
+#### 14.10.3 与参照站的差异（偏离说明）
+
+| 差异 | 参照站 | 我方 | 理由 |
+|---|---|---|---|
+| 聚合端点 | 无（首屏由前端连打多个） | 新增 `GET .../query` | 首屏 6 个请求会放大冷启动延迟；这是**新增**不是替换，13 条对齐端点全部保留 |
+| CSV 导出响应 | 未取证（`project-data/export` 无响应体样本） | `text/csv` + BOM，不包信封 | 与既有 `admin/failed-tasks.csv` 一致；二进制/文本流包信封会破坏客户端解析 |
+| `project-data/query` | 应有筛选参数（未取证） | 暂时与 `basic-info` 同实现 | 筛选语义待取证（§14.8），先保证端点存在且行为可解释，不臆造参数 |
+---
+
+## 15. 第 1 轮新增端点总则（2026-10-27 · 六个批次 + 三个横切件）
+
+> 本轮一次推进 6 个批次（第 1/2/3/4/5/7 批）+ 3 个横切件（数据层收尾、幂等账本、订阅制）。
+> 端点总数 236 → **414**，页面 29 → **48**，表 49 → **96**，迁移 0000–0022。
+> 本节只写**契约与偏离**；逐条竞品证据在 `_acceptance/_team/report-*.md`（含 `文件:行`）。
+
+### 15.0 三条全局约定（本轮所有新端点共用）
+
+1. **路径前缀按域切分**（ADR-009）：竞品 `df/novel/*` → 我方 `/v1/novel/*`；竞品 film 域 → `/v1/film/*`；resource/subject 域 → `/v1/subjects/*`、`/v1/extraction/*`，项目级动作留在 `/v1/projects/:id/...`。
+2. **信封不手写**：业务数据裸返回，`EnvelopeInterceptor` 包 `{code:0,data}`；业务错误抛 `AppError` → HTTP 200 + `code≠0`。
+3. **写操作幂等**：登录态写操作支持 `Idempotency-Key` 头（见 §15.9）；工具/批量类写操作另有各自的确定性去重键（见各节）。
+
+### 15.1 小说改编链（第 2 批 · 64 路由 · `/v1/novel/*`）
+
+| 子链 | 路由（相对 `/v1/novel`） | 语义要点 |
+|---|---|---|
+| 本子 | `POST /`、`GET /list`、`GET /:nt`、`PATCH /:nt`、`DELETE /:nt` | 删除=**归档**（软删）；`status=16` 为已定稿，定稿后写正文类接口一律 400100 |
+| 分章 | `POST /:nt/split`、`GET /:nt/chapters`、`GET /:nt/chapters/:chapter_no` | 重新分章**幂等**：chapter id 稳定（同内容不重建行） |
+| 内容分析 | `POST /:nt/content-analysis`、`GET .../detail`、`GET/PUT .../worldview`、`POST .../novel_character_cards/generate`、`/confirm`、`POST .../novel_character_cards`、`PATCH/DELETE .../:ncc_id` | 重跑不产生重复卡；`confirm(overwrite=false)` 已确认卡跳过 |
+| 章节大纲 | `POST /:nt/chapter_outline/generate`、`GET .../list`、`POST /:nt/chapter_outline`、`PATCH .../:nco_id` | 整体替换会删多余行（与竞品"提交全量"一致） |
+| 分集大纲 | `POST /:nt/episode_outline/generate`、`GET .../list`、`POST /:nt/episode_outline`、`PATCH .../:neo_id` | — |
+| 核心角色 | `POST /:nt/core_character/generate`、`GET .../list`、`POST /:nt/core_character`、`PATCH .../:ncc_id` | `is_core` 由生成链自动标记 |
+| 剧本 | `POST /:nt/script-generate`、`GET /:nt/episode/list`、`GET/PATCH /:nt/episode/:ne_id`、`POST .../:ne_id/confirm` | 指定集号生成时 `missing[]` 显式回显未生成集；单集 PATCH 产生新版本 |
+| 汇总/定稿 | `GET /:nt/summary`、`POST /:nt/finalize`、`GET /:nt/version/list` | `finalize` 幂等；定稿后 `status=16` 才能被拆集引用 |
+| **编辑 Agent** | `POST .../script_edit_agent/enter|exit|heartbeat`；`GET/POST /sessions`；`POST /sessions/switch`；`GET /sessions/:sid`；`POST /sessions/:sid/chat|abort`；`GET/POST /sessions/:sid/episodes/:ne_id/pending|apply|reject`；`POST /sessions/:sid/apply_all|reject_all`；`POST /sessions/:sid/version/:vid/finalize`；`DELETE /sessions/:sid/version/:vid/delete` | **逐集 diff**（original/proposed/change_summary）；`chat` 不改正文，`apply` 才写 + 落 `novel_script_versions`；`reject` 正文零改动；同会话并发 chat → `746005`；`abort` 无在途轮次返回 `aborted:false`（不假装成功） |
+| 创意裂变 | `POST /:nt/fission_script`、`GET/POST .../idea*`、`.../characters`、`.../summary_outline`、`.../episodes_outline`、`.../episodes` | 未选定方案就生成总纲 → 400101（顺序闸门） |
+| 海外改编 | `POST /:nt/overseas`、`GET /:nt/overseas` | 幂等键 = 源本 + lang + region |
+| 制片衔接 | `NovelService.assertSplittable(spaceId, ntId)` | 未定稿 → 400100 `details.reason=not_finalized`；跨 space → 403101；不存在 → 400102 |
+
+**偏离与待取证**：`meta` 承接 `source_text`/`fission.*`/`overseas.*`（数据层无对应列）；`reject` 的 reason 落 `session.context.decisions[]`（`novel_edit_pendings` 无 reason 列）；竞品 `content-analysis` 字段名、`heartbeat`/`switch` 的 body 未取证；`original_script/*` 14 端点与 `point/permission/group/adjust/import` 8 端点**未实现**（不在本批必做子链）；撤回定稿（reopen）未实现。
+
+### 15.2 影视版 film（第 5 批 · 49 操作 · `/v1/film/*` + `/v1/func-whitelist`）
+
+| 子域 | 操作数 | 路由要点 |
+|---|---:|---|
+| 任务表 | 8 | `task-tables` CRUD + `apply-template` + `ensure-presets` + `import` + `reorder` |
+| 字段 | 6 | `fields` CRUD + `reorder` + `batch-restore`；**11 种 field_type**，`task_status`/`review_ref`/`points_ro` 拒写 |
+| 视图偏好 | 2 | `pref` GET/PUT（每人每表一行） |
+| 行 | 12 | `tasks` CRUD + `cells`（稀疏 `{field_id:value}`）+ `children` + `status` + `notify-assignees` + `query` + `reorder` + `title-matches` + `unbound-query` + `batch-delete` + `batch-restore`；行版本 CAS → `746002` |
+| 审核 | 4 | `review` GET + `comments` + `read` + `tasks/:id/review`（提交，我方新增入口） |
+| 行↔画布 | 4 | `tasks/:task_id/canvas-bindings` GET/POST/PUT/DELETE |
+| 画布侧 | 5 | `canvases/visible`、`task-panel`、`task-bindings`、`submit-result`（唯一自动化衔接点）、`DELETE canvases/:id`（=解绑不删画布） |
+| 模板/导出/最近/统计 | 8 | `task-templates` 3、`exports` 2、`recent-open` 2、`tasks/stats` 1 |
+| 准入 | 1 | `GET /func-whitelist?scene=ai_film` → `{check:bool}`（`spaces.film_enabled`，商务开通制） |
+| 我方扩展 | 1 | `GET /film/projects`（项目=任务表容器；竞品无 film 项目端点证据） |
+
+**三个机制的实现口径**：① 版本链在事务 + 行锁下分配 `V01/V02`，已决策版本不可改判，驳回再提交得 `V02`；评论挂 `version_id`、已读按 `(version_id,user_id)`。② `submit-result`：校验画布归属 → 校验 asset 同 space → 无绑定自动补绑 → 登记版本 → 行 status 推 3 → 通知。③ 广播总线 + `client_id` 回声抑制（同 client 丢弃、同人异端保留）。
+
+**偏离**：导出为 **CSV/ZIP 而非 xlsx**（不引新依赖，响应显式带 `delivered_format` + `note`）；通知只到广播面（`task_events.task_id` FK 指向 `tasks`，film 行 id 写不进去）故未新造队列；**实时协同只有进程内总线**（仓库无 `@WebSocketGateway`，帧协议未取证，已留 broadcast/subscribe 接口）；无 `film_projects` 表（项目 id 不透明，跨租户 400102）；`points_ro` 返回 null（未结算，不返回假 0）。
+
+### 15.3 主体库 / 抽取 / 资产匹配（第 1 批 · 18 端点）
+
+| 组 | 端点 | 语义 |
+|---|---|---|
+| 主体库（7） | `POST /subjects`、`GET /subjects`、`GET /subjects/:id`、`POST /subjects/from-asset`、`POST /subjects/status`、`PATCH /subjects/:id`、`DELETE /subjects/:id` | 审核三态 `reviewing/approved/rejected`；**只有 approved 可用于生成**（未过审投递 400105，驳回 `retryable=false`）；`from-asset` 绑原资产、不建资产、幂等 |
+| 抽取（6） | `POST /extraction/tasks`、`GET /extraction/tasks/:id`、`POST /extraction/tasks/redo`、`GET /extraction/drafts`、`POST /extraction/drafts/import`、`POST /extraction/drafts/promote` | `task_type` 1..5；四态 1 进行中/2 成功/3 失败/4 失效（源资产被删→失效，不可重试）；`redo` 仅 3/4 态；草稿 `eed_id` 批次 + `parent_state_id` 主子形态 |
+| 匹配（5） | `POST /projects/:id/episodes/:eid/match-resources`、`GET .../match-result`、`POST .../match-reset`、`POST .../save-resource-matches`、`POST .../supplement-missing` | `save-resource-matches` 是**完整快照**（漏传类别 400101 且零写入）；`match-reset` 支持 dry-run 预演；`supplement-missing` 7 条件 + 三选项（默认「保持现状」） |
+
+**一致性三闸门**（`script/asset-gates.service.ts`）：定稿（status=2 + 参考图）→ 匹配（match-result 1/2/3）→ 生成（`images[]` 注入 + `[[@imgN]]` 映射）；既有 `reason` 字符串保持不变，只追加 `gate/blocked/retryable` 字段。
+
+**偏离**：竞品「集级 resources 数组」无对应表 → 用「分镜绑定 ∪ 名称提及」投影 + 按类整类替换实现快照（无法保存"无镜提及且未绑定"的资产）；`prompt_blocked` 无列可存 → 恒 false（需迁移）；`images[]` 注入不改原 prompt（另给 `prompt_with_images`）。
+
+### 15.4 创作 Agent 收口（第 4 批 · 12 端点）
+
+| 组 | 端点 |
+|---|---|
+| Skill 卡市场（9） | `GET /agent-skills`（category/q/page）、`/plaza`、`/mine`、`/favorites`、`POST /agent-skills/:id/favorite`（幂等，body 省略=取反）、`GET /agent-skills/:id`、`GET /agent-skills/details`、`POST /agent-skills`、`DELETE /agent-skills/:id`（软删，仅创建人；平台卡 403、跨空间 404） |
+| STT（2） | `GET /agent/stt-token`（无 Key → 200 + `{available:false,reason,fallback:"browser"}`，**绝不 500**）、`POST /agent/stt/transcribe`（`@Public` + 自验 `aud=agent-stt` 票据中继，厂商 Key 不下发浏览器） |
+| 推荐卡（1） | `GET /agent-recommend-cards`（最近 30 天项目/资产/会话 → 3~6 张；空态给 4 张兜底卡） |
+
+**33 张平台卡**在 `agent-skills.catalog.ts`（未进 `db/seed.ts`），首次读广场时事务级 advisory lock 按 `config.slug` 幂等 upsert（已存在不覆盖）。
+
+**偏离**：卡片逐卡文案竞品未取证（仅 3 个指令名 + 5 个 tag 有证据），其余自拟；STT 令牌是自有中继票而非厂商凭据（有意偏离）；`volc`/`minimax` 真实 ASR 未接（无文档无凭据）；`/agent/sessions/*` 8 条为我方增补（竞品 `/agent` 无会话 CRUD 路由）。
+
+### 15.5 工具箱 19 卡 + 后处理族（第 3 批 · 1 只读端点 + mode 扩面）
+
+- 新增 `GET /generations/tools`：19 卡 + 15 工具 mode + 参数面板声明，是 `/tools` 与工具工作台的**唯一数据源**（前端不硬编码卡清单）。
+- **不新增生成端点**（ADR-003）：`POST /generations` 的 `options` 扩成公共 options 超集（新增 `voice/speed/format/effect/region/strategy/target_fps/timbre/...`，全部 optional 且保留 `.default({})`）。
+- 新增 mode（只扩枚举 + 分派 + 报价）：`de_subtitle_auto`、`de_subtitle_region`、`video_slicing`、`fps_duration_unify`、`video_audio_separation`、`audio_timbre_modify`、`video_effects`、`text_repaint`、`auto_bgm`；既有 `lip_sync`/`video_upscale`/`tts`/`text2music`/`text2sfx` 接目录与页面。
+- 画布 `CANVAS_MODE_MAP` 补 `video_upscale`（产物=视频；1080p/2K/4K 档位）。
+- **`per_call` 计价约定**：14 个工具 mode 用 `model_prices.resolution='per_call'` + `duration_s=NULL`；视频超清是唯一按档位（1080p/2K/4K = 15/30/60）。将来若转按秒，应新增独立哨兵（`per_1k_chars`/`per_minute`）而不是复用 `per_call`。
+- **音频上传白名单**（必要跨范围改动）：`POST /assets/upload` 新增 `audio/mpeg`(→.mp3)/`audio/wav`(→.wav)/`audio/mp4`(→.m4a)，落库 `kind=audio`，上限与视频同档 32MB；图片仍 8MB。
+
+**模型目录口径**：`models` 单表同时承载「竞品对齐目录 46 条」与「15 行内部能力行（`toolbox-*`，`visible=false`）」。规则：**列表看 `visible`（`GET /models` 缺省 46 条），按名查找不看 `visible`**（内部编排按名解析始终可拿；用户拿不到不可见模型名故无法自选）。
+
+### 15.6 CLI 与 workflow detect（第 7 批）
+
+- 服务端新增 `GET /v1/workflow/detect?scope=studio|canvas&project_id=&canvas_id=`：只读零写，返回 `{stage, completed[], pending[], missing:[{key,goto_stage}], next_command}`；阶段序 `project → script → asset → storyboard → render`；**studio 只认工坊侧**（`canvas_id` 为空或 `"0"`）。
+- `app/apps/cli`：196 条命令 / 37 组（118 可用 + 78 骨架，骨架执行返回 `kind=unsupported` 并说明缺什么）；`{ok,data,links}` envelope、stdout 只出业务数据、退出码 0..10 显式映射（**权限拒绝=1 不是 3**，`error-codes.md:21`）、`--dry-run` 零请求、`--idempotency-key` 透传 + 本地三态账本。
+- **MCP 0 行实现**：竞品只有宣传、无工具清单（`SKILL.md`/`manual/` 无 MCP 页），按 ADR-013 不臆造，已在 `--help` 与 README 登记「待取证」。
+
+### 15.7 订阅制与动态价格（第 23 项计费补齐 · 5 端点）
+
+| 端点 | 鉴权 | 语义 |
+|---|---|---|
+| `GET /billing/plans` | 公开 | 13 档订阅（`skus.kind='vip'`），含活动价 |
+| `GET /billing/sku-price?sku=` | 公开 | 牌价 / 活动价 / 折扣来源（对照竞品 `sku-price`） |
+| `GET /billing/subscription` | 登录 | 当前生效订阅；**无订阅返回 null 而不是 404** |
+| `POST /billing/subscribe` | 登录 | 仅接受 VIP sku（充值包 → 400101）；复用普通下单链路 |
+| `POST /billing/subscription/cancel` | 登录 | 只关自动续费，到期前权益仍在 |
+
+**语义要点**：支付成功（`markPaid` 事务内）才激活订阅，与积分入账同生共死；续期起点取 `max(现在, 原到期日)`（过期后不从过去补）；`uq_subscriptions_active_space` 是**部分唯一索引**（同一 space 同时只有一条 `status=1`）。
+
+**偏离**：13 档结构对齐竞品（四线 × 月季半年年），**具体价格自建、不抄竞品数字**；升级档位按"改写 sku 字段"处理（竞品按比例补差价规则未取证，不臆造）。
+
+### 15.8 任务系统三件（第 26 项补齐 · 3 端点）
+
+| 端点 | 语义 |
+|---|---|
+| `POST /task/result` | 批量结果**快照**（≤100 id）；缺的 id 进 `missing[]` 而不是整批 404；不做 304 |
+| `POST /tasks/:id/regenerate` | 同参再来一次（成功态也允许）；`attempt_no=1`、`origin_task_id` 指向原任务；`idempotency_key` 可选，重复只产生一个任务 |
+| `POST /tasks/:id/feedback` | 1..5 星 + 标签 + 备注；**双写** `tasks.feedback`（agent 读侧）与 `task_events`（审计），重复提交覆盖且不冲掉 agent 写的 `reaction` |
+
+### 15.9 幂等账本（第 0.6 批 · 横切件）
+
+- 请求头 `Idempotency-Key`（登录态 POST/PUT/PATCH/DELETE 生效；**未登录/回调不参与**，否则会破坏渠道重试语义）。
+- 服务端 `idempotency_records` 三态：`1 处理中` / `2 已完成` / `3 状态不明`。
+  - 同 key 同体重复 → 原样重放（成功返回缓存 data；确定性业务失败重放同一错误）；
+  - 同 key 异体 → `400101`（不能把 A 的结果返给 B）；
+  - `1` → `746001`「仍在处理中」（不重复执行）；
+  - `3` → `746001` + 提示 `x-force-replay: 1`（人工确认后重放）；
+  - 过期（>5 分钟）→ 视为新请求。
+- 失败落账规则：**确定性失败（AppError）记已完成并缓存错误**；未捕获异常/超时记 `状态不明`（因为它可能已部分生效）。
+
+### 15.10 数据层（迁移 0019–0022）
+
+| 迁移 | 内容 |
+|---|---|
+| 0018 | 小说链 11 表 + 影视版 8 表 |
+| 0019 | 主体库 2、抽取 2、Agent Skill 2、知识库 3、创作者 3、活动 2、集市 3、运营增长 5（共 22 张） |
+| 0020 | film 二等表 4（`film_table_prefs`/`film_task_templates`/`film_exports`/`film_recent_opens`）+ `film_review_versions` 三列（`asset_ids`/`thumb_file_id`/`decision_comment`） |
+| 0021 | `subscriptions`、`sku_promotions` |
+| 0022 | `idempotency_records` 三态列（`status`/`error_body`/`updated_at`）+ 状态索引 |
+
+**表数**：49 → **96**；`schema.spec.ts` 锁表名与关键列（26 条 P1 契约不变量 + 第 0 批续 22 张 + 本轮新增）。

@@ -671,3 +671,100 @@ api **25 files / 234 passed**（新增 `storyboard-frames.spec.ts` 9 例）；wo
 1. 真实供应商 Key（Ark/Kling/Vidu）与 `STORAGE_S3_*` 公网桶配置；
 2. 签名 URL 的 TTL 要覆盖最长任务（当前默认 6h，可按供应商调整）；
 3. 若用内网穿透/反代，需要保证供应商侧可访问且不校验 Referer/UA。
+
+---
+
+## 20. P11 实施记录：ReelFlow 剪辑台独立两页（2026-10-27 落地）
+
+把时间线从「`/projects/:id` 的第 5 个视图」升级为**参照站同款独立路由** `/reelflow/list` + `/reelflow/edit/:id`
+（`routes.txt:74-75`，`FLOW:77-86`）。此前 P4-1/P7 已具备时间线持久化与 ffmpeg 合成能力，但入口埋在
+分镜工作台的步骤胶囊里，且左栏素材来源是「本集全部镜头」——与参照的「剧集资产只列已定稿」不是一回事。
+
+### 20.1 路由与壳层
+
+| 项 | 实现 |
+|---|---|
+| 路由 | `pages/reelflow/list.vue`、`pages/reelflow/edit/[id].vue` |
+| 壳层 | `blank` 裸壳（`app/apps/web/app.vue` 的 `blankPaths` 增 `/reelflow`）：参照站这两页同样无侧栏无顶栏，套 `app` 壳的 240 侧栏 + 64 顶栏会把 1440 视口的播放区压到 <600px |
+| SSR | `nuxt.config.ts` routeRules 增 `/reelflow` + `/reelflow/**` → `ssr:false`（与 `/canvas`、`/create` 同类：数据全来自登录态接口，开 SSR 必 hydration mismatch） |
+| 侧栏入口 | `layouts/app.vue` 的 `mainNav` 增「剪辑台」→ `/reelflow/list`（图标 `film`） |
+| 列表数据源 | `GET /works`（不是 `/projects`）：已带集数/分镜数/出片数/封面，本次为卡片补 `updated_at` / `timeline_duration_s` / `timeline_episode_count`（api-spec §8.1 已同步），一张请求填满卡片，不做 N+1 |
+
+### 20.2 三区结构与实测尺寸（1440×900，`_acceptance/rf-05-editor-dom.png`）
+
+| 区域 | 实测 | 说明 |
+|---|---|---|
+| 顶栏 | 高 64 | `← 返回分镜创作` / `时间线导出`（选中态 `--brand-40`）/ `保存` + 项目名 + 集数选择 + 导出状态 + `导出` |
+| 左栏「剧集资产」 | **宽 290**、`--radius-panel`、`--panel-tint` | 顶部 `已定稿/全部` 下拉 + 闸门说明 + 素材列表 + 底部 `更新分镜` |
+| 中区播放器 | 宽 1126 | 有可用源渲染 `<video>`，否则占位「请在左侧选择分镜资产加入至时间线」；右下角紫色气泡（参照同款文案） |
+| 底部时间线 | **高 150** | `播放` / `00:00:00 / 00:00:00` / 段数与总秒 / `− 缩放滑杆 ＋` / 刻度尺；轨道高 100 |
+| 整页滚动 | `document.scrollHeight - innerHeight = 0` | 固定 `100dvh`，三区各自内部滚动（与参照一致） |
+
+### 20.3 「已定稿」闸门的口径（关键决策，需产品确认）
+
+参照的闸门是 `resource.status=2`（已定稿资产）。映射到我们的数据模型**不是** `storyboards.status=2`，
+而是 **`status=5`（出片完成）+ `video_task_id` 非空**：
+
+- `storyboards.status` 语义：1 草稿 / 2 确认（可投递）/ 3 已投递 / 4 出图 / 5 出片。2 只是"可以投递"，
+  此时**还没有任何视频文件**；把 status=2 放进时间线，导出时只能整段跳过——那不是闸门，是空壳。
+- 剪辑台要的是「能进成片的料」，唯一的等价物是「已出片」（status=5）。
+- 「全部」视图仍把未定稿镜头列出来（半透明 + `title` 写明「未定稿：先去分镜页投递并等出片」），
+  点/拖都会被拒绝并给 toast。这样用户知道**卡在哪一步**，而不是发现素材"凭空消失"。
+
+### 20.4 「更新分镜」是显式同步
+
+- 进页面只 `GET .../timeline` 读服务端已存结果，**不因分镜变化自动重排**（参照原话：时间线材料不会自动更新）。
+- 点「更新分镜」→ 按本集全部已出片镜头重建轨道；**已存在的镜头保留用户裁过的时长与顺序**，
+  只补新增、去掉不再出片的，并在 toast 里报「移除 N 个不再定稿的片段」（不静默丢）。
+- 导出前强制先 `PUT` 落库：worker 读的是服务端时间线，不先写会导出旧内容。
+
+### 20.5 交互实现（无新依赖）
+
+- **拖拽全部用原生 pointer events**，三种交互共用一个状态机：左栏拖入（`rail`）/ 轨道内换位（`reorder`）/
+  右边缘裁时长（`trim`）。`pointerdown` 时 `setPointerCapture`，`pointermove`/`pointerup` 挂在 window，
+  鼠标移出容器不丢事件；`<3px` 阈值避免"点一下就变脏"。
+- 键盘可达：片段 `←/→` 换位、`Delete` 移除、`Space` 播放/暂停、`←/→` seek（Shift ×5）。
+- 裁剪**只做右边缘（出点）**：后端 clip 契约只有 `duration`，没有 in/out 字段，硬做入点写不进去，
+  所以不假装支持（真入点需扩展 timeline schema）。
+- 播放：`requestAnimationFrame` 推进播放头，按片段累加定位当前片段并切换 `<video>` 源；成片可用时
+  可切「播放成片」（直接播导出的 mp4）。
+
+### 20.6 验收（`_acceptance/e2e-reelflow.cjs`，真实 UI + 真实 API + 真实 worker ffmpeg）
+
+脚本自建数据：建项 → 大纲 → 生成 **4** 镜 → 只投 **2** 镜 `text2video` → 等 worker 出片（status=5），
+刻意留 2 个未定稿镜头用于验证闸门。**36 项断言全 PASS**，关键项：
+
+```
+左栏宽度 290 — 实测 290px
+底部时间线高 150 — 实测 150px
+默认左栏只列已定稿（2 条）      / 默认左栏不含未定稿（0 条）
+「全部」视图可见未定稿 — 共 4 行 / 未定稿 2 行
+未定稿行有明确原因提示 — "未定稿：先去分镜页投递并等出片"
+点击未定稿不加入时间线 — 片段 0
+拖入第 1 / 第 2 个片段 — 片段 2（原生 pointer，非 dnd 库）
+时间线已存服务端 — 服务端 2 段；刷新后时间线仍在（服务端回读）
+进入页面不自动同步（仍读服务端 1 段）→ 点「更新分镜」后重建 2 段
+导出完成并给出下载地址 — 状态=已完成 → 下载 mp4 成功（20175 bytes）
+FFPROBE {"codec":"h264","w":720,"h":1280,"fps":"30/1","duration":"10.000000"}
+无 pageerror / console error；无 4xx/5xx 接口响应
+```
+
+- 产物：`_acceptance/reelflow-export-sample.mp4`（h264 / 720×1280 / 30fps / 10.000s，含「AI生成」水印）。
+- 截图：`_acceptance/rf-01-list.png`、`rf-02-drag-one.png`、`rf-03-updated.png`、`rf-04-exported.png`、`rf-05-editor-dom.png`。
+- 环境噪音说明：Nuxt **dev** 模式每页都会打 `/_nuxt/builds/meta/dev.json` 并报 404（`/home`、`/projects` 同样），
+  脚本按该具体路径精确剔除，其余 console error / 4xx 一律判失败。
+
+### 20.7 测试与回归
+
+api **32 files / 337 passed**（本次改 `/works` 聚合与 `projectDto.updated_at`，无回归）；
+`@app/web` typecheck 通过、lint 0 error（13 条 warning 全为存量 `projects/[id].vue` / `Director3D.vue` 等既有未使用变量）。
+
+### 20.8 剩余差距
+
+1. **入点裁剪 / 多轨 / 音轨 / 字幕轨 / 转场**：需扩展 `timelineClipSchema`（in/out、track_id 等）+ worker 合成逻辑，本轮只做出点。
+2. **成片管理**：「已导出」tab 现在是「剪过的项目」按成片时长倒序，还没有一张真正的**导出历史表**视图
+   （`timeline_exports` 有记录但没有列表端点）——要做得像样需要一个 `GET /timeline/exports` 分页端点。
+3. **列表页「⋯」菜单**（重命名/删除/归档）：后端 `PATCH/DELETE /projects/:id` 已有，但删除属于破坏性操作且
+   与剪辑无关，本轮只给「进剪辑台 / 去分镜创作」两个真实去向，不放空壳菜单。
+4. **真实模式播放**：mock 适配器结果是占位字节，`<video>` 无法播放（UI 已显式说明）；`ADAPTER_MODE=real` 后即可。
+

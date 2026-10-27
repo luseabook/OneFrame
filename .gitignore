@@ -37,6 +37,12 @@ _acceptance/*
 !_acceptance/compliance-check.cjs
 !_acceptance/b-type-acceptance.ps1
 !_acceptance/ledger-repair.cjs
+# 本轮（第 1 轮六批次）起：一键门禁与分批交付报告入库。
+# 前者是 docs/07-plan/implement-progress-vs-reelmate.md §8.2 的复跑入口，
+# 后者是各批次"竞品证据行号"与"已知偏离/未完成"清单的落点（不进 docs 是因为
+# 它们随批次产生、且含逐条实现细节，硬塞进 api-spec 会淹没契约本身）。
+!_acceptance/verify-round.ps1
+!_acceptance/_team/
 
 # 全站复刻的差距底账与证据（2026-10-26 起入库，可复核）
 # _gap/：三条基线与门禁/代码/合规实测；ref2/：参照站公开页采集证据
