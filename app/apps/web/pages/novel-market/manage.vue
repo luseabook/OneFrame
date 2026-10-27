@@ -24,6 +24,9 @@ import { ApiError } from "~/composables/useApi";
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t, locale } = useI18n();
+useHead({ title: () => t("marketManage.metaTitle") });
+
 const api = useApi();
 const toast = useToast();
 
@@ -82,7 +85,7 @@ async function load() {
     config.value = cfg;
     if (withdrawAmount.value === "") withdrawAmount.value = o.available_credits;
   } catch (e) {
-    errorMsg.value = (e as Error).message || "创作者数据加载失败";
+    errorMsg.value = (e as Error).message || t("marketManage.creatorLoadFailed");
   } finally {
     loading.value = false;
   }
@@ -91,7 +94,7 @@ async function load() {
 /** 作品解析：本子 → 上架表单建议值（后端不写库，只是"填表助手"） */
 async function parseNovel() {
   if (!form.novel_id.trim()) {
-    toast.error("先填本子 ID（小说改编页里那本书的 id）");
+    toast.error(t("marketManage.novelIdRequired"));
     return;
   }
   parsing.value = true;
@@ -102,10 +105,10 @@ async function parseNovel() {
     parsed.value = res;
     form.title = res.suggested.title;
     form.summary = res.suggested.summary;
-    if (!res.finalized) toast.info("该本子还没定稿，定稿后才能提交审核");
-    else toast.success(`解析完成：${res.chapter_count} 章 / ${res.character_count} 个角色`);
+    if (!res.finalized) toast.info(t("marketManage.notFinalized"));
+    else toast.success(t("marketManage.parsedOk", { chapters: res.chapter_count, characters: res.character_count }));
   } catch (e) {
-    toast.error((e as Error).message || "解析失败");
+    toast.error((e as Error).message || t("marketManage.parseFailed"));
   } finally {
     parsing.value = false;
   }
@@ -113,7 +116,7 @@ async function parseNovel() {
 
 async function saveDraft() {
   if (!form.title.trim()) {
-    toast.error("请填作品标题");
+    toast.error(t("marketManage.titleRequired"));
     return;
   }
   creating.value = true;
@@ -128,13 +131,13 @@ async function saveDraft() {
       ...(form.category_id ? { category_id: form.category_id } : {}),
       ...(form.tag_ids.length > 0 ? { tag_ids: form.tag_ids } : {}),
     });
-    toast.success("已保存为草稿");
+    toast.success(t("marketManage.savedDraft"));
     form.title = "";
     form.summary = "";
     parsed.value = null;
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "保存失败");
+    toast.error((e as Error).message || t("marketManage.saveFailed"));
   } finally {
     creating.value = false;
   }
@@ -143,28 +146,28 @@ async function saveDraft() {
 async function submitWork(work: MarketWorkDto) {
   try {
     await api.post(`/market/creator/works/${work.id}/submit`);
-    toast.success("已提交审核");
+    toast.success(t("marketManage.submitted"));
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "提交失败");
+    toast.error((e as Error).message || t("marketManage.submitFailed"));
   }
 }
 
 async function offlineWork(work: MarketWorkDto) {
-  if (!window.confirm(`下架《${work.title}》？已购用户仍可下载，但新用户不能再买。`)) return;
+  if (!window.confirm(t("marketManage.offlineConfirm", { title: work.title }))) return;
   try {
     await api.post(`/market/creator/works/${work.id}/offline`);
-    toast.success("已下架");
+    toast.success(t("marketManage.offlineDone"));
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "下架失败");
+    toast.error((e as Error).message || t("marketManage.offlineFailed"));
   }
 }
 
 async function requestWithdraw() {
   const amount = Number(withdrawAmount.value);
   if (!Number.isInteger(amount) || amount <= 0) {
-    toast.error("请输入正整数积分");
+    toast.error(t("marketManage.creditsPositive"));
     return;
   }
   withdrawing.value = true;
@@ -174,12 +177,12 @@ async function requestWithdraw() {
       channel: withdrawChannel.value,
       account_info: withdrawAccount.value.trim() ? { account: withdrawAccount.value.trim() } : {},
     });
-    toast.success("提现申请已提交，等待运营审核");
+    toast.success(t("marketManage.withdrawSubmitted"));
     withdrawAmount.value = "";
     await load();
   } catch (e) {
     const err = e as ApiError;
-    toast.error(err.message || "提现申请失败");
+    toast.error(err.message || t("marketManage.withdrawFailed"));
   } finally {
     withdrawing.value = false;
   }
@@ -188,10 +191,10 @@ async function requestWithdraw() {
 async function cancelWithdrawal(row: MarketWithdrawalDto) {
   try {
     await api.post(`/market/creator/withdrawals/${row.id}/cancel`);
-    toast.success("已撤销");
+    toast.success(t("marketManage.revoked"));
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "撤销失败");
+    toast.error((e as Error).message || t("marketManage.revokeFailed"));
   }
 }
 
@@ -212,42 +215,42 @@ onMounted(load);
   <div class="mg-page">
     <header class="mg-head">
       <div>
-        <h1 class="mg-title">我的集市作品</h1>
-        <p class="mg-sub">上架 · 审核 · 收益 · 提现（平台抽成 {{ commissionText }}，运营未拍板）</p>
+        <h1 class="mg-title">{{ t("marketManage.title") }}</h1>
+        <p class="mg-sub">{{ t("marketManage.sub", { commission: commissionText }) }}</p>
       </div>
       <div class="mg-head-actions">
-        <NuxtLink to="/novel-market" class="mg-btn">去集市逛逛</NuxtLink>
-        <button type="button" class="mg-btn" :disabled="loading" @click="load">刷新</button>
+        <NuxtLink to="/novel-market" class="mg-btn">{{ t("marketManage.browse") }}</NuxtLink>
+        <button type="button" class="mg-btn" :disabled="loading" @click="load">{{ t("marketManage.refresh") }}</button>
       </div>
     </header>
 
-    <p v-if="loading" class="mg-state">正在加载创作者数据…</p>
+    <p v-if="loading" class="mg-state">{{ t("marketManage.loading") }}</p>
     <div v-else-if="errorMsg" class="mg-state mg-state-error">
       <p>{{ errorMsg }}</p>
-      <button type="button" class="mg-btn" @click="load">重试</button>
+      <button type="button" class="mg-btn" @click="load">{{ t("marketManage.retry") }}</button>
     </div>
 
     <template v-else>
       <!-- 收益概览 -->
       <section class="mg-kpis">
         <div class="mg-kpi">
-          <span class="mg-kpi-label">累计收益</span>
+          <span class="mg-kpi-label">{{ t("marketManage.kpiRevenue") }}</span>
           <strong class="mg-kpi-num">{{ (overview?.revenue_credits ?? 0).toLocaleString() }}</strong>
         </div>
         <div class="mg-kpi">
-          <span class="mg-kpi-label">可提现</span>
+          <span class="mg-kpi-label">{{ t("marketManage.kpiAvailable") }}</span>
           <strong class="mg-kpi-num">{{ (overview?.available_credits ?? 0).toLocaleString() }}</strong>
         </div>
         <div class="mg-kpi">
-          <span class="mg-kpi-label">已申请（审核中/已通过）</span>
+          <span class="mg-kpi-label">{{ t("marketManage.kpiApplied") }}</span>
           <strong class="mg-kpi-num">{{ (overview?.locked_credits ?? 0).toLocaleString() }}</strong>
         </div>
         <div class="mg-kpi">
-          <span class="mg-kpi-label">已打款</span>
+          <span class="mg-kpi-label">{{ t("marketManage.kpiPaid") }}</span>
           <strong class="mg-kpi-num">{{ (overview?.paid_credits ?? 0).toLocaleString() }}</strong>
         </div>
         <div class="mg-kpi">
-          <span class="mg-kpi-label">作品 / 在售</span>
+          <span class="mg-kpi-label">{{ t("marketManage.kpiWorks") }}</span>
           <strong class="mg-kpi-num">{{ profile?.works_count ?? 0 }} / {{ profile?.on_sale_count ?? 0 }}</strong>
         </div>
       </section>
@@ -255,49 +258,55 @@ onMounted(load);
 
       <!-- 上架表单 -->
       <section class="mg-panel">
-        <h2 class="mg-h2">上架新作品</h2>
+        <h2 class="mg-h2">{{ t("marketManage.publishTitle") }}</h2>
         <div class="mg-form">
           <label class="mg-field">
-            <span class="mg-label">本子 ID（可选；填了可用「解析本子」自动填表）</span>
+            <span class="mg-label">{{ t("marketManage.novelIdLabel") }}</span>
             <div class="mg-inline">
-              <input v-model="form.novel_id" class="mg-input" placeholder="例如 108386629107646464">
+              <input v-model="form.novel_id" class="mg-input" :placeholder="t('marketManage.novelIdPlaceholder')">
               <button type="button" class="mg-btn" :disabled="parsing" @click="parseNovel">
-                {{ parsing ? "解析中…" : "解析本子" }}
+                {{ parsing ? t("marketManage.parsing") : t("marketManage.parseNovel") }}
               </button>
             </div>
           </label>
           <p v-if="parsed" class="mg-note">
-            解析结果：{{ parsed.chapter_count }} 章 / {{ parsed.total_word_count.toLocaleString() }} 字 /
-            {{ parsed.character_count }} 角色 / {{ parsed.episode_count }} 集 ·
-            {{ parsed.finalized ? "已定稿，可提交审核" : "未定稿，先定稿再提审" }}
+            {{
+              t("marketManage.parsedResult", {
+                chapters: parsed.chapter_count,
+                words: parsed.total_word_count.toLocaleString(locale),
+                characters: parsed.character_count,
+                episodes: parsed.episode_count,
+                finalized: parsed.finalized ? t("marketManage.finalizedYes") : t("marketManage.finalizedNo"),
+              })
+            }}
           </p>
           <label class="mg-field">
-            <span class="mg-label">标题</span>
-            <input v-model="form.title" class="mg-input" placeholder="作品标题">
+            <span class="mg-label">{{ t("marketManage.titleLabel") }}</span>
+            <input v-model="form.title" class="mg-input" :placeholder="t('marketManage.titlePlaceholder')">
           </label>
           <label class="mg-field">
-            <span class="mg-label">简介</span>
-            <textarea v-model="form.summary" class="mg-input mg-textarea" rows="3" placeholder="一句话说清卖点" />
+            <span class="mg-label">{{ t("marketManage.summaryLabel") }}</span>
+            <textarea v-model="form.summary" class="mg-input mg-textarea" rows="3" :placeholder="t('marketManage.summaryPlaceholder')" />
           </label>
           <div class="mg-row">
             <label class="mg-field">
-              <span class="mg-label">售价（积分）</span>
+              <span class="mg-label">{{ t("marketManage.priceLabel") }}</span>
               <input v-model.number="form.price_credits" class="mg-input" type="number" min="0">
             </label>
             <label class="mg-field">
-              <span class="mg-label">预售定金（留空 = 直接上架在售）</span>
-              <input v-model="form.preorder_price_credits" class="mg-input" type="number" min="0" placeholder="留空">
+              <span class="mg-label">{{ t("marketManage.preorderLabel") }}</span>
+              <input v-model="form.preorder_price_credits" class="mg-input" type="number" min="0" :placeholder="t('marketManage.preorderPlaceholder')">
             </label>
             <label class="mg-field">
-              <span class="mg-label">分类</span>
+              <span class="mg-label">{{ t("marketManage.categoryLabel") }}</span>
               <select v-model="form.category_id" class="mg-input">
-                <option value="">不选</option>
+                <option value="">{{ t("marketManage.noCategory") }}</option>
                 <option v-for="c in config?.categories ?? []" :key="c.id" :value="c.id">{{ c.name }}</option>
               </select>
             </label>
           </div>
           <div v-if="(config?.tags ?? []).length > 0" class="mg-field">
-            <span class="mg-label">标签（可多选）</span>
+            <span class="mg-label">{{ t("marketManage.tagsLabel") }}</span>
             <div class="mg-tags">
               <button
                 v-for="t in config?.tags ?? []"
@@ -317,33 +326,33 @@ onMounted(load);
           </div>
           <div class="mg-form-actions">
             <button type="button" class="mg-btn mg-btn-primary" :disabled="creating" @click="saveDraft">
-              保存为草稿
+              {{ t("marketManage.saveDraft") }}
             </button>
-            <span class="mg-note">存草稿后在上方列表里点「提交审核」进入审核队列</span>
+            <span class="mg-note">{{ t("marketManage.draftHint") }}</span>
           </div>
         </div>
       </section>
 
       <!-- 我的作品 -->
       <section class="mg-panel">
-        <h2 class="mg-h2">我的作品（{{ works.length }}）</h2>
-        <p v-if="works.length === 0" class="mg-state">还没有作品。用上面的表单上架第一部。</p>
+        <h2 class="mg-h2">{{ t("marketManage.worksTitle", { count: works.length }) }}</h2>
+        <p v-if="works.length === 0" class="mg-state">{{ t("marketManage.worksEmpty") }}</p>
         <table v-else class="mg-table">
           <thead>
             <tr>
-              <th>标题</th>
-              <th>状态</th>
-              <th>售价</th>
-              <th>已售</th>
-              <th>收益</th>
-              <th>操作</th>
+              <th>{{ t("marketManage.thTitle") }}</th>
+              <th>{{ t("marketManage.thStatus") }}</th>
+              <th>{{ t("marketManage.thPrice") }}</th>
+              <th>{{ t("marketManage.thSold") }}</th>
+              <th>{{ t("marketManage.thRevenue") }}</th>
+              <th>{{ t("marketManage.thOps") }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="w in works" :key="w.id">
               <td>
                 <NuxtLink :to="`/novel-market/${w.id}`" class="mg-link">{{ w.title }}</NuxtLink>
-                <p v-if="w.audit_note" class="mg-audit">审核意见：{{ w.audit_note }}</p>
+                <p v-if="w.audit_note" class="mg-audit">{{ t("marketManage.auditNote", { note: w.audit_note }) }}</p>
               </td>
               <td>
                 <span class="mg-status">{{ w.status_name }}</span>
@@ -358,7 +367,7 @@ onMounted(load);
                   class="mg-btn mg-btn-sm"
                   @click="submitWork(w)"
                 >
-                  提交审核
+                  {{ t("marketManage.submitReview") }}
                 </button>
                 <button
                   v-if="actionsOf(w).offline"
@@ -366,10 +375,10 @@ onMounted(load);
                   class="mg-btn mg-btn-sm"
                   @click="offlineWork(w)"
                 >
-                  下架
+                  {{ t("marketManage.offline") }}
                 </button>
                 <span v-if="!actionsOf(w).submit && !actionsOf(w).offline" class="mg-note">
-                  {{ w.status === 2 ? "审核中，不可操作" : "暂无可执行动作" }}
+                  {{ w.status === 2 ? t("marketManage.statusReviewing") : t("marketManage.noAction") }}
                 </span>
               </td>
             </tr>
@@ -379,48 +388,48 @@ onMounted(load);
 
       <!-- 提现 -->
       <section class="mg-panel">
-        <h2 class="mg-h2">提现申请</h2>
+        <h2 class="mg-h2">{{ t("marketManage.withdrawTitle") }}</h2>
         <div class="mg-form">
           <div class="mg-row">
             <label class="mg-field">
               <span class="mg-label">
-                提现金额（最低 {{ overview?.min_withdraw_credits ?? 100 }} 积分）
+                {{ t("marketManage.withdrawAmount", { min: overview?.min_withdraw_credits ?? 100 }) }}
               </span>
               <input v-model.number="withdrawAmount" class="mg-input" type="number" min="1">
             </label>
             <label class="mg-field">
-              <span class="mg-label">收款渠道</span>
+              <span class="mg-label">{{ t("marketManage.channelLabel") }}</span>
               <select v-model="withdrawChannel" class="mg-input">
-                <option value="alipay">支付宝</option>
-                <option value="wechat">微信</option>
-                <option value="bank">银行卡</option>
+                <option value="alipay">{{ t("marketManage.channelAlipay") }}</option>
+                <option value="wechat">{{ t("marketManage.channelWechat") }}</option>
+                <option value="bank">{{ t("marketManage.channelBank") }}</option>
               </select>
             </label>
             <label class="mg-field">
-              <span class="mg-label">收款账号（仅落库，不做真实打款）</span>
-              <input v-model="withdrawAccount" class="mg-input" placeholder="账号/卡号">
+              <span class="mg-label">{{ t("marketManage.accountLabel") }}</span>
+              <input v-model="withdrawAccount" class="mg-input" :placeholder="t('marketManage.accountPlaceholder')">
             </label>
           </div>
           <div class="mg-form-actions">
             <button type="button" class="mg-btn mg-btn-primary" :disabled="withdrawing" @click="requestWithdraw">
-              提交提现申请
+              {{ t("marketManage.submitWithdraw") }}
             </button>
             <span class="mg-note">
-              同一时间只能有 1 笔待审；打款由运营人工完成，系统只记录打款凭证
+              {{ t("marketManage.withdrawHint") }}
             </span>
           </div>
         </div>
 
-        <p v-if="withdrawals.length === 0" class="mg-state">还没有提现记录。</p>
+        <p v-if="withdrawals.length === 0" class="mg-state">{{ t("marketManage.withdrawEmpty") }}</p>
         <table v-else class="mg-table">
           <thead>
             <tr>
-              <th>金额</th>
-              <th>状态</th>
-              <th>渠道</th>
-              <th>审核意见</th>
-              <th>申请时间</th>
-              <th>操作</th>
+              <th>{{ t("marketManage.thAmount") }}</th>
+              <th>{{ t("marketManage.thStatus") }}</th>
+              <th>{{ t("marketManage.thChannel") }}</th>
+              <th>{{ t("marketManage.thAuditNote") }}</th>
+              <th>{{ t("marketManage.thAppliedAt") }}</th>
+              <th>{{ t("marketManage.thOps") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -437,7 +446,7 @@ onMounted(load);
                   class="mg-btn mg-btn-sm"
                   @click="cancelWithdrawal(row)"
                 >
-                  撤销
+                  {{ t("marketManage.revoke") }}
                 </button>
                 <span v-else class="mg-note">—</span>
               </td>
@@ -448,18 +457,18 @@ onMounted(load);
 
       <!-- 收益明细 -->
       <section class="mg-panel">
-        <h2 class="mg-h2">成交明细（最近 20 笔）</h2>
-        <p v-if="revenues.length === 0" class="mg-state">还没有成交。</p>
+        <h2 class="mg-h2">{{ t("marketManage.revenueTitle") }}</h2>
+        <p v-if="revenues.length === 0" class="mg-state">{{ t("marketManage.revenueEmpty") }}</p>
         <table v-else class="mg-table">
           <thead>
             <tr>
-              <th>作品</th>
-              <th>类型</th>
-              <th>成交价</th>
-              <th>平台抽成</th>
-              <th>我的收益</th>
-              <th>状态</th>
-              <th>时间</th>
+              <th>{{ t("marketManage.thWork") }}</th>
+              <th>{{ t("marketManage.thKind") }}</th>
+              <th>{{ t("marketManage.thDealPrice") }}</th>
+              <th>{{ t("marketManage.thCommission") }}</th>
+              <th>{{ t("marketManage.thMyRevenue") }}</th>
+              <th>{{ t("marketManage.thStatus") }}</th>
+              <th>{{ t("marketManage.thTime") }}</th>
             </tr>
           </thead>
           <tbody>
