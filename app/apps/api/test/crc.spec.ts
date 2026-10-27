@@ -519,9 +519,48 @@ describe("crc e2e", () => {
     const ids = (filtered.data as { list: Array<{ id: string }> }).list.map((a) => a.id);
     expect(ids).toContain(adId);
     expect(ids).not.toContain(dramaId);
-    // 明确告诉前端哪些筛选真的生效（effect 没有对应列，不能假装过滤）
+    // 明确告诉前端哪些筛选真的生效（第 5 轮 effect 已有列，默认不传时 applied=false）
     expect((filtered.data as { filters: { category_applied: boolean; effect_applied: boolean } }).filters)
       .toMatchObject({ category_applied: true, effect_applied: false });
+  });
+
+  it("效果过滤：resource/list 的 effect 是真过滤（迁移 0033 新增列）；未知效果 400101", async () => {
+    const u = await loginNewUser("72");
+    const ts = Date.now();
+    const animeId = await createAsset(u.token, u.spaceId, `动漫风格${ts}`, "s3://demo/a.mp4");
+    const inkId = await createAsset(u.token, u.spaceId, `水墨风格${ts}`, "s3://demo/i.mp4");
+    const plainId = await createAsset(u.token, u.spaceId, `无效果${ts}`, "s3://demo/p.mp4");
+    // 效果标签走 update 打标（值必须来自 crc/effect/tree 的叶子）
+    expect((await inject("POST", "/crc/assets/update", { asset_id: animeId, effect: "anime" }, u.token)).code).toBe(0);
+    expect((await inject("POST", "/crc/assets/update", { asset_id: inkId, effect: "ink" }, u.token)).code).toBe(0);
+    for (const id of [animeId, inkId, plainId]) {
+      await act(u.token, u.spaceId, id, "submit");
+      await act(u.token, u.spaceId, id, "approve");
+    }
+
+    const filtered = await inject("POST", "/crc/resource/list", { effect: "anime" }, u.token);
+    expect(filtered.code).toBe(0);
+    const list = (filtered.data as { list: Array<{ id: string; effect?: string | null }>; filters: { effect_applied: boolean } });
+    const ids = list.list.map((a) => a.id);
+    expect(ids).toContain(animeId);
+    expect(ids).not.toContain(inkId);
+    expect(ids).not.toContain(plainId);
+    // 筛选真实生效 + DTO 回显 effect
+    expect(list.filters.effect_applied).toBe(true);
+    expect(list.list.find((a) => a.id === animeId)?.effect).toBe("anime");
+
+    // 未知效果值：明确 400101（不是"查空结果"让用户以为没有这类作品）
+    const bad = await inject("POST", "/crc/resource/list", { effect: "not-an-effect" }, u.token);
+    expect(bad.code).toBe(400101);
+
+    // 更新时显式传 null 可清空效果——只能在草稿态（已通过的作品必须下架后才能编辑）
+    const draftId = await createAsset(u.token, u.spaceId, `草稿清空效果${ts}`, "s3://demo/d2.mp4");
+    expect((await inject("POST", "/crc/assets/update", { asset_id: draftId, effect: "anime" }, u.token)).code).toBe(0);
+    const cleared = await inject("POST", "/crc/assets/update", { asset_id: draftId, effect: null }, u.token);
+    expect(cleared.code).toBe(0);
+    expect((cleared.data as { effect: string | null }).effect).toBeNull();
+    // 已通过状态下修改效果被拒（状态机保护，不是筛选项的问题）
+    expect((await inject("POST", "/crc/assets/update", { asset_id: plainId, effect: "anime" }, u.token)).code).toBe(400101);
   });
 
   // ── 团队空间 + 隔离 ─────────────────────────────────────

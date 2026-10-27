@@ -232,6 +232,13 @@
       "when": 1793072309525,
       "tag": "0032_known_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793101219325,
+      "tag": "0033_amused_nomad",
+      "breakpoints": true
     }
   ]
 }

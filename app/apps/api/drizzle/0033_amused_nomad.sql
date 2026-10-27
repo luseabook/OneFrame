@@ -1,0 +1,2 @@
+ALTER TABLE "creator_assets" ADD COLUMN "effect" text;--> statement-breakpoint
+CREATE INDEX "idx_creator_assets_effect" ON "creator_assets" USING btree ("status","effect","published_at" DESC NULLS LAST);

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
-import { CreatorService } from "./creator.service";
+import { CreatorService, EFFECT_VALUES } from "./creator.service";
 import type { TeamCtx } from "../op/op.service";
 
 /**
@@ -29,6 +29,8 @@ const assetInputBody = z.object({
   summary: z.string().max(1000).optional(),
   kind: z.number().int().min(1).max(3).optional(),
   category: z.string().min(1).max(40).optional(),
+  /** 效果标签：取值来自 `crc/effect/tree` 叶子（迁移 0033 新增列）；null = 清空 */
+  effect: z.enum(EFFECT_VALUES as [string, ...string[]]).nullish(),
   cover_uri: z.string().max(500).nullish(),
   uri: z.string().max(500).nullish(),
 });
@@ -153,16 +155,30 @@ export class CreatorController {
     const b = parseOrThrow(resourceListBody, body ?? {});
     // category 是真过滤（迁移 0025 给了 `creator_assets.category` + 组合索引）；
     // effect 是"展现层标签"，表里没有对应列，只做透传校验并显式说明未生效
+    // 两个筛选现在都**真过滤**（category 迁移 0025、effect 迁移 0033）。
+    // effect 先做白名单校验：未知值直接 400101，而不是查空结果让用户以为"没有这类作品"。
+    if (b.effect && !EFFECT_VALUES.includes(b.effect)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "unknown effect", {
+        field: "effect",
+        supported: EFFECT_VALUES,
+      });
+    }
     const feed = await this.creator.publicFeed({
       kind: b.kind,
       category: b.category,
+      effect: b.effect,
       q: b.q,
       page: b.page,
       pageSize: b.page_size,
     });
     return {
       ...feed,
-      filters: { category: b.category ?? null, category_applied: Boolean(b.category), effect: b.effect ?? null, effect_applied: false },
+      filters: {
+        category: b.category ?? null,
+        category_applied: Boolean(b.category),
+        effect: b.effect ?? null,
+        effect_applied: Boolean(b.effect),
+      },
     };
   }
 

@@ -2416,6 +2416,15 @@ export const creatorAssets = pgTable(
     reviewNote: text("review_note"),
     /** 分类（运营/集市用；默认 general，后台可改，前端按它做筛选项） */
     category: text("category").notNull().default("general"),
+    /**
+     * 效果标签（对照竞品 `crc/resource/list` 的 `effect` 筛选与 `crc/effect/tree` 目录）。
+     *
+     * 取值来自 `creator.service.ts` 的 `EFFECT_TREE` 叶子：`anime`/`realistic`/`ink`（风格）、
+     * `push`/`pan`/`handheld`（运镜）。此前表里没有列，接口只能"透传但不过滤"（`effect_applied:false`），
+     * 用户选筛选项却看不到结果变化——这类"假筛选"比没有筛选项更糟。
+     * 可空：老数据与未设置效果的作品不参与效果筛选（不出现在任何 effect 过滤结果里）。
+     */
+    effect: text("effect"),
     /** 审核人（人工审核留痕；未审为空） */
     reviewedBy: bigint("reviewed_by", { mode: "bigint" }).references(() => users.id),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
@@ -2430,6 +2439,7 @@ export const creatorAssets = pgTable(
     index("idx_creator_assets_creator").on(t.creatorUserId, t.status, t.createdAt.desc()),
     index("idx_creator_assets_feed").on(t.status, t.publishedAt.desc()),
     index("idx_creator_assets_category").on(t.status, t.category, t.publishedAt.desc()),
+    index("idx_creator_assets_effect").on(t.status, t.effect, t.publishedAt.desc()),
   ],
 );
 

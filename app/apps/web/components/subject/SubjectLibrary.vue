@@ -42,9 +42,57 @@ const REVIEW_BADGE: Record<string, { text: string; cls: string }> = {
   unknown: { text: "状态未知", cls: "unknown" },
 };
 
+/** 服务端模板目录（GET /subjects/templates，4 个预置：日系动漫/写实影视/3D 卡通/国风古装） */
+interface SubjectTemplateDto {
+  key: string;
+  name: string;
+  description: string;
+  prompt_prefix: string;
+  negative_prompt: string;
+}
+const templates = ref<SubjectTemplateDto[]>([]);
+/** 每个主体卡片上选中的模板（默认取它当前的 template_key） */
+const templatePick = reactive<Record<string, string>>({});
+
+/**
+ * 应用模板（POST /subjects/:id/apply-template）。
+ *
+ * 与 `editTemplateKey` 的分工：那个是自由填写"归类键"（ip:xxx，只做归类）；
+ * 这个是**套用预置风格模板** —— 服务端只落 template_key，并回 `prompt_template`（描述+风格前缀），
+ * 不改写主体原描述。UI 明确提示"已追加风格前缀，不覆盖原描述"，避免用户以为描述被改了。
+ */
+async function applyTemplate(subject: SubjectDto): Promise<void> {
+  const key = templatePick[subject.id];
+  if (!key) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    const result = await api.post<{ template_key: string; prompt_template: string; semantics?: string }>(
+      `/subjects/${subject.id}/apply-template`,
+      { template_key: key },
+    );
+    notice.value = `已应用模板「${templates.value.find((t) => t.key === key)?.name ?? key}」：风格前缀已追加，原描述不变`;
+    void result;
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "应用模板失败";
+  } finally {
+    busy.value = false;
+  }
+}
+
 /** 只看星标（置顶常用角色/场景）；与 template_key 一起做服务端筛选 */
 const starOnly = ref(false);
 const templateFilter = ref("");
+
+async function loadTemplates(): Promise<void> {
+  try {
+    const data = await api.get<{ templates: SubjectTemplateDto[] }>("/subjects/templates");
+    templates.value = data.templates ?? [];
+  } catch {
+    templates.value = [];
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -299,7 +347,9 @@ async function saveFromAsset(asset: ProjectAssetDto): Promise<void> {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await Promise.all([load(), loadTemplates()]);
+});
 </script>
 
 <template>
@@ -412,6 +462,21 @@ onMounted(load);
                 + 模板键
               </button>
             </p>
+            <!-- 预置风格模板（服务端目录驱动的"应用模板"；与上面的自由模板键是两件事） -->
+            <div v-if="templates.length" class="template-apply">
+              <select v-model="templatePick[subject.id]" class="mini-select" :disabled="busy">
+                <option value="">选择风格模板…</option>
+                <option v-for="tpl in templates" :key="tpl.key" :value="tpl.key">{{ tpl.name }}</option>
+              </select>
+              <button
+                type="button"
+                class="template-apply-btn"
+                :disabled="busy || !templatePick[subject.id]"
+                @click="applyTemplate(subject)"
+              >
+                应用模板
+              </button>
+            </div>
             <p v-if="subject.reject_reason" class="reject">驳回原因：{{ subject.reject_reason }}</p>
             <div class="thumbs">
               <span v-for="file in subject.files.slice(0, 4)" :key="file.id" class="thumb-chip">
@@ -474,6 +539,26 @@ onMounted(load);
 }
 .spacer {
   flex: 1;
+}
+.template-apply {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.template-apply-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-2);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 12px;
+}
+.template-apply-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .mini-select,
 .mini-input {

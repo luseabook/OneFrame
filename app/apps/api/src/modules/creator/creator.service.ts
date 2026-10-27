@@ -103,6 +103,15 @@ export const EFFECT_TREE = [
   },
 ];
 
+/**
+ * 效果标签的合法取值（= `EFFECT_TREE` 的叶子，扁平化）。
+ * 白名单理由：`effect` 写库后会被列表筛选直接比较；允许任意字符串时一次手误就会
+ * 让某批作品在筛选项里"永远查不到"，且无任何报错（脏数据静默失配）。未知值 400101。
+ */
+export const EFFECT_VALUES: string[] = EFFECT_TREE.flatMap((group) =>
+  ((group as { children?: Array<{ value: string }> }).children ?? []).map((child) => String(child.value)),
+);
+
 @Injectable()
 export class CreatorService {
   constructor(
@@ -320,6 +329,7 @@ export class CreatorService {
       summary?: string;
       kind?: number;
       category?: string;
+      effect?: string | null;
       cover_uri?: string | null;
       uri?: string | null;
     },
@@ -333,6 +343,8 @@ export class CreatorService {
     if (input.summary !== undefined) patch.summary = input.summary;
     if (input.kind !== undefined) patch.kind = input.kind;
     if (input.category !== undefined) patch.category = input.category;
+    // effect 允许显式传 null 清空（与 category 不同：效果是可选标签）
+    if (input.effect !== undefined) patch.effect = input.effect;
     if (input.cover_uri !== undefined) patch.coverUri = input.cover_uri;
     if (input.uri !== undefined) patch.uri = input.uri;
     if (row.status === ASSET_STATUS.REJECTED) {
@@ -487,13 +499,24 @@ export class CreatorService {
   }
 
   /** 公开信息流（`crc/home/list`）：**只有 status=3 可见** */
-  async publicFeed(opts: { kind?: number; category?: string; q?: string; page?: number; pageSize?: number } = {}) {
+  async publicFeed(
+    opts: {
+      kind?: number;
+      category?: string;
+      effect?: string;
+      q?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) {
     const page = opts.page ?? 1;
     const pageSize = opts.pageSize ?? 20;
     const conds = [eq(creatorAssets.status, ASSET_STATUS.APPROVED), sql`${creatorAssets.deletedAt} is null`];
     if (opts.kind) conds.push(eq(creatorAssets.kind, opts.kind));
     // 分类过滤走 idx_creator_assets_category(status, category, published_at desc)（迁移 0025）
     if (opts.category) conds.push(eq(creatorAssets.category, opts.category));
+    // 效果过滤走 idx_creator_assets_effect(status, effect, published_at desc)（迁移 0033）
+    if (opts.effect) conds.push(eq(creatorAssets.effect, opts.effect));
     if (opts.q) conds.push(ilike(creatorAssets.title, `%${opts.q}%`));
     const rows = await db
       .select()
@@ -928,6 +951,8 @@ export class CreatorService {
       kind: r.kind,
       kind_label: KIND_LABEL[r.kind] ?? null,
       category: r.category,
+      /** 效果标签（迁移 0033）：null = 未设置 */
+      effect: r.effect,
       cover_uri: r.coverUri,
       uri: r.uri,
       status: r.status,
