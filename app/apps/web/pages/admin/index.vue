@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // 运营后台控制台：独立登录页（/admin/login）+ 独立侧栏菜单（layouts/admin.vue）
+import type { PromoSlotDto, PromoSlotListDto } from "~/types/api";
+
 definePageMeta({ ssr: false, layout: "admin", middleware: "admin-auth" });
 
 interface Envelope<T> {
@@ -159,6 +161,102 @@ async function resolveReport(report: Record<string, unknown>, action: "takedown"
   await loadAll();
 }
 
+// ── 运营位（模块 #27 收尾）────────────────────────────────────────────
+//
+// 这个面板是「配置驱动」的写入口：新建/停用后**公开读接口立即变化**
+// （`GET /crc/banner_list?type=banner|pop_up|activity` 读的就是同一张 promo_slots 表，
+// 条件 = status=1 且当前时间在窗口内）。面板把服务端算好的 `active_now` 直接展示，
+// 避免运营自己拿本机时间比时间戳（时区差一小时就会误判）。
+const promoSlots = ref<PromoSlotDto[]>([]);
+const promoBusy = ref("");
+const PROMO_KINDS = ["banner", "pop_up", "activity", "creator"] as const;
+const PROMO_KIND_LABEL: Record<string, string> = {
+  banner: "首页横幅",
+  pop_up: "弹窗",
+  activity: "活动入口",
+  creator: "创作者卡",
+};
+const promoForm = reactive({
+  slot: "banner" as (typeof PROMO_KINDS)[number],
+  title: "",
+  image_uri: "",
+  link_uri: "",
+  sort: 0,
+  starts_at: "",
+  ends_at: "",
+});
+
+async function loadPromo(): Promise<void> {
+  try {
+    const data = await api<PromoSlotListDto>("/ops/admin/promo-slots");
+    promoSlots.value = data.list;
+  } catch {
+    // 运营位读失败不阻断其它面板（概览仍然可用）
+    promoSlots.value = [];
+  }
+}
+
+async function createPromo(): Promise<void> {
+  if (!promoForm.title.trim()) {
+    error.value = "运营位需要标题";
+    return;
+  }
+  promoBusy.value = "create";
+  error.value = "";
+  try {
+    await api("/ops/admin/promo-slots", {
+      method: "POST",
+      body: {
+        slot: promoForm.slot,
+        title: promoForm.title.trim(),
+        image_uri: promoForm.image_uri.trim() || null,
+        link_uri: promoForm.link_uri.trim() || null,
+        sort: Number(promoForm.sort) || 0,
+        starts_at: promoForm.starts_at.trim() || null,
+        ends_at: promoForm.ends_at.trim() || null,
+      },
+    });
+    promoForm.title = "";
+    promoForm.image_uri = "";
+    promoForm.link_uri = "";
+    await loadPromo();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "新建运营位失败";
+  } finally {
+    promoBusy.value = "";
+  }
+}
+
+async function togglePromo(slot: PromoSlotDto): Promise<void> {
+  promoBusy.value = slot.id;
+  error.value = "";
+  try {
+    await api(`/ops/admin/promo-slots/${slot.id}`, {
+      method: "PUT",
+      body: { status: slot.status === 1 ? 2 : 1 },
+    });
+    await loadPromo();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "更新运营位失败";
+  } finally {
+    promoBusy.value = "";
+  }
+}
+
+async function removePromo(slot: PromoSlotDto): Promise<void> {
+  if (!window.confirm(`删除运营位「${slot.title || slot.id}」？删除后公开页立即不再展示。`)) return;
+  promoBusy.value = slot.id;
+  error.value = "";
+  try {
+    await api(`/ops/admin/promo-slots/${slot.id}`, { method: "DELETE" });
+    await loadPromo();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "删除运营位失败";
+  } finally {
+    promoBusy.value = "";
+  }
+}
+
 onMounted(async () => {
   const saved = localStorage.getItem("admin_token");
   if (!saved) {
@@ -168,11 +266,13 @@ onMounted(async () => {
   token.value = saved;
   try {
     await loadAll();
-  } catch (e) {
+  } catch {
     // token 失效：回到独立登录页
     localStorage.removeItem("admin_token");
     await navigateTo("/admin/login", { replace: true });
+    return;
   }
+  await loadPromo();
 });
 </script>
 
@@ -192,6 +292,54 @@ onMounted(async () => {
         <div v-for="(counts, queue) in dashboard.queues" :key="queue" class="queue-card">
           <b>{{ queue }}</b>
           <span class="muted">wait {{ counts.wait ?? 0 }} · active {{ counts.active ?? 0 }} · failed {{ counts.failed ?? 0 }}</span>
+        </div>
+      </section>
+
+      <!-- 运营位（模块 #27）：新建/停用后公开读接口 crc/banner_list 立即变化 -->
+      <section v-if="tab === 'dashboard'" class="card promo">
+        <h2>运营位</h2>
+        <p class="muted small">
+          配置后立即作用于公开读接口 <code>GET /crc/banner_list?type=…</code>（读取条件：
+          启用 + 当前时间在窗口内，按 sort 升序）。「生效中」由服务端按服务器时间判定。
+        </p>
+
+        <div class="promo-form">
+          <select v-model="promoForm.slot" class="input">
+            <option v-for="kind in PROMO_KINDS" :key="kind" :value="kind">
+              {{ PROMO_KIND_LABEL[kind] }}（{{ kind }}）
+            </option>
+          </select>
+          <input v-model="promoForm.title" class="input" placeholder="标题（必填）" maxlength="120" />
+          <input v-model="promoForm.image_uri" class="input" placeholder="图片 key / URL（可选）" />
+          <input v-model="promoForm.link_uri" class="input" placeholder="跳转，如 /pricing（可选）" />
+          <input v-model.number="promoForm.sort" class="input sort" type="number" placeholder="排序" />
+          <input v-model="promoForm.starts_at" class="input time" placeholder="开始 ISO（可选）" />
+          <input v-model="promoForm.ends_at" class="input time" placeholder="结束 ISO（可选）" />
+          <button class="mini" :disabled="promoBusy === 'create'" @click="createPromo">
+            {{ promoBusy === "create" ? "新建中…" : "新建" }}
+          </button>
+        </div>
+
+        <div class="row head-row">
+          <span>类型</span><span>标题</span><span>排序</span><span>时间窗口</span><span>生效</span><span>操作</span>
+        </div>
+        <p v-if="promoSlots.length === 0" class="muted small">还没有运营位，用上方表单新建一条。</p>
+        <div v-for="slot in promoSlots" :key="slot.id" class="row">
+          <span>{{ PROMO_KIND_LABEL[slot.slot] ?? slot.slot }}</span>
+          <span>{{ slot.title || "（无标题）" }}</span>
+          <span class="muted">{{ slot.sort }}</span>
+          <span class="muted small">
+            {{ slot.starts_at ? new Date(slot.starts_at).toLocaleString() : "不限" }}
+            →
+            {{ slot.ends_at ? new Date(slot.ends_at).toLocaleString() : "不限" }}
+          </span>
+          <span :class="slot.active_now ? 'state-on' : 'state-off'">{{ slot.active_now ? "生效中" : "未生效" }}</span>
+          <span class="ops">
+            <button class="mini" :disabled="promoBusy === slot.id" @click="togglePromo(slot)">
+              {{ slot.status === 1 ? "停用" : "启用" }}
+            </button>
+            <button class="mini danger" :disabled="promoBusy === slot.id" @click="removePromo(slot)">删除</button>
+          </span>
         </div>
       </section>
 
@@ -546,6 +694,44 @@ h1 {
 }
 .error {
   color: #ff6b6b;
+  font-size: 12px;
+}
+/* ── 运营位面板（模块 #27）──────────────────────────────── */
+.promo .promo-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+  align-items: center;
+}
+.promo .promo-form .input {
+  width: 100%;
+}
+.promo .promo-form .sort {
+  max-width: 90px;
+}
+.promo .promo-form .time {
+  min-width: 180px;
+}
+.promo .state-on {
+  color: #4ade80;
+  font-size: 12px;
+}
+.promo .state-off {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.promo .ops {
+  display: inline-flex;
+  gap: 6px;
+}
+.promo .small {
+  font-size: 12px;
+}
+.promo code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-subtle, #16161f);
   font-size: 12px;
 }
 @media (max-width: 860px) {

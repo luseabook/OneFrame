@@ -1,7 +1,15 @@
 <script setup lang="ts">
 // 落地页：对齐竞品 ReelMate 首页信息架构（导航 → Hero → 双工作流入口 → 能力矩阵 → 流水线展示 → 页脚）
 definePageMeta({ layout: false });
-useHead({ title: "一帧 · AI 漫剧工作台 — 30 分钟产出一集短剧" });
+
+// i18n（第 8 批）：本页是全站唯一 SSR 的营销页，文案全量走语言包；
+// 首帧语言由 `plugins/i18n.ts` 在服务端按 `?lang=` → cookie → Accept-Language 解析，
+// 与客户端同一套优先级，因此不会出现"先中文后英文"的 hydration 抖动。
+const { t } = useI18n();
+useHead({ title: () => t("landing.metaTitle") });
+// 描述也随语言：`app.vue` 的全局 description 是中文常量（公共文件，不在本批范围），
+// 页面级覆盖优先级更高，保证外语首帧的 meta 也是对应语言。
+useSeoMeta({ description: () => t("landing.metaDescription") });
 
 const auth = useAuth();
 const isLogged = computed(() => !!auth.state.value.user);
@@ -11,64 +19,40 @@ onMounted(() => {
   if (!auth.state.value.accessToken && !auth.state.value.user) void auth.bootstrap();
 });
 
-const flows = [
+const flows = computed(() => [
   {
-    title: "短剧工作流",
-    desc: "从剧本到成片，一站式创作爆款短剧",
-    cta: "创建项目",
+    title: t("landing.flowStudioTitle"),
+    desc: t("landing.flowStudioDesc"),
+    cta: t("landing.flowStudioCta"),
     to: "/projects",
     variant: "primary" as const,
   },
   {
-    title: "工具箱",
-    desc: "文生视频 / 图生视频，单点快速出片",
-    cta: "打开工具箱",
+    title: t("landing.flowToolsTitle"),
+    desc: t("landing.flowToolsDesc"),
+    cta: t("landing.flowToolsCta"),
     to: "/tools",
     variant: "ghost" as const,
   },
-];
+]);
 
-const capabilities = [
-  {
-    icon: "◈",
-    title: "剧本流水线",
-    desc: "小说或一句话 → 分集大纲 → 角色定妆 → 分镜表 → 批量出片，每一步可编辑可重跑。",
-  },
-  {
-    icon: "☺",
-    title: "角色一致性",
-    desc: "定妆图绑定后自动注入每一镜参考，跨镜头、跨剧集人物不变脸。",
-  },
-  {
-    icon: "◉",
-    title: "价格透明",
-    desc: "模型直连价与积分换算公示，生成前实时报价，失败与取消不扣积分。",
-  },
-  {
-    icon: "▤",
-    title: "批量与预算",
-    desc: "选集或选镜批量投递，预算上限一键控制；触顶镜头部分成功，续投可预填。",
-  },
-  {
-    icon: "◫",
-    title: "资产复用",
-    desc: "结果转存资产库，角色定妆图打标签跨项目复用，作品可续做下一集。",
-  },
-  {
-    icon: "✧",
-    title: "AI 双标识",
-    desc: "成片画面水印 + 文件元数据双重标识，符合生成内容标识要求。",
-  },
-];
+const capabilities = computed(() => [
+  { icon: "◈", title: t("landing.capScriptTitle"), desc: t("landing.capScriptDesc") },
+  { icon: "☺", title: t("landing.capCharacterTitle"), desc: t("landing.capCharacterDesc") },
+  { icon: "◉", title: t("landing.capPriceTitle"), desc: t("landing.capPriceDesc") },
+  { icon: "▤", title: t("landing.capBatchTitle"), desc: t("landing.capBatchDesc") },
+  { icon: "◫", title: t("landing.capAssetsTitle"), desc: t("landing.capAssetsDesc") },
+  { icon: "✧", title: t("landing.capAiTitle"), desc: t("landing.capAiDesc") },
+]);
 
-const pipeline = [
-  { n: "01", title: "建项目", desc: "粘贴小说或写一句话想法，选画幅" },
-  { n: "02", title: "生成大纲", desc: "AI 拆成 3~6 集，逐条可改，自动保存" },
-  { n: "03", title: "角色定妆", desc: "抽取角色卡，生成定妆图并定稿绑定" },
-  { n: "04", title: "写分镜", desc: "按集生成 4~30 镜，镜号/画面/提示词" },
-  { n: "05", title: "批量出片", desc: "选模型与预算，一键投递全部镜头" },
-  { n: "06", title: "导出成片", desc: "逐镜下载或整集 zip，含 manifest" },
-];
+const pipeline = computed(() => [
+  { n: "01", title: t("landing.pipe1Title"), desc: t("landing.pipe1Desc") },
+  { n: "02", title: t("landing.pipe2Title"), desc: t("landing.pipe2Desc") },
+  { n: "03", title: t("landing.pipe3Title"), desc: t("landing.pipe3Desc") },
+  { n: "04", title: t("landing.pipe4Title"), desc: t("landing.pipe4Desc") },
+  { n: "05", title: t("landing.pipe5Title"), desc: t("landing.pipe5Desc") },
+  { n: "06", title: t("landing.pipe6Title"), desc: t("landing.pipe6Desc") },
+]);
 </script>
 
 <template>
@@ -78,18 +62,19 @@ const pipeline = [
       <div class="nav-inner">
         <NuxtLink to="/" class="brand">
           <span class="logo-mark">一</span>
-          <span class="logo-text">一帧</span>
+          <span class="logo-text">{{ t("landing.brandName") }}</span>
         </NuxtLink>
         <nav class="links">
-          <a href="#capabilities">能力</a>
-          <a href="#pipeline">流程</a>
-          <NuxtLink to="/pricing">定价</NuxtLink>
+          <a href="#capabilities">{{ t("nav.capabilities") }}</a>
+          <a href="#pipeline">{{ t("nav.process") }}</a>
+          <NuxtLink to="/pricing">{{ t("nav.pricing") }}</NuxtLink>
         </nav>
         <div class="nav-right">
-          <NuxtLink v-if="isLogged" to="/home" class="cta-sm">进入工作台</NuxtLink>
+          <LangSwitcher />
+          <NuxtLink v-if="isLogged" to="/home" class="cta-sm">{{ t("nav.enterWorkspace") }}</NuxtLink>
           <template v-else>
-            <NuxtLink to="/login" class="ghost-sm">登录</NuxtLink>
-            <NuxtLink to="/login?redirect=/projects" class="cta-sm">免费开始</NuxtLink>
+            <NuxtLink to="/login" class="ghost-sm">{{ t("nav.login") }}</NuxtLink>
+            <NuxtLink to="/login?redirect=/projects" class="cta-sm">{{ t("nav.startFree") }}</NuxtLink>
           </template>
         </div>
       </div>
@@ -98,19 +83,19 @@ const pipeline = [
     <!-- Hero -->
     <section class="hero">
       <div class="glow" aria-hidden="true" />
-      <p class="eyebrow">AI 漫剧 · 短剧生产流水线</p>
-      <h1>你的专属 AI 漫剧工作室</h1>
+      <p class="eyebrow">{{ t("landing.heroEyebrow") }}</p>
+      <h1>{{ t("landing.heroTitle") }}</h1>
       <p class="lead">
-        粘贴小说或写一句话，AI 生成分集大纲、角色定妆、分镜与视频——<br />
-        角色全程一致，价格全程透明。
+        {{ t("landing.heroLead1") }}<br />
+        {{ t("landing.heroLead2") }}
       </p>
       <div class="hero-cta">
         <NuxtLink :to="isLogged ? '/projects' : '/login?redirect=/projects'" class="btn-lg primary">
-          开始创作
+          {{ t("landing.heroCtaStart") }}
         </NuxtLink>
-        <a href="#pipeline" class="btn-lg ghost">看它怎么工作</a>
+        <a href="#pipeline" class="btn-lg ghost">{{ t("landing.heroCtaHow") }}</a>
       </div>
-      <p class="hint-sm">Alpha 期邀请制 · 注册赠送 80 积分 · 无需绑定支付</p>
+      <p class="hint-sm">{{ t("landing.heroHint") }}</p>
     </section>
 
     <!-- 双工作流入口（对齐竞品） -->
@@ -133,8 +118,8 @@ const pipeline = [
     <!-- 能力矩阵 -->
     <section id="capabilities" class="section">
       <div class="sec-head">
-        <h2>不是又一个文生视频站</h2>
-        <p>单点生成是模型厂商的主场。我们做的是「小说进、成片出」的生产线。</p>
+        <h2>{{ t("landing.capSectionTitle") }}</h2>
+        <p>{{ t("landing.capSectionDesc") }}</p>
       </div>
       <div class="cap-grid">
         <article v-for="c in capabilities" :key="c.title" class="cap">
@@ -148,8 +133,8 @@ const pipeline = [
     <!-- 流水线六步 -->
     <section id="pipeline" class="section alt">
       <div class="sec-head">
-        <h2>六步，从想法到成片</h2>
-        <p>人工操作约 30 分钟；含生成排队的端到端时长 ≤2 小时。</p>
+        <h2>{{ t("landing.pipeSectionTitle") }}</h2>
+        <p>{{ t("landing.pipeSectionDesc") }}</p>
       </div>
       <ol class="pipe">
         <li v-for="s in pipeline" :key="s.n">
@@ -162,10 +147,10 @@ const pipeline = [
 
     <!-- 底部 CTA -->
     <section class="final-cta">
-      <h2>现在就把第一部剧做出来</h2>
-      <p>Alpha 期邀请制，注册即赠 80 积分，够跑通一整集。</p>
+      <h2>{{ t("landing.finalTitle") }}</h2>
+      <p>{{ t("landing.finalDesc") }}</p>
       <NuxtLink :to="isLogged ? '/projects' : '/login?redirect=/projects'" class="btn-lg primary">
-        免费开始创作
+        {{ t("landing.finalCta") }}
       </NuxtLink>
     </section>
 
@@ -174,17 +159,17 @@ const pipeline = [
       <div class="foot-inner">
         <div class="foot-brand">
           <span class="logo-mark sm">一</span>
-          <span>一帧 · AI 漫剧工作台</span>
+          <span>{{ t("landing.footerBrand") }}</span>
         </div>
         <nav class="foot-links">
-          <NuxtLink to="/terms">用户协议</NuxtLink>
-          <NuxtLink to="/privacy">隐私政策</NuxtLink>
-          <NuxtLink to="/report">举报 / 投诉</NuxtLink>
-          <NuxtLink to="/pricing">定价</NuxtLink>
+          <NuxtLink to="/terms">{{ t("nav.terms") }}</NuxtLink>
+          <NuxtLink to="/privacy">{{ t("nav.privacy") }}</NuxtLink>
+          <NuxtLink to="/report">{{ t("nav.report") }}</NuxtLink>
+          <NuxtLink to="/pricing">{{ t("nav.pricing") }}</NuxtLink>
         </nav>
       </div>
       <p class="foot-note">
-        内容由 AI 生成，请仔细甄别 · 京 ICP 备 00000000 号（上线前替换）
+        {{ t("landing.footerNote") }}
       </p>
     </footer>
   </div>

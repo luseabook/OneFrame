@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
@@ -93,6 +93,15 @@ const batchAllocateBody = z.object({
     .min(1)
     .max(50),
   memo: z.string().max(200).optional(),
+});
+const rolePermissionsBody = z.object({
+  /**
+   * 权限码集合（`domain.action` 或粗码）。上限 200 是防御：目录只有 70 个，
+   * 超量请求一定是客户端把脏数据拼进来了。
+   */
+  permissions: z.array(z.string().min(1).max(64)).max(200),
+  /** 可选：模块可见范围（原样存 team_roles.module_id_list，不解析语义） */
+  module_id_list: z.unknown().optional(),
 });
 
 @Controller("cam")
@@ -192,6 +201,49 @@ export class TeamController {
   @Get("role/list")
   async roles(@Req() req: AuthedRequest) {
     return this.team.listRoles((await this.ctx(req)).spaceId);
+  }
+
+  /**
+   * 权限码目录（`domain.action` 分组）。
+   *
+   * 只读、对**所有成员**开放：矩阵编辑器需要先拿到目录才能渲染勾选框，
+   * 而"有哪些权限码"本身不是敏感信息（真正敏感的是谁能改谁的权限）。
+   */
+  @Get("permissions")
+  async permissions(@Req() req: AuthedRequest) {
+    await this.ctx(req);
+    return this.team.permissionCatalog();
+  }
+
+  /** 某角色的权限（含 power_list 原样、未知码单列，便于发现历史脏数据） */
+  @Get("roles/:role_id/permissions")
+  async rolePermissions(@Req() req: AuthedRequest, @Param("role_id") roleId: string) {
+    return this.team.getRolePermissions((await this.ctx(req)).spaceId, roleId);
+  }
+
+  /**
+   * 覆盖写角色权限（幂等）。
+   *
+   * 需要团队管理特权（与"改团队设置/成员"同级）：能改权限的人等于能改整个团队的边界。
+   * 本批**不做**入口拦截（见 `permission-catalog.ts` 注释），这里只存储。
+   */
+  @Put("roles/:role_id/permissions")
+  async setRolePermissions(@Req() req: AuthedRequest, @Param("role_id") roleId: string, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    this.team.requirePrivilege(c, "edit role permissions");
+    const input = parseOrThrow(rolePermissionsBody, body ?? {});
+    return this.team.setRolePermissions(c.spaceId, roleId, input.permissions, input.module_id_list);
+  }
+
+  /**
+   * 团队模型开关矩阵（对齐参照 `cam/team/temp-info`）。
+   *
+   * 契约里那 8 个开关有 4 个是折扣/白名单语义（未取证），本方法只返回**可推导**的真值，
+   * 推不出来的给 `null` 并列进 `unverified`（见 service 注释），不用假 false 冒充。
+   */
+  @Get("temp-info")
+  async tempInfo(@Req() req: AuthedRequest) {
+    return this.team.tempInfo((await this.ctx(req)).spaceId);
   }
 
   // ── 成员 ────────────────────────────────────────────────

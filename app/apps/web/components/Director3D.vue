@@ -6,6 +6,7 @@
  * - 机位与站位存 localStorage（每镜头一份），"定格" 可导出当前视角 PNG
  */
 import * as THREE from "three";
+import { useDirectorPersistence } from "~/components/director/useDirectorPersistence";
 
 const props = withDefaults(
   defineProps<{
@@ -13,8 +14,11 @@ const props = withDefaults(
     shotId?: string;
     shotNo?: number;
     actors?: Array<{ id: string; name: string; image?: string | null }>;
+    /** 项目上下文：有值时场景会持久化到服务端（`/v1/director/scenes`），否则只存 localStorage */
+    projectId?: string;
+    episodeId?: string;
   }>(),
-  { shotId: "", shotNo: 1, actors: () => [] },
+  { shotId: "", shotNo: 1, actors: () => [], projectId: "", episodeId: "" },
 );
 const emit = defineEmits<{ close: []; captured: [dataUrl: string] }>();
 
@@ -201,6 +205,191 @@ function saveState(): void {
     /* ignore */
   }
 }
+
+// ── 服务端持久化（场景快照 / 姿态预设 / 编辑心跳）──────────────
+//
+// 分工：`useDirectorPersistence` 只负责协议（保存/乐观锁/预设/心跳），
+// 这里负责**组件状态 ↔ payload 的唯一映射**。两边都不碰对方的细节。
+const presetName = ref("");
+const presetScope = ref(1);
+/** 正在应用远端快照时不要把它当成"用户改动"（否则一载入就变 dirty、马上又存一遍） */
+let applyingRemote = false;
+/** 远端快照应用后的短暂抑制窗口：`rebuildActors()` 等 nextTick 里的同步还会轻微改状态 */
+let suppressDirtyUntil = 0;
+
+function showSnap(message: string): void {
+  snapMsg.value = message;
+  setTimeout(() => (snapMsg.value = ""), 2200);
+}
+
+/**
+ * 组件状态 → 场景快照。
+ *
+ * 字段名与本地存档（`saveState`）保持一致，并额外带 `settings`（视图/网格/标签/缩放/旋转）：
+ * 这些是"导演台看起来是什么样"的一部分，只存相机和站位的话，重开项目视角全丢。
+ */
+function sceneSnapshot(): Record<string, unknown> {
+  syncActiveCam();
+  return {
+    schema_version: 1,
+    camPos: { ...camPos },
+    camTarget: { ...camTarget },
+    fov: fov.value,
+    groundOpacity: groundOpacity.value,
+    positions: positions.value.map((p) => ({ ...p })),
+    cameras: cameras.value.map((c) => ({ ...c, pos: { ...c.pos }, target: { ...c.target } })),
+    activeCamIndex: activeCamIndex.value,
+    settings: {
+      viewMode: viewMode.value,
+      gridSnap: gridSnap.value,
+      showLabels: showLabels.value,
+      sceneScale: sceneScale.value,
+      sceneRot: { ...sceneRot },
+    },
+  };
+}
+
+/**
+ * 快照 → 组件状态（防御式）。
+ *
+ * 为什么每个字段都要兜底：payload 可能来自**旧版本编辑器**（用户半年前存的场景），
+ * 少一个字段就抛异常的话，用户打开项目等于导演台打不开；宁可退化成默认值。
+ */
+function applySceneSnapshot(payload: Record<string, unknown>): void {
+  applyingRemote = true;
+  try {
+    const num = (value: unknown, fallback: number): number =>
+      typeof value === "number" && Number.isFinite(value) ? value : fallback;
+    const readVec = (value: unknown, fallback: { x: number; y: number; z: number }) => {
+      const record = (value ?? {}) as Record<string, unknown>;
+      return {
+        x: num(record.x, fallback.x),
+        y: num(record.y, fallback.y),
+        z: num(record.z, fallback.z),
+      };
+    };
+    Object.assign(camPos, readVec(payload.camPos, { x: 2.4, y: 2.2, z: 3.2 }));
+    Object.assign(camTarget, readVec(payload.camTarget, { x: 0, y: 1, z: 0 }));
+    fov.value = num(payload.fov, 50);
+    groundOpacity.value = Math.min(1, Math.max(0, num(payload.groundOpacity, 0.4)));
+
+    if (Array.isArray(payload.cameras) && payload.cameras.length > 0) {
+      cameras.value = (payload.cameras as Array<Record<string, unknown>>).map((raw, index) => ({
+        id: typeof raw.id === "string" ? raw.id : `cam-${index + 1}`,
+        name: typeof raw.name === "string" && raw.name ? raw.name : `机位${index + 1}`,
+        pos: readVec(raw.pos, { x: 2.4, y: 2.2, z: 3.2 }),
+        target: readVec(raw.target, { x: 0, y: 1, z: 0 }),
+        fov: num(raw.fov, 50),
+      }));
+      activeCamIndex.value = Math.min(Math.max(0, num(payload.activeCamIndex, 0)), cameras.value.length - 1);
+    }
+    if (Array.isArray(payload.positions)) {
+      positions.value = (payload.positions as Array<Record<string, unknown>>).map((raw, index) => ({
+        id: typeof raw.id === "string" ? raw.id : `actor-${index}`,
+        name: typeof raw.name === "string" && raw.name ? raw.name : `角色${index + 1}`,
+        x: num(raw.x, 0),
+        z: num(raw.z, 0),
+        rot: num(raw.rot, 0),
+        pose: (POSE_KEYS as readonly string[]).includes(String(raw.pose)) ? (raw.pose as PoseKey) : "stand",
+        image: typeof raw.image === "string" ? raw.image : null,
+      }));
+    }
+    const settings = (payload.settings ?? {}) as Record<string, unknown>;
+    viewMode.value = settings.viewMode === "camera" ? "camera" : "director";
+    gridSnap.value = settings.gridSnap !== false;
+    showLabels.value = settings.showLabels !== false;
+    sceneScale.value = Math.min(200, Math.max(60, num(settings.sceneScale, 100)));
+    Object.assign(sceneRot, readVec(settings.sceneRot, { x: 0, y: 0, z: 0 }));
+
+    // 相机缓冲跟随当前机位（与 switchCamera 的后置状态一致）
+    const cam = cameras.value[activeCamIndex.value];
+    if (cam) {
+      Object.assign(camPos, cam.pos);
+      Object.assign(camTarget, cam.target);
+      fov.value = cam.fov;
+    }
+  } finally {
+    /**
+     * 同步复位（不放在 nextTick 里）+ 200ms 抑制窗口：
+     * 组件 watcher 用 `flush: "sync"`，远端快照的每次字段赋值都会同步触发它；
+     * 而 `rebuildActors()` 等在 nextTick 里可能再改一点状态。两者都算"同步远端结果"，
+     * 不该让用户看到"刚打开就提示有未保存修改"。
+     */
+    applyingRemote = false;
+    suppressDirtyUntil = Date.now() + 200;
+  }
+  if (scene) {
+    nextTick(() => {
+      rebuildActors();
+      resize();
+    });
+  }
+}
+
+const persistence = useDirectorPersistence({
+  projectId: () => props.projectId || undefined,
+  episodeId: () => props.episodeId || undefined,
+  snapshot: sceneSnapshot,
+  restore: applySceneSnapshot,
+  /**
+   * 姿态预设是**快照子集**（只含站位/机位）：应用时只覆盖这两块，
+   * 不覆盖当前视图设置——用户刚调好的导演视角不该被预设带走。
+   */
+  applyPresetPayload: (payload) => {
+    applySceneSnapshot({ ...sceneSnapshot(), ...payload });
+  },
+  notify: showSnap,
+});
+
+const presetOptions = computed(() => persistence.presets.value);
+
+/** 模板里用短名（ref 在模板中自动解包） */
+const sceneDirty = persistence.dirty;
+const sceneSaving = persistence.saving;
+const sceneConflictVersion = persistence.conflictVersion;
+const sceneCollaborators = persistence.collaborators;
+const sceneStatusText = persistence.statusText;
+const sceneError = persistence.error;
+const scenePresetSaving = persistence.presetSaving;
+
+function onPresetChange(event: Event): void {
+  const id = (event.target as HTMLSelectElement).value;
+  const preset = presetOptions.value.find((item) => item.id === id);
+  if (preset) persistence.applyPreset(preset);
+  (event.target as HTMLSelectElement).value = "";
+}
+
+async function savePresetNow(): Promise<void> {
+  const ok = await persistence.savePreset(presetName.value, presetScope.value);
+  if (ok) presetName.value = "";
+}
+
+async function saveNow(): Promise<void> {
+  const ok = await persistence.save();
+  if (ok) saveState();
+}
+
+async function syncFromServer(): Promise<void> {
+  if (!props.projectId) return;
+  await persistence.loadPresets();
+  const loaded = await persistence.loadLatest();
+  if (loaded) {
+    // 服务端快照为准，顺手镜像回本地（断网时还能用上次的）
+    saveState();
+    showSnap(`已载入场景 v${persistence.version.value}`);
+  }
+  void persistence.heartbeat();
+}
+
+/** 关闭前把未保存改动落一次（尽力而为：失败也不阻塞关闭） */
+async function closePanel(): Promise<void> {
+  if (persistence.dirty.value && persistence.conflictVersion.value === null) {
+    await persistence.save();
+  }
+  persistence.dispose();
+  emit("close");
+}
+
 
 function makeLabel(text: string): THREE.Sprite {
   const canvas = document.createElement("canvas");
@@ -626,7 +815,7 @@ function toggleFullscreen(): void {
   else void host.requestFullscreen?.();
 }
 
-/** 定格：把当前视角渲染成 PNG 并下载 + 抛给父组件 */
+/** 定格：把当前视角渲染成 PNG 并下载 + 抛给父组件 + 作为场景缩略图存到服务端 */
 function capture(): void {
   if (!renderer || !scene || !activeCam) return;
   renderer.render(scene, activeCam);
@@ -638,6 +827,8 @@ function capture(): void {
   emit("captured", url);
   snapMsg.value = "已定格并下载当前视角 PNG";
   setTimeout(() => (snapMsg.value = ""), 2000);
+  // 缩略图只在有项目上下文时上传（独立导演台不产生服务端资产）
+  if (props.projectId) void persistence.save({ thumbnailDataUrl: url });
 }
 
 const filteredActors = computed(() => {
@@ -649,13 +840,22 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
+      /**
+       * 打开瞬间会做"本地存档回放 + 场景初始化 + 服务端快照覆盖"，这一串都是**加载**动作：
+       * 抑制窗口内不标脏，否则用户刚打开就看到"有未保存修改"（其实什么都没改）。
+       */
+      suppressDirtyUntil = Date.now() + 1200;
+      // 本地存档先上（秒开），服务端快照到了再覆盖：断网/服务端没存过时不至于白屏
       loadState();
       nextTick(() => {
         initScene();
         rebuildActors();
         resize();
       });
+      void syncFromServer();
+      persistence.start();
     } else {
+      persistence.dispose();
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       if (renderer) {
@@ -675,7 +875,26 @@ watch(
   },
 );
 
+/**
+ * 任何"会被保存进快照"的状态变化都标脏。
+ *
+ * 为什么用 deep watch 而不是在每个操作里手写 markDirty：
+ * 拖动角色、改 FOV、加机位、改网格吸附……入口有十几处，漏一个就会出现
+ * "界面改了但 30s 自动保存没存"（用户重开项目发现改动没了，最难排查的一类 bug）。
+ */
+watch(
+  [positions, cameras, camPos, camTarget, fov, groundOpacity, sceneScale, sceneRot, viewMode, gridSnap, showLabels],
+  () => {
+    if (applyingRemote || Date.now() < suppressDirtyUntil) return;
+    persistence.markDirty();
+  },
+  // sync：远端快照应用期间的赋值必须**当场**被 `applyingRemote` 挡住；
+  // 默认的 pre-flush 会把这些赋值攒到下一轮，那时标志位已经复位 → 误判成用户改动
+  { deep: true, flush: "sync" },
+);
+
 onUnmounted(() => {
+  persistence.dispose();
   if (raf) cancelAnimationFrame(raf);
   if (renderer) {
     renderer.dispose();
@@ -695,11 +914,38 @@ onUnmounted(() => {
             <button type="button" :class="{ on: viewMode === 'director' }" @click="viewMode = 'director'">导演视角</button>
             <button type="button" :class="{ on: viewMode === 'camera' }" @click="viewMode = 'camera'">机位视角</button>
           </div>
+          <!-- 场景持久化状态：项目上下文里才有意义（独立导演台只存本地） -->
+          <div v-if="projectId" class="d3-sync" :data-dirty="sceneDirty ? '1' : '0'">
+            <span class="d3-sync__dot" />
+            <span class="d3-sync__text">{{ sceneStatusText }}</span>
+            <button type="button" class="d3-sync__save" :disabled="sceneSaving" @click="saveNow">
+              {{ sceneSaving ? "保存中…" : "保存" }}
+            </button>
+            <span
+              v-if="sceneCollaborators.length"
+              class="d3-sync__peers"
+              :title="sceneCollaborators.map((c) => `${c.nickname}（${Math.round(c.last_seen_ms / 1000)}s 前）`).join('\n')"
+            >
+              👥 {{ sceneCollaborators.length }} 人在编辑
+            </span>
+          </div>
           <span class="d3-spacer" />
           <span v-if="snapMsg" class="d3-toast">{{ snapMsg }}</span>
           <button type="button" class="d3-icon" title="快捷键：拖动旋转 · 滚轮缩放" @click="resetView">⌨</button>
-          <button type="button" class="d3-icon" title="关闭" @click="emit('close')">✕</button>
+          <button type="button" class="d3-icon" title="关闭" @click="closePanel">✕</button>
         </header>
+
+        <!-- 版本冲突：有人在旧版本上改过，不许静默覆盖 -->
+        <div v-if="sceneConflictVersion !== null" class="d3-conflict">
+          <span>
+            场景已被他人更新到 <b>v{{ sceneConflictVersion }}</b>，你的改动还没保存。要覆盖服务端，还是载入最新版本？
+          </span>
+          <button type="button" class="d3-btn" :disabled="sceneSaving" @click="persistence.overwriteConflict()">
+            覆盖服务端
+          </button>
+          <button type="button" class="d3-btn d3-btn--ghost" @click="persistence.discardLocal()">载入最新</button>
+        </div>
+        <p v-if="sceneError" class="d3-error">{{ sceneError }}</p>
 
         <div class="d3-body">
           <!-- 左：素材区 + 3D 场景 -->
@@ -761,6 +1007,28 @@ onUnmounted(() => {
                   <input v-model.number="sceneRot[axis]" type="number" step="5" @change="saveState" />
                 </label>
               </div>
+            </div>
+
+            <!-- 姿态预设：团队协作里"常用摆位一键复用"（个人 / 团队） -->
+            <div v-if="projectId" class="d3-group">
+              <p class="d3-group__label">姿态预设</p>
+              <select class="d3-select" @change="onPresetChange">
+                <option value="">应用预设…</option>
+                <option v-for="p in presetOptions" :key="p.id" :value="p.id">
+                  {{ p.name }}{{ p.scope === 2 ? "（团队）" : "" }}
+                </option>
+              </select>
+              <div class="d3-preset-row">
+                <input v-model="presetName" class="d3-search" type="text" maxlength="60" placeholder="预设名" />
+                <select v-model.number="presetScope" class="d3-select">
+                  <option :value="1">个人</option>
+                  <option :value="2">团队</option>
+                </select>
+                <button type="button" class="d3-btn" :disabled="scenePresetSaving" @click="savePresetNow">存为预设</button>
+              </div>
+              <p v-if="!presetOptions.length" class="d3-muted">
+                还没有预设：把角色摆好后可存成预设，下次一键复用。
+              </p>
             </div>
           </aside>
 
@@ -835,9 +1103,12 @@ onUnmounted(() => {
             <div class="d3-ops">
               <button type="button" class="d3-btn" @click="capture">定格截图</button>
               <button type="button" class="d3-btn d3-btn--ghost" @click="switchView">切换视角</button>
+              <button v-if="projectId" type="button" class="d3-btn d3-btn--ghost" @click="persistence.duplicate()">
+                复制场景
+              </button>
             </div>
             <p class="d3-muted">
-              机位与站位按镜头保存在本浏览器；「定格截图」会下载当前视角 PNG（可作为首帧参考素材的来源）。
+              {{ projectId ? "场景快照自动保存到服务端（30s 自动保存 + 心跳）；「定格截图」会下载 PNG 并作为场景缩略图。" : "机位与站位按镜头保存在本浏览器；「定格截图」会下载当前视角 PNG（可作为首帧参考素材的来源）。" }}
             </p>
           </aside>
         </div>
@@ -907,6 +1178,93 @@ onUnmounted(() => {
 .d3-toast {
   font-size: 12px;
   color: var(--success);
+}
+
+/* ── 场景持久化状态条 / 冲突条 / 预设行 ── */
+.d3-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.d3-sync__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.d3-sync[data-dirty="1"] .d3-sync__dot {
+  background: var(--warning, #f5b544);
+}
+
+.d3-sync__text {
+  white-space: nowrap;
+}
+
+.d3-sync__save {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.d3-sync__save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.d3-sync__peers {
+  color: var(--brand-300, #a99cff);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.d3-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 181, 68, 0.35);
+  background: rgba(245, 181, 68, 0.1);
+  color: #f5d08a;
+  font-size: 12px;
+}
+
+.d3-error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.d3-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.d3-preset-row .d3-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.d3-preset-row .d3-select {
+  flex: 0 0 72px;
 }
 .d3-icon {
   width: 32px;

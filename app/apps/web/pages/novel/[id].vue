@@ -34,7 +34,7 @@ const loading = ref(true);
 const error = ref("");
 const busy = ref("");
 
-type Tab = "chapters" | "analysis" | "chapter_outline" | "episode_outline" | "core_character" | "script" | "agent";
+type Tab = "chapters" | "analysis" | "chapter_outline" | "episode_outline" | "core_character" | "script" | "agent" | "original";
 const tab = ref<Tab>("chapters");
 
 const STEP_TO_TAB: Record<string, Tab> = {
@@ -422,7 +422,12 @@ function chapterTitle(item: NovelChapterSummaryDto): string {
   return stripped || item.title;
 }
 
-const TABS: Array<{ key: Tab; label: string }> = [
+/**
+ * Tab 清单：改编链七项；**原创本子（source_type=2）在最前面多一个「原创链」**。
+ * 为什么原创本子仍保留"内容分析/核心角色"等改编 tab：角色卡生成对原创本子同样成立
+ * （上下文回落到创作灵感），删掉它们等于让原创本子没法生成角色卡 —— 那是能力退化，不是收敛。
+ */
+const ADAPT_TABS: Array<{ key: Tab; label: string }> = [
   { key: "chapters", label: "章节" },
   { key: "analysis", label: "内容分析" },
   { key: "chapter_outline", label: "章节大纲" },
@@ -432,11 +437,18 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "agent", label: "编辑 Agent" },
 ];
 
+const isOriginal = computed(() => summary.value?.novel.source_type === 2);
+const TABS = computed<Array<{ key: Tab; label: string }>>(() =>
+  isOriginal.value ? [{ key: "original", label: "原创链" }, ...ADAPT_TABS] : ADAPT_TABS,
+);
+
 const ROLE_LABEL: Record<number, string> = { 1: "主角", 2: "配角", 3: "反派" };
 
 onMounted(async () => {
   await loadSummary();
-  if (!error.value) await ensureTab("chapters");
+  if (error.value) return;
+  // 原创本子的入口是创意方案，不是章节：默认落在「原创链」而不是空空的章节页
+  await ensureTab(isOriginal.value ? "original" : "chapters");
 });
 </script>
 
@@ -465,7 +477,7 @@ onMounted(async () => {
     </header>
 
     <NovelStepper
-      v-if="summary"
+      v-if="summary && !isOriginal"
       :steps="summary.steps"
       :active="tab === 'agent' ? 'finalize' : tab"
       @pick="pickStep"
@@ -484,6 +496,11 @@ onMounted(async () => {
 
     <main class="wb__body">
       <Skeleton v-if="loading" :rows="6" />
+
+      <!-- 原创链（source_type=2）：创意方案 → 素材 → 总纲 → 章纲 → 集纲 → 剧本 → 定稿 -->
+      <section v-if="tab === 'original'" class="pane">
+        <NovelOriginalChain :novel-id="novelId" @changed="loadSummary" />
+      </section>
 
       <!-- 章节 -->
       <section v-else-if="tab === 'chapters'" class="pane">

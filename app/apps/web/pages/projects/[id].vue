@@ -52,6 +52,16 @@ const matrix = ref<MatrixDto | null>(null);
 const materials = ref<Array<{ id: string; name: string; portrait_url: string | null }>>([]);
 const budgetTouched = ref(false);
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * 3D 导演台（模块 #19）：打开时按 project_id 载入最近场景，组件内部自己管
+ * 30s 自动保存 + 心跳 + 版本冲突。这里只负责"入口 + 角色名单"两件事，
+ * 不把导演台状态提到页面层（否则页面刷新即丢）。
+ */
+const directorOpen = ref(false);
+/** 导演台需要的角色名单（id/名字/参考图）：分镜绑定角色后画面里就能直接摆位 */
+const directorActors = computed(() =>
+  characters.value.map((c) => ({ id: c.id, name: c.name, image: c.portrait_url ?? c.ref_image_uri ?? null })),
+);
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let exportTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -1590,6 +1600,7 @@ function kindLabel(kind: string): string {
       </div>
       <div class="ep-head__right">
         <span class="ep-meta">{{ project?.ratio ?? "9:16" }} · {{ episodes.length }} 集 · {{ characters.length }} 角色</span>
+        <Button variant="ghost" size="sm" @click="directorOpen = true">3D 导演台</Button>
         <Button size="sm" :disabled="!!busy || !selectedShot" @click="saveSelectedShot">保存</Button>
       </div>
     </header>
@@ -2414,6 +2425,15 @@ function kindLabel(kind: string): string {
       </div>
       <p v-if="!candidates?.list.length" class="muted">没有可用候选图。</p>
     </Modal>
+
+    <!-- ── 3D 导演台（场景快照存服务端；打开即载入本项目最近场景）── -->
+    <Director3D
+      :open="directorOpen"
+      :project-id="projectId"
+      :episode-id="selectedEpisodeId || undefined"
+      :actors="directorActors"
+      @close="directorOpen = false"
+    />
   </div>
 </template>
 

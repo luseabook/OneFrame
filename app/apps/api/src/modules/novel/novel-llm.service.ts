@@ -1,8 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   AppError,
   ErrorCode,
+  NOVEL_LIMITS,
   NovelRoleType,
   chapterOutlineResultSchema,
   editChatResultSchema,
@@ -143,9 +144,67 @@ const MOCK_SCRIPT_BEATS = [
 ] as const;
 
 /**
+ * 原创链（`original_script/*`）的三类 LLM 输出 schema —— **故意留在模块内**。
+ *
+ * 为什么不上移到 `packages/shared/src/schemas/novel.ts`：那个文件是跨批次共享契约
+ * （改编链的请求/输出），归 Lead 维护；原创链目前只有本模块消费，先就近放置，
+ * 等"原创链是否要对外暴露契约"定下来再上移，避免共享包跟着单点改动漂移。
+ * 约束强度与共享 schema 一致：`z.object` 强约束、数组 `.min(1)`、未声明键被 strip。
+ */
+const originalIdeaItemSchema = z.object({
+  title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX),
+  /** 一句话卖点：观众看完这一行就知道要不要点开 */
+  logline: z.string().trim().min(1).max(300),
+  genre: z.string().trim().min(1).max(50),
+  tone: z.string().trim().min(1).max(50),
+});
+export type OriginalIdeaItem = z.infer<typeof originalIdeaItemSchema>;
+const originalIdeasResultSchema = z.object({
+  ideas: z.array(originalIdeaItemSchema).min(1).max(5),
+});
+export type OriginalIdeasResult = z.infer<typeof originalIdeasResultSchema>;
+
+const originalMaterialItemSchema = z.object({
+  title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX),
+  content: z.string().trim().min(1).max(500),
+});
+export type OriginalMaterialItem = z.infer<typeof originalMaterialItemSchema>;
+const originalMaterialsResultSchema = z.object({
+  materials: z.array(originalMaterialItemSchema).min(1).max(10),
+});
+export type OriginalMaterialsResult = z.infer<typeof originalMaterialsResultSchema>;
+
+export const originalSummaryOutlineSchema = z.object({
+  title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX),
+  logline: z.string().trim().min(1).max(300),
+  theme: z.string().trim().min(1).max(50),
+  beats: z
+    .array(
+      z.object({
+        no: z.number().int().min(1).max(20),
+        beat: z.string().trim().min(1).max(50),
+        summary: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(3)
+    .max(20),
+  structure: z.string().trim().min(1).max(100),
+});
+export type OriginalSummaryOutline = z.infer<typeof originalSummaryOutlineSchema>;
+
+/** 原创链候选池（与改编链的池分开，避免"原创也长成同一个样子"） */
+const MOCK_GENRES = ["悬疑", "都市情感", "古装权谋", "现实职场", "奇幻冒险"] as const;
+const MOCK_TONES = ["冷峻克制", "热血爽利", "细腻治愈", "黑色幽默"] as const;
+const MOCK_IDEA_ANGLES = [
+  { key: "stake", label: "以小博大", line: "一个体量极小的人被卷进一件远超自身的交易" },
+  { key: "double", label: "双重身份", line: "主角对外一副面孔、回家另一副，而两副都有人信" },
+  { key: "debt", label: "旧债新偿", line: "十年前的人情，在第十一年变成了要命的条件" },
+] as const;
+
+/**
  * LLM 步骤服务。
  *
- * `enabled` 为 false 时全部走确定性 mock —— 这是本批"无 Key 也能跑通整条链"的实现点。
+ * `deepseek` 为 null 时全部走确定性 mock —— 这是"无 Key 也能跑通整条链"的实现点。
  */
 @Injectable()
 export class NovelLlmService {
@@ -443,6 +502,108 @@ export class NovelLlmService {
         })),
       }),
       editChatResultSchema,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 7~9. 原创链（`original_script/*`）：创意方案 → 素材 → 总纲
+  //
+  // 与改编链的根本区别：**没有源小说**。全部上下文来自用户的一句创作灵感
+  // （`novels.meta.source_text`），所以这三步的 mock 种子只吃"标题 + 灵感"，
+  // 不去读章节/世界观（原创本子本来就没有）。
+  // ══════════════════════════════════════════════════════════════
+
+  /** 创意方案（竞品 `novel create` 会同时启动创意规划方案生成，`novel.md:84-88,433-455`） */
+  async originalIdeas(input: { title: string; userInput: string; count: number }): Promise<OriginalIdeasResult> {
+    const count = Math.max(1, Math.min(input.count, 5));
+    const seed = seedOf([input.title, input.userInput].join("\n"));
+    const base = (input.title.trim() || condense(input.userInput, 12) || "未命名原创").slice(0, 40);
+    if (!this.deepseek) {
+      return originalIdeasResultSchema.parse({
+        ideas: Array.from({ length: count }, (_, i) => {
+          const angle = MOCK_IDEA_ANGLES[(seed + i) % MOCK_IDEA_ANGLES.length]!;
+          return {
+            title: `${base}·${angle.label}`,
+            logline: `${angle.line}。${condense(input.userInput, 80) || "（未提供灵感，按角度自行展开）"}`,
+            genre: MOCK_GENRES[(seed + i * 3) % MOCK_GENRES.length]!,
+            tone: MOCK_TONES[(seed + i * 5) % MOCK_TONES.length]!,
+          };
+        }),
+      });
+    }
+    return this.completeJson<OriginalIdeasResult>(
+      `你是短剧创意策划。基于用户的创作灵感，给出 ${count} 个互不重复的创意方案。` +
+        '只输出 JSON：{"ideas":[{"title":"","logline":"一句话卖点","genre":"题材","tone":"基调"}]}。' +
+        "logline 不超过 80 字且必须包含具体冲突；不要输出 JSON 之外的任何文字。",
+      JSON.stringify({ title: input.title, user_input: condense(input.userInput, 4_000), count }),
+      originalIdeasResultSchema,
+    );
+  }
+
+  /** 剧本素材（竞品 `novel material` / `material list`，`novel.md:504-548`） */
+  async originalMaterials(input: {
+    title: string;
+    idea: OriginalIdeaItem;
+    count: number;
+  }): Promise<OriginalMaterialsResult> {
+    const count = Math.max(1, Math.min(input.count, 10));
+    const seed = seedOf([input.title, input.idea.title, input.idea.logline].join("\n"));
+    if (!this.deepseek) {
+      const subjects = ["核心矛盾", "关键道具", "关系裂点", "时代细节", "反转支点", "结尾余味"];
+      return originalMaterialsResultSchema.parse({
+        materials: Array.from({ length: count }, (_, i) => {
+          const subject = subjects[(seed + i) % subjects.length]!;
+          return {
+            // 竞品表格里素材标题就是「素材1/素材2」（`novel.md:541`），照做便于对照
+            title: `素材${i + 1}`,
+            content: `${subject}：围绕《${input.idea.title}》的「${input.idea.logline.slice(0, 40)}」展开，落在${
+              ["第一集开场三分钟内", "中段的对手戏里", "最后两集的结算场面"][(seed + i) % 3]
+            }。`,
+          };
+        }),
+      });
+    }
+    return this.completeJson<OriginalMaterialsResult>(
+      `你是短剧素材策划。为创意方案生成 ${count} 条可复用的剧本素材（设定/道具/关系/桥段）。` +
+        '只输出 JSON：{"materials":[{"title":"素材1","content":"不超过 100 字的素材描述"}]}。',
+      JSON.stringify({ title: input.title, idea: input.idea, count }),
+      originalMaterialsResultSchema,
+    );
+  }
+
+  /** 剧本总纲及设定（竞品 `novel outline`，`novel.md:575-595`） */
+  async originalSummaryOutline(input: {
+    title: string;
+    idea: OriginalIdeaItem;
+    materials: string[];
+  }): Promise<OriginalSummaryOutline> {
+    const seed = seedOf([input.title, input.idea.title, ...input.materials].join("\n"));
+    if (!this.deepseek) {
+      const beats = ["开局钩子", "第一次反转", "关系崩解", "代价结算", "终局与余波"];
+      return originalSummaryOutlineSchema.parse({
+        title: `${input.title} 故事总纲`,
+        logline: input.idea.logline,
+        theme: ["选择的代价", "记忆与真相", "忠诚的边界"][seed % 3]!,
+        beats: beats.map((beat, i) => ({
+          no: i + 1,
+          beat,
+          summary: `${beat}：${input.idea.logline.slice(0, 40)}……${
+            ["以旧物为引子把矛盾摆上台面。", "让盟友做出一次不可逆的背叛。", "把最初的承诺变成需要偿还的债。"][i % 3]
+          }${i === 0 && input.materials.length > 0 ? `（呼应${input.materials[0]!.slice(0, 20)}）` : ""}`.slice(0, 480),
+        })),
+        structure: "三幕式（5 个节拍 / 12 集）",
+      });
+    }
+    return this.completeJson<OriginalSummaryOutline>(
+      "你是短剧总编剧。基于创意方案与素材，写出故事总纲及设定。" +
+        '只输出 JSON：{"title":"","logline":"","theme":"","beats":[{"no":1,"beat":"节拍名","summary":"不超过 120 字"}],"structure":"三幕式/其他"}。' +
+        "beats 至少 3 条且 no 从 1 起连续递增。",
+      JSON.stringify({
+        title: input.title,
+        idea: input.idea,
+        materials: input.materials.slice(0, 10),
+      }),
+      originalSummaryOutlineSchema,
     );
   }
 

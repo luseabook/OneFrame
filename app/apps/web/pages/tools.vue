@@ -11,7 +11,10 @@
 //   - 「灵感成片」：`routes.txt:42`（/creation-agent，报告点名无独立 /create 路由）
 //   - 「音色修改」：`reelmate-feature-map.md §3.5`（报告点名无独立路由的工具）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "工具箱 · 一帧" });
+// i18n（第 8 批）：服务端目录返回的卡片标题/描述是**后端数据**，不翻译；
+// 本页只翻译界面骨架（标题/页签/提示/空态/错误），中文原文与改造前逐字一致。
+const { t } = useI18n();
+useHead({ title: () => t("tools.metaTitle") });
 
 import type { ToolCardDto, ToolCatalogDto } from "~/types/api";
 
@@ -22,12 +25,12 @@ const loadError = ref("");
 const cards = ref<ToolCardDto[]>([]);
 
 type TabKey = "all" | "video" | "image" | "audio";
-const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: "all", label: "全部" },
-  { key: "video", label: "AI视频" },
-  { key: "image", label: "AI图片" },
-  { key: "audio", label: "AI音频" },
-];
+const tabs = computed<Array<{ key: TabKey; label: string }>>(() => [
+  { key: "all", label: t("tools.tabAll") },
+  { key: "video", label: t("tools.tabVideo") },
+  { key: "image", label: t("tools.tabImage") },
+  { key: "audio", label: t("tools.tabAudio") },
+]);
 const active = ref<TabKey>("all");
 const shown = computed(() => (active.value === "all" ? cards.value : cards.value.filter((c) => c.category === active.value)));
 
@@ -40,7 +43,7 @@ async function load(): Promise<void> {
     const data = await api.get<ToolCatalogDto>("/generations/tools");
     cards.value = data.cards;
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : "工具箱目录加载失败";
+    loadError.value = e instanceof Error ? e.message : t("tools.loadError");
   } finally {
     loading.value = false;
   }
@@ -54,34 +57,35 @@ onMounted(() => {
 <template>
   <div class="page">
     <header class="head">
-      <h1>工具箱</h1>
+      <h1>{{ t("tools.title") }}</h1>
       <div class="head-right">
         <div v-if="showTip" class="tip">
-          <button class="tip-close" type="button" aria-label="关闭提示" @click="showTip = false">✕</button>
-          <p class="tip-title">工具箱创作资产</p>
-          <p class="tip-text">使用工具箱功能生成的所有历史资源，都可以在这里查看。</p>
+          <button class="tip-close" type="button" :aria-label="t('tools.tipClose')" @click="showTip = false">✕</button>
+          <p class="tip-title">{{ t("tools.tipTitle") }}</p>
+          <p class="tip-text">{{ t("tools.tipText") }}</p>
         </div>
-        <NuxtLink to="/assets" class="asset-btn">工具箱创作资产</NuxtLink>
+        <NuxtLink to="/assets" class="asset-btn">{{ t("tools.assetsLink") }}</NuxtLink>
+        <LangSwitcher />
       </div>
     </header>
 
     <nav class="tabs">
       <button
-        v-for="t in tabs"
-        :key="t.key"
+        v-for="tab in tabs"
+        :key="tab.key"
         type="button"
         class="tab"
-        :class="{ on: active === t.key }"
-        @click="active = t.key"
+        :class="{ on: active === tab.key }"
+        @click="active = tab.key"
       >
-        {{ t.label }}
+        {{ tab.label }}
       </button>
     </nav>
 
-    <div v-if="loading" class="state">正在加载工具箱…</div>
+    <div v-if="loading" class="state">{{ t("tools.loading") }}</div>
     <div v-else-if="loadError" class="state">
       <p>{{ loadError }}</p>
-      <button type="button" class="retry" @click="load">重试</button>
+      <button type="button" class="retry" @click="load">{{ t("common.retry") }}</button>
     </div>
 
     <div v-else-if="shown.length" class="grid">
@@ -90,7 +94,12 @@ onMounted(() => {
         <p>{{ card.desc }}</p>
       </NuxtLink>
     </div>
-    <EmptyState v-else title="该分类暂无工具" description="该分类暂未开放工具，敬请期待" style="margin-top: 80px" />
+    <EmptyState
+      v-else
+      :title="t('tools.emptyTitle')"
+      :description="t('tools.emptyDesc')"
+      style="margin-top: 80px"
+    />
   </div>
 </template>
 

@@ -15,12 +15,17 @@ export const useApi = () => {
   const config = useRuntimeConfig();
   const base = (config.public.apiBase as string) || "";
   const auth = useAuth();
+  // i18n：在 setup 期捕获语言状态（computed），请求头注入时直接读，避免在异步回调里再取 composable
+  const i18n = useI18n();
 
   async function request<T>(path: string, options: Record<string, unknown> = {}, retried = false): Promise<T> {
     const headers: Record<string, string> = {
       ...((options.headers as Record<string, string>) || {}),
     };
     if (auth.state.value.accessToken) headers.Authorization = `Bearer ${auth.state.value.accessToken}`;
+    // 服务端**不做文案翻译**（语言包只在前端，决策与理由见 `_acceptance/_team/report-i18n.md`）。
+    // 这里只把当前语言告诉后端：用于日志追溯、内容审核按语言归档、将来按语言返回运营位等场景。
+    headers["X-Lang"] = i18n.locale.value;
     // 团队空间切换（ADR-010）：团队场景的所有请求都带 X-Space-Id；
     // 服务端会校验成员身份（不是只信这个头），非成员返回 403。
     const activeSpace = useActiveSpaceId();

@@ -117,6 +117,35 @@ const envSchema = z.object({
   AGENT_STT_BASE_URL: z.string().optional(),
   AGENT_STT_MODEL: z.string().optional(),
 
+  // 第三方登录（第 2 轮）：四个渠道全部**可选**——没配就明确返回"未配置"，
+  // 绝不静默降级成假登录。竞品 login.md 有微信/QQ/Apple/抖音四渠道。
+  // ⚠️ 这四项由 `modules/auth/oauth.service.ts` **在调用时读 process.env**（而非本 schema 常量），
+  // 目的是让测试能在同一进程内切换"已配置/未配置"两种态；此处登记只为可发现性与生产校验提示。
+  OAUTH_WECHAT_APP_ID: z.string().optional(),
+  OAUTH_WECHAT_SECRET: z.string().optional(),
+  OAUTH_WECHAT_REDIRECT_URI: z.string().optional(),
+  OAUTH_QQ_APP_ID: z.string().optional(),
+  OAUTH_QQ_APP_KEY: z.string().optional(),
+  OAUTH_QQ_REDIRECT_URI: z.string().optional(),
+  OAUTH_APPLE_CLIENT_ID: z.string().optional(),
+  OAUTH_APPLE_TEAM_ID: z.string().optional(),
+  OAUTH_APPLE_KEY_ID: z.string().optional(),
+  OAUTH_APPLE_PRIVATE_KEY: z.string().optional(),
+  OAUTH_APPLE_REDIRECT_URI: z.string().optional(),
+  OAUTH_DOUYIN_CLIENT_KEY: z.string().optional(),
+  OAUTH_DOUYIN_SECRET: z.string().optional(),
+  OAUTH_DOUYIN_REDIRECT_URI: z.string().optional(),
+  /** 仅非生产生效：把 OAuth 回调短路成本地假用户（便于 E2E 覆盖"登录成功"分支） */
+  OAUTH_MOCK: z.enum(["0", "1"]).default("0"),
+  /** master token 有效期（秒）：长令牌只用于换 access，不得打业务端点 */
+  MASTER_TTL_S: z.coerce.number().int().min(3600).default(2_592_000), // 30 天
+
+  /**
+   * 首页未读长轮询挂起上限（毫秒）：默认 25s（低于常见反代 30s 读超时，
+   * 避免网关先断、客户端拿到 502 而不是"空结果重连"）。测试/联调可调小到 300ms。
+   */
+  HOME_UNREAD_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(25_000),
+
   // 运营后台（独立 admin_users；生产必须显式配置）
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),

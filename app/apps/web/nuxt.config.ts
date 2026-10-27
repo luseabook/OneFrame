@@ -75,6 +75,17 @@ export default defineNuxtConfig({
     "/agent": { ssr: false },
     "/film": { ssr: false },
     "/film/**": { ssr: false },
+    // 第 2 轮新增（第 6 批生态 + 收尾批次）：同样是"登录后整页应用"。
+    // /activities 与 /novel-market 允许游客浏览列表（但下单/报名要登录），
+    // 仍统一关 SSR：列表首屏依赖分页与登录态，服务端首帧与客户端必然不一致。
+    "/creator-center": { ssr: false },
+    "/creator-center/**": { ssr: false },
+    "/activities": { ssr: false },
+    "/invite": { ssr: false },
+    "/novel-market": { ssr: false },
+    "/novel-market/**": { ssr: false },
+    "/knowledge": { ssr: false },
+    "/knowledge/**": { ssr: false },
   },
   app: {
     head: {

@@ -26,7 +26,6 @@ definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 const route = useRoute();
 const api = useApi();
 const toast = useToast();
-const activeSpace = useActiveSpaceId();
 
 const projectId = computed(() => String(route.params.id ?? ""));
 /** 本页面的协同身份（每次打开页面一个新值；服务端只透传，不解释语义） */

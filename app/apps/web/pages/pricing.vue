@@ -2,7 +2,10 @@
 // 定价/充值页：SKU 目录来自后端，支持下单→支付→轮询入账（PRD §10）
 // 支付渠道：mock（联调一键模拟）/ 微信 APIv3（Native 二维码、H5 跳转）/ 支付宝（收银台跳转、扫码）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "定价 · 一帧" });
+// i18n（第 8 批）：SKU 名称/金额/渠道名里的商户信息来自后端与配置，不翻译；
+// 页面骨架、计费说明、支付引导与提示语走语言包（中文原文与改造前逐字一致）。
+const { t } = useI18n();
+useHead({ title: () => t('pricing.metaTitle') });
 
 import { toDataURL } from "qrcode";
 
@@ -90,9 +93,9 @@ const isMobile = ref(false);
 const channelOptions = computed(() =>
   channels.value.map((c) => ({
     id: c.channel,
-    label: c.channel === "mock" ? "模拟支付（联调）" : c.channel === "wechat" ? "微信支付" : "支付宝",
+    label: c.channel === "mock" ? t("pricing.channelMock") : c.channel === "wechat" ? t("pricing.channelWechat") : t("pricing.channelAlipay"),
     enabled: c.configured,
-    hint: c.configured ? "" : c.reason || (c.missing?.length ? `缺少 ${c.missing.join(", ")}` : "暂不可用"),
+    hint: c.configured ? "" : c.reason || (c.missing?.length ? t("pricing.channelMissing", { list: c.missing.join(", ") }) : t("pricing.channelUnavailable")),
     modes: c.modes,
   })),
 );
@@ -137,7 +140,7 @@ async function load(): Promise<void> {
     skus.value = list;
     balance.value = me.credits.balance;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("pricing.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -158,7 +161,7 @@ function resetPaymentView(): void {
 
 async function buy(sku: SkuDto): Promise<void> {
   if (!selectedChannel.value) {
-    error.value = "请选择支付方式";
+    error.value = t("pricing.selectChannel");
     return;
   }
   paying.value = sku.sku;
@@ -171,7 +174,7 @@ async function buy(sku: SkuDto): Promise<void> {
       mode: resolveMode(),
     });
     activeOrder.value = order;
-    toast.info(`订单已创建：${(order.amount_cents / 100).toFixed(2)} 元 / ${order.credits} 积分`);
+    toast.info(t("pricing.orderCreated", { amount: (order.amount_cents / 100).toFixed(2), credits: order.credits }));
 
     // mock 联调：一键模拟渠道回调（PAYMENT_LIVE=true 时后端会 403）
     if (selectedChannel.value === "mock") {
@@ -180,7 +183,7 @@ async function buy(sku: SkuDto): Promise<void> {
         {},
       );
       if (paid.credited) {
-        toast.success(`充值成功，+${paid.credits} 积分`);
+        toast.success(t("pricing.paid", { credits: paid.credits }));
         activeOrder.value = null;
         await load();
         return;
@@ -191,7 +194,7 @@ async function buy(sku: SkuDto): Promise<void> {
 
     const params = order.pay_params;
     if (!params) {
-      error.value = "渠道未返回支付参数，请稍后重试";
+      error.value = t("pricing.noPayParams");
       return;
     }
     if (params.code_url) {
@@ -210,7 +213,7 @@ async function buy(sku: SkuDto): Promise<void> {
     }
     startPoll(order.order_id);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "下单失败";
+    const msg = e instanceof Error ? e.message : t("pricing.orderFailed");
     error.value = msg;
     toast.error(msg);
   } finally {
@@ -229,13 +232,13 @@ function startPoll(orderId: string): void {
       if (o.status === 2) {
         stopPoll();
         resetPaymentView();
-        toast.success(`充值成功，+${o.credits} 积分`);
+        toast.success(t("pricing.paid", { credits: o.credits }));
         activeOrder.value = null;
         await load();
       } else if (o.status === 3) {
         stopPoll();
         resetPaymentView();
-        toast.error("订单已关闭");
+        toast.error(t("pricing.orderClosed"));
         activeOrder.value = null;
       }
     } catch {
@@ -256,9 +259,9 @@ async function closeOrder(): Promise<void> {
   if (!activeOrder.value) return;
   try {
     await api.post(`/billing/orders/${activeOrder.value.order_id}/close`, {});
-    toast.info("订单已关闭");
+    toast.info(t("pricing.orderClosed"));
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "关闭失败");
+    toast.error(e instanceof Error ? e.message : t("pricing.closeFailed"));
   } finally {
     stopPoll();
     resetPaymentView();
@@ -273,7 +276,7 @@ const priceTab = ref<"credits" | "redeem">("credits");
 const billingCycle = ref<"monthly" | "once">("monthly");
 const redeemCode = ref("");
 function redeem(): void {
-  toast.info("兑换码功能即将上线，敬请期待");
+  toast.info(t("pricing.redeemSoon"));
 }
 
 onMounted(async () => {
@@ -284,7 +287,7 @@ onMounted(async () => {
     const target = activeSpace.value
       ? mine.list.find((s) => s.space_id === activeSpace.value)
       : mine.list.find((s) => s.type === 1);
-    buyingFor.value = target ? `${target.name}${target.type === 2 ? "" : "（个人）"}` : "";
+    buyingFor.value = target ? `${target.name}${target.type === 2 ? "" : t("pricing.personalSuffix")}` : "";
   } catch {
     buyingFor.value = "";
   }
@@ -297,63 +300,64 @@ onUnmounted(stopPoll);
   <div class="pricing">
     <nav class="price-tabs">
       <button type="button" class="price-tab" :class="{ on: priceTab === 'credits' }" @click="priceTab = 'credits'">
-        积分加购
+        {{ t("pricing.tabCredits") }}
       </button>
       <button type="button" class="price-tab" :class="{ on: priceTab === 'redeem' }" @click="priceTab = 'redeem'">
-        兑换码
+        {{ t("pricing.tabRedeem") }}
       </button>
     </nav>
 
     <section v-if="priceTab === 'redeem'" class="redeem-card">
-      <h2>兑换码</h2>
-      <p class="sub">输入活动兑换码，兑换积分或会员权益。</p>
+      <h2>{{ t("pricing.redeemTitle") }}</h2>
+      <p class="sub">{{ t("pricing.redeemSub") }}</p>
       <div class="redeem-row">
-        <input v-model="redeemCode" class="redeem-input" placeholder="请输入兑换码" maxlength="64" />
-        <Button :disabled="!redeemCode.trim()" @click="redeem">兑换</Button>
+        <input v-model="redeemCode" class="redeem-input" :placeholder="t('pricing.redeemPlaceholder')" maxlength="64" />
+        <Button :disabled="!redeemCode.trim()" @click="redeem">{{ t("pricing.redeemButton") }}</Button>
       </div>
-      <p class="redeem-hint">兑换码功能即将上线，敬请期待。</p>
+      <p class="redeem-hint">{{ t("pricing.redeemSoon") }}</p>
     </section>
 
     <template v-else>
     <!-- 购买目标空间提示（2026-10-26）：团队空间下单会直接充进团队积分池，
          避免用户在团队上下文里误以为充到了个人账户 -->
     <p v-if="buyingFor" class="buy-target">
-      当前购买至：<b>{{ buyingFor }}</b>
-      <span v-if="isTeamContext" class="buy-target-tag">团队积分池</span>
-      <NuxtLink v-else class="buy-target-switch" to="/team">切换到团队</NuxtLink>
+      {{ t("pricing.buyTarget") }} <b>{{ buyingFor }}</b>
+      <span v-if="isTeamContext" class="buy-target-tag">{{ t("pricing.teamPool") }}</span>
+      <NuxtLink v-else class="buy-target-switch" to="/team">{{ t("pricing.switchTeam") }}</NuxtLink>
     </p>
     <section class="promo-banner">
-      <p class="promo-title">算力积分补贴活动</p>
+      <p class="promo-title">{{ t("pricing.promoTitle") }}</p>
       <p class="promo-text">
-        全模型通用积分，按实际消耗计费；生成失败自动返还。模型价格以任务报价为准，运营可热更。
+        {{ t("pricing.promoText") }}
       </p>
     </section>
 
     <div class="mode-tabs">
       <button type="button" class="mode-tab" :class="{ on: billingCycle === 'monthly' }" @click="billingCycle = 'monthly'">
-        团队购买
+        {{ t("pricing.modeTeam") }}
       </button>
       <button type="button" class="mode-tab" :class="{ on: billingCycle === 'once' }" @click="billingCycle = 'once'">
-        个人订阅
+        {{ t("pricing.modePersonal") }}
       </button>
     </div>
-    <p class="mode-note">ⓘ 团队积分购买后一次性发放，可叠加，有效期一年</p>
+    <p class="mode-note">{{ t("pricing.modeNote") }}</p>
 
     <div class="cycle-row">
       <div class="cycle-toggle">
         <button type="button" :class="{ on: billingCycle === 'monthly' }" @click="billingCycle = 'monthly'">
-          连续包月
+          {{ t("pricing.cycleMonthly") }}
         </button>
         <button type="button" :class="{ on: billingCycle === 'once' }" @click="billingCycle = 'once'">
-          按月购买
+          {{ t("pricing.cycleOnce") }}
         </button>
       </div>
     </div>
 
     <header class="head">
       <div v-if="balance !== null" class="balance-chip">
-        当前余额 <b>{{ balance }}</b> 积分
+        {{ t("pricing.balance") }} <b>{{ balance }}</b> {{ t("pricing.balanceUnit") }}
       </div>
+      <LangSwitcher />
     </header>
 
     <p v-if="error" class="err">{{ error }}</p>
@@ -362,7 +366,7 @@ onUnmounted(stopPoll);
 
     <template v-else>
       <div class="channels">
-        <span class="ch-label">支付方式</span>
+        <span class="ch-label">{{ t("pricing.channelTitle") }}</span>
         <button
           v-for="c in channelOptions"
           :key="c.id"
@@ -376,7 +380,7 @@ onUnmounted(stopPoll);
           {{ c.label }}
           <span v-if="!c.enabled" class="ch-tag">{{ c.hint }}</span>
         </button>
-        <span v-if="live" class="ch-live">真实支付已开启</span>
+        <span v-if="live" class="ch-live">{{ t("pricing.channelLive") }}</span>
       </div>
 
       <div v-if="skus.length" class="cards">
@@ -386,30 +390,30 @@ onUnmounted(stopPoll);
           class="card"
           :class="{ featured: idx === skus.length - 1 }"
         >
-          <span v-if="idx === skus.length - 1" class="ribbon">限时加赠 · 最高性价比</span>
+          <span v-if="idx === skus.length - 1" class="ribbon">{{ t("pricing.ribbon") }}</span>
           <div class="card-top">
             <p class="label">{{ s.label }}</p>
             <Tag v-if="s.cents_per_credit !== null" tone="neutral" size="sm">
-              ¥{{ s.cents_per_credit }}/积分
+              {{ t("pricing.perCredit", { value: s.cents_per_credit }) }}
             </Tag>
           </div>
           <p class="price">
             <span class="cur">¥</span>{{ yuan(s.price_cents) }}
           </p>
           <p class="unit-line">
-            1积分 = ¥{{ s.credits > 0 ? (s.price_cents / s.credits / 100).toFixed(3) : "—" }}
+            {{ t("pricing.unitLine", { value: s.credits > 0 ? (s.price_cents / s.credits / 100).toFixed(3) : "—" }) }}
           </p>
-          <p class="credits">✦ {{ s.credits }} 积分</p>
+          <p class="credits">{{ t("pricing.creditsAmount", { count: s.credits }) }}</p>
           <Button class="buy-btn" block :loading="paying === s.sku" :disabled="!!paying" @click="buy(s)">
-            {{ paying === s.sku ? "处理中" : "立即购买" }}
+            {{ paying === s.sku ? t("pricing.buying") : t("pricing.buy") }}
           </Button>
-          <p class="seconds">约可生成 {{ Math.floor(s.credits / 8) }} 条 5s/720p 视频</p>
+          <p class="seconds">{{ t("pricing.secondsVideo", { count: Math.floor(s.credits / 8) }) }}</p>
           <div class="perks">
-            <p class="perks-title">限时活动</p>
+            <p class="perks-title">{{ t("pricing.perksTitle") }}</p>
             <ul>
-              <li>全模型通用，永久有效</li>
-              <li>生成失败/取消自动返还积分</li>
-              <li>支持微信 / 支付宝支付</li>
+              <li>{{ t("pricing.perk1") }}</li>
+              <li>{{ t("pricing.perk2") }}</li>
+              <li>{{ t("pricing.perk3") }}</li>
             </ul>
           </div>
         </article>
@@ -418,43 +422,45 @@ onUnmounted(stopPoll);
       <EmptyState
         v-else
         icon="◇"
-        title="暂无可购买的套餐"
-        description="运营尚未配置 SKU，请联系管理员或稍后再试。"
+        :title="t('pricing.emptyTitle')"
+        :description="t('pricing.emptyDesc')"
       />
+
+      <!-- 会员订阅（13 档，Lead 提供；价格与活动价全部来自后端 /billing/plans，前端不复刻折扣） -->
+      <SubscriptionPlans />
 
       <div v-if="activeOrder" class="pending">
         <div class="p-main">
-          <p class="p-title">订单待支付</p>
+          <p class="p-title">{{ t("pricing.pendingTitle") }}</p>
           <p class="p-meta">
-            订单 {{ activeOrder.order_id.slice(-10) }} · ¥{{ yuan(activeOrder.amount_cents) }} ·
-            {{ activeOrder.credits }} 积分
+            {{ t("pricing.pendingMeta", { id: activeOrder.order_id.slice(-10), amount: yuan(activeOrder.amount_cents), credits: activeOrder.credits }) }}
           </p>
 
           <div v-if="qrDataUrl" class="qr-wrap">
-            <img :src="qrDataUrl" alt="支付二维码" class="qr" />
+            <img :src="qrDataUrl" :alt="t('pricing.qrWechat')" class="qr" />
             <p class="qr-tip">
-              {{ activeOrder.channel === "wechat" ? "请使用微信扫一扫完成支付" : "请使用支付宝扫一扫完成支付" }}
+              {{ activeOrder.channel === "wechat" ? t("pricing.qrWechat") : t("pricing.qrAlipay") }}
             </p>
           </div>
 
           <div v-else-if="payLink" class="pay-link">
-            <p class="qr-tip">若未自动跳转，请点击下方按钮继续支付：</p>
-            <a :href="payLink" target="_blank" rel="noopener noreferrer" class="pay-a">打开支付页面</a>
+            <p class="qr-tip">{{ t("pricing.payLinkTip") }}</p>
+            <a :href="payLink" target="_blank" rel="noopener noreferrer" class="pay-a">{{ t("pricing.payLinkOpen") }}</a>
           </div>
         </div>
         <div class="p-ops">
-          <span class="p-poll">正在确认支付结果…（{{ pollCount }}/60）</span>
-          <Button size="sm" variant="text" @click="closeOrder">关闭订单</Button>
+          <span class="p-poll">{{ t("pricing.polling", { n: pollCount }) }}</span>
+          <Button size="sm" variant="text" @click="closeOrder">{{ t("pricing.closeOrder") }}</Button>
         </div>
       </div>
 
       <section class="notes">
-        <h3>计费说明</h3>
+        <h3>{{ t("pricing.notesTitle") }}</h3>
         <ul>
-          <li>创建任务时按报价冻结积分，成功结算、失败或取消自动解冻；</li>
-          <li>价格由运营在后台热更，下单时冻结价格快照，调价不影响已下单订单；</li>
-          <li v-if="live">支付由微信支付 / 支付宝官方渠道处理，支付成功由渠道异步通知入账，页面每 3 秒自动确认；</li>
-          <li v-else>当前为联调模式（mock 渠道）；配置商户号/证书并开启 PAYMENT_LIVE 后自动切换真实支付。</li>
+          <li>{{ t("pricing.notes1") }}</li>
+          <li>{{ t("pricing.notes2") }}</li>
+          <li v-if="live">{{ t("pricing.notesLive") }}</li>
+          <li v-else>{{ t("pricing.notesMock") }}</li>
         </ul>
       </section>
     </template>

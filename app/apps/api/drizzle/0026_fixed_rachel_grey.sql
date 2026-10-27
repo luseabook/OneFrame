@@ -1,0 +1,3 @@
+ALTER TABLE "script_projects" ADD COLUMN "source_novel_id" bigint;--> statement-breakpoint
+ALTER TABLE "script_projects" ADD CONSTRAINT "script_projects_source_novel_id_novels_id_fk" FOREIGN KEY ("source_novel_id") REFERENCES "public"."novels"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_script_projects_source_novel" ON "script_projects" USING btree ("source_novel_id");

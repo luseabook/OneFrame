@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import type { TaskDto } from "~/types/api";
-import { statusLabel } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
+
+// i18n（第 8 批）：`mode`/`task_id` 等是后端数据不翻译；页面骨架、状态名、提示语走语言包，
+// 中文原文与改造前逐字一致。状态名不再用 `~/types/api` 的 statusLabel（全局常量无法跟随语言）。
+const { t, locale } = useI18n();
+useHead({ title: () => t("tasks.metaTitle") });
 
 const api = useApi();
 const auth = useAuth();
@@ -51,9 +55,9 @@ async function createShare(): Promise<void> {
     );
     const url = `${window.location.origin}${shareInfo.value.share_path}`;
     await navigator.clipboard?.writeText(url).catch(() => undefined);
-    info.value = `分享链接已生成并复制：${url}`;
+    info.value = t("tasks.shareCopied", { url });
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "分享失败";
+    error.value = e instanceof Error ? e.message : t("tasks.shareFailed");
   }
 }
 
@@ -62,9 +66,9 @@ async function revokeShare(): Promise<void> {
   try {
     await api.delete(`/tasks/${detail.value.task_id}/share`);
     shareInfo.value = null;
-    info.value = "已取消分享";
+    info.value = t("tasks.shareRevoked");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "取消失败";
+    error.value = e instanceof Error ? e.message : t("tasks.revokeFailed");
   }
 }
 
@@ -73,9 +77,9 @@ async function cancel(item: TaskDto): Promise<void> {
     await api.post(`/tasks/${item.task_id}/cancel`);
     await load();
     await auth.me();
-    info.value = "已取消并解冻积分";
+    info.value = t("tasks.canceled");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "取消失败";
+    error.value = e instanceof Error ? e.message : t("tasks.cancelFailed");
   }
 }
 
@@ -84,9 +88,9 @@ async function retry(item: TaskDto): Promise<void> {
     await api.post(`/tasks/${item.task_id}/retry`);
     await load();
     await auth.me();
-    info.value = "已创建重试任务";
+    info.value = t("tasks.retried");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "重试失败";
+    error.value = e instanceof Error ? e.message : t("tasks.retryFailed");
   }
 }
 
@@ -94,25 +98,25 @@ async function download(item: TaskDto): Promise<void> {
   try {
     const data = await api.get<{ url: string }>(`/tasks/${item.task_id}/results/1/download-url`);
     if (data.url.startsWith("mock://")) {
-      info.value = "当前为 mock 结果（真实供应商接入后可下载）";
+      info.value = t("tasks.mockResult");
       return;
     }
     window.open(data.url, "_blank");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "下载失败";
+    error.value = e instanceof Error ? e.message : t("tasks.downloadFailed");
   }
 }
 
 async function addToProject(): Promise<void> {
   if (!detail.value || !projectTarget.value) {
-    info.value = "请选择项目";
+    info.value = t("tasks.selectProjectFirst");
     return;
   }
   try {
     await api.post(`/projects/${projectTarget.value}/shot-materials`, { task_id: detail.value.task_id });
-    info.value = "已加入项目分镜素材";
+    info.value = t("tasks.addedToProject");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加入项目失败";
+    error.value = e instanceof Error ? e.message : t("tasks.addToProjectFailed");
   }
 }
 
@@ -120,9 +124,9 @@ async function transferAsset(): Promise<void> {
   if (!detail.value) return;
   try {
     await api.post("/assets/from-task", { task_id: detail.value.task_id, index: 0 });
-    info.value = "已转存资产库";
+    info.value = t("tasks.transferred");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "转存失败";
+    error.value = e instanceof Error ? e.message : t("tasks.transferFailed");
   }
 }
 
@@ -132,15 +136,15 @@ async function batchDownload(): Promise<void> {
     .slice(0, 50)
     .map((item) => item.task_id);
   if (ids.length === 0) {
-    info.value = "当前页没有已完成任务可打包";
+    info.value = t("tasks.noDoneOnPage");
     return;
   }
   try {
     const data = await api.post<{ url: string }>("/tasks/batch-download", { task_ids: ids });
     window.open(data.url, "_blank");
-    info.value = `已打包 ${ids.length} 个任务`;
+    info.value = t("tasks.packed", { count: ids.length });
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "批量下载失败";
+    error.value = e instanceof Error ? e.message : t("tasks.batchFailed");
   }
 }
 
@@ -158,22 +162,47 @@ onMounted(async () => {
     projects.value = data.list;
     timer = setInterval(() => void load().catch(() => undefined), 5000);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("tasks.loadFailed");
   }
 });
 
 onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
-// 状态筛选页签与颜色映射（UI 层，不改业务逻辑）
-const statusTabs = [
-  { value: "", label: "全部" },
-  { value: "1", label: "排队中" },
-  { value: "2", label: "生成中" },
-  { value: "3", label: "已完成" },
-  { value: "4", label: "失败" },
-  { value: "5", label: "已取消" },
-];
+// 状态筛选页签与颜色映射（UI 层，不改业务逻辑）；文案随语言切换
+const statusTabs = computed<Array<{ value: string; label: string }>>(() => [
+  { value: "", label: t("tasks.tabAll") },
+  { value: "1", label: t("tasks.tabQueued") },
+  { value: "2", label: t("tasks.tabRunning") },
+  { value: "3", label: t("tasks.tabDone") },
+  { value: "4", label: t("tasks.tabFailed") },
+  { value: "5", label: t("tasks.tabCanceled") },
+]);
+
+/**
+ * 任务状态文案。为什么不用 `~/types/api` 的 `statusLabel`：那是模块级常量（构建期定死），
+ * 无法跟随运行时切换语言。本页是唯一需要本地化它的消费方，收在这里不扩散影响。
+ */
+function statusText(status: number): string {
+  switch (status) {
+    case 1:
+      return t("tasks.statusQueued");
+    case 2:
+      return t("tasks.statusRunning");
+    case 3:
+      return t("tasks.statusDone");
+    case 4:
+      return t("tasks.statusFailed");
+    case 5:
+      return t("tasks.statusCanceled");
+    case 6:
+      return t("tasks.statusReviewing");
+    case 7:
+      return t("tasks.statusReviewRejected");
+    default:
+      return t("tasks.statusUnknown", { status });
+  }
+}
 function statusTone(status: number): "neutral" | "info" | "success" | "danger" | "warning" {
   if (status === 3) return "success";
   if (status === 4) return "danger";
@@ -197,11 +226,12 @@ onMounted(() => {
     <div class="tasks">
       <header class="head">
         <div class="head-main">
-          <h1>任务中心</h1>
-          <p class="sub">按「次」查看执行状态；成果请到作品库按剧查看。</p>
+          <h1>{{ t("tasks.title") }}</h1>
+          <p class="sub">{{ t("tasks.sub") }}</p>
         </div>
         <div class="head-actions">
-          <Button variant="ghost" size="sm" @click="batchDownload">批量下载 zip</Button>
+          <Button variant="ghost" size="sm" @click="batchDownload">{{ t("tasks.batchDownload") }}</Button>
+          <LangSwitcher />
         </div>
       </header>
 
@@ -217,7 +247,7 @@ onMounted(() => {
         >
           {{ s.label }}
         </button>
-        <span class="total">共 {{ total }} 条</span>
+        <span class="total">{{ t("common.totalItems", { count: total }) }}</span>
       </nav>
 
       <p v-if="error" class="err">{{ error }}</p>
@@ -227,8 +257,8 @@ onMounted(() => {
            本页有 5s 轮询，若参与 SSR 会与 hydration 时的数据不一致 -->
       <template v-if="mounted">
         <p v-if="expiring.length > 0" class="warn">
-          <span class="dot" />有 {{ expiring.length }} 个任务结果将在 7 天内到期，请尽快
-          <NuxtLink to="/assets">转存资产库</NuxtLink>（到期后自动清理）。
+          <span class="dot" />{{ t("tasks.expiring", { count: expiring.length }) }}
+          <NuxtLink to="/assets">{{ t("tasks.expiringLink") }}</NuxtLink>{{ t("tasks.expiringSuffix") }}
         </p>
 
         <Skeleton v-if="loading" :rows="4" />
@@ -236,25 +266,25 @@ onMounted(() => {
         <template v-else>
           <div v-if="list.length" class="task-table">
             <div class="t-row t-head">
-              <span class="c-id">任务</span>
-              <span class="c-status">状态</span>
-              <span class="c-mode">模式</span>
-              <span class="c-credits">积分</span>
-              <span class="c-time">创建时间</span>
-              <span class="c-ops">操作</span>
+              <span class="c-id">{{ t("tasks.tableTask") }}</span>
+              <span class="c-status">{{ t("tasks.tableStatus") }}</span>
+              <span class="c-mode">{{ t("tasks.tableMode") }}</span>
+              <span class="c-credits">{{ t("tasks.tableCredits") }}</span>
+              <span class="c-time">{{ t("tasks.tableTime") }}</span>
+              <span class="c-ops">{{ t("tasks.tableOps") }}</span>
             </div>
             <div v-for="item in list" :key="item.task_id" class="t-row">
               <button class="id-link" @click="openDetail(item)">{{ item.task_id.slice(-8) }}</button>
               <span class="c-status">
-                <Tag :tone="statusTone(item.status)" size="sm" dot>{{ statusLabel(item.status) }}</Tag>
+                <Tag :tone="statusTone(item.status)" size="sm" dot>{{ statusText(item.status) }}</Tag>
               </span>
               <span class="c-mode mono">{{ item.mode }}</span>
               <span class="c-credits mono">{{ item.credits_frozen }}</span>
-              <span class="c-time muted">{{ new Date(item.created_at).toLocaleString("zh-CN") }}</span>
+              <span class="c-time muted">{{ new Date(item.created_at).toLocaleString(locale) }}</span>
               <span class="c-ops ops">
-                <Button size="sm" variant="ghost" :disabled="item.status !== 3" @click="download(item)">下载</Button>
-                <Button size="sm" variant="text" :disabled="!canCancel(item)" @click="cancel(item)">取消</Button>
-                <Button size="sm" variant="text" :disabled="item.status !== 4" @click="retry(item)">重试</Button>
+                <Button size="sm" variant="ghost" :disabled="item.status !== 3" @click="download(item)">{{ t("tasks.download") }}</Button>
+                <Button size="sm" variant="text" :disabled="!canCancel(item)" @click="cancel(item)">{{ t("tasks.cancel") }}</Button>
+                <Button size="sm" variant="text" :disabled="item.status !== 4" @click="retry(item)">{{ t("tasks.retry") }}</Button>
               </span>
             </div>
           </div>
@@ -262,58 +292,58 @@ onMounted(() => {
           <div v-else class="empty-wrap">
             <EmptyState
               icon="◷"
-              title="暂无任务"
-              description="在工具箱或流水线投递后会出现在这里；可用顶部状态筛选查看。"
+              :title="t('tasks.emptyTitle')"
+              :description="t('tasks.emptyDesc')"
             >
-              <Button @click="$router.push('/create/text-to-video')">去生成</Button>
+              <Button @click="$router.push('/create/text-to-video')">{{ t("tasks.emptyCta") }}</Button>
             </EmptyState>
           </div>
 
           <div v-if="total > pageSize" class="pager">
-            <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
-            <span class="muted">第 {{ page }} 页</span>
-            <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
+            <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">{{ t("common.prevPage") }}</Button>
+            <span class="muted">{{ t("common.pageNo", { page }) }}</span>
+            <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">{{ t("common.nextPage") }}</Button>
           </div>
         </template>
       </template>
 
-    <Modal :open="!!detail" title="任务详情" width="560px" @close="detail = null">
+    <Modal :open="!!detail" :title="t('tasks.detailTitle')" width="560px" @close="detail = null">
       <template v-if="detail">
         <dl class="kv-list">
-          <div class="kv"><dt>任务 ID</dt><dd class="mono">{{ detail.task_id }}</dd></div>
+          <div class="kv"><dt>{{ t("tasks.detailTaskId") }}</dt><dd class="mono">{{ detail.task_id }}</dd></div>
           <div class="kv">
-            <dt>状态</dt>
-            <dd><Tag :tone="statusTone(detail.status)" size="sm" dot>{{ statusLabel(detail.status) }}</Tag></dd>
+            <dt>{{ t("common.status") }}</dt>
+            <dd><Tag :tone="statusTone(detail.status)" size="sm" dot>{{ statusText(detail.status) }}</Tag></dd>
           </div>
-          <div class="kv"><dt>模式</dt><dd class="mono">{{ detail.mode }}</dd></div>
-          <div class="kv"><dt>提示词</dt><dd>{{ detail.input?.prompt || "—" }}</dd></div>
+          <div class="kv"><dt>{{ t("common.mode") }}</dt><dd class="mono">{{ detail.mode }}</dd></div>
+          <div class="kv"><dt>{{ t("tasks.detailPrompt") }}</dt><dd>{{ detail.input?.prompt || "—" }}</dd></div>
           <div class="kv">
-            <dt>比例 / 分辨率</dt>
+            <dt>{{ t("tasks.detailRatio") }}</dt>
             <dd>{{ detail.options?.ratio }} / {{ detail.options?.resolution }}</dd>
           </div>
-          <div class="kv"><dt>结果</dt><dd class="mono break">{{ detail.results?.[0]?.uri ?? "—" }}</dd></div>
+          <div class="kv"><dt>{{ t("tasks.detailResult") }}</dt><dd class="mono break">{{ detail.results?.[0]?.uri ?? "—" }}</dd></div>
         </dl>
         <p v-if="detail.error" class="err">{{ detail.error.message }}</p>
 
         <div v-if="detail.status === 3" class="detail-ops">
-          <p class="block-label">成果处理</p>
+          <p class="block-label">{{ t("tasks.detailOps") }}</p>
           <div class="op-row">
-            <Button size="sm" variant="ghost" @click="transferAsset">转存资产</Button>
-            <Button size="sm" variant="ghost" @click="createShare">生成分享链接</Button>
-            <Button v-if="shareInfo" size="sm" variant="text" @click="revokeShare">取消分享</Button>
+            <Button size="sm" variant="ghost" @click="transferAsset">{{ t("tasks.transferAsset") }}</Button>
+            <Button size="sm" variant="ghost" @click="createShare">{{ t("tasks.createShare") }}</Button>
+            <Button v-if="shareInfo" size="sm" variant="text" @click="revokeShare">{{ t("tasks.revokeShare") }}</Button>
             <NuxtLink v-if="shareInfo" :to="shareInfo.share_path" class="share-link" target="_blank">
-              打开分享页 →
+              {{ t("tasks.openShare") }}
             </NuxtLink>
           </div>
           <div class="op-row">
             <select v-model="projectTarget" class="mini-select">
-              <option value="">选择项目…</option>
+              <option value="">{{ t("tasks.selectProject") }}</option>
               <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option>
             </select>
-            <Button size="sm" variant="ghost" @click="addToProject">加入项目当分镜</Button>
+            <Button size="sm" variant="ghost" @click="addToProject">{{ t("tasks.addToProject") }}</Button>
           </div>
           <p v-if="shareInfo" class="muted small">
-            分享有效期至 {{ new Date(shareInfo.expires_at).toLocaleString("zh-CN") }}
+            {{ t("tasks.shareExpires", { date: new Date(shareInfo.expires_at).toLocaleString(locale) }) }}
           </p>
         </div>
       </template>

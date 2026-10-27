@@ -172,7 +172,20 @@ export async function creditIn(
  */
 export async function creditOut(
   tx: Tx,
-  input: { spaceId: bigint; amount: number; kind: "refund"; orderId?: bigint; memo?: string },
+  input: {
+    spaceId: bigint;
+    amount: number;
+    /**
+     * 负向流水的业务来源：
+     * - `refund`：退款回冲（订单/集市退款）
+     * - `consume`：直接消耗（集市购买等，不经任务冻结）
+     * 两者语义不同但都是"扣可用余额"，共用一个函数；**不要**把 `consume` 记成 `refund`，
+     * 否则财务对账时"退款金额"会虚高。
+     */
+    kind: "refund" | "consume";
+    orderId?: bigint;
+    memo?: string;
+  },
 ): Promise<{ balanceAfter: number }> {
   if (!Number.isInteger(input.amount) || input.amount <= 0) {
     throw new Error("creditOut amount must be a positive integer");

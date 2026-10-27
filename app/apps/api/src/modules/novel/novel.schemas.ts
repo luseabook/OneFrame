@@ -107,3 +107,99 @@ export const outlinePatchSchema = z
     message: "至少需要一个可更新字段",
   });
 export type OutlinePatch = z.infer<typeof outlinePatchSchema>;
+
+// ══════════════════════════════════════════════════════════════
+// 原创链（`original_script/*`）请求参数
+//
+// 与改编链的差别：原创链**没有源小说**，入口是"一句创作灵感"（`user_input`，
+// 竞品 `novel create --set user_input=` 必填，见 `cmd/novel.md:95`）。
+// ══════════════════════════════════════════════════════════════
+
+/** 创意方案生成（竞品 create 时自动触发，也可在链上重生成，`novel.md:84-88,433-455`） */
+export const originalIdeaGenerateSchema = z.object({
+  /** 覆盖本子里的创作灵感（省略 = 用创建时存下的 `meta.source_text`） */
+  user_input: z.string().trim().min(1).max(NOVEL_LIMITS.SOURCE_TEXT_MAX).optional(),
+  count: z.number().int().min(1).max(5).default(3),
+});
+export type OriginalIdeaGenerateRequest = z.infer<typeof originalIdeaGenerateSchema>;
+
+/** 选定创意方案（竞品 `idea/select-op`：只提交当前 ni_id + selected=true，`novel.md:461`） */
+export const originalIdeaSelectSchema = z.object({
+  ni_id: z.string().min(1).max(40),
+});
+export type OriginalIdeaSelectRequest = z.infer<typeof originalIdeaSelectSchema>;
+
+/** 素材生成（竞品 `novel material`，`novel.md:504-526`） */
+export const originalMaterialGenerateSchema = z.object({
+  count: z.number().int().min(1).max(10).default(3),
+  instructions: z.string().max(1_000).optional(),
+});
+export type OriginalMaterialGenerateRequest = z.infer<typeof originalMaterialGenerateSchema>;
+
+/** 素材编辑/勾选（竞品 `material set` 只提交 nm_id + selected=true，不取消其它，`novel.md:550-573`） */
+export const originalMaterialPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX).optional(),
+    content: z.string().trim().max(500).optional(),
+    selected: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "至少需要一个可更新字段",
+  });
+export type OriginalMaterialPatch = z.infer<typeof originalMaterialPatchSchema>;
+
+/** 勾选素材（`materials/select-op`） */
+export const originalMaterialSelectSchema = z.object({
+  nm_id: z.string().min(1).max(40),
+});
+export type OriginalMaterialSelectRequest = z.infer<typeof originalMaterialSelectSchema>;
+
+/** 总纲生成（竞品 `novel outline`，`novel.md:575-595`） */
+export const originalOutlineGenerateSchema = z.object({
+  instructions: z.string().max(1_000).optional(),
+});
+export type OriginalOutlineGenerateRequest = z.infer<typeof originalOutlineGenerateSchema>;
+
+/** 总纲编辑（人工改写总纲的标题/卖点/主题/结构/节拍） */
+export const originalOutlinePatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX).optional(),
+    logline: z.string().trim().min(1).max(300).optional(),
+    theme: z.string().trim().min(1).max(50).optional(),
+    structure: z.string().trim().min(1).max(100).optional(),
+    beats: z
+      .array(
+        z.object({
+          no: z.number().int().min(1).max(20),
+          beat: z.string().trim().min(1).max(50),
+          summary: z.string().trim().min(1).max(500),
+        }),
+      )
+      .min(1)
+      .max(20)
+      .optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "至少需要一个可更新字段",
+  });
+export type OriginalOutlinePatch = z.infer<typeof originalOutlinePatchSchema>;
+
+/** 分卡章纲生成（竞品 `novel chapter`，`novel.md:597-617`） */
+export const originalChapterOutlineGenerateSchema = z.object({
+  instructions: z.string().max(1_000).optional(),
+});
+export type OriginalChapterOutlineGenerateRequest = z.infer<typeof originalChapterOutlineGenerateSchema>;
+
+/** 集纲生成（竞品 `novel episode`，`novel.md:619-639`） */
+export const originalEpisodeOutlineGenerateSchema = z.object({
+  episode_count: z.number().int().min(1).max(NOVEL_LIMITS.EPISODE_MAX).optional(),
+  instructions: z.string().max(1_000).optional(),
+});
+export type OriginalEpisodeOutlineGenerateRequest = z.infer<typeof originalEpisodeOutlineGenerateSchema>;
+
+/** 撤回定稿（16 → 1）：被拆集引用时拒绝 */
+export const reopenSchema = z.object({
+  /** 撤回原因（写入 `novels.meta.reopen_memo`，便于审计"为什么又改了"） */
+  memo: z.string().max(500).optional(),
+});
+export type ReopenRequest = z.infer<typeof reopenSchema>;

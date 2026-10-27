@@ -4,26 +4,36 @@
 const auth = useAuth();
 const route = useRoute();
 const router = useRouter();
+// 壳层文案走 i18n（第 2 轮 i18n 基建）：侧栏/分组/品牌名按当前语言切换。
+// 页面内文案由各页自己 t()，壳层只负责"全局导航"这一层，避免两处各翻译一份。
+const { t } = useI18n();
 
-type NavItem = { key: string; to: string; label: string; icon: string; disabled?: boolean };
+/** `labelKey` 指向语言包 `sidebar.*`；模板里 t(item.labelKey) 渲染 */
+type NavItem = { key: string; to: string; labelKey: string; icon: string; disabled?: boolean };
 const mainNav: NavItem[] = [
-  { key: "home", to: "/home", label: "首页", icon: "home" },
-  { key: "create", to: "/projects?create=1", label: "剧本创作", icon: "script" },
+  { key: "home", to: "/home", labelKey: "sidebar.home", icon: "home" },
+  { key: "create", to: "/projects?create=1", labelKey: "sidebar.create", icon: "script" },
   // 2026-10-27：小说改编链（第 2 批）落地，入口开放
-  { key: "novel", to: "/novel", label: "小说改编", icon: "script" },
+  { key: "novel", to: "/novel", labelKey: "sidebar.novel", icon: "script" },
   // 2026-10-27：创作 Agent（第 4 批）落地（对话页 + Skill 卡市场），置灰改为可进入
-  { key: "agent", to: "/agent", label: "创作 Agent", icon: "wand" },
+  { key: "agent", to: "/agent", labelKey: "sidebar.agent", icon: "wand" },
   // 2026-10-26：canvas 域后端已落地（27 路由 / 11 表），入口开放
-  { key: "canvas", to: "/canvas", label: "无限画布", icon: "folder" },
-  { key: "projects", to: "/projects", label: "全部项目", icon: "folder" },
+  { key: "canvas", to: "/canvas", labelKey: "sidebar.canvas", icon: "folder" },
+  { key: "projects", to: "/projects", labelKey: "sidebar.projects", icon: "folder" },
   // 2026-10-27：ReelFlow 剪辑台（出片之后的时间线编辑；对齐竞品 /reelflow/list）
-  { key: "reelflow", to: "/reelflow/list", label: "剪辑台", icon: "film" },
-  { key: "tools", to: "/tools", label: "工具箱", icon: "wand" },
+  { key: "reelflow", to: "/reelflow/list", labelKey: "sidebar.reelflow", icon: "film" },
+  { key: "tools", to: "/tools", labelKey: "sidebar.tools", icon: "wand" },
 ];
 const teamNav: NavItem[] = [
-  { key: "assets", to: "/assets", label: "资产库", icon: "folder" },
+  { key: "assets", to: "/assets", labelKey: "sidebar.assets", icon: "folder" },
   // 2026-10-26：cam 团队域已落地（后端 17 端点 + /team 页），置灰改为可进入
-  { key: "team", to: "/team", label: "团队管理", icon: "clock" },
+  { key: "team", to: "/team", labelKey: "sidebar.team", icon: "clock" },
+  // 2026-10-27（第 2 轮 · 第 6 批）：剧本集市与团队知识库
+  { key: "market", to: "/novel-market", labelKey: "sidebar.market", icon: "script" },
+  { key: "knowledge", to: "/knowledge", labelKey: "sidebar.knowledge", icon: "folder" },
+  // 2026-10-27（第 2 轮 · 第 6 批 A）：创作者中心与活动
+  { key: "creator", to: "/creator-center", labelKey: "sidebar.creator", icon: "wand" },
+  { key: "activities", to: "/activities", labelKey: "sidebar.activities", icon: "clock" },
 ];
 
 const collapsed = ref(false);
@@ -110,11 +120,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               </template>
             </svg>
           </span>
-          <span v-if="!collapsed">{{ item.label }}</span>
+          <span v-if="!collapsed">{{ t(item.labelKey) }}</span>
         </NuxtLink>
 
         <div class="divider" />
-        <p v-if="!collapsed" class="group-label">团队</p>
+        <p v-if="!collapsed" class="group-label">{{ t("sidebar.group") }}</p>
         <NuxtLink
           v-for="item in teamNav"
           :key="item.key"
@@ -134,7 +144,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               </template>
             </svg>
           </span>
-          <span v-if="!collapsed">{{ item.label }}</span>
+          <span v-if="!collapsed">{{ t(item.labelKey) }}</span>
         </NuxtLink>
       </nav>
 
@@ -148,8 +158,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               <path d="m10 9.5 5 2.5-5 2.5Z" />
             </svg>
           </span>
-          <span v-if="!collapsed" class="foot-label">影视版</span>
-          <span v-if="!collapsed" class="tag-beta">内测</span>
+          <span v-if="!collapsed" class="foot-label">{{ t("sidebar.film") }}</span>
+          <span v-if="!collapsed" class="tag-beta">{{ t("sidebar.beta") }}</span>
         </NuxtLink>
         <span class="item disabled" title="CLI 已随包提供（apps/cli，196 条命令）；MCP 待取证，故 Web 侧无入口">
           <span class="ico" aria-hidden="true">
@@ -160,15 +170,15 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           </span>
           <span v-if="!collapsed">MCP &amp; CLI</span>
         </span>
-        <span class="item disabled">
+        <NuxtLink to="/activities" class="item" :title="t('sidebar.activities')">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 4v2.5M12 17.5V20M4.5 12H7M17 12h2.5M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8M8.8 15.2 7 17" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </span>
-          <span v-if="!collapsed">活动</span>
-        </span>
+          <span v-if="!collapsed">{{ t("sidebar.activities") }}</span>
+        </NuxtLink>
         <NuxtLink to="/report" class="item assist">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -181,9 +191,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           <span v-if="!collapsed">添加专属运营助手</span>
         </NuxtLink>
         <div v-if="!collapsed" class="legal">
-          <NuxtLink to="/terms">用户协议</NuxtLink>
-          <NuxtLink to="/privacy">隐私政策</NuxtLink>
-          <NuxtLink to="/report">举报投诉</NuxtLink>
+          <NuxtLink to="/terms">{{ t("nav.terms") }}</NuxtLink>
+          <NuxtLink to="/privacy">{{ t("nav.privacy") }}</NuxtLink>
+          <NuxtLink to="/report">{{ t("nav.report") }}</NuxtLink>
         </div>
       </div>
     </aside>
@@ -205,6 +215,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               </svg>
               商务合作
             </span>
+            <LangSwitcher class="lang-in-topbar" />
             <NuxtLink to="/tasks" class="icon-btn" title="任务中心">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
@@ -247,6 +258,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <div v-if="menuOpen" class="menu">
                   <p class="menu-name">{{ user.nickname }}</p>
                   <NuxtLink to="/works" class="menu-item" @click="menuOpen = false">我的作品</NuxtLink>
+                  <NuxtLink to="/invite" class="menu-item" @click="menuOpen = false">{{ t("sidebar.invite") }}</NuxtLink>
                   <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">任务中心</NuxtLink>
                   <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">个人设置</NuxtLink>
                   <button class="menu-item" @click="logout">退出登录</button>

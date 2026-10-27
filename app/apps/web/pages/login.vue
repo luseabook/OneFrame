@@ -4,13 +4,18 @@
 // 不改动全局 tokens.css，也不污染其它页面。
 definePageMeta({ ssr: false });
 
+// i18n（第 8 批）：登录页仍然 ssr:false —— 弹窗形态依赖 document.body 且首屏有登录态分支，
+// 语言由 plugins/i18n.ts 在客户端协商后立即生效，中文原文与改造前逐字一致。
+const { t } = useI18n();
+useHead({ title: () => t('auth.title') });
+
 type LoginTab = "wechat" | "code" | "password";
 
-const TAB_LIST: { key: LoginTab; label: string }[] = [
-  { key: "wechat", label: "微信登录" },
-  { key: "code", label: "验证码登录" },
-  { key: "password", label: "密码登录" },
-];
+const TAB_LIST = computed<{ key: LoginTab; label: string }[]>(() => [
+  { key: "wechat", label: t("auth.tabWechat") },
+  { key: "code", label: t("auth.tabCode") },
+  { key: "password", label: t("auth.tabPassword") },
+]);
 
 const auth = useAuth();
 const route = useRoute();
@@ -38,9 +43,7 @@ const canSend = computed(
 );
 
 const noticeText = computed(() =>
-  activeTab.value === "wechat"
-    ? "微信登录即将开放，请使用验证码登录"
-    : "密码登录即将开放，请使用验证码登录",
+  activeTab.value === "wechat" ? t("auth.noticeWechat") : t("auth.noticePassword"),
 );
 
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -78,15 +81,15 @@ async function sendCode(): Promise<void> {
       `${base}/v1/auth/sms-code`,
       { method: "POST", body: { phone: phone.value }, credentials: "include" },
     );
-    if (res.code !== 0) throw new Error(res.msg || "发送失败");
-    hint.value = res.data?.debug_code ? `开发环境验证码：${res.data.debug_code}` : "验证码已发送";
+    if (res.code !== 0) throw new Error(res.msg || t("auth.sendFailed"));
+    hint.value = res.data?.debug_code ? t("auth.devCode", { code: res.data.debug_code }) : t("auth.codeSent");
     countdown.value = 60;
     timer = setInterval(() => {
       countdown.value -= 1;
       if (countdown.value <= 0 && timer) clearInterval(timer);
     }, 1000);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "发送失败";
+    error.value = e instanceof Error ? e.message : t("auth.sendFailed");
     errorSlot.value = "phone";
   } finally {
     sending.value = false;
@@ -103,12 +106,12 @@ async function login(): Promise<void> {
   }
   showAgreeBubble.value = false;
   if (!/^1\d{10}$/.test(phone.value)) {
-    error.value = "请输入正确的手机号";
+    error.value = t("auth.phoneInvalid");
     errorSlot.value = "phone";
     return;
   }
   if (!/^\d{6}$/.test(code.value)) {
-    error.value = "请输入 6 位验证码";
+    error.value = t("auth.codeInvalid");
     errorSlot.value = "code";
     return;
   }
@@ -118,7 +121,7 @@ async function login(): Promise<void> {
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
     await navigateTo(redirect);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "登录失败";
+    error.value = e instanceof Error ? e.message : t("auth.loginFailed");
     errorSlot.value = "form";
   } finally {
     submitting.value = false;
@@ -129,7 +132,84 @@ watch(agreement, (checked) => {
   if (checked) showAgreeBubble.value = false;
 });
 
+// ── 第三方登录（SSO）──────────────────────────────────────
+// 竞品登录页有微信/QQ/Apple/抖音四个入口（reference-alignment-spec §8 实测）。
+// 我方**由服务端决定能不能点**：`GET /auth/oauth/providers` 返回每个渠道 configured。
+// 未配置 → 按钮置灰 + tooltip「未配置」；绝不在未配置时假装能登录（后端也会 400101）。
+type OauthProvider = "wechat" | "qq" | "apple" | "douyin";
+
+const api = useApi();
+const oauthMeta = ref<Partial<Record<OauthProvider, { configured: boolean; label: string }>>>({});
+const oauthLoading = ref(true);
+const oauthBusy = ref<OauthProvider | "">("");
+
+// 品牌名用语言包而不是服务端 `label`：服务端返回的是中文文案，外语界面里会露中文；
+// 品牌名本身不翻译，但需要在四个语言包里各有一条（值相同），才能保证 key 集合一致。
+function oauthLabelText(provider: OauthProvider): string {
+  switch (provider) {
+    case "wechat":
+      return t("auth.oauthWechat");
+    case "qq":
+      return t("auth.oauthQq");
+    case "apple":
+      return t("auth.oauthApple");
+    default:
+      return t("auth.oauthDouyin");
+  }
+}
+
+async function loadOauthProviders(): Promise<void> {
+  try {
+    const data = await api.get<{ list: Array<{ provider: OauthProvider; label: string; configured: boolean }> }>(
+      "/auth/oauth/providers",
+    );
+    const next: Partial<Record<OauthProvider, { configured: boolean; label: string }>> = {};
+    for (const item of data.list ?? []) next[item.provider] = { configured: item.configured, label: item.label };
+    oauthMeta.value = next;
+  } catch {
+    // 拉不到清单 → 一律当未配置（宁可全部置灰，也不能给一个点了会 400101 的按钮）
+    oauthMeta.value = {};
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+function oauthConfigured(provider: OauthProvider): boolean {
+  return oauthMeta.value[provider]?.configured === true;
+}
+
+function oauthTitle(provider: OauthProvider): string {
+  const label = oauthLabelText(provider);
+  if (oauthLoading.value) return t("auth.oauthChecking", { label });
+  return oauthConfigured(provider)
+    ? t("auth.oauthUse", { label })
+    : t("auth.oauthNotConfigured", { label });
+}
+
+async function startOauth(provider: OauthProvider): Promise<void> {
+  error.value = "";
+  errorSlot.value = "";
+  if (!agreement.value) {
+    showAgreeBubble.value = true;
+    return;
+  }
+  if (!oauthConfigured(provider)) return;
+  oauthBusy.value = provider;
+  try {
+    const res = await api.post<{ authorize_url: string; state: string }>(`/auth/oauth/${provider}/url`);
+    if (!res?.authorize_url) throw new Error(t("auth.oauthNoUrl"));
+    // 整页跳转：第三方授权页会带 state 回到 /auth/oauth/:provider/callback 的落地页
+    window.location.href = res.authorize_url;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("auth.oauthUnavailable", { label: oauthLabelText(provider) });
+    errorSlot.value = "form";
+  } finally {
+    oauthBusy.value = "";
+  }
+}
+
 onMounted(() => {
+  void loadOauthProviders();
   // 弹窗形态下锁住背景滚动（卸载时恢复，不污染全局）
   bodyOverflow = document.body.style.overflow;
   document.body.style.overflow = "hidden";
@@ -149,16 +229,19 @@ onUnmounted(() => {
       <header class="brand-row">
         <div class="brand">
           <span class="brand-logo" aria-hidden="true">一</span>
-          <span class="brand-name">一帧</span>
+          <span class="brand-name">{{ t("landing.brandName") }}</span>
         </div>
-        <button class="close" type="button" title="关闭" aria-label="关闭" @click="closeModal">
-          ✕
-        </button>
+        <div class="brand-right">
+          <LangSwitcher tone="light" />
+          <button class="close" type="button" :title="t('auth.closeAria')" :aria-label="t('auth.closeAria')" @click="closeModal">
+            ✕
+          </button>
+        </div>
       </header>
 
-      <h1 id="login-title" class="title">登录一帧</h1>
+      <h1 id="login-title" class="title">{{ t("auth.title") }}</h1>
 
-      <div class="tabs" role="tablist" aria-label="登录方式">
+      <div class="tabs" role="tablist" :aria-label="t('auth.dialogLabel')">
         <button
           v-for="tab in TAB_LIST"
           :key="tab.key"
@@ -182,7 +265,7 @@ onUnmounted(() => {
             inputmode="numeric"
             maxlength="11"
             autocomplete="tel"
-            placeholder="请输入手机号码"
+            :placeholder="t('auth.phonePlaceholder')"
           />
         </div>
         <p v-if="errorSlot === 'phone'" class="field-error">{{ error }}</p>
@@ -195,10 +278,10 @@ onUnmounted(() => {
             inputmode="numeric"
             maxlength="6"
             autocomplete="one-time-code"
-            placeholder="请输入验证码"
+            :placeholder="t('auth.codePlaceholder')"
           />
           <button class="send-code" type="button" :disabled="!canSend" @click="sendCode">
-            {{ countdown > 0 ? `${countdown}s` : sending ? "发送中…" : "发送验证码" }}
+            {{ countdown > 0 ? `${countdown}s` : sending ? t("auth.sending") : t("auth.sendCode") }}
           </button>
         </div>
         <p v-if="errorSlot === 'code'" class="field-error">{{ error }}</p>
@@ -210,17 +293,17 @@ onUnmounted(() => {
             class="input"
             type="text"
             maxlength="32"
-            placeholder="请输入邀请码（选填）"
+            :placeholder="t('auth.invitePlaceholder')"
           />
         </div>
 
         <label class="keep">
           <input v-model="keepLogin" class="cb" type="checkbox" />
-          <span>保持登录</span>
+          <span>{{ t("auth.keepLogin") }}</span>
         </label>
 
         <button class="submit" type="button" :disabled="submitting" @click="login">
-          {{ submitting ? "登录中…" : "立即登录" }}
+          {{ submitting ? t("auth.submitting") : t("auth.submit") }}
         </button>
         <p v-if="errorSlot === 'form'" class="form-error">{{ error }}</p>
       </div>
@@ -228,14 +311,21 @@ onUnmounted(() => {
       <div v-else class="tab-notice">
         <p class="notice-text">{{ noticeText }}</p>
         <button class="notice-switch" type="button" @click="setTab('code')">
-          使用验证码登录
+          {{ t("auth.useCode") }}
         </button>
       </div>
 
-      <div class="divider"><span>使用其他方式登录</span></div>
+      <div class="divider"><span>{{ t("auth.otherWays") }}</span></div>
 
       <div class="thirdparty">
-        <button class="tp" type="button" disabled title="即将开放" aria-label="微信登录（即将开放）">
+                <button
+          class="tp"
+          type="button"
+          :disabled="!oauthConfigured('wechat') || oauthBusy !== ''"
+          :title="oauthTitle('wechat')"
+          :aria-label="oauthTitle('wechat')"
+          @click="startOauth('wechat')"
+        >
           <svg viewBox="3.3 2.7 17.7 17.7" aria-hidden="true">
             <path
               d="M9.6 4.2c-3.5 0-6.3 2.3-6.3 5.2 0 1.7 1 3.2 2.5 4.2l-.6 1.9 2.2-1.1c.7.2 1.4.3 2.2.3h.3c-.1-.4-.2-.8-.2-1.3 0-2.9 2.8-5.2 6.2-5.2h.5c-.6-2.3-3.2-4-6.8-4z"
@@ -251,7 +341,14 @@ onUnmounted(() => {
             <circle cx="18" cy="12.7" r=".8" fill="#fff" />
           </svg>
         </button>
-        <button class="tp" type="button" disabled title="即将开放" aria-label="QQ 登录（即将开放）">
+                <button
+          class="tp"
+          type="button"
+          :disabled="!oauthConfigured('qq') || oauthBusy !== ''"
+          :title="oauthTitle('qq')"
+          :aria-label="oauthTitle('qq')"
+          @click="startOauth('qq')"
+        >
           <svg viewBox="4.35 3.25 15.3 15.3" aria-hidden="true">
             <path
               d="M12 3.2c-3.3 0-5.4 2.6-5.4 6.1 0 1-.4 1.8-.9 2.6-.6.9-1.1 1.9-1.1 2.7 0 .6.3 1 .8 1 .4 0 .8-.3 1.1-.8.1 1.3.6 2.4 1.4 3.1-.5.2-.8.5-.8.9 0 .7 1.3 1.2 2.9 1.2.9 0 1.6-.2 2-.5.5.3 1.2.5 2 .5 1.6 0 2.9-.5 2.9-1.2 0-.4-.3-.7-.8-.9.8-.7 1.3-1.8 1.4-3.1.3.5.7.8 1.1.8.5 0 .8-.4.8-1 0-.8-.5-1.8-1.1-2.7-.5-.8-.9-1.6-.9-2.6 0-3.5-2.1-6.1-5.4-6.1z"
@@ -261,7 +358,14 @@ onUnmounted(() => {
             <circle cx="14.1" cy="9.3" r="1" fill="#fff" />
           </svg>
         </button>
-        <button class="tp" type="button" disabled title="即将开放" aria-label="Apple 登录（即将开放）">
+                <button
+          class="tp"
+          type="button"
+          :disabled="!oauthConfigured('apple') || oauthBusy !== ''"
+          :title="oauthTitle('apple')"
+          :aria-label="oauthTitle('apple')"
+          @click="startOauth('apple')"
+        >
           <svg viewBox="5.45 3.9 16 16" aria-hidden="true">
             <path
               d="M16.7 12.8c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.6-1.3-.1-2.5.8-3.2.8-.7 0-1.7-.7-2.8-.7-1.5 0-2.8.8-3.6 2.1-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.9-.7s1.7.7 2.9.7c1.2 0 1.9-1.1 2.6-2.1.8-1.2 1.1-2.3 1.2-2.4-.1 0-2.6-1-2.6-3.6z"
@@ -273,7 +377,14 @@ onUnmounted(() => {
             />
           </svg>
         </button>
-        <button class="tp" type="button" disabled title="即将开放" aria-label="抖音登录（即将开放）">
+                <button
+          class="tp"
+          type="button"
+          :disabled="!oauthConfigured('douyin') || oauthBusy !== ''"
+          :title="oauthTitle('douyin')"
+          :aria-label="oauthTitle('douyin')"
+          @click="startOauth('douyin')"
+        >
           <svg viewBox="1 1 22 22" aria-hidden="true">
             <rect x="1" y="1" width="22" height="22" rx="6" fill="#111111" />
             <path
@@ -287,10 +398,10 @@ onUnmounted(() => {
       <div class="agree-block">
         <label class="agree-row">
           <input v-model="agreement" class="cb cb--sm" type="checkbox" />
-          <span class="agree-text">我已阅读并同意<NuxtLink class="link" to="/terms" @click.stop>一帧 用户服务协议</NuxtLink> 和 <NuxtLink class="link" to="/privacy" @click.stop>隐私政策</NuxtLink>，未注册手机登录时会自动创建账号</span>
+          <span class="agree-text">{{ t("auth.agreePrefix") }}<NuxtLink class="link" to="/terms" @click.stop>{{ t("auth.agreeTerms") }}</NuxtLink> {{ t("auth.agreeAnd") }} <NuxtLink class="link" to="/privacy" @click.stop>{{ t("auth.agreePrivacy") }}</NuxtLink>{{ t("auth.agreeSuffix") }}</span>
         </label>
-        <p class="age-note">仅限 18 周岁以上用户使用</p>
-        <div v-if="showAgreeBubble" class="bubble" role="alert">请先同意并勾选上述协议</div>
+        <p class="age-note">{{ t("auth.ageNote") }}</p>
+        <div v-if="showAgreeBubble" class="bubble" role="alert">{{ t("auth.agreeBubble") }}</div>
       </div>
     </section>
   </div>
@@ -349,6 +460,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+/* 语言切换器在浅色弹窗里跟关闭按钮同一行右侧 */
+.brand-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .brand {
   display: flex;
@@ -738,3 +855,4 @@ onUnmounted(() => {
   }
 }
 </style>
+

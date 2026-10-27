@@ -21,9 +21,18 @@ import { TeamModule } from "./modules/team/team.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
 import { AgentModule } from "./modules/agent/agent.module";
 import { KdsModule } from "./modules/kds/kds.module";
+import { HomeModule } from "./modules/home/home.module";
 import { NovelModule } from "./modules/novel/novel.module";
 import { FilmModule } from "./modules/film/film.module";
 import { WorkflowModule } from "./modules/workflow/workflow.module";
+import { DirectorModule } from "./modules/director/director.module";
+// 第 6 批「生态」：创作者中心 + 运营增长 + 激励活动
+import { CreatorModule } from "./modules/creator/creator.module";
+import { OpModule } from "./modules/op/op.module";
+import { CampaignModule } from "./modules/campaign/campaign.module";
+// 第 6 批「生态」B 组：剧本集市（market，含 ops/admin）+ 团队知识库（knowledge）
+import { MarketModule } from "./modules/market/market.module";
+import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -50,6 +59,7 @@ import { StorageModule } from "./storage/storage.module";
     CanvasModule,
     AgentModule,
     KdsModule,
+    HomeModule,
     // 第 1 批「出片质量」：主体库 + 抽取流水线（迁移 0019 已建表）
     SubjectsModule,
     ExtractionModule,
@@ -57,6 +67,14 @@ import { StorageModule } from "./storage/storage.module";
     FilmModule,
     WorkflowModule,
     ReportsModule,
+    DirectorModule,
+    // 第 6 批「生态」：crc 30 + op 31 + campaign 6（迁移 0019/0024 已建表）
+    OpModule,
+    CampaignModule,
+    CreatorModule,
+    // 第 6 批「生态」B 组：集市 29+admin + 知识库 29
+    MarketModule,
+    KnowledgeModule,
   ],
   controllers: [AppController, HealthController, MetricsController],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],

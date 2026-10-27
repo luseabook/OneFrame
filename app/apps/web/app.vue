@@ -24,6 +24,13 @@ const workspacePaths = [
   "/novel",
   "/agent",
   "/film",
+  // 2026-10-27（第 2 轮）：第 6 批生态页
+  "/novel-market",
+  "/knowledge",
+  // 第 6 批 A：创作者中心 / 活动 / 邀请返利（都是登录后工作台类页面）
+  "/creator-center",
+  "/activities",
+  "/invite",
 ];
 const adminPaths = ["/admin"];
 const adminLoginPaths = ["/admin/login"];

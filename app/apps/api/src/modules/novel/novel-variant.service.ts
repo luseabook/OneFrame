@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
-import { novelCharacters, novelEpisodeOutlines, novelEpisodes, novels } from "@app/db";
+import { novelChapterOutlines, novelCharacters, novelEpisodeOutlines, novelEpisodes, novels } from "@app/db";
 import {
   AppError,
   ErrorCode,
@@ -15,6 +15,7 @@ import { NovelLlmService } from "./novel-llm.service";
 import { NovelService } from "./novel.service";
 import {
   asRecord,
+  chapterOutlineDto,
   characterDto,
   episodeOutlineDto,
   novelDto,
@@ -274,6 +275,111 @@ export class NovelVariantService {
       .where(eq(novelEpisodeOutlines.novelId, novel.id))
       .orderBy(asc(novelEpisodeOutlines.episodeNo));
     return { list: rows.map(episodeOutlineDto), total: rows.length };
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 薄路径补完（路径级 1:1）—— 竞品 `routes.txt:535,542,537,540`
+  //
+  // 上一轮这 4 条竞品路径由"同语义端点"覆盖（列表接口 + select-op），
+  // 本轮补成独立路径，目的只有两个：
+  //  1. 覆盖核对时能逐条对上（不用解释"这条其实等价于那条"）；
+  //  2. 前端按竞品形状取详情时少一次"拉全表再 find"。
+  // 每条都**只读**（唯一的写是 `episodes_outline/:neo_id` 的单条编辑，
+  // 与其它大纲编辑同一口径），不新增任何状态。
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * `GET /fission_script/chapters_outline`（竞品 `routes.txt:535`）。
+   *
+   * 裂变链在竞品里同时有 `summary_outline`（总纲）与 `chapters_outline`（分卡章纲）两个产物。
+   * 我方裂变链把分卡边界放在 `summary_outline.beats` 里；所以这里：
+   * - 本子上有真实 `novel_chapter_outlines` 行（用户跑过 chapter_outline/generate 或本链生成过）→ 直接返回；
+   * - 没有 → 返回由节拍**派生**的只读投影，并明确标 `derived_from`，
+   *   让调用方知道"这些条没有 id、不可 PATCH"，而不是拿到一堆假 id 再去 PATCH 404。
+   */
+  async fissionChapterOutlines(spaceId: string, ntId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    const rows = await db
+      .select()
+      .from(novelChapterOutlines)
+      .where(eq(novelChapterOutlines.novelId, novel.id))
+      .orderBy(asc(novelChapterOutlines.chapterNo));
+    if (rows.length > 0) {
+      return { list: rows.map(chapterOutlineDto), total: rows.length, derived_from: "novel_chapter_outlines" };
+    }
+    const state = asRecord(asRecord(novel.meta).fission);
+    const outline = asRecord(state.summary_outline);
+    const beats = Array.isArray(outline.beats) ? (outline.beats as Array<Record<string, unknown>>) : [];
+    return {
+      list: beats.map((beat, i) => ({
+        id: null,
+        chapter_no: Number(beat.no ?? i + 1),
+        title: String(beat.beat ?? `分卡${i + 1}`),
+        synopsis: String(beat.summary ?? ""),
+        sort: i,
+        readonly: true,
+      })),
+      total: beats.length,
+      derived_from: "meta.fission.summary_outline.beats",
+      hint:
+        beats.length === 0
+          ? "还没有章纲：先 POST summary_outline 生成总纲，或 POST /chapter_outline/generate"
+          : "这些条目由总纲节拍派生、没有独立主键，只能读；要持久化请调用 POST /chapter_outline/generate",
+    };
+  }
+
+  /** `GET /fission_script/idea/:ni_id`（竞品 `routes.txt:542`） */
+  async getIdea(spaceId: string, ntId: string, niId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    const state = this.fissionState(novel);
+    const ideas = (Array.isArray(state.ideas) ? state.ideas : []) as Array<Record<string, unknown>>;
+    const idea = ideas.find((row) => row.ni_id === niId);
+    if (!idea) throw new AppError(ErrorCode.NOT_FOUND, "idea not found", { reason: "idea_not_found" });
+    return {
+      idea,
+      selected: state.selected_ni_id === niId,
+      source_nt_id: typeof state.source_nt_id === "string" ? state.source_nt_id : null,
+    };
+  }
+
+  /** `GET /fission_script/characters/:nc_id`（竞品 `routes.txt:537`；nc_id 即 novel_characters.id） */
+  async getCharacter(spaceId: string, ntId: string, ncId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    let id: bigint;
+    try {
+      id = BigInt(ncId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid nc_id", { field: "nc_id" });
+    }
+    const [row] = await db
+      .select()
+      .from(novelCharacters)
+      .where(and(eq(novelCharacters.id, id), eq(novelCharacters.novelId, novel.id)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "character not found", { reason: "character_not_found" });
+    return { character: characterDto(row) };
+  }
+
+  /** `GET /fission_script/episodes_outline/:neo_id`（竞品 `routes.txt:540`） */
+  async getEpisodeOutline(spaceId: string, ntId: string, neoId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    let id: bigint;
+    try {
+      id = BigInt(neoId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid neo_id", { field: "neo_id" });
+    }
+    const [row] = await db
+      .select()
+      .from(novelEpisodeOutlines)
+      .where(and(eq(novelEpisodeOutlines.id, id), eq(novelEpisodeOutlines.novelId, novel.id)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "episode outline not found", { reason: "neo_not_found" });
+    return { episode_outline: episodeOutlineDto(row) };
+  }
+
+  /** `PATCH /fission_script/episodes_outline/:neo_id`（同路径的编辑动作，与其它大纲编辑同口径） */
+  async patchEpisodeOutline(spaceId: string, ntId: string, neoId: string, input: { title?: string; synopsis?: string }) {
+    await this.novels.requireNovel(spaceId, ntId);
+    return this.novels.patchEpisodeOutline(spaceId, ntId, neoId, input);
   }
 
   /** 分集剧本（裂变链的最后一步）直接复用主链的生成逻辑，避免两套写正文代码 */

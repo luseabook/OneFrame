@@ -60,6 +60,22 @@ const batchEditBody = z.object({
 });
 const idsBody = z.object({ node_ids: z.array(z.string().min(1)).min(1).max(500) });
 
+/**
+ * 画布恢复入参（两种模式互斥）：
+ * - `node_ids`：撤销软删（既有语义，`routes.txt:359`）；
+ * - `from_snapshot` / 省略：从快照补齐缺失节点与边。
+ * 明确互斥是为了避免"既想撤销删除又想补快照"这种歧义请求被静默解释成其中一种。
+ */
+const recoverBody = z
+  .object({
+    node_ids: z.array(z.string().min(1)).min(1).max(500).optional(),
+    from_snapshot: z.boolean().optional(),
+    version: z.number().int().min(1).optional(),
+  })
+  .refine((value) => !(value.node_ids && value.from_snapshot), {
+    message: "node_ids 与 from_snapshot 不能同时给",
+  });
+
 const edgeBody = z.object({
   src_node_id: z.string().min(1),
   dst_node_id: z.string().min(1),
@@ -215,11 +231,20 @@ export class CanvasController {
     return this.canvas.batchDeleteNodes(c.spaceId, canvasId, input.node_ids);
   }
 
+  /**
+   * 节点恢复（两种模式，按入参区分）：
+   * - `{node_ids:[...]}`（既有）：撤销软删，恢复**指定**节点；
+   * - `{from_snapshot:true}`（新）或省略 node_ids：从最近快照补齐**缺失**的节点与边，
+   *   不覆盖现存（见 canvas.service.recoverNodesFromSnapshot 注释）。
+   */
   @Post("canvases/:canvas_id/nodes-recover")
   async recoverNodes(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string, @Body() body: unknown) {
     const c = this.ctx(req);
-    const input = parseOrThrow(idsBody, body);
-    return this.canvas.recoverNodes(c.spaceId, canvasId, input.node_ids);
+    const input = parseOrThrow(recoverBody, body ?? {});
+    if (input.node_ids && input.node_ids.length > 0) {
+      return this.canvas.recoverNodes(c.spaceId, canvasId, input.node_ids);
+    }
+    return this.canvas.recoverNodesFromSnapshot(c.spaceId, canvasId, input.version);
   }
 
   @Get("canvases/:canvas_id/nodes")

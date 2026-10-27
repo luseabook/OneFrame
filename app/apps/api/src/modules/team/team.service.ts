@@ -4,17 +4,25 @@ import {
   creditAccounts,
   creditFlows,
   identities,
+  models,
   spaceMembers,
   spaces,
   tasks,
   teamGroups,
   teamMemberProjects,
   teamRoles,
+  userThirdKeys,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { hashPhone } from "../auth/crypto";
 import { StorageService } from "../../storage/storage.service";
+import {
+  codesToPowerList,
+  isKnownPermission,
+  listPermissionCatalog,
+  powerListToCodes,
+} from "./permission-catalog";
 
 /**
  * 团队（cam）域服务 —— F1 契约 §12.3 / ADR-010 / ADR-011
@@ -1165,4 +1173,159 @@ export class TeamService {
       );
     return { ok: true };
   }
+
+  // ── 权限码体系（目录 + 角色绑定存储）────────────────────
+  /**
+   * ⚠️ 本批边界（写死在这里，防后来者误以为已生效）：
+   * 下面三个方法只负责**目录展示**与**角色 power_list 存储**，**不参与任何请求鉴权**。
+   * 全站入口拦截（L3 按 power_list 判权）留到独立批次，因为它会打穿既有 13 个 e2e suite
+   * （那些 team 成员都是 role=3 且 power_list 为空）——需要同时定义"存量角色的默认权限"。
+   * 详见 `permission-catalog.ts` 文件头。
+   */
+
+  /** 权限码目录（按分组；前端矩阵编辑器直接渲染） */
+  permissionCatalog() {
+    return listPermissionCatalog();
+  }
+
+  /** 某个角色的权限码（role_id 必须属于本 space；不存在 → 400102） */
+  async getRolePermissions(spaceId: string, roleId: string) {
+    await this.listRoles(spaceId); // 懒初始化内置 11 级角色（幂等）
+    const [role] = await db
+      .select()
+      .from(teamRoles)
+      .where(and(eq(teamRoles.id, BigInt(roleId)), eq(teamRoles.spaceId, BigInt(spaceId))));
+    if (!role) throw new AppError(ErrorCode.NOT_FOUND, "role not found");
+    const codes = powerListToCodes(role.powerList);
+    return {
+      role_id: String(role.id),
+      role_code: role.roleCode,
+      role_name: role.roleName,
+      role_level: role.roleLevel,
+      is_system: role.isSystem,
+      permissions: codes,
+      power_list: role.powerList,
+      module_id_list: role.moduleIdList,
+      known_permissions: codes.filter((c) => isKnownPermission(c)),
+      unknown_permissions: codes.filter((c) => !isKnownPermission(c)),
+    };
+  }
+
+  /**
+   * 覆盖写角色权限（幂等：同一集合重复写，落库字节与返回值都相同）。
+   *
+   * 三条规则：
+   * 1. **未知码直接拒**（400101 `field=permissions`，附全部未知码）——静默丢弃会让
+   *    运维以为配置成功，实际少了权限；
+   * 2. **owner 角色（master）不可改**：它的特权来自 `role_code` 短路（契约 §3.1
+   *    `isOwner` 判定），写 power_list 不生效，允许写反而制造"配了但没用"的假象；
+   * 3. 排序去重后写 → 同集合重复 PUT 的 `power_list` 字节完全一致（`changed=false`），
+   *    这样审计 diff 不会因为勾选顺序不同而每次都"看起来变了"。
+   */
+  async setRolePermissions(spaceId: string, roleId: string, codes: string[], moduleIdList?: unknown) {
+    await this.listRoles(spaceId);
+    const [role] = await db
+      .select()
+      .from(teamRoles)
+      .where(and(eq(teamRoles.id, BigInt(roleId)), eq(teamRoles.spaceId, BigInt(spaceId))));
+    if (!role) throw new AppError(ErrorCode.NOT_FOUND, "role not found");
+    if (role.roleCode === "master") {
+      throw new AppError(ErrorCode.INVALID_PARAM, "owner role permissions are fixed（owner_role_immutable）", {
+        field: "role_id",
+        reason: "owner_role_immutable",
+      });
+    }
+    const unique = [...new Set(codes)];
+    const unknown = unique.filter((c) => !isKnownPermission(c)).sort();
+    if (unknown.length > 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `unknown permission codes: ${unknown.join(", ")}`, {
+        field: "permissions",
+        reason: "unknown_code",
+        unknown,
+      });
+    }
+    const nextPowerList = codesToPowerList(unique);
+    const nextModuleIdList = moduleIdList === undefined ? role.moduleIdList : moduleIdList;
+    const before = powerListToCodes(role.powerList).sort();
+    const after = unique.sort();
+    const changed = JSON.stringify(before) !== JSON.stringify(after) ||
+      JSON.stringify(role.moduleIdList) !== JSON.stringify(nextModuleIdList);
+    if (changed) {
+      await db
+        .update(teamRoles)
+        .set({ powerList: nextPowerList, moduleIdList: nextModuleIdList as never, updatedAt: new Date() })
+        .where(eq(teamRoles.id, role.id));
+    }
+    return {
+      role_id: String(role.id),
+      role_code: role.roleCode,
+      changed,
+      permissions: after,
+      power_list: nextPowerList,
+      module_id_list: nextModuleIdList,
+    };
+  }
+
+  /**
+   * `GET /cam/temp-info` —— 团队级"模型开关矩阵"。
+   *
+   * 契约 §3.4 的响应字段（`api_key_white / is_lingman_wsid / is_sd_discount_black /
+   * is_support / sd_480p_is_support / sd_is_support / seedance_is_support /
+   * tsd_is_support`）里有 4 个是**折扣/白名单**语义而非能力开关，我方**没有对应列**，
+   * 也没有取证到判定来源（contract §7 A-adjacent）。
+   *
+   * 处理原则（和 points_ro 一致）：**能推导的给真实值，推不出来的给 null 并列入
+   * `unverified`**，绝不返回假 `false` 让前端以为"确定不支持"。
+   *   - 可推导：`api_key_white`（本 space 是否配了 BYOK key）、四个模型族支持位
+   *     （按 models 目录里的可见模型名匹配）；
+   *   - 不可推导：`is_lingman_wsid` / `is_sd_discount_black` / `is_support` → null。
+   */
+  async tempInfo(spaceId: string) {
+    const [space] = await db.select().from(spaces).where(eq(spaces.id, BigInt(spaceId)));
+    if (!space) throw new AppError(ErrorCode.NOT_FOUND, "space not found");
+
+    const visibleModels = await db
+      .select({ name: models.name, displayName: models.displayName, vendor: models.vendor, capability: models.capability })
+      .from(models)
+      .where(eq(models.visible, true));
+
+    const familySupported = (needle: string): boolean =>
+      visibleModels.some(
+        (m) =>
+          m.name.toLowerCase().includes(needle) || (m.displayName ?? "").toLowerCase().includes(needle),
+      );
+
+    const [byok] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(userThirdKeys)
+      .where(and(eq(userThirdKeys.spaceId, BigInt(spaceId)), eq(userThirdKeys.status, 1)));
+
+    const unverified = ["is_lingman_wsid", "is_sd_discount_black", "is_support"];
+
+    return {
+      space_id: String(space.id),
+      name: space.name,
+      type: space.type,
+      // ── 我方真实状态（有列 / 可聚合）──
+      film_enabled: space.filmEnabled === 1,
+      agent_whitelist: space.agentWhitelist === 1,
+      api_key_white: Number(byok?.n ?? 0) > 0,
+      // ── 模型开关矩阵（按 models 目录派生；契约同名字段）──
+      sd_is_support: familySupported("sd"),
+      sd_480p_is_support: familySupported("480p"),
+      seedance_is_support: familySupported("seedance"),
+      tsd_is_support: familySupported("tsd"),
+      // ── 未取证：显式 null，不用假 false 冒充"确定不支持" ──
+      is_lingman_wsid: null,
+      is_sd_discount_black: null,
+      is_support: null,
+      unverified,
+      derived_from: "models_catalog",
+      model_families: {
+        total_visible: visibleModels.length,
+        vendors: [...new Set(visibleModels.map((m) => m.vendor))].sort(),
+      },
+    };
+  }
 }
+

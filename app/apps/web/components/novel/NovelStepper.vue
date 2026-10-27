@@ -2,20 +2,27 @@
 import type { NovelStepState } from "~/types/api";
 
 /**
- * 改编链步进器（分章 → 内容分析 → 章纲 → 集纲 → 核心角色 → 剧本 → 定稿）。
+ * 改编链 / 原创链共用步进器。
  *
- * 为什么用 `hint` 而不是只画进度条：竞品这条链每一步都是"用户必须点一下"的显式动作，
- * 用户最常问的是"我现在卡在哪一步、下一步该点什么"。所以每个未完成的步骤直接把
- * 待办文案显示出来，已完成显示产出数量（如「3 章已解析」）。
+ * 默认清单是改编链七步（分章 → 内容分析 → 章节大纲 → 分集大纲 → 核心角色 → 分集剧本 → 定稿）；
+ * 原创链通过 `items` 换成八步（创意方案 → 选定 → 素材 → 总纲 → 分卡章纲 → 集纲 → 剧本 → 定稿）。
+ * 两条链复用同一组件而不是各写一套：用户对"我现在在哪一步、还差什么"的心智模型一样，
+ * UI 就该一样，差别只在步骤名。
+ *
+ * 为什么用 `hint` 而不是只画进度条：这条链每一步都是"用户必须点一下"的显式动作，
+ * 用户最常问的是"卡在哪、下一步该点什么"，所以未完成的步骤直接把待办文案摆出来，
+ * 已完成显示产出数量（如「3 章已解析」）。
  */
 const props = defineProps<{
   steps: Record<string, NovelStepState>;
   active: string;
+  /** 步骤清单（省略 = 改编链七步） */
+  items?: Array<{ key: string; label: string }>;
 }>();
 
 defineEmits<{ pick: [key: string] }>();
 
-const ORDER: Array<{ key: string; label: string }> = [
+const DEFAULT_ORDER: Array<{ key: string; label: string }> = [
   { key: "split", label: "分章" },
   { key: "content_analysis", label: "内容分析" },
   { key: "chapter_outline", label: "章节大纲" },
@@ -26,7 +33,7 @@ const ORDER: Array<{ key: string; label: string }> = [
 ];
 
 const items = computed(() =>
-  ORDER.map((row) => ({
+  (props.items ?? DEFAULT_ORDER).map((row) => ({
     ...row,
     done: props.steps[row.key]?.done ?? false,
     hint: props.steps[row.key]?.hint ?? "",
@@ -35,7 +42,7 @@ const items = computed(() =>
 </script>
 
 <template>
-  <nav class="stepper" aria-label="改编链步骤">
+  <nav class="stepper" aria-label="创作链步骤">
     <button
       v-for="(item, index) in items"
       :key="item.key"
@@ -55,7 +62,8 @@ const items = computed(() =>
 <style scoped>
 .stepper {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* 步数随 items 变化（改编 7 步 / 原创 8 步）：auto-fit 让两者都不用单独写样式 */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border-1);

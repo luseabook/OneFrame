@@ -466,6 +466,24 @@ describe("asset-match + consistency gates e2e", () => {
     expect(passedItem.submitted).toBe(true);
   });
 
+  /** 建一个已定稿（status=16）的本子：create → 分集大纲 → 生成剧本 → finalize */
+  const createFinalizedNovel = async (suffix: string): Promise<{ ntId: string; episodeCount: number }> => {
+    const novel = await inject("POST", "/novel", {
+      title: `本子-${suffix}-${stamp}`,
+      source_type: 1,
+      source_text: "第一章：开端。第二章：转折。",
+    });
+    expect(novel.code).toBe(0);
+    const ntId = String(novel.data.id);
+    expect((await inject("POST", `/novel/${ntId}/episode_outline/generate`, {})).code).toBe(0);
+    const scripts = await inject("POST", `/novel/${ntId}/script-generate`, {});
+    expect(scripts.code).toBe(0);
+    const finalized = await inject("POST", `/novel/${ntId}/finalize`, { snapshot_episodes: false });
+    expect(finalized.code).toBe(0);
+    expect(finalized.data.status).toBe(16);
+    return { ntId, episodeCount: scripts.data.count as number };
+  };
+
   it("episodes/split keeps script behavior and accepts a novel source (only finalized novels)", async () => {
     // 1) 不传 source：保持既有行为（用项目正文拆集）
     const plainProject = await inject("POST", "/projects", {
@@ -478,6 +496,9 @@ describe("asset-match + consistency gates e2e", () => {
     expect(plain.code).toBe(0);
     expect(plain.data.length).toBe(3);
     expect(plain.data[0].title).toBe("第1集");
+    // 非 novel 来源：source_novel_id 必须为 null（novel 侧 reopen 据此判断"没被本子拆过"）
+    const plainDetail = await inject("GET", `/projects/${plainProject.data.id}`);
+    expect(plainDetail.data.project.source_novel_id).toBeNull();
 
     // 2) 传 source：不存在的本子 → novel 侧 400102（证明真的转到 NovelService 而不是糊过去）
     const novelProject = await inject("POST", "/projects", {
@@ -504,6 +525,8 @@ describe("asset-match + consistency gates e2e", () => {
     });
     expect(notFinalized.code).toBe(400100);
     expect(notFinalized.msg).toContain("finalized");
+    // 未定稿被拒时不得写入来源本子（否则 novel 侧会以为已被拆集）
+    expect((await inject("GET", `/projects/${novelProject.data.id}`)).data.project.source_novel_id).toBeNull();
 
     // 4) 定稿后可作来源：集边界取本子的 episodeScripts，不再二次切分
     const outlineGenerated = await inject("POST", `/novel/${ntId}/episode_outline/generate`, {});
@@ -527,11 +550,37 @@ describe("asset-match + consistency gates e2e", () => {
     expect(split.data[0].script_text.length).toBeGreaterThan(0);
     expect(split.data[0].title).not.toBe("第1集");
 
-    // 来源标记落库：详情里 source_type=1（ProjectSourceType.NOVEL）
+    // 来源标记 + 来源本子落库：详情里 source_type=1（ProjectSourceType.NOVEL）、source_novel_id=ntId
     const detail = await inject("GET", `/projects/${novelProject.data.id}`);
     expect(detail.data.project.source_type).toBe(1);
+    expect(detail.data.project.source_novel_id).toBe(ntId);
 
     void tokenOther;
+  });
+
+  it("split keeps the first source_novel_id when another finalized novel re-splits the project", async () => {
+    const project = await inject("POST", "/projects", {
+      title: `二次拆集-${stamp}`,
+      source_type: 1,
+      source_text: "占位正文",
+    });
+    expect(project.code).toBe(0);
+    const first = await createFinalizedNovel("first");
+    const firstSplit = await inject("POST", `/projects/${project.data.id}/episodes/split`, {
+      source: { kind: "novel", nt_id: first.ntId },
+    });
+    expect(firstSplit.code).toBe(0);
+    expect((await inject("GET", `/projects/${project.data.id}`)).data.project.source_novel_id).toBe(first.ntId);
+
+    // 换另一个已定稿本子再拆一次（集未确认，允许重拆）：来源标记不覆盖
+    const second = await createFinalizedNovel("second");
+    const secondSplit = await inject("POST", `/projects/${project.data.id}/episodes/split`, {
+      source: { kind: "novel", nt_id: second.ntId },
+    });
+    expect(secondSplit.code).toBe(0);
+    expect((await inject("GET", `/projects/${project.data.id}`)).data.project.source_novel_id).toBe(first.ntId);
+    void first.episodeCount;
+    void second.episodeCount;
   });
 });
 

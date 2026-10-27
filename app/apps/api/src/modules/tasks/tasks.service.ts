@@ -599,4 +599,79 @@ export class TasksService {
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
     return row;
   }
+
+  /**
+   * 分享页「打包下载」（模块 #26 收尾）。
+   *
+   * ## 越权边界（这是本方法唯一需要小心的地方）
+   * 请求方是**匿名访客**，只有 token。因此：
+   * 1. 绝不接受客户端传 `task_ids`——打包范围**只由 share 行决定**（`share.taskId`）；
+   * 2. 取任务时同时校验 `tasks.spaceId === share.spaceId`，防止历史脏数据把
+   *    A 空间的 share 指到 B 空间的任务上导致跨租户读取；
+   * 3. 返回体只有公开字段（zip 的 manifest 里不含 space_id / user_id / 积分）。
+   *
+   * 与 `batchDownload` 的关系：这里复用同一条"读存储 → 组 zip → put → 签名"路径，
+   * 但**不复用它的入参**（那个版本按 space 鉴权、可传任意 task_ids，两个威胁模型不能混）。
+   */
+  async publicShareDownload(token: string) {
+    const [share] = await db.select().from(taskShares).where(eq(taskShares.token, token));
+    if (!share || share.revokedAt || share.expiresAt.getTime() <= Date.now()) {
+      throw new AppError(ErrorCode.NOT_FOUND, "share not found or expired");
+    }
+    const [row] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
+
+    const results = Array.isArray(row.results) ? (row.results as Array<{ uri?: string }>) : [];
+    if (results.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no downloadable results");
+
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const files: string[] = [];
+    for (let i = 0; i < results.length; i += 1) {
+      const uri = results[i]?.uri;
+      if (!uri) continue;
+      try {
+        const data = /^https?:\/\//.test(uri)
+          ? Buffer.from(await (await fetch(uri)).arrayBuffer())
+          : /^[a-z][a-z0-9+.-]*:\/\//i.test(uri)
+            ? null
+            : await this.storage.read(uri);
+        if (!data) continue;
+        const ext = uri.split(".").pop()?.toLowerCase() || "bin";
+        const name = `result-${i + 1}.${ext}`;
+        zip.file(name, data);
+        files.push(name);
+      } catch {
+        // 单个产物失败不阻断整包
+      }
+    }
+    if (files.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no downloadable results");
+
+    zip.file(
+      "manifest.json",
+      JSON.stringify(
+        {
+          generated_at: new Date().toISOString(),
+          mode: row.mode,
+          task_id: String(row.id),
+          files,
+        },
+        null,
+        2,
+      ),
+    );
+    const buffer = await zip.generateAsync({ type: "nodebuffer" });
+    const key = `u/${String(share.spaceId)}/shares/${newId()}.zip`;
+    await this.storage.put(key, buffer, "application/zip");
+    const url = await this.storage.signDownload(key, 3600);
+    return {
+      url,
+      filename: `share-${String(row.id)}-${files.length}.zip`,
+      count: files.length,
+      expires_in: 3600,
+    };
+  }
 }

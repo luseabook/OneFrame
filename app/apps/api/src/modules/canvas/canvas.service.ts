@@ -339,17 +339,165 @@ export class CanvasService {
   async recoverNodes(spaceId: string, canvasId: string, nodeIds: string[]) {
     const canvas = await this.mustGetCanvas(spaceId, canvasId);
     if (nodeIds.length === 0) return { recovered: 0 };
-    await db
+    // 非雪花 id 是客户端本地临时 id（不可能被软删过），直接 400101 比 BigInt 抛 500 清晰
+    const ids = nodeIds
+      .map((id) => asSnowflake(id))
+      .filter((id): id is bigint => id !== null);
+    if (ids.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "no valid node id to recover", { field: "node_ids" });
+    }
+    const updated = await db
       .update(canvasNodes)
       .set({ deletedAt: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(canvasNodes.canvasId, canvas.id),
-          inArray(canvasNodes.id, nodeIds.map((id) => BigInt(id))),
-        ),
-      );
+      .where(and(eq(canvasNodes.canvasId, canvas.id), inArray(canvasNodes.id, ids)))
+      .returning({ id: canvasNodes.id });
     await this.touch(canvas.id);
-    return { recovered: nodeIds.length };
+    // 返回真实恢复条数（原先直接回显入参长度，传了不存在的 id 也会"看起来成功"）
+    return { recovered: updated.length };
+  }
+
+  /**
+   * 从最近快照补齐**缺失**的节点与边（画布崩溃/误操作后的"救回"路径）。
+   *
+   * 四条语义（都影响数据安全，别随意改）：
+   * 1. **只补不覆盖**：现存节点（含软删）一律跳过，因此本方法可重复调用（幂等）；
+   *    软删的节点不当作"缺失"——它是有意删掉的，要救请显式传 `node_ids` 走撤销软删。
+   * 2. **无快照 → 400102**：没有可比对的基准时不猜（"空恢复"会让用户以为救回来了）。
+   * 3. **边的两端必须都在**：快照里的边若指向不存在/已软删的节点则跳过，
+   *    绝不恢复悬挂边（画布渲染会直接炸）。
+   * 4. **不写事件**：画布域没有自己的事件表；`task_events` 需要真实 `task_id`，
+   *    为了留痕伪造一条会让任务列表/看板出现假任务。故只返回统计。
+   */
+  async recoverNodesFromSnapshot(spaceId: string, canvasId: string, version?: number) {
+    const canvas = await this.mustGetCanvas(spaceId, canvasId);
+    const [snapshot] = version !== undefined
+      ? await db
+          .select()
+          .from(canvasSnapshots)
+          .where(and(eq(canvasSnapshots.canvasId, canvas.id), eq(canvasSnapshots.version, version)))
+      : await db
+          .select()
+          .from(canvasSnapshots)
+          .where(eq(canvasSnapshots.canvasId, canvas.id))
+          .orderBy(desc(canvasSnapshots.version))
+          .limit(1);
+    if (!snapshot) throw new AppError(ErrorCode.NOT_FOUND, "no snapshot to recover from");
+
+    const payload = (snapshot.payload ?? {}) as { nodes?: unknown; edges?: unknown };
+    const snapshotNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+    const snapshotEdges = Array.isArray(payload.edges) ? payload.edges : [];
+    if (snapshotNodes.length === 0) {
+      throw new AppError(ErrorCode.NOT_FOUND, "snapshot has no nodes");
+    }
+
+    const current = await db
+      .select({ id: canvasNodes.id, deletedAt: canvasNodes.deletedAt })
+      .from(canvasNodes)
+      .where(eq(canvasNodes.canvasId, canvas.id));
+    const liveIds = new Set(current.filter((row) => row.deletedAt === null).map((row) => String(row.id)));
+    const allIds = new Set(current.map((row) => String(row.id)));
+
+    /** 快照里的节点 id（可能是客户端本地临时 id）→ 本次可用的真实节点 id */
+    const idMap = new Map<string, bigint>();
+    const toInsert: Array<typeof canvasNodes.$inferInsert> = [];
+    let skippedExisting = 0;
+    let skippedDeleted = 0;
+
+    for (const raw of snapshotNodes) {
+      if (raw === null || typeof raw !== "object") continue;
+      const node = raw as Record<string, unknown>;
+      const nodeType = typeof node.node_type === "string" ? node.node_type : typeof node.nodeType === "string" ? node.nodeType : null;
+      if (!nodeType) continue;
+      const rawId = node.id === undefined || node.id === null ? undefined : String(node.id);
+      const existingId = rawId ? asSnowflake(rawId) : null;
+      if (existingId !== null && allIds.has(String(existingId))) {
+        if (liveIds.has(String(existingId))) {
+          idMap.set(rawId ?? String(existingId), existingId);
+          skippedExisting += 1;
+        } else {
+          // 软删：算"存在"，不复活（见语义 1）
+          skippedDeleted += 1;
+        }
+        continue;
+      }
+      const id = existingId ?? newId();
+      if (rawId) idMap.set(rawId, id);
+      toInsert.push({
+        id,
+        spaceId: canvas.spaceId,
+        canvasId: canvas.id,
+        nodeType,
+        name: typeof node.name === "string" ? node.name : "",
+        x: typeof node.x === "number" ? node.x : 0,
+        y: typeof node.y === "number" ? node.y : 0,
+        width: typeof node.width === "number" ? node.width : null,
+        height: typeof node.height === "number" ? node.height : null,
+        zIndex: typeof node.z_index === "number" ? node.z_index : 0,
+        params: (node.params ?? {}) as Record<string, unknown>,
+        status: typeof node.status === "number" ? node.status : 1,
+        groupIds: [],
+      });
+    }
+
+    let nodesRecovered = 0;
+    let edgesRecovered = 0;
+    if (toInsert.length > 0) {
+      const inserted = await db
+        .insert(canvasNodes)
+        .values(toInsert)
+        // 并发恢复/与其它写入竞争时以库里为准（id 是主键）
+        .onConflictDoNothing({ target: canvasNodes.id })
+        .returning({ id: canvasNodes.id });
+      nodesRecovered = inserted.length;
+      for (const row of inserted) {
+        liveIds.add(String(row.id));
+      }
+    }
+
+    const recoverableEdges: Array<typeof canvasEdges.$inferInsert> = [];
+    for (const raw of snapshotEdges) {
+      if (raw === null || typeof raw !== "object") continue;
+      const edge = raw as Record<string, unknown>;
+      const srcRaw = edge.src_node_id ?? edge.srcNodeId;
+      const dstRaw = edge.dst_node_id ?? edge.dstNodeId;
+      if (srcRaw === undefined || dstRaw === undefined) continue;
+      const src = idMap.get(String(srcRaw));
+      const dst = idMap.get(String(dstRaw));
+      // 两端都必须是本次可见的节点：一端缺失就跳过（不恢复悬挂边）
+      if (!src || !dst || !liveIds.has(String(src)) || !liveIds.has(String(dst))) continue;
+      if (src === dst) continue;
+      recoverableEdges.push({
+        id: newId(),
+        spaceId: canvas.spaceId,
+        canvasId: canvas.id,
+        srcNodeId: src,
+        dstNodeId: dst,
+        semantic: typeof edge.semantic === "string" ? edge.semantic : "pipeline",
+      });
+    }
+    if (recoverableEdges.length > 0) {
+      const insertedEdges = await db
+        .insert(canvasEdges)
+        .values(recoverableEdges)
+        // 唯一约束 (canvas, src, dst, semantic)：已存在即视为恢复完成
+        .onConflictDoNothing({
+          target: [canvasEdges.canvasId, canvasEdges.srcNodeId, canvasEdges.dstNodeId, canvasEdges.semantic],
+        })
+        .returning({ id: canvasEdges.id });
+      edgesRecovered = insertedEdges.length;
+    }
+
+    if (nodesRecovered > 0 || edgesRecovered > 0) await this.touch(canvas.id);
+    return {
+      from_version: snapshot.version,
+      snapshot_created_at: snapshot.createdAt.toISOString(),
+      nodes_recovered: nodesRecovered,
+      edges_recovered: edgesRecovered,
+      // 统计只报事实：跳过多少现存、多少软删（后者要救得显式撤销软删）
+      skipped_existing: skippedExisting,
+      skipped_deleted: skippedDeleted,
+      skipped_dangling_edges: snapshotEdges.length - recoverableEdges.length,
+    };
   }
 
   /** 按类型取节点（供"素材/资产"面板按类型过滤） */

@@ -114,6 +114,8 @@ export interface ProjectDto {
   status: number;
   archived_at?: string | null;
   is_sample?: boolean;
+  /** 拆集来源本子（迁移 0026）：null = 未用小说拆集；novel 侧 reopen 用它精确判断 */
+  source_novel_id?: string | null;
   created_at: string;
   /** 最后写操作时间（ReelFlow 列表卡「最后编辑于 …」用它） */
   updated_at?: string;
@@ -121,15 +123,32 @@ export interface ProjectDto {
 
 /** 作品（作品=项目，PRD 增补 §1.3）：带成果聚合 */
 export interface WorkDto extends ProjectDto {
+  /** 形态：工坊项目 / 无限画布（全部项目聚合页把两者放同一清单） */
+  kind?: "workshop" | "canvas";
   episode_count: number;
   shot_count: number;
   done_count: number;
   cover_uri: string | null;
-  work_state: "draft" | "producing" | "ready" | "archived";
+  work_state: "draft" | "producing" | "ready" | "archived" | "canvas";
   /** ReelFlow：项目全部时间线片段时长之和（秒）；0 = 还没剪过 */
   timeline_duration_s?: number;
   /** ReelFlow：已保存时间线的集数 */
   timeline_episode_count?: number;
+  /** 画布侧只读投影（工坊项目为 null） */
+  node_count?: number | null;
+  creation_mode?: number | null;
+  running_nodes?: number | null;
+  failed_nodes?: number | null;
+}
+
+/** GET /works 聚合响应（tab=workshop|canvas|all + 筛选 + has_more） */
+export interface WorksListDto {
+  list: WorkDto[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  tabs: { workshop: number; canvas: number };
 }
 
 export interface EpisodeDto {
@@ -1060,4 +1079,975 @@ export interface SupplementMissingDto {
     note: string;
   }>;
   notes?: string[];
+}
+
+// ── 3D 导演台（director 域）──────────────────────────────────────
+// payload 是**不透明场景快照**（相机/机位/角色站位/位姿），服务端不解析语义，
+// 只做大小上限与 version 乐观锁；前端与组件状态互转集中在
+// `components/director/useDirectorPersistence.ts` 一处。
+
+export interface DirectorSceneDto {
+  id: string;
+  project_id: string | null;
+  episode_id: string | null;
+  name: string;
+  payload: Record<string, unknown>;
+  thumbnail_uri: string | null;
+  /** 服务端签好的可访问 URL（storage key 由后端签名；完整 URL 原样返回） */
+  thumbnail_url: string | null;
+  version: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DirectorPosePresetDto {
+  id: string;
+  name: string;
+  payload: Record<string, unknown>;
+  /** 1 个人 / 2 团队共享 */
+  scope: number;
+  created_by: string | null;
+  /** 是否是我创建的（团队共享里区分"谁存的"） */
+  mine: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DirectorHeartbeatDto {
+  scene_id: string;
+  ttl_s: number;
+  /** 除自己之外、最近 60s 内还在该场景的人 */
+  collaborators: Array<{ user_id: string; nickname: string; last_seen_ms: number }>;
+  count: number;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 账号 SSO / 双 token / 团队权限码（第 9 批 B）
+// ══════════════════════════════════════════════════════════════════
+
+export interface OauthProviderDto {
+  provider: "wechat" | "qq" | "apple" | "douyin";
+  label: string;
+  /** false → 登录页按钮置灰 + tooltip「未配置」；后端取授权 URL 会 400101 */
+  configured: boolean;
+  disabled_reason: "provider_not_configured" | null;
+}
+
+export interface OauthProvidersDto {
+  list: OauthProviderDto[];
+  /** true 表示当前进程走了 OAUTH_MOCK（验收时别误判"渠道已通"） */
+  mock: boolean;
+}
+
+export interface OauthAuthorizeUrlDto {
+  provider: string;
+  authorize_url: string;
+  state: string;
+  expires_in: number;
+  mock: boolean;
+}
+
+/** `POST /auth/renew` 只回 access（不轮换 master/refresh） */
+export interface RenewResultDto {
+  access_token: string;
+  expires_in: number;
+}
+
+export interface TeamPermissionItemDto {
+  code: string;
+  name: string;
+  group: string;
+}
+
+export interface TeamPermissionGroupDto {
+  group: string;
+  name: string;
+  codes: string[];
+}
+
+export interface TeamPermissionCatalogDto {
+  list: TeamPermissionItemDto[];
+  groups: TeamPermissionGroupDto[];
+  total: number;
+}
+
+export interface TeamRolePermissionsDto {
+  role_id: string;
+  role_code: string;
+  role_name: string;
+  role_level: number;
+  is_system: boolean;
+  /** 权限码集合（已去重排序） */
+  permissions: string[];
+  /** 落库形状：[{module, action, permission_code}] */
+  power_list: unknown[];
+  module_id_list: unknown;
+  known_permissions: string[];
+  /** 目录外的历史码（脏数据，保存会被拒） */
+  unknown_permissions: string[];
+}
+
+export interface TeamTempInfoDto {
+  space_id: string;
+  name: string;
+  type: number;
+  film_enabled: boolean;
+  agent_whitelist: boolean;
+  api_key_white: boolean;
+  sd_is_support: boolean;
+  sd_480p_is_support: boolean;
+  seedance_is_support: boolean;
+  tsd_is_support: boolean;
+  /** 未取证项一律 null（不用假 false 冒充"确定不支持"） */
+  is_lingman_wsid: boolean | null;
+  is_sd_discount_black: boolean | null;
+  is_support: boolean | null;
+  unverified: string[];
+  derived_from: string;
+  model_families: { total_visible: number; vendors: string[] };
+}
+
+// ── 第 3 轮（首发补全 A）：分集质量/合成/解析 + 切片发布 + 片段资产 ────────────
+
+/** 分集质量检查（只读）：issues[] + 加权 score */
+export interface QualityIssueDto {
+  code: string;
+  severity: "error" | "warn";
+  category: "shots" | "prompt" | "assets" | "duration" | "timeline";
+  message: string;
+  shot_id?: string;
+  shot_no?: number;
+  hint?: string;
+}
+
+export interface QualityDimensionDto {
+  key: QualityIssueDto["category"];
+  label: string;
+  weight: number;
+  score: number;
+  weighted: number;
+  ok_items: number;
+  total_items: number;
+}
+
+export interface QualityCheckDto {
+  project_id: string;
+  ep_id: string;
+  ep_no: number;
+  status: "pass" | "warn" | "fail";
+  score: number;
+  blocking: boolean;
+  read_only: true;
+  dimensions: QualityDimensionDto[];
+  issues: QualityIssueDto[];
+  stats: {
+    shot_count: number;
+    prompt_avg_len: number;
+    bound_asset_count: number;
+    finalized_asset_count: number;
+    timeline_clip_count: number;
+    timeline_duration_s: number;
+    shot_duration_s: number;
+    succeeded_video_tasks: number;
+  };
+  checked_at: string;
+}
+
+/** 分集合成导出：zip 包（exports 四态）+ 成片 mp4（timeline_exports 四态）两个 job */
+export interface FilmSynthesisDto {
+  export_id: string;
+  synthesis_export_id: string;
+  status: number;
+  status_label: string;
+  success_ratio: number;
+  shots_total: number;
+  shots_ready: number;
+  clips: number;
+  duration_s: number;
+  watermarked: boolean;
+  poll: { package: string; synthesis: string };
+}
+
+/** 分镜表解析（贴表 → storyboards），备份后覆盖 */
+export interface EpisodeParseDto {
+  dry_run: boolean;
+  ep_id: string;
+  mode: "replace" | "merge";
+  parsed: number;
+  created?: number;
+  updated?: number;
+  removed?: number;
+  would_create?: number;
+  would_update?: number;
+  backup_key: string | null;
+  storyboards?: StoryboardDto[];
+  preview?: Array<{ shot_no: number; shot_desc: string; video_prompt?: string; duration_s?: number }>;
+  retried?: boolean;
+}
+
+/** 切片发布（timeline_publications）：1 排队 / 2 转码中 / 3 可播放 / 4 失败 / 5 已下架 */
+export interface TimelinePublicationDto {
+  publication_id: string;
+  title: string;
+  status: 1 | 2 | 3 | 4 | 5;
+  status_label: "queued" | "transcoding" | "ready" | "failed" | "removed" | "unknown";
+  slice: {
+    unit?: string;
+    start_ms?: number;
+    end_ms?: number;
+    duration_ms?: number;
+    clip_ids?: string[] | null;
+    source_export_id?: string;
+  };
+  share_token: string | null;
+  download_url: string | null;
+  error: { code?: number; message?: string } | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelinePublicationListDto {
+  list: TimelinePublicationDto[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+/** 片段资产绑定（wf/clip-bind-asset） */
+export interface TimelineClipAssetDto {
+  source: "asset" | "project_asset" | "shot_product";
+  id: string;
+  name: string;
+  uri: string;
+  task_id?: string | null;
+}
+
+// ── 原创剧本链（`original_script/*`，task-13）─────────────────────
+// 与改编链共用 NovelDto / NovelCharacterDto / NovelChapterOutlineDto /
+// NovelEpisodeOutlineDto / NovelEpisodeDto；这里只补原创链独有的三样产物
+// （创意方案 / 素材 / 总纲），它们存在 novels.meta.original（无独立表）。
+
+export interface NovelOriginalIdeaDto {
+  ni_id: string;
+  title: string;
+  logline: string;
+  genre: string;
+  tone: string;
+  selected: boolean;
+}
+
+export interface NovelOriginalMaterialDto {
+  nm_id: string;
+  title: string;
+  content: string;
+  selected: boolean;
+}
+
+export interface NovelOriginalBeatDto {
+  no: number;
+  beat: string;
+  summary: string;
+}
+
+export interface NovelOriginalOutlineDto {
+  title: string;
+  logline: string;
+  theme: string;
+  beats: NovelOriginalBeatDto[];
+  structure: string;
+  generated_at?: string;
+  edited_at?: string;
+}
+
+/** `/novel/:id/original_script/state`：一次拿全原创链八步进度 */
+export interface NovelOriginalStateDto {
+  novel: NovelDto;
+  source_type: number;
+  user_input: string;
+  selected_ni_id: string | null;
+  steps: Record<string, NovelStepState>;
+  counts: {
+    ideas: number;
+    materials: number;
+    chapter_outlines: number;
+    episode_outlines: number;
+    episodes: number;
+  };
+  llm_mode: "mock" | "real";
+}
+
+/* ══════════════════════════════════════════════════════════════
+   剧本集市（market，第 6 批 B）—— 对照竞品 `df/novel_market` 29 端点
+   ══════════════════════════════════════════════════════════════ */
+
+export interface MarketAuthorDto {
+  user_id: string;
+  nickname: string;
+  avatar_uri: string | null;
+}
+
+/** 作品 DTO（`market_works` 的对外投影；status 语义见 MARKET_WORK_STATUS_LABEL） */
+export interface MarketWorkDto {
+  id: string;
+  novel_id: string | null;
+  owner_user_id: string;
+  space_id: string;
+  title: string;
+  summary: string;
+  cover_uri: string | null;
+  /** 1 小说 / 2 剧本 / 3 分镜包 */
+  kind: number;
+  kind_name: string;
+  /** 售价（积分） */
+  price_credits: number;
+  /** 预售定金（积分）；非预售作品为 null */
+  preorder_price_credits: number | null;
+  /** 1 草稿 / 2 待审 / 3 在售 / 4 已驳回 / 5 已下架 / 6 预售中 */
+  status: number;
+  status_name: string;
+  audit_note: string | null;
+  sales_count: number;
+  /** 累计收益（成交价 − 抽成）；**不是积分余额**，提现走独立申请 */
+  revenue_credits: number;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** 分类/标签直接来自 `market_works` 两列（迁移 0030），不再回查配置表 */
+  category_id: string | null;
+  tag_ids: string[];
+  author?: MarketAuthorDto;
+}
+
+/** 审核留痕（迁移 0030 `market_review_logs`）：提交/通过/驳回/下架各一行 */
+export interface MarketReviewLogDto {
+  id: string;
+  work_id: string;
+  /** 1 提交 / 2 通过 / 3 驳回 / 4 下架 */
+  action: number;
+  action_name: string;
+  operator_admin_id: string | null;
+  operator_user_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface MarketCategoryDto {
+  id: string;
+  name: string;
+  sort: number;
+  status: number;
+}
+
+export interface MarketTagDto {
+  id: string;
+  name: string;
+  status: number;
+}
+
+export interface MarketConfigDto {
+  categories: MarketCategoryDto[];
+  tags: MarketTagDto[];
+  /** 抽成比例（basis point）：2000 = 20%。前端不许写死，一律用这个值 */
+  commission_bps: number;
+  commission_note: string;
+  min_withdraw_credits: number;
+  agreement_kinds: Array<{ kind: number; name: string; note: string }>;
+  work_status: Array<{ status: number; name: string }>;
+}
+
+export interface MarketScriptListDto {
+  list: MarketWorkDto[];
+  total: number;
+  page: number;
+  page_size: number;
+  /** 是否应用了分类/标签筛选（false 表示只按 SQL 条件过滤） */
+  taxonomy_filtered: boolean;
+}
+
+export interface MarketWorkCountsDto {
+  chapters: number;
+  characters: number;
+  episodes: number;
+  total_word_count: number;
+}
+
+export interface MarketScriptDetailDto extends MarketWorkDto {
+  author: MarketAuthorDto;
+  counts: MarketWorkCountsDto;
+  access: { free_preview: boolean; requires_purchase: boolean; content_endpoints: string[] };
+}
+
+export interface MarketAgreementTextDto {
+  work_id: string;
+  kind: number;
+  kind_name: string;
+  title: string;
+  body: string;
+  signed: boolean;
+  creator_view?: {
+    price_credits: number;
+    commission_credits: number;
+    revenue_credits: number;
+    commission_bps: number;
+    note: string;
+  };
+}
+
+export interface MarketAgreementDto {
+  id: string;
+  work_id: string;
+  work_title: string;
+  buyer_user_id: string;
+  space_id: string;
+  /** 1 购买 / 2 预售 / 3 授权 / 4 退款反向记录 */
+  kind: number;
+  kind_name: string;
+  price_credits: number;
+  commission_credits: number;
+  revenue_credits: number;
+  /** 1 待支付 / 2 已生效 / 3 已退款 */
+  status: number;
+  status_name: string;
+  signed_at: string | null;
+  created_at: string;
+}
+
+export interface MarketBuyResultDto {
+  agreement: MarketAgreementDto;
+  /** true = 重复购买，未再扣分（幂等） */
+  idempotent: boolean;
+  /** 扣分后余额；幂等重放时为 null */
+  balance_after: number | null;
+}
+
+export interface MarketContentTreeDto {
+  work_id: string;
+  novel_id: string | null;
+  chapters: Array<{ chapter_no: number; title: string; word_count: number }>;
+  chapter_count: number;
+  total_word_count: number;
+  episode_outlines: Array<{ episode_no: number; title: string; synopsis: string }>;
+  episodes: Array<{ episode_no: number; title: string; status: number }>;
+  content_included: boolean;
+}
+
+export interface MarketCharacterDto {
+  id: string;
+  name: string;
+  role_type: number;
+  role_type_name: string;
+  description: string;
+  appearance: string;
+  personality: string;
+  is_core: boolean;
+}
+
+export interface MarketEpisodeDto {
+  id: string;
+  episode_no: number;
+  title: string;
+  status: number;
+  version: number;
+  word_count: number;
+  script_text: string;
+}
+
+export interface MarketCreatorProfileDto {
+  user_id: string;
+  nickname: string;
+  avatar_uri: string | null;
+  works_count: number;
+  on_sale_count: number;
+  total_sales: number;
+  revenue_credits: number;
+  available_withdraw_credits: number;
+  commission_bps: number;
+  min_withdraw_credits: number;
+}
+
+export interface MarketWorkDetailOwnDto extends MarketWorkDto {
+  counts: MarketWorkCountsDto;
+  readiness: {
+    has_novel: boolean;
+    novel_finalized: boolean | null;
+    price_set: boolean;
+    can_submit: boolean;
+  };
+}
+
+export interface MarketWorkStatsDto {
+  works_count: number;
+  works_by_status: Record<string, number>;
+  total_sales: number;
+  revenue_credits: number;
+  commission_bps: number;
+  withdraw: { locked_credits: number; paid_credits: number; available_credits: number };
+}
+
+export interface MarketRevenueRowDto {
+  agreement_id: string;
+  work_id: string;
+  work_title: string;
+  kind: number;
+  kind_name: string;
+  price_credits: number;
+  commission_credits: number;
+  revenue_credits: number;
+  status: number;
+  status_name: string;
+  buyer_user_id: string;
+  created_at: string;
+}
+
+export interface MarketRevenueOverviewDto {
+  revenue_credits: number;
+  total_sales: number;
+  commission_bps: number;
+  available_credits: number;
+  locked_credits: number;
+  paid_credits: number;
+  min_withdraw_credits: number;
+  settlement_note: string;
+}
+
+/** 提现状态机：1 待审 → 2 已通过 → 3 已打款；1/2 → 4 已驳回；1 → 5 已撤销 */
+export interface MarketWithdrawalDto {
+  id: string;
+  user_id: string;
+  space_id: string;
+  amount_credits: number;
+  status: number;
+  status_name: string;
+  channel: string;
+  account_info: Record<string, unknown>;
+  review_note: string | null;
+  paid_at: string | null;
+  /** 当前状态允许的下一步（approve/reject/payout/cancel） */
+  next_actions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketParseResultDto {
+  work_id: string;
+  novel_id: string | null;
+  structure: {
+    kind: string;
+    counts: MarketWorkCountsDto;
+    writable: boolean;
+    note: string;
+  };
+}
+
+export interface MarketCreatorParseDto {
+  novel_id: string;
+  title: string;
+  status: number;
+  finalized: boolean;
+  chapter_count: number;
+  total_word_count: number;
+  character_count: number;
+  episode_count: number;
+  suggested: { title: string; summary: string; kind: number; cover_uri: string | null };
+  writable: boolean;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   团队知识库（knowledge，第 6 批 B）—— 对照竞品 `df/user_knowledge` 29 端点
+   ══════════════════════════════════════════════════════════════ */
+
+export interface KnowledgeDirNodeDto {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  sort: number;
+  depth: number;
+  asset_count?: number;
+  created_at: string;
+  updated_at: string;
+  children?: KnowledgeDirNodeDto[];
+}
+
+export interface KnowledgeDirTreeDto {
+  list: KnowledgeDirNodeDto[];
+  tree: KnowledgeDirNodeDto[];
+  max_depth: number;
+  count: number;
+  /** 未挂目录的条目数（前端"未分类"节点用） */
+  unclassified_assets?: number;
+}
+
+export interface KnowledgeTagDto {
+  id: string;
+  name: string;
+  asset_count: number;
+  in_use: boolean;
+  created_at: string;
+}
+
+export interface KnowledgeResourceRefDto {
+  id: string;
+  kind: string;
+  uri: string;
+  preview_uri: string | null;
+  name: string;
+}
+
+export interface KnowledgeAssetDto {
+  id: string;
+  dir_id: string | null;
+  dir_name: string | null;
+  asset_id: string | null;
+  title: string;
+  content: string | null;
+  tags: string[];
+  /** 1 文本 / 2 资产引用 / 3 链接 */
+  source_type: number;
+  source_type_name: string;
+  created_by: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+  resource: KnowledgeResourceRefDto | null;
+}
+
+export interface KnowledgeAssetListDto {
+  list: KnowledgeAssetDto[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface KnowledgeInfoDto {
+  scope: string;
+  note: string;
+  dir_count: number;
+  asset_count: number;
+  tag_count: number;
+  asset_by_source_type: { text: number; asset_reference: number; link: number };
+  max_dir_depth: number;
+  unclassified_assets: number;
+}
+
+export interface KnowledgeScriptwriterDto {
+  user_id: string;
+  nickname: string;
+  asset_count: number;
+  last_updated_at: string | null;
+}
+
+
+
+// ── 首页配置 / 未读长轮询 / AB 实验位（模块 #1 收尾）─────────────────────
+// 契约：`GET /v1/home/config` / `GET /v1/home/unread?since=` / `GET /v1/home/ab?key=`
+export interface HomeSectionDto {
+  key: string;
+  visible: boolean;
+  sort: number;
+}
+
+export interface HomeConfigDto {
+  /** 未配置时为 null（此时 source=default，前端按内置顺序渲染） */
+  version: number | null;
+  scope: "global" | "space" | "default";
+  source: "default" | "db";
+  sections: HomeSectionDto[];
+  ab_slots: Array<{ key: string; experiment: string }>;
+  unread: { poll_timeout_ms: number; poll_interval_ms: number };
+  updated_at: string | null;
+}
+
+export interface HomeUnreadItemDto {
+  type: "task_event" | "task_status" | "share";
+  task_id: string;
+  event_type: string | null;
+  title: string | null;
+  created_at: string;
+}
+
+export interface HomeUnreadDto {
+  items: HomeUnreadItemDto[];
+  /** 下一次轮询带回的游标（超时时与入参相同，不会跳读） */
+  cursor: string;
+  waited_ms: number;
+  timed_out: boolean;
+  poll_after_ms: number;
+}
+
+export interface HomeAbDto {
+  key: string;
+  active: boolean;
+  experiment_id: string | null;
+  variant: string | null;
+  assigned: boolean;
+  reason?: string;
+}
+
+// ── 运营位（模块 #27 收尾）：/v1/ops/admin/promo-slots ───────────────────
+export interface PromoSlotDto {
+  id: string;
+  /** banner | pop_up | activity | creator */
+  slot: string;
+  title: string;
+  image_uri: string | null;
+  link_uri: string | null;
+  sort: number;
+  /** 1 启用 / 2 停用 */
+  status: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  view_count: number;
+  click_count: number;
+  created_by: string | null;
+  /** status 启用且当前时间在窗口内（与公开读接口同口径） */
+  active_now: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromoSlotListDto {
+  list: PromoSlotDto[];
+  count: number;
+  active_count: number;
+  slots: string[];
+}
+
+// ── 内容安全（模块 #25 收尾）──────────────────────────────────────────
+export interface CaptchaTicketDto {
+  /** 恒 false：未接入第三方行为验证码（本地算术题兜底） */
+  available: false;
+  provider: null;
+  mode: "local_arithmetic";
+  reason: string;
+  configured_provider: string | null;
+  integration: "not_implemented" | "none";
+  challenge: { a: number; b: number; op: "+" };
+  ticket: string;
+  expires_in: number;
+}
+
+export interface CaptchaVerifyDto {
+  passed: boolean;
+  reason?: "invalid_ticket" | "expired" | "used_or_expired" | "wrong_answer" | "verifier_unavailable";
+  retry_allowed: boolean;
+}
+
+export interface ModerationTextHitDto {
+  word: string;
+  index: number;
+  category: string;
+  level: number;
+}
+
+export interface ModerationTextDetectDto {
+  enabled: boolean;
+  risky: boolean;
+  action: "allow" | "review" | "block";
+  hits: ModerationTextHitDto[];
+  categories: string[];
+  scanned_chars: number;
+  scene: string | null;
+}
+
+export interface ModerationTaskStatusDto {
+  task_id: string;
+  status: number;
+  status_name: string;
+  reviewing: boolean;
+  rejected: boolean;
+  terminal: boolean;
+  mode: string;
+  capability: string;
+  result_count: number;
+  error: unknown;
+  finished_at: string | null;
+  events: Array<{ type: string; created_at: string; payload: unknown }>;
+}
+
+// ── 分享页批量下载（模块 #26 收尾）────────────────────────────────────
+// 公开接口：只认 token，打包范围由 share 行决定（不接受 task_ids）
+export interface ShareBatchDownloadDto {
+  url: string;
+  filename: string;
+  count: number;
+  expires_in: number;
+}
+
+// ── 画布快照恢复（模块 #11 收尾）──────────────────────────────────────
+export interface CanvasRecoverResultDto {
+  from_version: number;
+  snapshot_created_at: string;
+  nodes_recovered: number;
+  edges_recovered: number;
+  skipped_existing: number;
+  skipped_deleted: number;
+  skipped_dangling_edges: number;
+}
+
+// ── 第 6 批 A：创作者中心 crc / 运营增长 op / 活动 campaign ─────────────
+// 与 `apps/api/src/modules/{creator,op,campaign}` 的响应形状一致（字段全部 snake_case，
+// 与后端 DTO 同形，避免前端再做一层映射导致两边漂移）。
+export interface CreatorWorkDto {
+  id: string;
+  title: string;
+  summary: string;
+  kind: number;
+  kind_label: string | null;
+  category: string;
+  cover_uri: string | null;
+  uri: string | null;
+  /** 1 草稿 / 2 待审 / 3 已通过 / 4 已驳回 / 5 已下架 */
+  status: number;
+  status_label: string | null;
+  review_note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  creator_user_id: string;
+  space_id: string;
+  view_count: number;
+  like_count: number;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  creator?: { nickname: string; avatar_uri: string | null } | null;
+  liked?: boolean;
+  is_owner?: boolean;
+}
+
+export interface CreatorProfileDto {
+  user_id: string;
+  nickname: string;
+  bio: string;
+  avatar_uri: string | null;
+  status: number;
+  follower_count: number;
+  following_count: number;
+  like_count: number;
+  works: { total: number; approved: number; pending: number; rejected: number };
+  view_count: number;
+  created_at: string;
+  /** 是否具备审核权（作品所属 space 的管理员）——前端据此决定是否渲染审核按钮 */
+  can_review?: boolean;
+}
+
+export interface CreatorLikeResultDto {
+  asset_id: string;
+  liked: boolean;
+  like_count: number;
+  changed: boolean;
+}
+
+export interface CreatorFollowResultDto {
+  creator_user_id: string;
+  following: boolean;
+  follower_count: number;
+}
+
+export interface CreatorFollowRowDto {
+  user_id: string;
+  nickname: string | null;
+  bio?: string;
+  follower_count?: number;
+  followed_at?: string;
+}
+
+export interface CreatorIncentiveDto {
+  total_credits: number;
+  record_count: number;
+  by_category: Record<string, number>;
+  list: Array<{ id: string; credits: number; category: string; memo: string | null; created_at: string }>;
+  page: number;
+  page_size: number;
+}
+
+export interface CampaignDto {
+  id: string;
+  campaign_key: string | null;
+  title: string;
+  kind: number;
+  brief: string;
+  cover_uri: string | null;
+  reward_credits: number;
+  start_at: string | null;
+  end_at: string | null;
+  status: number;
+  space_id: string | null;
+  my_signup?: CampaignSignupDto | null;
+  signup_count?: number;
+  shortlist_count?: number;
+  open_for_signup?: boolean;
+}
+
+export interface CampaignSignupDto {
+  id: string;
+  campaign_id: string;
+  /** 1 已报名 / 2 已入围 / 3 已获奖 / 4 已取消 */
+  status: number;
+  status_label: string | null;
+  work_id: string | null;
+  nominated_at: string | null;
+  created_at: string;
+}
+
+export interface CampaignSignupResultDto {
+  signed_up: boolean;
+  replayed: boolean;
+  revived?: boolean;
+  rewarded_credits: number;
+  balance_after?: number | null;
+  signup: CampaignSignupDto | null;
+}
+
+export interface InviteCodeDto {
+  code: string | null;
+  credits: number;
+  invitee_count: number;
+  share_link?: string;
+}
+
+export interface DistributorOverviewDto {
+  me: { parent_user_id: string | null; commission_bps: number; bound_at: string | null };
+  invitee_count: number;
+  income_credits: number;
+  income_records: number;
+  pending_credits: number;
+}
+
+export interface RedeemCodeInfoDto {
+  found: boolean;
+  code: string;
+  credits: number;
+  /** -1 = 不限次 */
+  remaining_uses: number;
+  expires_at: string | null;
+  valid: boolean;
+  reason?: string;
+}
+
+export interface RedeemResultDto {
+  redeemed: boolean;
+  replayed: boolean;
+  already_redeemed: boolean;
+  code: string;
+  credits: number;
+  balance_after?: number;
+}
+
+export interface DailyRewardDto {
+  rewarded: boolean;
+  already_rewarded: boolean;
+  day: string;
+  credits: number;
+  today_credits: number;
+  balance_after?: number;
+}
+
+export interface Paged<T> {
+  list: T[];
+  count: number;
+  page: number;
+  page_size: number;
 }

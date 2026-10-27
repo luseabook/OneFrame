@@ -21,6 +21,7 @@ import { parseOrThrow } from "../../common/zod";
 import { NovelService } from "./novel.service";
 import {
   chapterListQuerySchema,
+  reopenSchema,
   chapterOutlineGenerateSchema,
   charactersGenerateSchema,
   contentAnalysisSchema,
@@ -332,6 +333,18 @@ export class NovelController {
   async finalize(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
     const { spaceId, userId } = this.ctx(req);
     return this.novels.finalize(spaceId, ntId, parseOrThrow(novelFinalizeSchema, body ?? {}), userId);
+  }
+
+  /**
+   * 撤回定稿：status 16 → 1。
+   *
+   * 被拆集引用时返回 **400105** + `reason=referenced_by_split`（不回退、不静默），
+   * 理由与判据见 `NovelService.reopen` 的注释。
+   */
+  @Post(":ntId/reopen")
+  async reopen(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = this.ctx(req);
+    return this.novels.reopen(spaceId, ntId, parseOrThrow(reopenSchema, body ?? {}));
   }
 
   @Get(":ntId/version/list")

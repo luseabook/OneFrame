@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { reportResolveSchema } from "@app/shared";
@@ -52,6 +52,29 @@ const priceCreateSchema = z.object({
   strikeCredits: z.number().int().min(0).optional(),
   memberCredits: z.number().int().min(0).nullable().optional(),
   timeLimitedCredits: z.number().int().min(0).nullable().optional(),
+});
+
+/**
+ * 运营位四类（`promo_slots.slot`）：banner 首页横幅 / pop_up 弹窗 /
+ * activity 活动入口 / creator 创作者首页卡。
+ * 枚举钉在这里而不是只在 DB 里约束，是为了配错时立刻 400101 而不是"存进去但不生效"。
+ */
+const PROMO_SLOT_KINDS = ["banner", "pop_up", "activity", "creator"] as const;
+
+const promoSlotBaseSchema = z.object({
+  title: z.string().max(120).optional(),
+  image_uri: z.string().max(1000).nullable().optional(),
+  link_uri: z.string().max(1000).nullable().optional(),
+  sort: z.number().int().min(-9999).max(9999).optional(),
+  /** 1 启用 / 2 停用（软态，保留历史投放记录） */
+  status: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** ISO 时间；null = 不限 */
+  starts_at: z.string().max(40).nullable().optional(),
+  ends_at: z.string().max(40).nullable().optional(),
+});
+
+const promoSlotCreateSchema = promoSlotBaseSchema.extend({
+  slot: z.enum(PROMO_SLOT_KINDS),
 });
 
 @Controller("ops/admin")
@@ -178,6 +201,38 @@ export class AdminController {
   @Post("shares/:id/revoke")
   revokeShare(@Param("id") id: string) {
     return this.admin.revokeShare(id);
+  }
+
+  // ── 运营位 CRUD（模块 #27 收尾）──────────────────────────────────────
+  // 列表带 `active_now`（status 启用且当前时间在窗口内），运营不必自己比时间戳。
+
+  @Get("promo-slots")
+  promoSlots(@Query("slot") slot?: string, @Query("status") status?: string) {
+    return this.admin.listPromoSlots({
+      slot,
+      status: status === undefined || status === "" ? undefined : Number(status),
+    });
+  }
+
+  @Post("promo-slots")
+  createPromoSlot(
+    @Body() body: unknown,
+    @Req() req: FastifyRequest & { adminAuth?: { adminId: string } },
+  ) {
+    return this.admin.createPromoSlot(
+      req.adminAuth?.adminId ?? "",
+      parseOrThrow(promoSlotCreateSchema, body),
+    );
+  }
+
+  @Put("promo-slots/:id")
+  updatePromoSlot(@Param("id") id: string, @Body() body: unknown) {
+    return this.admin.updatePromoSlot(id, parseOrThrow(promoSlotBaseSchema, body));
+  }
+
+  @Delete("promo-slots/:id")
+  deletePromoSlot(@Param("id") id: string) {
+    return this.admin.deletePromoSlot(id);
   }
 
   // ── 订单 / 退款（api-spec §10.5；运营审核后操作，工单与退款记录留痕） ──

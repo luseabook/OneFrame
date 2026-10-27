@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProjectDto } from "~/types/api";
+import type { HomeAbDto, HomeConfigDto, HomeUnreadDto, ProjectDto } from "~/types/api";
 // 工作台首页：1:1 对齐竞品 ReelMate App 首页（home.png）
 // 结构：居中大标题 → 双工作流入口卡 → 工具矩阵 → 活动轮播 → 案例墙
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
@@ -82,19 +82,139 @@ const showOnboarding = computed(() => auth.state.value.onboarded === false);
 async function dismissOnboarding(): Promise<void> {
   await auth.dismissOnboarding();
 }
+
+// ── 首页配置驱动 / 未读长轮询 / AB 位（模块 #1 收尾）────────────────────
+//
+// 三件事都由服务端说了算（`GET /home/config`、`/home/unread`、`/home/ab`）：
+// 1. 板块**显隐与顺序**来自 config；拿不到配置就用内置默认（首页不能白屏）。
+// 2. 未读走**长轮询**：服务端最多挂 25s，有增量立即返回；返回即续挂。
+//    不用 WebSocket 的理由见 apps/api/src/modules/home/home.service.ts 的方法注释
+//    （红点只要一个比特，长轮询可随客户端断开即时释放，且不引入第二套推送语义）。
+// 3. AB 位按 config 声明的 `ab_slots[].experiment` 取变体；一人一变体由服务端保证。
+const DEFAULT_SECTION_ORDER: Record<string, number> = {
+  hero: 10,
+  workflow: 20,
+  canvas: 30,
+  tools: 40,
+  banner: 50,
+  recent: 60,
+};
+const homeConfig = ref<HomeConfigDto | null>(null);
+const configLoaded = ref(false);
+const unreadCount = ref(0);
+const abVariant = ref<string | null>(null);
+let unreadTimer: ReturnType<typeof setTimeout> | undefined;
+let unreadDisposed = false;
+
+const sectionMap = computed(() => {
+  const map = new Map<string, { visible: boolean; sort: number }>();
+  for (const section of homeConfig.value?.sections ?? []) {
+    map.set(section.key, { visible: section.visible, sort: section.sort });
+  }
+  return map;
+});
+
+/** 未配置时默认可见（配置是"覆盖"，不是"白名单"） */
+function sectionVisible(key: string): boolean {
+  const section = sectionMap.value.get(key);
+  return section ? section.visible : true;
+}
+
+function sectionOrder(key: string): number {
+  return sectionMap.value.get(key)?.sort ?? DEFAULT_SECTION_ORDER[key] ?? 999;
+}
+
+/** 只有在拿到真实运营配置时才启用 flex 排序，避免默认布局行为被改变 */
+function sectionStyle(key: string): Record<string, number> {
+  return { order: sectionOrder(key) };
+}
+
+async function loadHomeConfig(): Promise<void> {
+  try {
+    homeConfig.value = await api.get<HomeConfigDto>("/home/config");
+  } catch {
+    // 配置不可用不是致命错误：退回内置默认，保证首页可用
+    homeConfig.value = null;
+  } finally {
+    configLoaded.value = homeConfig.value !== null && homeConfig.value.sections.length > 0;
+  }
+}
+
+async function loadAbAssignment(): Promise<void> {
+  const slot = homeConfig.value?.ab_slots?.[0];
+  if (!slot) return;
+  try {
+    const result = await api.get<HomeAbDto>(`/home/ab?key=${encodeURIComponent(slot.experiment)}`);
+    abVariant.value = result.active ? result.variant : null;
+  } catch {
+    abVariant.value = null;
+  }
+}
+
+/** AB 位只换文案：变体由服务端分配，前端不猜 */
+const abCtaLabel = computed(() => (abVariant.value === "variant_b" ? "立即开始创作" : "开始创作"));
+
+async function pollUnread(since?: string): Promise<void> {
+  if (unreadDisposed) return;
+  try {
+    const query = since ? `?since=${encodeURIComponent(since)}` : "";
+    const data = await api.get<HomeUnreadDto>(`/home/unread${query}`);
+    if (data.items.length > 0) unreadCount.value += data.items.length;
+    scheduleUnread(data.cursor);
+  } catch {
+    // 失败退避 5s：断网时不打忙轮询
+    scheduleUnread(since, 5000);
+  }
+}
+
+function scheduleUnread(cursor?: string, delayMs = 0): void {
+  if (unreadDisposed) return;
+  if (unreadTimer) clearTimeout(unreadTimer);
+  unreadTimer = setTimeout(() => void pollUnread(cursor), delayMs);
+}
+
+function openUnread(): void {
+  unreadCount.value = 0;
+  void router.push("/tasks");
+}
+
+onMounted(async () => {
+  await loadHomeConfig();
+  await loadAbAssignment();
+  scheduleUnread();
+});
+
+onUnmounted(() => {
+  unreadDisposed = true;
+  if (unreadTimer) clearTimeout(unreadTimer);
+});
 </script>
 
 <template>
-  <main class="page">
+  <main class="page" :class="{ 'config-flex': configLoaded }">
     <!-- 新手引导条：仅未关闭时展示（PRD 增补 §3.2）；ClientOnly 避免 SSR/客户端分支不一致 -->
     <ClientOnly>
       <OnboardingBar v-if="showOnboarding" @dismiss="dismissOnboarding" />
     </ClientOnly>
 
-    <h1 class="hero-title">您的专属AI漫剧工作室</h1>
+    <h1 v-if="sectionVisible('hero')" class="hero-title" :style="sectionStyle('hero')">
+      您的专属AI漫剧工作室
+      <button v-if="unreadCount > 0" type="button" class="unread-badge" @click="openUnread">
+        {{ unreadCount }} 条新动态
+      </button>
+    </h1>
 
-    <section class="hero-cards">
-      <button type="button" class="flow-card" @click="openCreate">
+    <p v-if="abVariant" class="ab-cta" :data-variant="abVariant">
+      <button type="button" class="ab-btn" @click="openCreate">{{ abCtaLabel }}</button>
+    </p>
+
+    <section
+      v-if="sectionVisible('workflow') || sectionVisible('canvas')"
+      class="hero-cards"
+      :class="{ single: !(sectionVisible('workflow') && sectionVisible('canvas')) }"
+      :style="sectionStyle(sectionVisible('workflow') ? 'workflow' : 'canvas')"
+    >
+      <button v-if="sectionVisible('workflow')" type="button" class="flow-card" @click="openCreate">
         <div class="flow-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="m14.5 4.5 5 5L8 21H3v-5Z" />
@@ -109,7 +229,7 @@ async function dismissOnboarding(): Promise<void> {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
       </button>
-      <button type="button" class="canvas-card" @click="comingSoon('无限画布')">
+      <button v-if="sectionVisible('canvas')" type="button" class="canvas-card" @click="comingSoon('无限画布')">
         <div class="flow-icon flat" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 4v16M16 4v16M4 8h16M4 16h16" />
@@ -126,7 +246,7 @@ async function dismissOnboarding(): Promise<void> {
       </button>
     </section>
 
-    <section class="tool-row">
+    <section v-if="sectionVisible('tools')" class="tool-row" :style="sectionStyle('tools')">
       <div v-for="t in tools" :key="t.label" class="tool-cell">
         <button
           type="button"
@@ -173,7 +293,7 @@ async function dismissOnboarding(): Promise<void> {
       </div>
     </section>
 
-    <section class="carousel">
+    <section v-if="sectionVisible('banner')" class="carousel" :style="sectionStyle('banner')">
       <button class="arrow" aria-label="上一个" @click="bannerIndex = (bannerIndex + banners.length - 1) % banners.length">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 6-6 6 6 6" /></svg>
       </button>
@@ -207,7 +327,7 @@ async function dismissOnboarding(): Promise<void> {
       />
     </div>
 
-    <section class="cases">
+    <section v-if="sectionVisible('recent')" class="cases" :style="sectionStyle('recent')">
       <div class="cases-head">
         <h3>最近项目</h3>
         <NuxtLink to="/projects" class="more">查看全部
@@ -272,6 +392,52 @@ async function dismissOnboarding(): Promise<void> {
   font-size: 28px;
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+
+/* 只有在拿到运营配置时才启用 flex 排序（order 仅对 flex/grid 子项生效）；
+   默认不启用，保证"没有配置"时布局与以前完全一致。 */
+.page.config-flex {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 未读红点：长轮询增量计数，点击清零并去任务中心 */
+.unread-badge {
+  margin-left: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #7769ff55;
+  background: #7769ff1f;
+  color: #cfc8ff;
+  font-size: 12px;
+  font-weight: 500;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.unread-badge:hover {
+  background: #7769ff33;
+}
+
+/* AB 位：只换文案，变体名放在 data-variant 上便于核对（不向用户展示内部实验名） */
+.ab-cta {
+  margin: -20px 0 28px;
+  text-align: center;
+}
+.ab-btn {
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid #7769ff66;
+  background: linear-gradient(120deg, #5d4ff0, #8a7dff);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ab-btn:hover {
+  filter: brightness(1.08);
+}
+.hero-cards.single {
+  grid-template-columns: minmax(0, 640px);
 }
 
 /* ── 双工作流入口卡 ── */

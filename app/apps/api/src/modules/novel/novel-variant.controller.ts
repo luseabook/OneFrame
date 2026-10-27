@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
 import { z } from "zod";
 import { AppError, ErrorCode, novelScriptGenerateSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
@@ -7,6 +7,7 @@ import { NovelVariantService } from "./novel-variant.service";
 import {
   chapterOutlineGenerateSchema,
   charactersGenerateSchema,
+  outlinePatchSchema,
   episodeOutlineGenerateSchema,
   fissionCreateSchema,
   overseasSchema,
@@ -100,6 +101,48 @@ export class NovelFissionController {
   async listEpisodesOutline(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
     const { spaceId } = ctx(req);
     return this.variants.listEpisodesOutline(spaceId, ntId);
+  }
+
+  // ── 薄路径（路径级 1:1，竞品 routes.txt:535,542,537,540）──────────
+
+  /** 分卡章纲（竞品 `fission_script/chapters_outline`）：真实行优先，否则由总纲节拍派生投影 */
+  @Get("chapters_outline")
+  async chaptersOutline(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
+    const { spaceId } = ctx(req);
+    return this.variants.fissionChapterOutlines(spaceId, ntId);
+  }
+
+  /** 单条创意方案（竞品 `fission_script/idea/:ni_id`） */
+  @Get("idea/:niId")
+  async idea(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("niId") niId: string) {
+    const { spaceId } = ctx(req);
+    return this.variants.getIdea(spaceId, ntId, niId);
+  }
+
+  /** 单个角色（竞品 `fission_script/characters/:nc_id`） */
+  @Get("characters/:ncId")
+  async character(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
+    const { spaceId } = ctx(req);
+    return this.variants.getCharacter(spaceId, ntId, ncId);
+  }
+
+  /** 单条集纲（竞品 `fission_script/episodes_outline/:neo_id`） */
+  @Get("episodes_outline/:neoId")
+  async episodeOutline(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("neoId") neoId: string) {
+    const { spaceId } = ctx(req);
+    return this.variants.getEpisodeOutline(spaceId, ntId, neoId);
+  }
+
+  /** 单条集纲编辑（同路径的写动作；与其它大纲编辑同口径） */
+  @Patch("episodes_outline/:neoId")
+  async patchEpisodeOutline(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("neoId") neoId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = ctx(req);
+    return this.variants.patchEpisodeOutline(spaceId, ntId, neoId, parseOrThrow(outlinePatchSchema, body ?? {}));
   }
 
   /** 分集剧本（复用主链写正文/版本逻辑） */

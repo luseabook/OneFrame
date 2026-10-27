@@ -1057,7 +1057,19 @@ describe("novel e2e", () => {
       expect((applyAllAgain.data as { applied: number }).applied).toBe(0);
     }
 
-    // reject_all 处理剩余
+    // reject_all 处理剩余。
+    // ⚠️ 不能假设"此时一定还有 pending"：mock 每轮产出几集 diff 由内容哈希决定（1 或 2 集），
+    // 上面的 apply_all 有可能刚好把唯一一集应用掉 —— 那样这里 rejected=0 是正确行为、断言却假红。
+    // 所以先补一轮 chat 把待确认变更造出来，再验证 reject_all。
+    if ((await pendingOf(novelBSession)).length === 0) {
+      const refill = await inject(
+        "POST",
+        `/novel/${novelA2}/script_edit_agent/sessions/${novelBSession}/chat`,
+        { content: "再给一版更冷的开场，把信息压到最少的台词里" },
+        userA,
+      );
+      expect(refill.code).toBe(0);
+    }
     const rejectAll = await inject(
       "POST",
       `/novel/${novelA2}/script_edit_agent/sessions/${novelBSession}/reject_all`,

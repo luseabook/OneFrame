@@ -1,15 +1,21 @@
 <script setup lang="ts">
+import type { TeamTempInfoDto } from "~/types/api";
+
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
 /**
  * 团队管理（cam 域）
  *
  * 结构对齐参照产品实测（2026-10-26 登录态采集）：
- *   tabs = 成员管理 / 积分管理 / 规则说明
+ *   tabs = 成员管理 / 积分管理 / 角色权限 / 规则说明
  *   成员表格 8 列 = 成员 / 账号 / 角色 / 成员组 / 参与项目形式 / 当前积分 / 状态 / 备注
  *
  * 关键语义（ADR-011）：团队积分池 = 该 space 的 credit_accounts.balance；
  * 成员「当前积分」是**已分配额度**（credits_quota），不是余额，回收会回落。
+ *
+ * 「角色权限」页签（第 9 批 B）：权限码目录（70 条：竞品实测 53 细码 + 10 粗码
+ * + 5 影视版码 + 2 团队管理扩展码）与角色 power_list 的勾选/保存，
+ * **本批只存储不拦截**（边界写在 `components/team/TeamPermissionMatrix.vue` 里）。
  */
 
 interface TeamInfo {
@@ -102,6 +108,7 @@ const statusStr = computed({
 const tabs = computed(() => [
   { value: "members", label: "成员管理", badge: total.value },
   { value: "points", label: "积分管理" },
+  { value: "permissions", label: "角色权限" },
   { value: "rules", label: "规则说明" },
 ]);
 
@@ -189,6 +196,32 @@ async function loadRoles(): Promise<void> {
   const data = await api.get<{ list: RoleDto[] }>("/cam/role/list");
   roles.value = data.list;
 }
+
+/**
+ * 团队模型开关矩阵（`GET /cam/temp-info`）。
+ *
+ * 页签懒加载：只有点开「角色权限」才拉，避免团队页首屏多一个请求。
+ * 展示口径与后端一致：可推导的给真值，未取证项显示「未取证」而不是「不支持」。
+ */
+const tempInfo = ref<TeamTempInfoDto | null>(null);
+const tempInfoLoading = ref(false);
+async function loadTempInfo(): Promise<void> {
+  if (tempInfo.value || tempInfoLoading.value) return;
+  tempInfoLoading.value = true;
+  try {
+    tempInfo.value = await api.get<TeamTempInfoDto>("/cam/temp-info");
+  } catch {
+    tempInfo.value = null;
+  } finally {
+    tempInfoLoading.value = false;
+  }
+}
+
+/** 切到「角色权限」页签时顺带拉开关矩阵 */
+watch(tab, (next) => {
+  if (next === "permissions") void loadTempInfo();
+});
+
 async function loadPoints(): Promise<void> {
   const [f, r] = await Promise.all([
     api.get<{ list: FlowDto[]; total: number }>("/cam/team/points-flow/list?page=1&page_size=50"),
@@ -731,6 +764,30 @@ onMounted(bootstrap);
     </section>
 
     <!-- 规则说明 -->
+    <!-- 角色权限（第 9 批 B）：权限码目录（70 条）+ 角色 power_list 勾选保存 -->
+    <section v-else-if="tab === 'permissions'" class="tm-panel">
+      <TeamPermissionMatrix :roles="roles" :can-manage="canManage" />
+
+      <div class="tm-switches">
+        <h3 class="tm-switches-title">团队模型开关（<code>GET /cam/temp-info</code>）</h3>
+        <p v-if="tempInfoLoading" class="tm-muted">加载中…</p>
+        <p v-else-if="!tempInfo" class="tm-muted">暂无开关数据</p>
+        <ul v-else class="tm-switch-list">
+          <li><span>影视版</span><strong>{{ tempInfo.film_enabled ? "已开通" : "未开通" }}</strong></li>
+          <li><span>Agent 白名单</span><strong>{{ tempInfo.agent_whitelist ? "已开通" : "未开通" }}</strong></li>
+          <li><span>自带 API Key（BYOK）</span><strong>{{ tempInfo.api_key_white ? "已配置" : "未配置" }}</strong></li>
+          <li><span>Seedance 系列模型</span><strong>{{ tempInfo.seedance_is_support ? "支持" : "不支持" }}</strong></li>
+          <li v-for="key in tempInfo.unverified" :key="key">
+            <span>{{ key }}</span><strong class="tm-unverified">未取证</strong>
+          </li>
+        </ul>
+        <p v-if="tempInfo" class="tm-muted tm-switch-note">
+          开关按 <code>{{ tempInfo.derived_from }}</code> 派生；「未取证」项服务端没有判定依据，
+          未用假 false 冒充「不支持」。
+        </p>
+      </div>
+    </section>
+
     <section v-else class="tm-panel tm-rules">
       <h2 class="tm-h2">团队积分怎么算</h2>
       <ul>
@@ -908,5 +965,16 @@ onMounted(bootstrap);
 .tm-rank-no { width: 20px; color: var(--text-3); }
 .tm-rank-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-rules ul { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); font-size: 13px; color: var(--text-2); }
+/* ── 角色权限页签的「模型开关」小卡 ── */
+.tm-switches { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--line-1); }
+.tm-switches-title { margin: 0 0 var(--space-3); font-size: 14px; color: var(--text-1); }
+.tm-switches-title code { background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.tm-switch-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2) var(--space-4); font-size: 13px; }
+.tm-switch-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 6px 10px; background: var(--bg-2); border-radius: var(--radius-2); color: var(--text-2); }
+.tm-switch-list strong { color: var(--text-1); font-weight: 600; }
+.tm-unverified { color: var(--warn-1, #f0c48a) !important; }
+.tm-switch-note { margin: var(--space-3) 0 0; font-size: 12px; color: var(--text-3); }
+.tm-switch-note code { background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.tm-muted { font-size: 12px; color: var(--text-3); }
 @media (max-width: 960px) { .tm-split { grid-template-columns: 1fr; } }
 </style>

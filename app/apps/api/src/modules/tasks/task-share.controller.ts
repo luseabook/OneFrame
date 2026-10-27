@@ -14,6 +14,16 @@ export class PublicShareController {
   async get(@Param("token") token: string) {
     return this.tasks.publicShare(token);
   }
+
+  /**
+   * 分享页「打包下载」：公开可访问（只认 token），打包范围只由 share 行决定，
+   * 不接受任何 task_ids 入参（越权读取=事故，见 tasks.service.publicShareDownload 注释）。
+   */
+  @Public()
+  @Post("share/:token/batch-download")
+  async batchDownload(@Param("token") token: string) {
+    return this.tasks.publicShareDownload(token);
+  }
 }
 
 @Controller()

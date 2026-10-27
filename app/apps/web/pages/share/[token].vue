@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ShareView } from "~/types/api";
+import type { ShareBatchDownloadDto, ShareView } from "~/types/api";
 import { statusLabel } from "~/types/api";
 
 definePageMeta({ ssr: false });
@@ -15,6 +15,30 @@ const reportDetail = ref("");
 const reportContact = ref("");
 const reportMsg = ref("");
 const reporting = ref(false);
+const downloading = ref(false);
+const downloadMsg = ref("");
+
+/**
+ * 打包下载（模块 #26 收尾）。
+ *
+ * 这里**不带任何凭证**：`POST /share/:token/batch-download` 是公开只读端点，只认本页面的
+ * share token；打包范围由服务端按 share 行决定（不接受前端传 task_ids），所以越权读取
+ * 在服务端就被挡住，前端不参与授权判断。
+ */
+async function downloadAll(): Promise<void> {
+  downloading.value = true;
+  downloadMsg.value = "";
+  try {
+    const data = await api.post<ShareBatchDownloadDto>(`/share/${String(route.params.token)}/batch-download`, {});
+    downloadMsg.value = `已打包 ${data.count} 个文件`;
+    // 预签名 URL 有时效（默认 1 小时），直接交给浏览器下载/打开
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  } catch (e) {
+    downloadMsg.value = e instanceof Error ? e.message : "打包失败";
+  } finally {
+    downloading.value = false;
+  }
+}
 
 async function submitReport(): Promise<void> {
   reporting.value = true;
@@ -76,6 +100,15 @@ onMounted(async () => {
       <p v-else class="muted">生成完成后即可查看结果。</p>
 
       <p v-if="share.error?.message" class="error">{{ share.error.message }}</p>
+
+      <!-- 批量下载：公开接口（只认本页 token），打包范围由服务端按 share 行决定 -->
+      <div v-if="share.results.length > 0" class="batch">
+        <Button size="sm" :loading="downloading" @click="downloadAll">
+          {{ downloading ? "打包中…" : "打包下载全部" }}
+        </Button>
+        <span v-if="downloadMsg" class="muted small">{{ downloadMsg }}</span>
+      </div>
+
       <p class="muted small">链接有效期至 {{ new Date(share.expires_at).toLocaleString() }} · 内容由 AI 生成，请仔细甄别</p>
 
       <div class="report">
@@ -143,6 +176,12 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+.batch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 h1 {
   margin: 0;

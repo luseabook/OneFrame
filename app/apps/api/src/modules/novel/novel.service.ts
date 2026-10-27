@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import {
+  episodes as projectEpisodes,
   novelChapterOutlines,
   novelChapters,
   novelCharacters,
@@ -9,12 +10,14 @@ import {
   novelScriptVersions,
   novelWorldviews,
   novels,
+  scriptProjects,
 } from "@app/db";
 import {
   AppError,
   ErrorCode,
   NOVEL_LIMITS,
   NovelStatus,
+  ProjectSourceType,
   newId,
   type ChapterOutlinesPutRequest,
   type CreateNovelRequest,
@@ -281,8 +284,12 @@ export class NovelService {
 
     // 竞品 analyze 入口是"上传 → 建拆解任务 → 内容分析"，即上传即拆解。
     // 这里同样在创建时就把原文切成章节，用户打开工作台时第一步已经是完成态。
+    //
+    // ⚠️ 只对 `source_type=1`（小说改编）分章：原创本子（2）的 source_text 是**创作灵感**
+    // 而不是小说正文，把一句灵感切成"第1章/第2章"是没有意义的假进度，
+    // 还会让工作台的"分章"步骤假装已完成（原创链的入口是创意方案，见 novel-original.service）。
     let chapterCount = 0;
-    if (sourceText) {
+    if (sourceText && input.source_type === 1) {
       chapterCount = (await this.splitIntoChapters(row, sourceText, undefined)).count;
     }
     return { ...novelDto(row), chapter_count: chapterCount };
@@ -1426,6 +1433,142 @@ export class NovelService {
       novel: novelDto(fresh!),
       snapshot_version_id: snapshotVersionId,
     };
+  }
+
+  /**
+   * 撤回定稿：`status` 16 → 1，让本子重新可编辑。
+   *
+   * 三个必须说清的点：
+   *
+   * 1. **只有已定稿才可撤回**。已是草稿时返回 400100 + `reason=not_finalized`
+   *    （不是静默 `ok:true`）——前端据此能区分"刚撤回成功"和"本来就没定稿"。
+   * 2. **已被拆集引用时拒绝**（`400105`）：拆集是单向快照，本子一旦被制片工坊
+   *    `episodes/split` 复制进项目，撤回定稿再改正文会让"项目里的剧本"与
+   *    "剧本工厂的剧本"永久分叉，且用户没有任何地方能看到这个分叉。
+   *    明确拒绝 + 回显引用它的项目列表，是把选择权交回用户（先删项目，再撤回）。
+   * 3. **不删版本、不动正文**：撤回只改状态（以及 meta 里的审计字段）。
+   *    已生成的整本/单集快照继续保留，用户可以随时对比"定稿那一稿"。
+   */
+  async reopen(spaceId: string, ntId: string, input: { memo?: string } = {}) {
+    const novel = await this.requireNovel(spaceId, ntId);
+    this.assertNotArchived(novel, "reopen");
+    if (novel.status !== NovelStatus.FINALIZED) {
+      throw new AppError(ErrorCode.BAD_REQUEST, "novel is not finalized; nothing to reopen", {
+        reason: "not_finalized",
+        status: novel.status,
+      });
+    }
+    const references = await this.findSplitReferences(novel);
+    if (references.length > 0) {
+      // 400105 = ASSET_NOT_READY（api-spec 的"引用资产未定稿"语义位）；号由 §3.3 契约固定，
+      // 具体原因放在 details.reason，前端按 reason 出文案而不是按码猜。
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "novel has been used as a split source; reopen refused", {
+        reason: "referenced_by_split",
+        projects: references,
+        hint: "如需改稿，请先在制片工坊删除（或重建）这些项目，再撤回定稿",
+      });
+    }
+    const [row] = await db
+      .update(novels)
+      .set({
+        status: NovelStatus.DRAFT,
+        meta: {
+          ...this.meta(novel),
+          reopen_memo: input.memo ?? "",
+          reopened_at: new Date().toISOString(),
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(novels.id, novel.id))
+      .returning();
+    return {
+      ok: true,
+      status: NovelStatus.DRAFT,
+      previous_status: NovelStatus.FINALIZED,
+      references: [] as Array<{ project_id: string; title: string; episodes: number }>,
+      novel: novelDto(row ?? novel),
+    };
+  }
+
+  /**
+   * 找出"已经把这个本子拆过集"的制片工坊项目。
+   *
+   * 判据分两级（迁移 0026 之后）：
+   *
+   * 1. **精确**：`script_projects.source_novel_id = 本子 id`。
+   *    这是拆集时由 `script` 域写下的来源外键，能覆盖"项目正文后来被人工改写"的情形。
+   * 2. **回落：正文快照比对**（兼容 0026 之前拆出的历史项目 —— 那时没有该列，
+   *    只把 `source_type` 置成 1（NOVEL)）：项目里任意一集正文（去空白后）与本子某集正文
+   *    完全相同即认定被引用。只有在精确判据**一条都没命中**时才跑，避免全表扫。
+   *
+   * 返回项带 `matched_by`，让拒绝原因可解释（前端/排障能区分"外键命中"与"文本推断"）。
+   */
+  private async findSplitReferences(
+    novel: NovelRow,
+  ): Promise<Array<{ project_id: string; title: string; episodes: number; matched_by: "source_novel_id" | "text_snapshot" }>> {
+    // ── 1. 精确：来源外键（含已归档项目：归档不等于"没用它拆过集"）
+    const precise = await db
+      .select({ projectId: scriptProjects.id, title: scriptProjects.title })
+      .from(scriptProjects)
+      .where(and(eq(scriptProjects.spaceId, novel.spaceId), eq(scriptProjects.sourceNovelId, novel.id)));
+    if (precise.length > 0) {
+      const counts = await db
+        .select({ projectId: projectEpisodes.projectId, n: sql<number>`count(*)::int` })
+        .from(projectEpisodes)
+        .where(
+          inArray(
+            projectEpisodes.projectId,
+            precise.map((row) => row.projectId),
+          ),
+        )
+        .groupBy(projectEpisodes.projectId);
+      const byProject = new Map(counts.map((row) => [String(row.projectId), row.n]));
+      return precise.map((row) => ({
+        project_id: String(row.projectId),
+        title: row.title,
+        episodes: byProject.get(String(row.projectId)) ?? 0,
+        matched_by: "source_novel_id" as const,
+      }));
+    }
+
+    // ── 2. 回落：正文快照（历史数据兼容）
+    const ownEpisodes = await db.select().from(novelEpisodes).where(eq(novelEpisodes.novelId, novel.id));
+    const normalize = (text: string): string => text.replace(/\s+/g, "");
+    const signatures = new Set(
+      ownEpisodes.map((row) => normalize(row.scriptText)).filter((text) => text.length >= 20),
+    );
+    if (signatures.size === 0) return [];
+    const rows = await db
+      .select({
+        projectId: scriptProjects.id,
+        title: scriptProjects.title,
+        text: projectEpisodes.scriptText,
+      })
+      .from(scriptProjects)
+      .innerJoin(projectEpisodes, eq(projectEpisodes.projectId, scriptProjects.id))
+      .where(
+        and(
+          eq(scriptProjects.spaceId, novel.spaceId),
+          eq(scriptProjects.sourceType, ProjectSourceType.NOVEL),
+          isNull(scriptProjects.archivedAt),
+        ),
+      );
+    const hit = new Map<
+      string,
+      { project_id: string; title: string; episodes: number; matched_by: "source_novel_id" | "text_snapshot" }
+    >();
+    for (const row of rows) {
+      if (!signatures.has(normalize(row.text ?? ""))) continue;
+      const key = String(row.projectId);
+      const previous = hit.get(key);
+      hit.set(key, {
+        project_id: key,
+        title: row.title,
+        episodes: (previous?.episodes ?? 0) + 1,
+        matched_by: "text_snapshot",
+      });
+    }
+    return [...hit.values()];
   }
 
   async listVersions(spaceId: string, ntId: string, query: ListQuery) {

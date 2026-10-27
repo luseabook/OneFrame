@@ -16,6 +16,7 @@ import {
   type NovelEditSessionCreateRequest,
 } from "@app/shared";
 import { db } from "../../db/database";
+import { RedisService } from "../../redis/redis.service";
 import { NovelLlmService } from "./novel-llm.service";
 import { NovelService } from "./novel.service";
 import {
@@ -48,6 +49,8 @@ import type { SessionSwitchRequest } from "./novel.schemas";
  *
  * 3. **并发/中止/心跳都要显式状态**，不允许静默：
  *    - 同一会话同时 chat → `746005 AGENT_TURN_IN_FLIGHT`（与 `agent` 域同码）；
+ *      互斥用 **Redis `SET NX`**（不是进程内 Set）：API 多副本时进程内锁等于没锁，
+ *      两个副本会各自认为"我拿到了"，同一会话就会同时跑两轮、双写 pending/消息。
  *    - 已 closed 的会话再 chat → `400100` + reason=`session_closed`；
  *    - 重复 apply 同一 pending → `746002 VERSION_CONFLICT`（防止版本表被重放刷两遍）；
  *    - abort 无在途轮次 → `aborted:false` + reason=`no_turn_in_flight`（不是假装成功）。
@@ -55,21 +58,29 @@ import type { SessionSwitchRequest } from "./novel.schemas";
 @Injectable()
 export class NovelAgentService {
   /**
-   * 进程内轮次锁。
+   * 轮次互斥：**Redis `SET NX` + TTL**。
    *
    * 为什么不用 DB 行锁：`chat` 的临界区跨一次 LLM 调用（最长 30s），
-   * 用 `SELECT ... FOR UPDATE` 会长时间占住连接；而"同一会话不允许并发轮次"
-   * 本质是单实例内的互斥语义（会话不属于某个具体进程），用内存集合足够，
-   * 且**失败是显式的**（返回 746005），不是排队等锁。
+   * `SELECT ... FOR UPDATE` 会长时间占住连接池；也不用进程内 Set —— 多副本部署时
+   * 进程内锁等于没锁（两个副本各自认为自己是唯一持有者，同一会话会同时跑两轮）。
+   *
+   * TTL 是**租约**而不是业务超时：正常路径在 finally 里主动释放；
+   * TTL（60s）只兜底"进程崩在 LLM 调用中间"，避免会话被永久锁死。
+   * 释放时用 Lua 比对 token —— 否则 A 的锁超时后 B 拿到锁，A 的 finally 会把 B 的锁删掉。
    */
-  private readonly busy = new Set<string>();
-  /** 已请求中止的会话（下一轮轮次在 LLM 返回后检查并放弃结果） */
-  private readonly abortRequested = new Set<string>();
+  private readonly lockKey = (sid: string): string => `novel:agent:turn:${sid}`;
+  /** 中止标记（跨副本可见；TTL 同样 60s，正常路径读取后即删） */
+  private readonly abortKey = (sid: string): string => `novel:agent:abort:${sid}`;
+  private static readonly LOCK_TTL_S = 60;
+  /** 释放锁的原子比较删除（token 不符则不动） */
+  private static readonly RELEASE_LUA =
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 
   /** 显式 `@Inject` 见 `NovelService` 构造函数注释（esbuild 不产 decorator metadata） */
   constructor(
     @Inject(NovelService) private readonly novels: NovelService,
     @Inject(NovelLlmService) private readonly llm: NovelLlmService,
+    @Inject(RedisService) private readonly redis: RedisService,
   ) {}
 
   // ── 内部工具 ────────────────────────────────────────────────
@@ -386,27 +397,29 @@ export class NovelAgentService {
 
   async chat(spaceId: string, ntId: string, sid: string, input: NovelEditChatRequest) {
     /**
-     * 关键顺序：**先拿轮次锁，再做任何 await**。
+     * 顺序：先做**廉价校验**（本子/会话/活跃态）拿到精确错误，再原子抢轮次锁。
      *
-     * 锁的 key 直接用路径里的 `sid`（而不是查出来的 `session.id`）：
-     * 若要等 `requireNovel` / `requireSession` 两次 DB 往返之后才判断占用，
-     * 两个并发请求都会在"判断前"通过 —— 那正是"同一会话同时 chat"最典型的漏判。
-     * 在任何 await 之前完成占位，才是真正的互斥（第二次调用必然看到已占用）。
+     * 为什么校验放前面：抢锁前失败不必写 Redis key；而"并发"的正确性不依赖顺序 ——
+     * `SET NX` 本身是原子的，两个并发请求里恰好一个成功，另一个拿 746005。
+     * （上一版用进程内 Set 时必须"先占位再校验"才对，换成 Redis 后这个约束消失。）
      */
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    const session = await this.requireSession(novel.id, sid);
+    this.assertActive(session);
     const key = sid;
-    if (this.busy.has(key)) {
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const acquired = await this.redis.setNx(this.lockKey(key), token, NovelAgentService.LOCK_TTL_S);
+    if (!acquired) {
       // 显式 746005：不排队、不吞掉，第二次调用者必须知道自己的要求没被处理
       throw new AppError(ErrorCode.AGENT_TURN_IN_FLIGHT, "another turn is in flight for this session", {
         reason: "turn_in_flight",
         session_id: key,
+        retry: "wait_for_current_turn",
       });
     }
-    this.busy.add(key);
-    this.abortRequested.delete(key);
+    // 上一轮残留的中止标记不能影响本轮
+    await this.redis.del(this.abortKey(key));
     try {
-      const novel = await this.novels.requireNovel(spaceId, ntId);
-      const session = await this.requireSession(novel.id, sid);
-      this.assertActive(session);
       const episodes = await this.episodesInScope(novel.id, session, input.episode_nos);
       const unknown = (input.episode_nos ?? []).filter((no) => !episodes.some((e) => e.episodeNo === no));
       if (unknown.length > 0) {
@@ -433,9 +446,9 @@ export class NovelAgentService {
         })),
       });
 
-      if (this.abortRequested.has(key)) {
-        // 中止语义：LLM 结果整轮作废（**不落 pending**），并把已记录的用户消息保留
-        this.abortRequested.delete(key);
+      if ((await this.redis.get(this.abortKey(key))) !== null) {
+        // 中止语义：LLM 结果整轮作废（**不落 pending**），已记录的用户消息保留（可审计）
+        await this.redis.del(this.abortKey(key));
         throw new AppError(ErrorCode.BAD_REQUEST, "turn aborted by user", { reason: "aborted" });
       }
 
@@ -516,7 +529,23 @@ export class NovelAgentService {
         llm_mode: this.llm.mode,
       };
     } finally {
-      this.busy.delete(key);
+      await this.releaseTurnLock(key, token);
+    }
+  }
+
+  /**
+   * 释放轮次锁（原子比较删除）。
+   *
+   * 为什么必须比对 token：A 的锁若因崩溃/TTL 到期消失、B 已抢到新锁，
+   * A 的 `finally` 若直接 `DEL` 就会把 B 的锁删掉 —— 那等于给"第三个请求"开了门。
+   * 释放失败不掩盖业务结果（TTL 到期后锁自然失效）。
+   */
+  private async releaseTurnLock(sid: string, token: string): Promise<void> {
+    try {
+      // 走到这里说明 setNx 成功过，连接必然 ready（RedisService.setNx 内部等 ready）
+      await this.redis.client.eval(NovelAgentService.RELEASE_LUA, 1, this.lockKey(sid), token);
+    } catch {
+      // 忽略：租约到期即失效，最坏情况是用户等一个 TTL
     }
   }
 
@@ -531,7 +560,9 @@ export class NovelAgentService {
     const session = await this.requireSession(novel.id, sid);
     // 与 chat 用同一个 key（路径 sid），否则 abort 永远看不到 chat 占的锁
     const key = sid;
-    if (!this.busy.has(key)) {
+    // 在途判据 = 轮次锁是否还在（Redis 是唯一致据，所以别的副本也能判对）
+    const held = await this.redis.get(this.lockKey(key));
+    if (held === null) {
       return {
         aborted: false,
         in_flight: false,
@@ -539,7 +570,7 @@ export class NovelAgentService {
         session_id: String(session.id),
       };
     }
-    this.abortRequested.add(key);
+    await this.redis.set(this.abortKey(key), "1", NovelAgentService.LOCK_TTL_S);
     return { aborted: true, in_flight: true, reason: "abort_requested", session_id: String(session.id) };
   }
 
@@ -773,10 +804,7 @@ export class NovelAgentService {
     return this.novels.deleteVersion(spaceId, ntId, vid);
   }
 
-  /** 供测试/排查观察：当前有多少会话正在跑轮次（不含业务语义，不暴露为端点） */
-  inFlightCount(): number {
-    return this.busy.size;
-  }
+
 
   /** 每次会话上限保护（消息过多时 chat 的上下文会超窗，这里只做一条明确失败） */
   assertMessageBudget(count: number): void {

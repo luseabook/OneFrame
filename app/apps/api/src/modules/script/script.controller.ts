@@ -25,6 +25,10 @@ import {
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { AssetMatchService } from "./asset-match.service";
+import { FilmSynthesisService } from "./film-synthesis.service";
+import { ParseService } from "./parse.service";
+import { PublishService } from "./publish.service";
+import { QualityCheckService } from "./quality-check.service";
 import { ScriptService } from "./script.service";
 import { timelinePutSchema } from "./timeline.schema";
 
@@ -76,11 +80,80 @@ const supplementMissingSchema = z.object({
   dry_run: z.boolean().optional(),
 });
 
+/** 分镜表一行（贴表解析）：镜号/描述/提示词/时长，后两项可缺 */
+const parseTableRowSchema = z.object({
+  shot_no: z.number().int().min(1).max(999),
+  shot_desc: z.string().min(1).max(500),
+  video_prompt: z.string().max(2000).optional(),
+  duration_s: z.number().int().min(1).max(30).optional(),
+  ratio: z.string().max(16).optional(),
+  resolution: z.string().max(16).optional(),
+});
+
+const episodeParseSchema = z.object({
+  episode_id: z.string().min(1),
+  table: z.array(parseTableRowSchema).min(1).max(200).optional(),
+  /** 纯文本分镜表（Markdown/TSV）：镜号 | 描述 | 提示词 | 时长 */
+  text: z.string().max(200_000).optional(),
+  mode: z.enum(["replace", "merge"]).optional(),
+  dry_run: z.boolean().optional(),
+});
+
+const episodeParseResetSchema = z.object({
+  episode_id: z.string().min(1),
+  backup_key: z.string().min(1).max(300).optional(),
+  dry_run: z.boolean().optional(),
+});
+
+const episodeParseRetrySchema = z.object({ episode_id: z.string().min(1) });
+
+const publishSchema = z.object({
+  title: z.string().trim().max(100).optional(),
+  slice: z
+    .object({
+      start_ms: z.number().int().min(0).optional(),
+      end_ms: z.number().int().min(1).optional(),
+      clip_ids: z.array(z.string().min(1).max(64)).max(100).optional(),
+    })
+    .optional(),
+  export_id: z.string().min(1).optional(),
+  dry_run: z.boolean().optional(),
+});
+
+const publicationListQuery = z.object({
+  status: z.coerce.number().int().min(1).max(5).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+const clipAssetsSchema = z.object({
+  asset_ids: z.array(z.string().min(1)).max(20).optional(),
+  task_id: z.string().min(1).optional(),
+  clear: z.boolean().optional(),
+});
+
+/** 作品库查询：形态（tab/kind）+ 状态 + 时间 + 关键词 + 四态 */
+const worksQuerySchema = z.object({
+  tab: z.enum(["workshop", "canvas", "all"]).optional(),
+  kind: z.enum(["workshop", "canvas"]).optional(),
+  status: z.enum(["archived", "active", "all"]).optional(),
+  state: z.enum(["draft", "producing", "ready", "archived"]).optional(),
+  keyword: z.string().max(80).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(60).optional(),
+});
+
 @Controller()
 export class ScriptController {
   constructor(
     @Inject(ScriptService) private readonly script: ScriptService,
     @Inject(AssetMatchService) private readonly match: AssetMatchService,
+    @Inject(QualityCheckService) private readonly quality: QualityCheckService,
+    @Inject(FilmSynthesisService) private readonly synthesis: FilmSynthesisService,
+    @Inject(ParseService) private readonly parser: ParseService,
+    @Inject(PublishService) private readonly publish: PublishService,
   ) {}
 
   @Post("projects")
@@ -101,18 +174,23 @@ export class ScriptController {
     return this.script.listProjects(req.auth?.spaceId ?? "", Number(page ?? 1), Number(pageSize ?? 20));
   }
 
-  /** 作品库（PRD 增补 §1.3）：以「剧」为单位聚合成果 */
+  /**
+   * 作品库（PRD 增补 §1.3 / task-10 §2）：工坊项目 + 画布项目聚合。
+   * 支持形态（tab/kind）、状态、四态、关键词、时间区间筛选与 has_more。
+   */
   @Get("works")
-  async works(
-    @Req() req: AuthedRequest,
-    @Query("status") status?: string,
-    @Query("page") page?: string,
-    @Query("page_size") pageSize?: string,
-  ) {
+  async works(@Req() req: AuthedRequest, @Query() query: unknown) {
+    const q = parseOrThrow(worksQuerySchema, query ?? {});
     return this.script.listWorks(req.auth?.spaceId ?? "", {
-      status,
-      page: Number(page ?? 1),
-      pageSize: Number(pageSize ?? 24),
+      tab: q.tab,
+      kind: q.kind,
+      status: q.status,
+      state: q.state,
+      keyword: q.keyword,
+      from: q.from,
+      to: q.to,
+      page: q.page ?? 1,
+      pageSize: q.page_size ?? 24,
     });
   }
 
@@ -158,6 +236,60 @@ export class ScriptController {
     const input = parseOrThrow(splitWithSourceSchema, body ?? {});
     const { source, ...rest } = input;
     return this.script.splitEpisodes(req.auth?.spaceId ?? "", id, rest, source);
+  }
+
+  // ── 分镜表解析子链（竞品 process/parse/{generate,delete} + parse-retry）────
+
+  /**
+   * 贴表解析成 storyboards（竞品 `df/episode/:ep_id/process/parse/generate`）。
+   * **覆盖前先备份**：没有备份 `parse-reset` 就还原不回来。
+   */
+  @Post("projects/:id/episodes/parse")
+  async parseStoryboards(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(episodeParseSchema, body);
+    return this.parser.parse(req.auth?.spaceId ?? "", id, input);
+  }
+
+  /** 解析重置（竞品 `process/parse/delete`）：恢复到最近一次解析前的快照 */
+  @Post("projects/:id/episodes/parse-reset")
+  async parseReset(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(episodeParseResetSchema, body);
+    return this.parser.reset(req.auth?.spaceId ?? "", id, input);
+  }
+
+  /** 解析重试（竞品 `episode parse-retry`）：按最近一次输入原样重跑 */
+  @Post("projects/:id/episodes/parse-retry")
+  async parseRetry(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(episodeParseRetrySchema, body);
+    return this.parser.retry(req.auth?.spaceId ?? "", id, input);
+  }
+
+  // ── 分集质量检查（只读）+ 分集合成导出 ─────────────────────────────────
+
+  /**
+   * 质量检查（竞品 `routes.txt:445` `/df/episode/:ep_id/quality-check`）：**只读**，
+   * 返回 issues[] + score；评分口径（每项权重与理由）见 `quality-check.service.ts` 注释。
+   */
+  @Post("projects/:id/episodes/:eid/quality-check")
+  async qualityCheck(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.quality.check(req.auth?.spaceId ?? "", id, eid);
+  }
+
+  /**
+   * 分集合成导出：同步判 80% 闸门（不足 → 400106），通过后同时下发
+   * zip 包（exports 四态）与成片 mp4（timeline_exports，含 AI 水印）两个 job。
+   */
+  @Post("projects/:id/episodes/:eid/film-synthesis-export")
+  async filmSynthesisExport(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+  ) {
+    return this.synthesis.filmSynthesisExport(req.auth?.spaceId ?? "", id, eid);
   }
 
   // ── 环节 4：资产 × 分镜匹配（asset-match）────────────────────────────
@@ -575,5 +707,65 @@ export class ScriptController {
     @Param("exportId") exportId: string,
   ) {
     return this.script.getTimelineExport(req.auth?.spaceId ?? "", id, eid, exportId);
+  }
+
+  // ── 切片发布 + 片段资产（竞品 wf/publish、wf/clip-bind-asset、wf/video-slicing）──
+
+  /**
+   * 切片发布：写 `timeline_publications`，异步转码 1 排队 → 2 转码中 → 3 可播放（发 shareToken）
+   * / 4 失败（落 error）。前置是本集已有一次成功成片（status=3），否则 400105。
+   */
+  @Post("projects/:id/episodes/:eid/timeline/publish")
+  async publishTimeline(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(publishSchema, body ?? {});
+    return this.publish.publish(req.auth?.spaceId ?? "", req.auth?.userId ?? "", id, eid, input);
+  }
+
+  /** 切片发布列表（含签名下载地址与 shareToken；下架(5) 的 token 不再返回） */
+  @Get("projects/:id/episodes/:eid/timeline/publications")
+  async listPublications(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Query() query: unknown,
+  ) {
+    const q = parseOrThrow(publicationListQuery, query ?? {});
+    return this.publish.listPublications(req.auth?.spaceId ?? "", id, eid, {
+      status: q.status,
+      page: q.page,
+      page_size: q.page_size,
+    });
+  }
+
+  /** 下架（status=5）：保留记录便于审计，重复下架 → 400102 */
+  @Delete("projects/:id/episodes/:eid/publications/:pubId")
+  async unpublish(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("pubId") pubId: string,
+  ) {
+    return this.publish.unpublish(req.auth?.spaceId ?? "", id, eid, pubId);
+  }
+
+  /**
+   * 片段资产绑定（竞品 `wf/clip-bind-asset`）：把空间资产/项目资产/镜头产物挂到时间线片段。
+   * 快照语义：传 `asset_ids`+`task_id` 整体替换该片段绑定，`clear=true` 清空。
+   */
+  @Post("projects/:id/episodes/:eid/timeline/clips/:clipId/assets")
+  async bindClipAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("clipId") clipId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(clipAssetsSchema, body ?? {});
+    return this.publish.bindClipAssets(req.auth?.spaceId ?? "", id, eid, clipId, input);
   }
 }

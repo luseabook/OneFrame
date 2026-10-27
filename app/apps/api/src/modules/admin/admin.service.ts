@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import {
   adminUsers,
   contentReports,
@@ -9,6 +9,7 @@ import {
   models,
   orders,
   projectAssets,
+  promoSlots,
   scriptProjects,
   storyboards,
   taskShares,
@@ -588,4 +589,141 @@ export class AdminService {
     }
     return { ok: true, status: action === "takedown" ? 2 : 3 };
   }
+
+  // ── 运营位（模块 #27 收尾；promo_slots 见迁移 0024）────────────────────
+  //
+  // 三个语义必须分清（运营后台最容易配错的就是这里）：
+  //   status     = 素材本身的启用/停用（软态，保留历史投放记录）
+  //   active_now = status 启用 **且** 当前时间落在 [starts_at, ends_at] 内
+  //   sort       = 同一 slot 内的展示顺序（升序，数字小的在前）
+  // 列表把 `active_now` 一并算好返回，运营不必自己拿当前时间比时间戳。
+
+  private promoSlotDto(row: typeof promoSlots.$inferSelect, now = new Date()) {
+    const startsOk = row.startsAt === null || row.startsAt.getTime() <= now.getTime();
+    // 结束时间用**闭区间**（>=）：与公开读接口 `OpService.listActivePromoSlots` 的口径一致，
+    // 否则运营看到 active_now=true、用户端却已经下线，排查时互相扯皮。
+    const endsOk = row.endsAt === null || row.endsAt.getTime() >= now.getTime();
+    return {
+      id: String(row.id),
+      slot: row.slot,
+      title: row.title,
+      image_uri: row.imageUri,
+      link_uri: row.linkUri,
+      sort: row.sort,
+      status: row.status,
+      starts_at: row.startsAt ? row.startsAt.toISOString() : null,
+      ends_at: row.endsAt ? row.endsAt.toISOString() : null,
+      view_count: row.viewCount,
+      click_count: row.clickCount,
+      created_by: row.createdBy === null ? null : String(row.createdBy),
+      active_now: row.status === 1 && startsOk && endsOk,
+      created_at: row.createdAt.toISOString(),
+      updated_at: row.updatedAt.toISOString(),
+    };
+  }
+
+  async listPromoSlots(filters: { slot?: string; status?: number } = {}) {
+    const conds = [];
+    if (filters.slot) conds.push(eq(promoSlots.slot, filters.slot));
+    if (filters.status !== undefined) conds.push(eq(promoSlots.status, filters.status));
+    const rows = await db
+      .select()
+      .from(promoSlots)
+      .where(conds.length > 0 ? and(...conds) : undefined)
+      // 同 slot 按 sort 升序；跨 slot 按 slot 名稳定排序（运营列表要可预期）
+      .orderBy(asc(promoSlots.slot), asc(promoSlots.sort), asc(promoSlots.id));
+    const now = new Date();
+    const list = rows.map((row) => this.promoSlotDto(row, now));
+    return {
+      list,
+      count: list.length,
+      active_count: list.filter((item) => item.active_now).length,
+      slots: PROMO_SLOT_KINDS,
+    };
+  }
+
+  async createPromoSlot(adminId: string, input: PromoSlotInput) {
+    const id = newId();
+    const [row] = await db
+      .insert(promoSlots)
+      .values({
+        id,
+        slot: input.slot ?? "banner",
+        title: input.title ?? "",
+        imageUri: input.image_uri ?? null,
+        linkUri: input.link_uri ?? null,
+        sort: input.sort ?? 0,
+        status: input.status ?? 1,
+        startsAt: parseOptionalDate(input.starts_at, "starts_at"),
+        endsAt: parseOptionalDate(input.ends_at, "ends_at"),
+        // 迁移 0028 起 `promo_slots.created_by` 的外键指向 `admin_users(id)`（与
+        // `content_reports.handled_by` 同口径），运营 token 的 adminId 可直接落库留痕。
+        createdBy: adminIdBigint(adminId),
+      })
+      .returning();
+    return this.promoSlotDto(row);
+  }
+
+  async updatePromoSlot(id: string, input: PromoSlotInput) {
+    const patch: Partial<typeof promoSlots.$inferInsert> = { updatedAt: new Date() };
+    if (input.slot !== undefined) patch.slot = input.slot;
+    if (input.title !== undefined) patch.title = input.title;
+    if (input.image_uri !== undefined) patch.imageUri = input.image_uri;
+    if (input.link_uri !== undefined) patch.linkUri = input.link_uri;
+    if (input.sort !== undefined) patch.sort = input.sort;
+    if (input.status !== undefined) patch.status = input.status;
+    if (input.starts_at !== undefined) patch.startsAt = parseOptionalDate(input.starts_at, "starts_at");
+    if (input.ends_at !== undefined) patch.endsAt = parseOptionalDate(input.ends_at, "ends_at");
+    const [row] = await db.update(promoSlots).set(patch).where(eq(promoSlots.id, idBigint(id))).returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "promo slot not found");
+    return this.promoSlotDto(row);
+  }
+
+  /** 物理删除：运营位只是投放素材，无业务外键引用；效果计数随行一起消失（误删需重建） */
+  async deletePromoSlot(id: string) {
+    const [row] = await db.delete(promoSlots).where(eq(promoSlots.id, idBigint(id))).returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "promo slot not found");
+    return { ok: true, id: String(row.id) };
+  }
+}
+
+/** 运营位四类（schema:`promo_slots.slot` 注释口径） */
+export const PROMO_SLOT_KINDS = ["banner", "pop_up", "activity", "creator"] as const;
+
+export interface PromoSlotInput {
+  slot?: string;
+  title?: string;
+  image_uri?: string | null;
+  link_uri?: string | null;
+  sort?: number;
+  status?: number;
+  starts_at?: string | null;
+  ends_at?: string | null;
+}
+
+function idBigint(id: string): bigint {
+  try {
+    return BigInt(id);
+  } catch {
+    throw new AppError(ErrorCode.INVALID_PARAM, "invalid id", { field: "id" });
+  }
+}
+
+/** 运营身份 id → bigint；非数字（历史脏 token）时退化为不落操作人，而不是 500 */
+function adminIdBigint(adminId: string): bigint | null {
+  if (!adminId) return null;
+  try {
+    return BigInt(adminId);
+  } catch {
+    return null;
+  }
+}
+
+function parseOptionalDate(raw: string | null | undefined, field: string): Date | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new AppError(ErrorCode.INVALID_PARAM, `${field} must be ISO datetime`, { field });
+  }
+  return new Date(parsed);
 }

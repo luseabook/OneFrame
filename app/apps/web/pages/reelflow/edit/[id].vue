@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EpisodeDto, ProjectDto, StoryboardDto } from "~/types/api";
+import type { EpisodeDto, ProjectDto, StoryboardDto, TimelineClipAssetDto, TimelinePublicationDto } from "~/types/api";
 
 /**
  * ReelFlow 剪辑台（对齐竞品 /reelflow/edit/:projectId）
@@ -49,6 +49,8 @@ interface Clip {
   shot_no: number;
   /** 源文件探测失败（mock 占位字节）：仅在 UI 提示，不影响导出 */
   unplayable?: boolean;
+  /** 片段资产绑定（服务端只在有绑定时返回该字段） */
+  assets?: TimelineClipAssetDto[];
 }
 
 const project = ref<ProjectDto | null>(null);
@@ -190,7 +192,7 @@ async function loadTimeline(): Promise<void> {
     clips.value = [];
     return;
   }
-  const data = await api.get<{ clips: Array<{ clip_id: string; shot_id: string; task_id: string | null; name: string; duration: number }> }>(
+  const data = await api.get<{ clips: Array<{ clip_id: string; shot_id: string; task_id: string | null; name: string; duration: number; assets?: TimelineClipAssetDto[] }> }>(
     `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline`,
   );
   const shotNoById = new Map(shots.value.map((s) => [s.id, s.shot_no]));
@@ -202,6 +204,7 @@ async function loadTimeline(): Promise<void> {
     duration: c.duration,
     url: null,
     shot_no: shotNoById.get(c.shot_id) ?? 0,
+    ...(c.assets && c.assets.length > 0 ? { assets: c.assets } : {}),
   }));
   playhead.value = 0;
   void hydrateClipUrls();
@@ -675,6 +678,216 @@ function downloadComposed(): void {
   a.remove();
 }
 
+// ── 切片发布（timeline_publications：1 排队 / 2 转码中 / 3 可播放 / 4 失败 / 5 已下架）──
+const showPublish = ref(false);
+const publications = ref<TimelinePublicationDto[]>([]);
+const pubTitle = ref("");
+const pubStartS = ref(0);
+const pubEndS = ref(0);
+const publishing = ref(false);
+const pubError = ref("");
+let pubTimer: ReturnType<typeof setInterval> | undefined;
+
+const PUB_STATUS: Record<number, { text: string; tone: "info" | "success" | "danger" | "neutral" }> = {
+  1: { text: "排队中", tone: "info" },
+  2: { text: "转码中", tone: "info" },
+  3: { text: "可播放", tone: "success" },
+  4: { text: "失败", tone: "danger" },
+  5: { text: "已下架", tone: "neutral" },
+};
+
+async function loadPublications(): Promise<void> {
+  if (!selectedEpisodeId.value) return;
+  try {
+    const data = await api.get<{ list: TimelinePublicationDto[]; total: number }>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/publications`,
+    );
+    publications.value = data.list;
+  } catch (e) {
+    pubError.value = e instanceof Error ? e.message : "加载发布记录失败";
+  }
+}
+
+async function openPublish(): Promise<void> {
+  showPublish.value = true;
+  pubError.value = "";
+  pubTitle.value = `${project.value?.title ?? ""} · ${episodeLabel.value} 切片`;
+  // 默认整集：起止按当前时间线总时长（单位秒，提交时换算 ms）
+  pubStartS.value = 0;
+  pubEndS.value = Math.round(totalDuration.value);
+  await loadPublications();
+}
+
+/** 轮询未终态的发布（转码是异步的：1→2→3/4） */
+function pollPublications(): void {
+  if (pubTimer) clearInterval(pubTimer);
+  let tries = 0;
+  pubTimer = setInterval(async () => {
+    tries += 1;
+    await loadPublications();
+    const pending = publications.value.some((item) => item.status === 1 || item.status === 2);
+    if (!pending || tries > 150) {
+      if (pubTimer) clearInterval(pubTimer);
+      pubTimer = undefined;
+      if (tries > 150) pubError.value = "转码超时（5 分钟未完成），请稍后刷新列表";
+    }
+  }, 2000);
+}
+
+async function publishSlice(): Promise<void> {
+  if (!selectedEpisodeId.value) return;
+  if (pubEndS.value <= pubStartS.value) {
+    pubError.value = "切片的结束时间必须大于开始时间";
+    return;
+  }
+  // 发布读的是服务端时间线：先落库，否则会发出旧内容
+  const saved = await persistTimeline(true);
+  if (!saved) return;
+  publishing.value = true;
+  pubError.value = "";
+  try {
+    await api.post(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/publish`,
+      {
+        title: pubTitle.value.trim() || undefined,
+        slice: { start_ms: Math.round(pubStartS.value * 1000), end_ms: Math.round(pubEndS.value * 1000) },
+      },
+    );
+    toast.success("已提交发布，正在转码（1 排队 → 2 转码中 → 3 可播放）");
+    await loadPublications();
+    pollPublications();
+  } catch (e) {
+    pubError.value = e instanceof Error ? e.message : "发布失败";
+    toast.error(`发布失败：${pubError.value}`);
+  } finally {
+    publishing.value = false;
+  }
+}
+
+async function unpublish(item: TimelinePublicationDto): Promise<void> {
+  if (!confirm(`下架「${item.title}」？下架后分享链接失效（记录保留可审计）。`)) return;
+  try {
+    await api.delete(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/publications/${item.publication_id}`,
+    );
+    toast.success("已下架");
+    await loadPublications();
+  } catch (e) {
+    pubError.value = e instanceof Error ? e.message : "下架失败";
+    toast.error(pubError.value);
+  }
+}
+
+async function copyShareToken(item: TimelinePublicationDto): Promise<void> {
+  if (!item.share_token) return;
+  try {
+    await navigator.clipboard.writeText(item.share_token);
+    toast.success("shareToken 已复制");
+  } catch {
+    toast.error("复制失败：浏览器未授予剪贴板权限");
+  }
+}
+
+// ── 片段资产绑定（wf/clip-bind-asset，快照语义）────────────────
+const showClipAssets = ref(false);
+const assetClip = ref<Clip | null>(null);
+const clipAssetError = ref("");
+const clipAssetBusy = ref(false);
+const projectAssetList = ref<
+  Array<{ id: string; name: string; kind: string; status: number; ref_image_uri: string | null }>
+>([]);
+
+async function openClipAssets(clip: Clip): Promise<void> {
+  showClipAssets.value = true;
+  assetClip.value = clip;
+  clipAssetError.value = "";
+  try {
+    const data = await api.get<{ list: typeof projectAssetList.value }>(`/projects/${projectId.value}/assets`);
+    // 只列已定稿且有参考图的资产：未定稿挂上去在成片里也是空引用
+    projectAssetList.value = data.list.filter((asset) => asset.status === 2 && asset.ref_image_uri);
+  } catch (e) {
+    clipAssetError.value = e instanceof Error ? e.message : "加载项目资产失败";
+  }
+}
+
+/** 当前绑定 → 提交体（快照语义：必须把既有绑定一起带上，否则会被覆盖清空） */
+function bindingPayload(clip: Clip, extra?: { assetId?: string; taskId?: string }) {
+  const assets = clip.assets ?? [];
+  const assetIds = assets.filter((item) => item.source !== "shot_product").map((item) => item.id);
+  const existingTask = assets.find((item) => item.source === "shot_product")?.task_id ?? null;
+  if (extra?.assetId) assetIds.push(extra.assetId);
+  return {
+    asset_ids: [...new Set(assetIds)],
+    task_id: extra?.taskId ?? existingTask ?? undefined,
+  };
+}
+
+async function refreshClipAssets(): Promise<void> {
+  const clipId = assetClip.value?.clip_id;
+  await loadTimeline();
+  assetClip.value = clips.value.find((clip) => clip.clip_id === clipId) ?? assetClip.value;
+}
+
+async function bindProjectAsset(assetId: string): Promise<void> {
+  const clip = assetClip.value;
+  if (!clip) return;
+  clipAssetBusy.value = true;
+  clipAssetError.value = "";
+  try {
+    await api.post(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/clips/${clip.clip_id}/assets`,
+      bindingPayload(clip, { assetId }),
+    );
+    await refreshClipAssets();
+    toast.success("资产已绑定到片段");
+  } catch (e) {
+    clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
+    toast.error(clipAssetError.value);
+  } finally {
+    clipAssetBusy.value = false;
+  }
+}
+
+async function bindShotProductToClip(): Promise<void> {
+  const clip = assetClip.value;
+  if (!clip || !clip.task_id) {
+    clipAssetError.value = "该片段没有镜头产物（task_id 为空）";
+    return;
+  }
+  clipAssetBusy.value = true;
+  try {
+    await api.post(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/clips/${clip.clip_id}/assets`,
+      bindingPayload(clip, { taskId: clip.task_id }),
+    );
+    await refreshClipAssets();
+    toast.success("镜头产物已绑定到片段");
+  } catch (e) {
+    clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
+    toast.error(clipAssetError.value);
+  } finally {
+    clipAssetBusy.value = false;
+  }
+}
+
+async function clearClipAssets(): Promise<void> {
+  const clip = assetClip.value;
+  if (!clip) return;
+  clipAssetBusy.value = true;
+  try {
+    await api.post(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/clips/${clip.clip_id}/assets`,
+      { clear: true },
+    );
+    await refreshClipAssets();
+    toast.success("已清空该片段的资产绑定");
+  } catch (e) {
+    clipAssetError.value = e instanceof Error ? e.message : "清空失败";
+  } finally {
+    clipAssetBusy.value = false;
+  }
+}
+
 // ── 生命周期 ─────────────────────────────────────────────
 // 换集：重新载分镜 + 该集时间线（时间线是 per-episode 的）
 watch(selectedEpisodeId, async (next, prev) => {
@@ -685,6 +898,10 @@ watch(selectedEpisodeId, async (next, prev) => {
     rafId = 0;
   }
   if (exportTimer) clearInterval(exportTimer);
+  if (pubTimer) clearInterval(pubTimer);
+  showPublish.value = false;
+  showClipAssets.value = false;
+  publications.value = [];
   exportStatus.value = 0;
   exportUrl.value = null;
   exportError.value = "";
@@ -724,6 +941,7 @@ onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId);
   if (saveTimer) clearTimeout(saveTimer);
   if (exportTimer) clearInterval(exportTimer);
+  if (pubTimer) clearInterval(pubTimer);
 });
 
 const episodeLabel = computed(() => {
@@ -758,6 +976,9 @@ const episodeLabel = computed(() => {
           {{ EXPORT_LABEL[exportStatus] }}
         </Tag>
         <a v-if="exportUrl" :href="exportUrl" class="rf-download" download @click.prevent="downloadComposed">下载 mp4</a>
+        <Button size="sm" variant="ghost" :disabled="!selectedEpisodeId || loading" @click="openPublish">
+          切片发布
+        </Button>
         <Button class="rf-export" :loading="exporting" :disabled="!clips.length || loading" @click="startExport">
           {{ exporting ? "合成中…" : "导出" }}
         </Button>
@@ -874,6 +1095,15 @@ const episodeLabel = computed(() => {
           <button type="button" class="rf-play" @click="togglePlay">{{ playing ? "暂停" : "播放" }}</button>
           <span class="rf-time">{{ playheadLabel }} / {{ totalLabel }}</span>
           <span class="rf-count">{{ clips.length }} 段 · 共 {{ Math.round(totalDuration) }}s</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            :disabled="!activeClip"
+            title="把资产/镜头产物挂到当前片段（wf/clip-bind-asset）"
+            @click="activeClip && openClipAssets(activeClip)"
+          >
+            片段资产
+          </Button>
           <span class="rf-spacer" />
           <label class="rf-zoom">
             <span>缩放</span>
@@ -930,6 +1160,123 @@ const episodeLabel = computed(() => {
           </div>
         </div>
       </footer>
+    </div>
+
+    <!-- ═════════ 切片发布（wf/publish + wf/video-slicing）═════════ -->
+    <div v-if="showPublish" class="rf-modal" role="dialog" aria-label="切片发布">
+      <div class="rf-modal__panel">
+        <header class="rf-modal__head">
+          <b>切片发布</b>
+          <button type="button" class="rf-modal__x" @click="showPublish = false">✕</button>
+        </header>
+        <p class="rf-modal__hint">
+          发布是**对外作品**，与「导出」不同：会复制一份产物并生成 shareToken。前置是本集已有一次成功的
+          成片合成（status=3），否则返回 400105。
+        </p>
+        <p v-if="pubError" class="rf-modal__err">{{ pubError }}</p>
+
+        <div class="rf-form">
+          <label>
+            <span>标题</span>
+            <input v-model="pubTitle" class="rf-input" maxlength="100" placeholder="切片标题" />
+          </label>
+          <label>
+            <span>开始（秒）</span>
+            <input v-model.number="pubStartS" class="rf-input" type="number" min="0" step="1" />
+          </label>
+          <label>
+            <span>结束（秒）</span>
+            <input v-model.number="pubEndS" class="rf-input" type="number" min="1" step="1" />
+          </label>
+          <Button size="sm" :loading="publishing" :disabled="!clips.length" @click="publishSlice">
+            发布切片
+          </Button>
+        </div>
+
+        <div class="rf-pub-list">
+          <div v-for="item in publications" :key="item.publication_id" class="rf-pub">
+            <span class="rf-pub__title" :title="item.title">{{ item.title }}</span>
+            <Tag
+              :tone="PUB_STATUS[item.status]?.tone ?? 'neutral'"
+              size="sm"
+              dot
+            >
+              {{ PUB_STATUS[item.status]?.text ?? item.status }}
+            </Tag>
+            <span class="rf-pub__slice">
+              {{ Math.round((item.slice.start_ms ?? 0) / 1000) }}s ~
+              {{ Math.round((item.slice.end_ms ?? 0) / 1000) }}s
+            </span>
+            <a v-if="item.download_url" :href="item.download_url" class="rf-pub__dl" download>下载</a>
+            <button
+              v-if="item.share_token"
+              type="button"
+              class="rf-pub__btn"
+              title="复制 shareToken"
+              @click="copyShareToken(item)"
+            >
+              复制 token
+            </button>
+            <a v-if="item.status === 3" :href="`/share/${item.share_token}`" target="_blank" class="rf-pub__btn">
+              分享页
+            </a>
+            <button
+              v-if="item.status !== 5"
+              type="button"
+              class="rf-pub__btn is-danger"
+              @click="unpublish(item)"
+            >
+              下架
+            </button>
+          </div>
+          <p v-if="publications.length === 0" class="rf-modal__hint">还没有发布记录</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════ 片段资产（wf/clip-bind-asset，快照语义）═════════ -->
+    <div v-if="showClipAssets && assetClip" class="rf-modal" role="dialog" aria-label="片段资产">
+      <div class="rf-modal__panel">
+        <header class="rf-modal__head">
+          <b>片段资产 · {{ assetClip.name }}</b>
+          <button type="button" class="rf-modal__x" @click="showClipAssets = false">✕</button>
+        </header>
+        <p class="rf-modal__hint">
+          快照语义：每次提交会**整体替换**该片段的绑定（已有绑定会自动带上，不会被清空）。
+        </p>
+        <p v-if="clipAssetError" class="rf-modal__err">{{ clipAssetError }}</p>
+
+        <div class="rf-form">
+          <Button size="sm" variant="ghost" :loading="clipAssetBusy" @click="bindShotProductToClip">
+            绑定镜头产物
+          </Button>
+          <Button size="sm" variant="ghost" :disabled="clipAssetBusy" @click="clearClipAssets">清空绑定</Button>
+        </div>
+
+        <div class="rf-assets">
+          <div v-for="asset in assetClip.assets ?? []" :key="`${asset.source}:${asset.id}`" class="rf-asset-row">
+            <span class="rf-asset-row__src">{{ asset.source }}</span>
+            <span class="rf-asset-row__name">{{ asset.name }}</span>
+            <span class="rf-asset-row__uri" :title="asset.uri">{{ asset.uri }}</span>
+          </div>
+          <p v-if="!(assetClip.assets ?? []).length" class="rf-modal__hint">该片段还没有绑定资产</p>
+        </div>
+
+        <p class="rf-modal__hint">从项目已定稿资产中选择：</p>
+        <div class="rf-assets">
+          <button
+            v-for="asset in projectAssetList"
+            :key="asset.id"
+            type="button"
+            class="rf-pub__btn"
+            :disabled="clipAssetBusy"
+            @click="bindProjectAsset(asset.id)"
+          >
+            {{ asset.name }} · {{ asset.kind }}
+          </button>
+          <p v-if="projectAssetList.length === 0" class="rf-modal__hint">项目里还没有已定稿且有参考图的资产</p>
+        </div>
+      </div>
     </div>
 
     <!-- 拖拽跟随气泡 -->
@@ -1542,5 +1889,165 @@ const episodeLabel = computed(() => {
     grid-row: 1;
     grid-column: 1;
   }
+}
+
+/* ═════════ 切片发布 / 片段资产 浮层（wf/publish + wf/clip-bind-asset）═════════ */
+.rf-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 55%);
+  backdrop-filter: blur(2px);
+}
+.rf-modal__panel {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100dvh - 80px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--panel-line);
+  background: var(--bg-surface);
+}
+.rf-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-1);
+}
+.rf-modal__x {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.rf-modal__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-4);
+}
+.rf-modal__err {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12px;
+}
+.rf-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rf-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-4);
+}
+.rf-input {
+  height: 28px;
+  min-width: 120px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text-1);
+  font-size: 12px;
+  outline: none;
+}
+.rf-input:focus {
+  border-color: var(--brand-500);
+}
+.rf-pub-list,
+.rf-assets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.rf-pub {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto auto auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.rf-pub__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.rf-pub__slice {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-4);
+  font-size: 11px;
+}
+.rf-pub__dl {
+  color: var(--success);
+  font-size: 11px;
+}
+.rf-pub__btn {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.rf-pub__btn:hover {
+  border-color: var(--brand-500);
+  color: var(--brand-300);
+}
+.rf-pub__btn.is-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.rf-asset-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+.rf-asset-row__src {
+  color: var(--text-4);
+}
+.rf-asset-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.rf-asset-row__uri {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-5);
 }
 </style>

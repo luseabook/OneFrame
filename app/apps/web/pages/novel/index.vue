@@ -68,13 +68,17 @@ watch(tab, () => void load());
 // ── 新建本子 ─────────────────────────────────────────────────
 const showCreate = ref(false);
 const creating = ref(false);
+/** 两种入口：改编（1，粘贴/上传小说）与原创（2，一句创作灵感）。 */
+type CreateMode = "adapt" | "original";
+const mode = ref<CreateMode>("adapt");
 const form = reactive({ title: "", ratio: "9:16" as "9:16" | "16:9", source_text: "" });
 const fileName = ref("");
 const parsing = ref(false);
 
 const canCreate = computed(() => form.title.trim().length > 0 && form.source_text.trim().length > 0 && !creating.value);
 
-function openCreate(): void {
+function openCreate(next: CreateMode = "adapt"): void {
+  mode.value = next;
   form.title = "";
   form.ratio = "9:16";
   form.source_text = "";
@@ -118,13 +122,18 @@ async function create(): Promise<void> {
   if (!canCreate.value) return;
   creating.value = true;
   try {
+    const isOriginal = mode.value === "original";
     const novel = await api.post<NovelDto>("/novel", {
       title: form.title.trim(),
       ratio: form.ratio,
+      // 原创本子的 source_type=2：source_text 存的是"创作灵感"，服务端不会把它切成章节
+      source_type: isOriginal ? 2 : 1,
       source_text: form.source_text,
-      source_file_name: fileName.value || undefined,
+      source_file_name: isOriginal ? undefined : fileName.value || undefined,
     });
-    toast.success(`已创建并解析 ${novel.chapter_count ?? 0} 章`);
+    toast.success(
+      isOriginal ? "已创建原创本子，进入工作台的「原创链」开始生成创意方案" : `已创建并解析 ${novel.chapter_count ?? 0} 章`,
+    );
     showCreate.value = false;
     await router.push(`/novel/${novel.id}`);
   } catch (e) {
@@ -160,7 +169,10 @@ onMounted(() => void load());
         <h1>剧本工厂</h1>
         <p>粘贴或上传小说 → 分章 → 内容分析 → 大纲 → 剧本 → 编辑 Agent 逐集定稿</p>
       </div>
-      <Button data-testid="novel-create" @click="openCreate">新建剧本</Button>
+      <div class="head__actions">
+        <Button data-testid="novel-create" variant="secondary" @click="openCreate('adapt')">新建改编</Button>
+        <Button data-testid="novel-create-original" @click="openCreate('original')">新建原创剧本</Button>
+      </div>
     </header>
 
     <nav class="tabs">
@@ -212,14 +224,26 @@ onMounted(() => void load());
         title="还没有剧本项目"
         description="粘贴一段小说正文（或上传 txt / docx），系统会自动按「第N章」切分，然后逐步生成世界观、角色卡、章节大纲与分集剧本。"
       >
-        <Button @click="openCreate">新建第一个剧本</Button>
+        <div class="head__actions">
+          <Button variant="secondary" @click="openCreate('adapt')">粘贴小说改编</Button>
+          <Button @click="openCreate('original')">从一句灵感原创</Button>
+        </div>
       </EmptyState>
     </div>
 
-    <!-- 新建弹窗：粘贴 / 上传同一条路（都得到纯文本，服务端做分章） -->
-    <Modal :open="showCreate" title="新建剧本" width="620px" @close="showCreate = false">
+    <!-- 新建弹窗：改编（粘贴/上传小说）与原创（一句灵感）共用同一张表单，只切换模式 -->
+    <Modal :open="showCreate" :title="mode === 'original' ? '新建原创剧本' : '新建改编剧本'" width="620px" @close="showCreate = false">
       <div class="form">
-        <TextField v-model="form.title" label="剧本名称" placeholder="例如：雨夜当票" :maxlength="200" />
+        <div class="segmented segmented--mode">
+          <button type="button" :class="{ on: mode === 'adapt' }" @click="mode = 'adapt'">小说改编</button>
+          <button type="button" :class="{ on: mode === 'original' }" @click="mode = 'original'">纯原创</button>
+        </div>
+        <TextField
+          v-model="form.title"
+          label="剧本名称"
+          :placeholder="mode === 'original' ? '例如：替人写遗书的女孩' : '例如：雨夜当票'"
+          :maxlength="200"
+        />
         <div class="form__row">
           <label class="form__label">画面比例</label>
           <div class="segmented">
@@ -227,7 +251,7 @@ onMounted(() => void load());
             <button type="button" :class="{ on: form.ratio === '16:9' }" @click="form.ratio = '16:9'">16:9 横屏</button>
           </div>
         </div>
-        <div class="form__upload">
+        <div v-if="mode === 'adapt'" class="form__upload">
           <label class="upload">
             <input type="file" accept=".txt,.md,.docx,.xlsx" :disabled="parsing" @change="onFile" />
             <span>{{ parsing ? "解析中…" : "上传小说文件（txt / md / docx）" }}</span>
@@ -236,16 +260,26 @@ onMounted(() => void load());
         </div>
         <TextAreaField
           v-model="form.source_text"
-          label="小说正文"
-          :rows="10"
-          :maxlength="50000"
-          placeholder="把小说正文粘贴到这里（上限 5 万字）。含「第N章」标题会自动按章切分。"
-          hint="创建时会立刻完成分章；之后可以随时在详情页重新分章。"
+          :label="mode === 'original' ? '创作灵感（user_input）' : '小说正文'"
+          :rows="mode === 'original' ? 4 : 10"
+          :maxlength="mode === 'original' ? 5000 : 50000"
+          :placeholder="
+            mode === 'original'
+              ? '一句话说清核心冲突，例如：一名替人写遗书的女孩，发现客户名单里有自己父亲的名字。'
+              : '把小说正文粘贴到这里（上限 5 万字）。含「第N章」标题会自动按章切分。'
+          "
+          :hint="
+            mode === 'original'
+              ? '原创链不需要小说原文：这句灵感会生成创意方案 → 素材 → 总纲 → 章纲 → 集纲 → 剧本。'
+              : '创建时会立刻完成分章；之后可以随时在详情页重新分章。'
+          "
         />
       </div>
       <template #footer>
         <Button variant="ghost" @click="showCreate = false">取消</Button>
-        <Button :disabled="!canCreate" :loading="creating" @click="create">创建并分章</Button>
+        <Button :disabled="!canCreate" :loading="creating" @click="create">
+          {{ mode === 'original' ? "创建原创本子" : "创建并分章" }}
+        </Button>
       </template>
     </Modal>
   </div>
@@ -273,6 +307,13 @@ onMounted(() => void load());
   margin: 0;
   color: var(--text-3);
   font-size: var(--text-sm);
+}
+.head__actions {
+  display: flex;
+  gap: 8px;
+}
+.segmented--mode {
+  align-self: flex-start;
 }
 .tabs {
   display: flex;

@@ -51,8 +51,9 @@ import { NovelService } from "../novel/novel.service";
 import { StorageService } from "../../storage/storage.service";
 import { ModerationService } from "../moderation/moderation.service";
 import { AssetGatesService } from "./asset-gates.service";
+import { WorksService } from "./works.service";
 import { LlmService } from "./llm.service";
-import type { TimelineClipDto, TimelineClipInput, TimelinePutRequest } from "./timeline.schema";
+import type { TimelineClipAssetDto, TimelineClipDto, TimelineClipInput, TimelinePutRequest } from "./timeline.schema";
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
 type EpisodeRow = typeof episodes.$inferSelect;
@@ -69,6 +70,12 @@ function projectDto(row: ProjectRow) {
     source_type: row.sourceType,
     source_text: row.sourceText,
     source_file_name: row.sourceFileName ?? null,
+    /**
+     * 拆集来源本子（迁移 0026）：`POST /episodes/split` 的 novel 分支写入，**只写一次不覆盖**。
+     * 对外透出是为了让 novel 侧 `reopen` 能先按本子精确判断"这本有没有被拆过"，
+     * 而不是拿正文快照比对——项目正文被改写后快照就会漏判。
+     */
+    source_novel_id: row.sourceNovelId ? String(row.sourceNovelId) : null,
     status: row.status,
     archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
     is_sample: row.isSample === 1,
@@ -154,6 +161,7 @@ export class ScriptService {
     @Inject(ModerationService) private readonly moderation: ModerationService,
     @Inject(AssetGatesService) private readonly gates: AssetGatesService,
     @Inject(NovelService) private readonly novels: NovelService,
+    @Inject(WorksService) private readonly works: WorksService,
   ) {}
 
   async createProject(
@@ -226,119 +234,40 @@ export class ScriptService {
    * 作品库（PRD 增补 §1.3）：以「剧」为单位的成果视图。
    * 作品 = 项目；聚合集数、已成功出片镜头数、封面与状态，供作品墙直接渲染。
    */
-  async listWorks(spaceId: string, opts: { status?: string; page?: number; pageSize?: number } = {}) {
-    const p = Math.max(1, opts.page ?? 1);
-    const ps = Math.min(60, Math.max(1, opts.pageSize ?? 24));
-    const conditions = [eq(scriptProjects.spaceId, BigInt(spaceId))];
-    if (opts.status === "archived") {
-      conditions.push(sql`${scriptProjects.archivedAt} is not null`);
-    } else {
-      conditions.push(sql`${scriptProjects.archivedAt} is null`);
-    }
-    const rows = await db
-      .select()
-      .from(scriptProjects)
-      .where(and(...conditions))
-      .orderBy(desc(scriptProjects.updatedAt))
-      .limit(ps)
-      .offset((p - 1) * ps);
-
-    const [countRow] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(scriptProjects)
-      .where(and(...conditions));
-
-    const ids = rows.map((r) => r.id);
-    // 聚合：集数、分镜数、成功镜头数、封面（首个成功结果的 asset uri）
-    const stats = ids.length
-      ? await db.execute(sql`
-          select p.id as project_id,
-                 (select count(*)::int from episodes e where e.project_id = p.id) as episode_count,
-                 (select count(*)::int
-                    from storyboards s
-                    join episodes e2 on e2.id = s.episode_id
-                   where e2.project_id = p.id) as shot_count,
-                 (select count(*)::int
-                    from tasks t
-                    join storyboards s2 on s2.id = t.shot_id
-                    join episodes e3 on e3.id = s2.episode_id
-                   where e3.project_id = p.id and t.status = 3) as done_count,
-                 (select a.uri
-                    from assets a
-                    join tasks t3 on t3.id::text = (a.meta->>'task_id')
-                    join storyboards s4 on s4.id = t3.shot_id
-                    join episodes e5 on e5.id = s4.episode_id
-                   where e5.project_id = p.id and a.deleted_at is null
-                     and coalesce(a.meta->>'content_type', '') like 'image/%'
-                   order by a.id desc limit 1) as cover_uri,
-                 (select ast.uri
-                    from assets ast
-                    join project_assets pa on pa.portrait_asset_id = ast.id
-                   where pa.project_id = p.id and ast.deleted_at is null
-                   order by ast.id desc limit 1) as portrait_uri,
-                 -- ReelFlow 列表卡要显示「时长」：项目全部时间线片段时长之和。
-                 -- 用 jsonb_array_elements 展开后 sum；无时间线的项目返回 0（不是 null，
-                 -- 免得前端还要区分"还没剪"与"查询失败"）。
-                 coalesce((
-                   select sum(coalesce((c->>'duration')::numeric, 0))::int
-                     from project_timelines pt
-                     cross join lateral jsonb_array_elements(pt.clips) c
-                    where pt.project_id = p.id
-                 ), 0) as timeline_duration_s,
-                 -- 有服务端时间线的分集数（剪辑台干过活的集数）
-                 (select count(*)::int from project_timelines pt2 where pt2.project_id = p.id)
-                   as timeline_episode_count
-            from script_projects p
-           where p.id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
-        `)
-      : { rows: [] };
-
-    const statMap = new Map<string, Record<string, unknown>>();
-    for (const r of (stats as { rows?: Record<string, unknown>[] }).rows ?? []) {
-      statMap.set(String(r.project_id), r);
-    }
-
-    const list = await Promise.all(
-      rows.map(async (row) => {
-        const s = statMap.get(String(row.id)) ?? {};
-        const episodeCount = Number(s.episode_count ?? 0);
-        const shotCount = Number(s.shot_count ?? 0);
-        const doneCount = Number(s.done_count ?? 0);
-        // 封面优先用已转存的图片资产，退化为角色定妆图；都签名成可直接访问的 URL
-        const coverKey = (s.cover_uri as string | null) ?? (s.portrait_uri as string | null) ?? null;
-        let coverUrl: string | null = null;
-        if (coverKey) {
-          try {
-            coverUrl = await this.storage.signDownload(coverKey, 3600);
-          } catch {
-            coverUrl = null;
-          }
-        }
-        return {
-          ...projectDto(row),
-          episode_count: episodeCount,
-          shot_count: shotCount,
-          done_count: doneCount,
-          cover_uri: coverUrl,
-          // ReelFlow 列表卡：时间线总时长（秒）与已入时间线的集数（0 = 还没剪）
-          timeline_duration_s: Number(s.timeline_duration_s ?? 0),
-          timeline_episode_count: Number(s.timeline_episode_count ?? 0),
-          // 用户可理解的四态（PRD 增补 §1.2）
-          work_state:
-            row.archivedAt !== null
-              ? "archived"
-              : shotCount === 0
-                ? "draft"
-                : doneCount > 0 && doneCount >= shotCount
-                  ? "ready"
-                  : "producing",
-        };
-      }),
-    );
-
-    return { list, total: countRow?.count ?? 0, page: p, page_size: ps };
+  /**
+   * 作品库（PRD 增补 §1.3 / task-10 §2「全部项目聚合」）：
+   * 工坊项目与画布项目在同一清单里，跨域**只读投影**。
+   *
+   * 聚合口径与筛选全部下沉到 WorksService（SQL），这里只做参数收敛，
+   * 保留原签名让既有调用方（作品墙）零改动。
+   */
+  async listWorks(
+    spaceId: string,
+    opts: {
+      status?: string;
+      page?: number;
+      pageSize?: number;
+      tab?: "workshop" | "canvas" | "all";
+      kind?: "workshop" | "canvas";
+      state?: "draft" | "producing" | "ready" | "archived";
+      keyword?: string;
+      from?: string;
+      to?: string;
+    } = {},
+  ) {
+    return this.works.list(spaceId, {
+      tab: opts.tab,
+      kind: opts.kind,
+      // status 兼容旧值 archived / 其它（active）；all 表示不过滤归档
+      status: opts.status === "archived" ? "archived" : opts.status === "all" ? "all" : "active",
+      state: opts.state,
+      keyword: opts.keyword,
+      from: opts.from,
+      to: opts.to,
+      page: opts.page,
+      pageSize: opts.pageSize,
+    });
   }
-
   /** 归档 / 恢复作品（软标记） */
   async setArchived(spaceId: string, projectId: string, archived: boolean) {
     const project = await this.findProject(spaceId, projectId);
@@ -547,16 +476,32 @@ export class ScriptService {
           })),
         )
         .returning();
-      // 小说来源的集边界是用户确认过的，落库后把项目来源标成 novel（便于详情页区分）
+      // 小说来源：① 来源标记（详情页区分来源）② 记录来源本子（迁移 0026）。
+      // `source_novel_id` 只写一次、**已存在不覆盖**：一个项目若先后被两个本子拆过，
+      // 保留最初来源才与"这本被拆过"的判据一致；覆盖会让 novel 侧 reopen 判错本子。
       if (source?.kind === "novel") {
+        const alreadyBound = project.sourceNovelId !== null;
         await tx
           .update(scriptProjects)
-          .set({ sourceType: ProjectSourceType.NOVEL, updatedAt: new Date() })
+          .set({
+            sourceType: ProjectSourceType.NOVEL,
+            ...(alreadyBound ? {} : { sourceNovelId: this.parseBigId(source.nt_id, "source.nt_id") }),
+            updatedAt: new Date(),
+          })
           .where(eq(scriptProjects.id, project.id));
       }
       return rows;
     });
     return created.map(episodeDto);
+  }
+
+  /** 数字 id 解析（novel 侧已在 assertSplittable 校验过，这里仍防御性归一） */
+  private parseBigId(raw: string, field: string): bigint {
+    try {
+      return BigInt(raw);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, `invalid ${field}`, { field });
+    }
   }
 
   async generateOutline(spaceId: string, projectId: string) {
@@ -2145,7 +2090,13 @@ export class ScriptService {
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
-    const clips = await this.normalizeTimelineClips(spaceId, episode.id, input.clips);
+    const [existing] = await db
+      .select()
+      .from(projectTimelines)
+      .where(eq(projectTimelines.episodeId, episode.id));
+    const normalized = await this.normalizeTimelineClips(spaceId, episode.id, input.clips);
+    // 片段资产绑定由专门端点维护：整体覆盖时按 clip_id 保留，避免"保存一次绑定就丢"
+    const clips = this.preservedClipAssets(this.timelineClipsDto(existing?.clips), normalized);
     await db
       .insert(projectTimelines)
       .values({
@@ -2242,19 +2193,52 @@ export class ScriptService {
     };
   }
 
-  /** 从 jsonb 读出 clips 并归一化（防御历史/脏数据） */
+  /** 从 jsonb 读出 clips 并归一化（防御历史/脏数据）；片段资产绑定为可选字段 */
   private timelineClipsDto(raw: unknown): TimelineClipDto[] {
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-      .map((item) => ({
-        clip_id: String(item.clip_id ?? ""),
-        shot_id: String(item.shot_id ?? ""),
-        task_id: item.task_id === null || item.task_id === undefined ? null : String(item.task_id),
-        name: String(item.name ?? ""),
-        duration: Number(item.duration ?? 1),
-      }))
+      .map((item) => {
+        const assets = Array.isArray(item.assets)
+          ? (item.assets as unknown[])
+              .filter((asset): asset is Record<string, unknown> => typeof asset === "object" && asset !== null)
+              .map((asset) => ({
+                source: String(asset.source ?? "") as TimelineClipAssetDto["source"],
+                id: String(asset.id ?? ""),
+                name: String(asset.name ?? ""),
+                uri: String(asset.uri ?? ""),
+                task_id:
+                  asset.task_id === null || asset.task_id === undefined ? null : String(asset.task_id),
+              }))
+              .filter((asset) => asset.id.length > 0 && asset.uri.length > 0 && asset.source.length > 0)
+          : [];
+        return {
+          clip_id: String(item.clip_id ?? ""),
+          shot_id: String(item.shot_id ?? ""),
+          task_id: item.task_id === null || item.task_id === undefined ? null : String(item.task_id),
+          name: String(item.name ?? ""),
+          duration: Number(item.duration ?? 1),
+          // 可选字段：无绑定时不出现（保持既有 clip 键集合不变）
+          ...(assets.length > 0 ? { assets } : {}),
+        };
+      })
       .filter((clip) => clip.clip_id.length > 0 && clip.shot_id.length > 0);
+  }
+
+  /**
+   * 片段资产绑定按 clip_id 保留：
+   * PUT timeline 是"整体覆盖顺序/字段"，不应该把专门端点维护的绑定一并清掉
+   * （否则用户在剪辑台点一下保存，刚绑的资产就没了）。
+   */
+  private preservedClipAssets(previous: TimelineClipDto[], next: TimelineClipDto[]): TimelineClipDto[] {
+    const keep = new Map(
+      previous.filter((clip) => clip.assets && clip.assets.length > 0).map((clip) => [clip.clip_id, clip.assets!]),
+    );
+    if (keep.size === 0) return next;
+    return next.map((clip) => {
+      const assets = keep.get(clip.clip_id);
+      return assets ? { ...clip, assets } : clip;
+    });
   }
 
   /** 校验并归一化 clips：shot 必须属于本集、task 必须属于本 space（且本集/本集镜头） */
@@ -2461,4 +2445,7 @@ export class ScriptService {
     );
   }
 }
+
+
+
 
