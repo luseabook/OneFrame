@@ -1896,8 +1896,65 @@ inArray(timelinePublications.status, [PUB_STATUS_QUEUED, PUB_STATUS_TRANSCODING]
 `enqueuePublishTranscode({publicationId, spaceId, sourceKey})` 以 `jobId = publish-transcode-<id>` 入队
 （同发布记录天然去重），`onModuleDestroy` 里 `close()`。
 
-**测试**：`packages/shared/src/publish-transcode.spec.ts` 6 例（纯状态机）+
-`apps/worker/test/publish-transcode.spec.ts` 4 例（真库 + 真 `LocalStorage`：源缺失落 `status=4` 且不抛 /
+**测试**：`packages/shared/src/publish-transcode.spec.ts` 7 例（纯状态机）+
+`apps/worker/test/publish-transcode.spec.ts` 11 例（真库 + 真 `LocalStorage`：源缺失落 `status=4` 且不抛 /
 已 READY 重投 skipped 且字段全不变 / 记录不存在 skipped / 正常路径产物落 `u/<space>/publications/<id>.mp4`
-且 `storage.read` 可读回）；api 侧 `test/ffmpeg-trim.spec.ts` + `test/reelflow-publish.spec.ts` **18 例**
-证明默认 `inline` 模式行为与改造前完全一致。
+且 `storage.read` 可读回 / **并发两 job 抢占** / **孤儿记录接管** / **源 key 反查 4 例**）；api 侧
+`test/ffmpeg-trim.spec.ts` + `test/reelflow-publish.spec.ts` **18 例**证明默认 `inline` 模式行为与改造前完全一致。
+
+### 17.17 转码看门狗与队列的协同、`markTranscoding` 抢占语义（第 58 批）
+
+无端点变更。本节只讲**状态推进的正确性**——第 57 批下沉之后暴露的两处竞态。
+
+**缺陷一：看门狗把「队列里还排着的任务」判成失败。** 第 57 批把转码下沉到 `publish.transcode` 后，
+`reviveStuckPublications` 仍是「超时即失败」口径，形成一条把下沉收益全额抵消的链路：
+
+```
+worker 停机 20min（任务都在 Redis 正常排队）
+  → 重启 schedule("publications-watchdog", …, runOnStart=true) 让看门狗先跑
+  → status=1 且 updated_at 超 15min 的记录被逐条置 status=4（error.code="transcode_stalled"）
+  → BullMQ 随后投出 job，runPublishTranscode 撞 PUB_TERMINAL_STATUSES=[3,4,5] → skipped
+```
+
+判定改为**三分类**（`apps/worker/src/maintenance.ts`）：
+
+| 情况 | 判定 | 理由 |
+|---|---|---|
+| 仍在队列（`wait`/`waiting`/`delayed`/`active`/`paused`） | 跳过 | 排队久 ≠ 坏了，worker 停机积压是队列正常状态 |
+| 不在队列、源还在 | **重新入队** | 才是真重投；源 key 顺 `slice.source_export_id` → `timeline_exports.file_uri` 反查 |
+| 不在队列、也投不了 | 置 `status=4` | 源成片已被清理时才真救不了 |
+
+```ts
+export interface RevivePublicationHooks {
+  pendingInQueue?: () => Promise<ReadonlySet<string>>;  // 一次取整批，不逐条查
+  requeue?: (row: { publicationId: string; spaceId: string }) => Promise<boolean>;
+}
+```
+
+两条硬要求：① **探针一次取集合**（逐条查是「200 条超时 × 数百 job」，会把 2min 维护任务拖成分钟级）；
+② **探针抛错时整轮放弃**（`return 0`）——Redis 抖动时把正在跑的转码判失败，用户会看到「重发」而原任务仍在跑。
+重投 jobId 必须带时间戳 `publish-transcode-retry-<id>-<ts>`：BullMQ 对同名 jobId 去重，固定 id 重投会**静默 no-op**。
+
+**缺陷二：`markTranscoding` 无条件写。** api（`publish.service.ts` `transcodeDeps()`）与 worker
+（`apps/worker/src/publish-transcode.ts`）两侧原先都是 `.set({status:2}).where(eq(id))`，不看当前状态，
+两个执行者并发转同一片源时后写者覆盖中间态（含 shareToken）。改为抢占式：
+
+```ts
+or(eq(status, PUB_STATUS_QUEUED),
+   and(eq(status, PUB_STATUS_TRANSCODING), lt(updatedAt, cutoff)))   // 接管已死的执行者
+```
+
+`.returning({id})` 判断是否抢到，抢不到即 `skipped`（reason `publication already claimed by another transcoder`），
+不读源、不写产物。**不能只认 `status=1`**：worker 崩溃后 BullMQ 重投的 job 面对的是停在 `status=2` 的孤儿记录，
+只认 1 就等于永远放弃它——故引入 `PUB_TRANSCODE_STALE_MINUTES = 15`（与看门狗 `stuckMinutes` 同源）作为接管窗口。
+状态机契约由此由三条不变量增为**四条**：终态不覆盖 / 降级留痕 / 失败不抛 / **单执行者**。
+
+**其余对齐**：`markReady` / `markFailed` 的 `inArray(status, [QUEUED, TRANSCODING])` 守卫此前只有 worker 侧有，
+内联路径缺，已逐字对齐。`hooks` 不传时行为退化为第 57 批原口径（超时即失败），保证无队列的部署形态语义不变。
+
+**测试**：shared **7 例**（+1「没抢到转码权 → skipped，不读源不写产物」）、
+`apps/worker/src/maintenance-publications.spec.ts` **8 例**（+4：仍在队列 → `revived=0` 且 status 保持 2 /
+不在队列且 requeue 成功 → status **保持 2** 且 `updated_at` 推到当前 / requeue false → status=4 且 error 含「无法自动重试」/
+探针抛错 → 整轮放弃）、`apps/worker/test/publish-transcode.spec.ts` **11 例**（+7：并发两 job → 结果集恰为
+`["ready","skipped"]` 且 reason 含 `claimed`、源只读一次 / `status=2` 且 `updated_at` 1 小时前 → 救回 /
+`status=2` 但 `updated_at` 很新 → skipped / 反查正常 / 三种 null 分支不抛）。

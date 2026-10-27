@@ -208,26 +208,64 @@ export async function reviveStuckTasks(
 }
 
 /**
- * 复活卡住的"发布转码"记录（ReelFlow 切片发布）。
+ * 发布转码看门狗（第 58 批重写判定口径）。
  *
- * 背景：`PublishService.publish()` 是 **进程内 fire-and-forget**（`void this.transcode(...)`），
- * 好处是不依赖 worker 也能跑通；代价是 **API 进程在转码中途重启/崩溃时，记录会永久停在
- * status=2（转码中）** —— 用户看到"转码中"永远不结束，也没有任何任务可重试。
+ * ## 它防的是什么
+ * 发布记录的转码可能**没有任何执行者**：API 进程在转码中途重启、worker 崩在 job 里、
+ * 内联路径的 `void this.scheduleTranscode(...)` 随进程消失。记录会永久停在
+ * 1（排队中）/ 2（转码中），用户看到"转码中"永远不结束。
  *
- * 这里做与 `reviveStuckTasks` 同构的兜底：把超过阈值的 2（转码中）与 1（排队中）记录
- * 标记为 4（失败）并写入可读原因。**不自动重跑转码**：源产物可能已被清理，
- * 静默重试会把"可诊断的失败"变成"无声的资源消耗"；让创作者在编辑台重新发布更诚实。
+ * ## 第 58 批修掉的坑：看门狗把「队列里还排着的任务」误判成失败
+ * 第 57 批把转码下沉到 `publish.transcode` 队列后，出现了这样一条真实链路：
+ * worker 停机 20min（发布任务都在 Redis 里正常排队）→ 重启时 `schedule(..., runOnStart=true)`
+ * 让本函数**先**跑 → 这些记录 status=1 且 `updated_at` 早已超 15min，被逐条改成 4（失败）；
+ * → 随后 BullMQ 把 job 投出来，状态机一看是终态直接 `skipped` → **下沉换来的"重启可重投"
+ * 被看门狗全额抵消**，而且错误文案还让用户"重新发布"。
+ *
+ * 所以判定必须区分三种情况，而不是只看"超时了没有"：
+ * 1. **还在队列里**（waiting/delayed/active）→ 有执行者，跳过。排队久不等于坏了，
+ *    worker 停机期间积压本来就是队列的正常状态；
+ * 2. **不在队列、但能重投**（源产物还在）→ 重新入队，给记录一次真正的重试机会；
+ * 3. **不在队列、也重投不了**（源产物已被清理 / 没配队列）→ 才判 4（失败）并写可读原因。
+ *
+ * 因此本函数不自己拼 SQL 判定"能不能重投"，而是由调用方注入 `hooks`：
+ * worker 进程注入真队列 + 真反查（`apps/worker/src/main.ts`），单测注入假实现。
+ * 不注入 hooks 时行为退化为第 57 批的原判定（超时即失败），保持既有 spec 与
+ * 没有队列的部署形态（`PUBLISH_TRANSCODE_MODE=inline` 且无 worker 时）语义不变。
  */
+export interface RevivePublicationHooks {
+  /**
+   * 一次性取回"仍被队列持有"（waiting / delayed / active / paused）的发布 id 集合。
+   *
+   * 为什么是整批而不是逐条查：本函数一次最多扫 200 条超时记录，逐条查队列在
+   * worker 停机积压时恰好是最坏情形（队列里几百个 job × 每条都要扫一遍），
+   * 会把一个 2min 的维护任务拖成分钟级。整批一次 RPC 就够。
+   *
+   * 抛错按"全部持有"处理 → 本轮直接放弃判定（保守：宁可晚一轮，也不误杀正在排队的）。
+   */
+  pendingInQueue?: () => Promise<ReadonlySet<string>>;
+  /**
+   * 重新入队（源 key 由实现方反查）。返回 true 表示已重投，false 表示投不了
+   * （源成片已被清理 / slice 里没有 source_export_id）。
+   */
+  requeue?: (row: { publicationId: string; spaceId: string }) => Promise<boolean>;
+}
+
 export async function reviveStuckPublications(
   db: Db,
   log: MaintenanceLogger,
   stuckMinutes = 15,
   /** 仅处理指定 space（运维/测试排查用）；省略时全库扫描 */
   scopeSpaceId?: bigint,
+  hooks: RevivePublicationHooks = {},
 ): Promise<number> {
   const cutoff = new Date(Date.now() - stuckMinutes * MINUTE);
   const stuck = await db
-    .select({ id: timelinePublications.id, status: timelinePublications.status })
+    .select({
+      id: timelinePublications.id,
+      spaceId: timelinePublications.spaceId,
+      status: timelinePublications.status,
+    })
     .from(timelinePublications)
     .where(
       and(
@@ -238,18 +276,66 @@ export async function reviveStuckPublications(
     )
     .limit(200);
 
-  let revived = 0;
-  for (const row of stuck) {
+  // 队列持有情况一次取回。取不到就整轮不判失败 —— Redis 抖动时把正在跑的转码
+  // 判成失败是不可接受的（用户会看到"重发"提示，而原任务其实还在跑）。
+  let pendingIds: ReadonlySet<string> | null = null;
+  if (hooks.pendingInQueue && stuck.length > 0) {
     try {
-      // 抢占式更新：只有仍是 1/2 且仍超时的那一行会被改，避免和正在跑的轮询/发布互相覆盖
+      pendingIds = await hooks.pendingInQueue();
+    } catch (err) {
+      log.warn({ err: String(err) }, "publication queue probe failed, skip this round");
+      return 0;
+    }
+  }
+
+  let revived = 0;
+  let requeued = 0;
+  let pending = 0;
+  for (const row of stuck) {
+    const publicationId = String(row.id);
+    try {
+      // ① 还在队列里 → 有执行者，本轮不碰它。排队久不等于坏了：
+      //    worker 停机期间任务积压本来就是队列的正常状态。
+      if (pendingIds?.has(publicationId)) {
+        pending += 1;
+        continue;
+      }
+
+      // ② 不在队列 → 尝试重投（第 58 批核心：先救，再判死）
+      if (hooks.requeue) {
+        let requeuedOk = false;
+        try {
+          requeuedOk = await hooks.requeue({ publicationId, spaceId: String(row.spaceId) });
+        } catch (err) {
+          log.warn({ publication_id: publicationId, err: String(err) }, "publication requeue failed");
+          requeuedOk = false;
+        }
+        if (requeuedOk) {
+          // 重投成功：把 updated_at 推到当前，给新任务一个完整的 stuckMinutes 窗口。
+          // 否则下一轮（2min 后）它仍然是"超时"状态，排查时看不出"这一轮已经救过了"；
+          // 且新任务自己也可能会被别的维护路径当成陈旧记录。
+          await db
+            .update(timelinePublications)
+            .set({ updatedAt: new Date() })
+            .where(
+              and(eq(timelinePublications.id, row.id), inArray(timelinePublications.status, [1, 2])),
+            );
+          requeued += 1;
+          continue;
+        }
+      }
+
+      // ③ 救不了 → 判失败。抢占式更新：只有仍是 1/2 且仍超时的那一行会被改，
+      // 避免和正在跑的轮询/发布互相覆盖。
       const updated = await db
         .update(timelinePublications)
         .set({
           status: 4,
           error: {
             code: "transcode_stalled",
-            message:
-              "转码未在预期时间内完成（服务可能重启）。请在剪辑台重新发布该切片。",
+            message: hooks.requeue
+              ? "转码超时且无法自动重试（源成片可能已被清理）。请在剪辑台重新导出并发布该切片。"
+              : "转码未在预期时间内完成（服务可能重启）。请在剪辑台重新发布该切片。",
           },
           updatedAt: new Date(),
         })
@@ -263,10 +349,12 @@ export async function reviveStuckPublications(
         .returning({ id: timelinePublications.id });
       if (updated.length > 0) revived += 1;
     } catch (err) {
-      log.error({ publication_id: String(row.id), err: String(err) }, "revive publication failed");
+      log.error({ publication_id: publicationId, err: String(err) }, "revive publication failed");
     }
   }
   if (revived > 0) log.warn({ revived }, "stuck publications marked failed");
+  if (requeued > 0) log.warn({ requeued }, "stuck publications requeued");
+  if (pending > 0) log.info({ pending }, "stuck publications still pending in queue (skipped)");
   return revived;
 }
 

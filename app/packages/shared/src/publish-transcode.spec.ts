@@ -26,7 +26,9 @@ import {
  *
  * 本 spec 全部用 fake deps，不碰 DB / 不碰 ffmpeg（`trim` 是注入点）。
  */
-function fakeDeps(overrides: Partial<PublishTranscodeDeps> & { row?: PublishTranscodeRow | null } = {}) {
+function fakeDeps(
+  overrides: Partial<PublishTranscodeDeps> & { row?: PublishTranscodeRow | null; claimFails?: boolean } = {},
+) {
   const calls: string[] = [];
   let status = overrides.row === undefined ? PUB_STATUS_QUEUED : (overrides.row?.status ?? 0);
   let readyPatch: Parameters<PublishTranscodeDeps["markReady"]>[1] | null = null;
@@ -40,7 +42,9 @@ function fakeDeps(overrides: Partial<PublishTranscodeDeps> & { row?: PublishTran
     },
     markTranscoding: async () => {
       calls.push("markTranscoding");
+      if (overrides.claimFails) return false;
       status = 2;
+      return true;
     },
     readSource: async () => {
       calls.push("readSource");
@@ -179,5 +183,21 @@ describe("publish transcode: 状态机语义", () => {
     });
     expect(outcome.result).toBe("failed");
     expect(h.failReason).toBe("disk full");
+  });
+
+  it("没抢到转码权（另一个执行者已在跑）→ skipped，不读源、不写产物", async () => {
+    const h = fakeDeps({ trim: okTrim(), claimFails: true });
+    const outcome = await runPublishTranscode(h.deps, {
+      publicationId: "42",
+      spaceId: "7",
+      sourceKey: "k",
+    });
+
+    expect(outcome.result).toBe("skipped");
+    expect(outcome.reason).toMatch(/claimed/);
+    // 关键：不能退化成"照转不误" —— 否则同一条发布会并行转两遍、shareToken 被后写者换掉
+    expect(h.calls).not.toContain("readSource");
+    expect(h.calls).not.toContain("markReady");
+    expect(h.readyPatch).toBeNull();
   });
 });

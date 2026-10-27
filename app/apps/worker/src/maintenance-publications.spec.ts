@@ -116,4 +116,80 @@ describe("worker: reviveStuckPublications", () => {
     const again = await reviveStuckPublications(db, silentLog, 15, BigInt(spaceId));
     expect(again).toBe(0);
   });
+
+  // ── 第 58 批：看门狗与 publish.transcode 队列协同 ──────────────────────
+  //
+  // 这几例锁的是第 57 批下沉后暴露出来的真实链路：worker 停机 20min 期间发布任务正常
+  // 积压在 Redis 里，重启时 `runOnStart=true` 让看门狗先跑，旧口径"超时即失败"把
+  // 这些任务全判成 4，随后队列把 job 投出来也只会被终态检查 skipped ——
+  // 下沉换来的"重启可重投"被全额抵消。判定必须区分"在队列"与"真没人管"。
+
+  it("仍在队列里（waiting/delayed/active）→ 跳过，不判失败", async () => {
+    const queued = await mk(`wd-inqueue-${stamp}`, 1, 30);
+    const revived = await reviveStuckPublications(db, silentLog, 15, BigInt(spaceId), {
+      pendingInQueue: async () => new Set([queued]),
+      requeue: async () => {
+        throw new Error("不该走到重投：在队列里就不该重投");
+      },
+    });
+
+    // 此刻本空间里唯一超时的记录就是 queued（前面的例都已推进到终态），
+    // 所以"没有把任何一条判失败"是确定性断言，不是范围判断。
+    expect(revived).toBe(0);
+    expect((await statusOf(queued)).status).toBe(1);
+  });
+
+  it("不在队列且源可反查 → 重投而非判失败，并把 updated_at 推到当前", async () => {
+    const orphan = await mk(`wd-orphan-${stamp}`, 2, 30);
+    const requeuedIds: string[] = [];
+    const before = Date.now();
+
+    await reviveStuckPublications(db, silentLog, 15, BigInt(spaceId), {
+      pendingInQueue: async () => new Set<string>(),
+      requeue: async ({ publicationId }) => {
+        requeuedIds.push(publicationId);
+        return publicationId === orphan;
+      },
+    });
+
+    expect(requeuedIds).toContain(orphan);
+    const after = await statusOf(orphan);
+    expect(after.status).toBe(2); // 没被判失败
+    expect(after.error).toBeNull();
+    // updated_at 被推到当前：否则下一轮它仍然"超时"，排查时看不出"已经被救过一次"
+    const [row] = await db
+      .select({ updatedAt: timelinePublications.updatedAt })
+      .from(timelinePublications)
+      .where(sql`${timelinePublications.id} = ${BigInt(orphan)}`);
+    expect(new Date(row!.updatedAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  it("不在队列且源不可反查（requeue 返回 false）→ 才判失败，文案说清救不了", async () => {
+    const hopeless = await mk(`wd-hopeless-${stamp}`, 1, 30);
+    await reviveStuckPublications(db, silentLog, 15, BigInt(spaceId), {
+      pendingInQueue: async () => new Set<string>(),
+      requeue: async () => false,
+    });
+
+    const after = await statusOf(hopeless);
+    expect(after.status).toBe(4);
+    expect(JSON.stringify(after.error ?? {})).toContain("transcode_stalled");
+    // 与旧文案的区别：不是让用户"重新发布"，而是明确指出源成片可能已被清理
+    expect(JSON.stringify(after.error ?? {})).toContain("无法自动重试");
+  });
+
+  it("队列探针抛错 → 整轮放弃判定，不误杀", async () => {
+    const probeFail = await mk(`wd-probefail-${stamp}`, 2, 30);
+    const revived = await reviveStuckPublications(db, silentLog, 15, BigInt(spaceId), {
+      pendingInQueue: async () => {
+        throw new Error("redis down");
+      },
+      requeue: async () => true,
+    });
+
+    // Redis 挂了意味着"不知道有没有执行者"，此时判失败会误杀正在跑的任务；
+    // 宁可整轮放弃（下一轮探针恢复后自然会处理）。
+    expect(revived).toBe(0);
+    expect((await statusOf(probeFail)).status).toBe(2);
+  });
 });

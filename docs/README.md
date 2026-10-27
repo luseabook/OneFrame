@@ -123,6 +123,84 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.12 · 第 58 批：修第 57 批自己引入的回归 —— 看门狗误杀队列中任务 + 无条件 markTranscoding · 2026-10-28）
+
+> 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.1**（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批不加分**：修的是上一批自己造的回归，全站仍 **201.42/206 = 97.8%**、剩余 **4.58**，28 个模块分一个没动。
+
+### 缺陷一：看门狗把「队列里还排着的任务」判成失败
+
+第 57 批把转码下沉到 `publish.transcode` 之后，`reviveStuckPublications` 的判定口径没跟着改，还是「超时即失败」。于是出现一条把下沉收益**全额抵消**的链路：
+
+```
+worker 停机 20min（发布任务都在 Redis 里正常排队）
+  → 重启时 schedule("publications-watchdog", …, runOnStart = true) 让看门狗先跑
+  → 这些记录 status=1 且 updated_at 已超 15min，被逐条改成 status=4（失败）
+  → 随后 BullMQ 把 job 投出来，runPublishTranscode 一看是终态 → 直接 skipped
+  → 「重启可重投」等于没做；文案还让用户「在剪辑台重新发布」= 让用户自己再造一条记录
+```
+
+修法是**三分类**，而不是「加个 try/catch 或者把阈值调大」：
+
+| 情况 | 判定 | 为什么 |
+|---|---|---|
+| **还在队列里**（wait / waiting / delayed / active / paused） | 跳过，本轮不碰 | 排队久 ≠ 坏了。worker 停机期间任务积压本来就是队列的正常状态 |
+| **不在队列、但源还在** | **重新入队** | 这才叫重投。源 key 顺 `slice.source_export_id` → `timeline_exports.file_uri` 反查 |
+| **不在队列、也投不了** | 判 `status=4` | 源成片已被清理时才真的救不了，此时文案与事实一致 |
+
+```ts
+// apps/worker/src/maintenance.ts —— 探针一次取回整批，而不是逐条查
+export interface RevivePublicationHooks {
+  pendingInQueue?: () => Promise<ReadonlySet<string>>;
+  requeue?: (row: { publicationId: string; spaceId: string }) => Promise<boolean>;
+}
+```
+
+两个容易写错的点：
+1. **探针一次取集合**。逐条查队列在最坏情形是「200 条超时记录 × 队列里数百 job」，会把一个 2min 的维护任务拖成分钟级。
+2. **探针抛错时整轮放弃判定**（`return 0`）。Redis 抖动时把正在跑的转码判失败，用户会看到「重发」提示，而原任务其实还在跑——宁可晚一轮。
+
+重投的 jobId 必须带时间戳：`publish-transcode-retry-<id>-<ts>`。BullMQ 对同名 jobId 会去重，用固定 id 重投会**静默变成 no-op**。
+
+### 缺陷二：`markTranscoding` 无条件写，两个执行者会互相覆盖
+
+api 侧（`publish.service.ts` 的 `transcodeDeps()`）与 worker 侧（`apps/worker/src/publish-transcode.ts`）原先都是：
+
+```ts
+await db.update(timelinePublications).set({ status: 2, ... }).where(eq(timelinePublications.id, id));
+```
+
+不看当前状态。两个执行者并发转同一片源时，后写者会覆盖先写者的中间态（包括 shareToken）。改为**抢占式条件更新**并返回是否抢到：
+
+```ts
+const claimed = await db.update(timelinePublications).set({ status: PUB_STATUS.TRANSCODING, ... })
+  .where(and(eq(id), or(
+    eq(status, PUB_STATUS.QUEUED),                                        // 正常排队
+    and(eq(status, PUB_STATUS.TRANSCODING),
+        lt(updatedAt, cutoff)),                                            // 接管已死的执行者
+  )))
+  .returning({ id });
+// 抢不到 → runPublishTranscode 直接 skipped，不读源、不写产物
+```
+
+**不能只认 `status=1`**：worker 崩溃后 BullMQ 重投的 job，面对的是停在 `status=2` 的孤儿记录；只认 1 就等于永远放弃它。故引入 `PUB_TRANSCODE_STALE_MINUTES = 15`（与看门狗同源）作为「接管」窗口。状态机契约由此补上第 4 条不变量：**单执行者**（原三条：终态不覆盖 / 降级留痕 / 失败不抛）。
+
+### 顺带对齐的一处不对称
+
+`markReady` / `markFailed` 的 `inArray(status, [QUEUED, TRANSCODING])` 守卫此前**只有 worker 侧有**，内联路径缺——同一份状态机两条路径守卫不一致。已逐字对齐。
+
+### 验证
+
+| 层 | 例数 | 覆盖 |
+|---|---:|---|
+| shared 状态机 | 7（+1） | 新增「没抢到转码权 → skipped，且不读源、不写产物」 |
+| worker 看门狗 | 8（+4） | 仍在队列 → `revived=0` 且 status 保持 2 / 不在队列且 requeue 成功 → status **保持 2** 且 `updated_at` 推到当前 / requeue 返回 false → status=4 且 error 含「无法自动重试」/ 探针抛错 → 整轮放弃 |
+| worker 抢占与反查 | 11（+7） | 两个并发 job → 结果集恰为 `["ready","skipped"]` 且 skipped 的 reason 含 `claimed`、源只被读一次 / `status=2` 且 `updated_at` 1 小时前 → 能救回 / `status=2` 但 `updated_at` 很新 → skipped 且 status 仍 2 / 反查正常 / 三种 null 分支不抛 |
+
+测试总量 **1,216 → 1,228**（worker 41 → 52、shared 25 → 26）；`verify-round.ps1` **12/12 全绿**（api 76 文件 863 例）。
+
+**为什么不加分**：#20 的 0.08 只剩「切片业务语义的竞品字段证据」，这批代码不落在任何模块的扣分项上。修 bug 不等于补缺口——把这两件事混起来才是不诚实的开始。
+
 ## 变更登记（v6.11 · 第 57 批：#20 切片转码异步下沉 worker · 2026-10-28）
 
 > 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.0**（同一批；本文件与主台账各有一套编号，勿混）。

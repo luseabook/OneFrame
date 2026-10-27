@@ -8,6 +8,7 @@ import {
   episodes,
   scriptProjects,
   spaces,
+  timelineExports,
   timelinePublications,
   users,
 } from "@app/db";
@@ -19,7 +20,7 @@ import {
   PUB_STATUS_READY,
   publicationObjectKey,
 } from "@app/shared";
-import { runPublishTranscodeJob } from "../src/publish-transcode";
+import { runPublishTranscodeJob, resolvePublicationSourceKey } from "../src/publish-transcode";
 
 /**
  * `publish.transcode` 队列消费者（第 57 批）。
@@ -75,6 +76,7 @@ describe("publish.transcode worker consumer", () => {
 
   afterAll(async () => {
     await db.delete(timelinePublications).where(eq(timelinePublications.spaceId, spaceId));
+    await db.delete(timelineExports).where(eq(timelineExports.spaceId, spaceId));
     await db.delete(episodes).where(eq(episodes.projectId, projectId));
     await db.delete(scriptProjects).where(eq(scriptProjects.id, projectId));
     await db.delete(spaces).where(eq(spaces.id, spaceId));
@@ -191,5 +193,127 @@ describe("publish.transcode worker consumer", () => {
     // 产物真的写进了 storage（不是只改了库）
     const stored = await storage.read(row.fileUri!);
     expect(stored.byteLength).toBeGreaterThan(0);
+  });
+
+  // ── 第 58 批：抢占式进入转码中 ────────────────────────────────────────
+  //
+  // 背景：入队 + 内联兜底 + worker 重投三者并存时，同一条发布会**同时有两个执行者**。
+  // 旧的 markTranscoding 是无条件 `.set({status:2})`，两边都会"开始"，后果有两个：
+  // ① 同一个片源被转两遍（白烧 CPU/IO）；② 后写者会用新的 share_token 覆盖先写者的，
+  // 用户手里那条分享链接中途失效。以下三例锁住"只有一个人能干活"。
+
+  it("抢占：两条并发任务只有一个真转码，另一个 skipped 且不覆盖 share_token", async () => {
+    const id = await createPublication({});
+    const sourceKey = `u/${spaceId}/exports/race-${String(id)}.mp4`;
+    await storage.put(sourceKey, Buffer.from("race-source-bytes"), "video/mp4");
+
+    const [a, b] = await Promise.all([
+      runPublishTranscodeJob(
+        { db, storage, log },
+        { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+      ),
+      runPublishTranscodeJob(
+        { db, storage, log },
+        { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+      ),
+    ]);
+
+    const results = [a.result, b.result].sort();
+    expect(results).toEqual(["ready", "skipped"]);
+
+    // 落库结果必须是"恰好一次"的证据：只有一条 ready 路径写过的痕迹
+    const row = await readRow(id);
+    expect(row.status).toBe(PUB_STATUS_READY);
+    expect(row.shareToken).toBeTruthy();
+    const skippedOne = a.result === "skipped" ? a : b;
+    expect(skippedOne.reason).toContain("claimed");
+  });
+
+  it("接管：停在 2（转码中）但 updated_at 已过期的孤儿记录 → 仍能被重投的任务救回", async () => {
+    const id = await createPublication({ status: 2 });
+    // 把 updated_at 推到很久以前，模拟"执行者崩在转码中途、没人再碰它"
+    await db
+      .update(timelinePublications)
+      .set({ updatedAt: new Date(Date.now() - 60 * 60_000) })
+      .where(eq(timelinePublications.id, id));
+    const sourceKey = `u/${spaceId}/exports/orphan-${String(id)}.mp4`;
+    await storage.put(sourceKey, Buffer.from("orphan-source-bytes"), "video/mp4");
+
+    const outcome = await runPublishTranscodeJob(
+      { db, storage, log },
+      { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+    );
+
+    // 如果只认 status=1，这里会变成 skipped，孤儿记录永远没人管 —— 那比改造前更差
+    expect(outcome.result).toBe("ready");
+    expect((await readRow(id)).status).toBe(PUB_STATUS_READY);
+  });
+
+  it("不接管：停在 2 但 updated_at 很新（另一个执行者正在跑）→ skipped，不抢", async () => {
+    const id = await createPublication({ status: 2 });
+    const sourceKey = `u/${spaceId}/exports/busy-${String(id)}.mp4`;
+    await storage.put(sourceKey, Buffer.from("busy-source-bytes"), "video/mp4");
+
+    const outcome = await runPublishTranscodeJob(
+      { db, storage, log },
+      { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+    );
+
+    expect(outcome.result).toBe("skipped");
+    expect(outcome.reason).toContain("claimed");
+    expect((await readRow(id)).status).toBe(2); // 保持"转码中"，让原执行者继续
+  });
+
+  // ── 第 58 批：看门狗重投的源 key 反查 ──────────────────────────────────
+  //
+  // 看门狗的"先救再判死"依赖能从发布记录找回源成片 key。这个 key 没有单独列，
+  // 发布时被塞进了 slice.source_export_id（publish.service.ts 落库处），
+  // 所以只能顺这条线查 timeline_exports.file_uri。返回 null = 救不了 → 才允许判失败。
+
+  async function createExport(fileUri: string | null): Promise<bigint> {
+    const id = BigInt(`${Date.now()}${Math.floor(Math.random() * 1000)}`);
+    await db.insert(timelineExports).values({
+      id,
+      spaceId,
+      projectId,
+      episodeId,
+      status: 3,
+      fileUri,
+      clipCount: 1,
+      durationS: 3,
+    });
+    return id;
+  }
+
+  it("反查源 key：slice.source_export_id → timeline_exports.file_uri", async () => {
+    const expectedKey = `u/${spaceId}/exports/source-${Date.now()}.mp4`;
+    const exportId = await createExport(expectedKey);
+    const id = await createPublication({});
+    await db
+      .update(timelinePublications)
+      .set({ slice: { start_ms: 0, end_ms: 1000, source_export_id: String(exportId) } })
+      .where(eq(timelinePublications.id, id));
+
+    expect(await resolvePublicationSourceKey(db, String(id))).toBe(expectedKey);
+  });
+
+  it("反查源 key：slice 里没有 source_export_id → null（早期记录/手工插入，救不了）", async () => {
+    const id = await createPublication({}); // slice 只有 start_ms/end_ms
+    expect(await resolvePublicationSourceKey(db, String(id))).toBeNull();
+  });
+
+  it("反查源 key：导出记录的 file_uri 为空 → null（导出失败残留，救不了）", async () => {
+    const exportId = await createExport(null);
+    const id = await createPublication({});
+    await db
+      .update(timelinePublications)
+      .set({ slice: { source_export_id: String(exportId) } })
+      .where(eq(timelinePublications.id, id));
+    expect(await resolvePublicationSourceKey(db, String(id))).toBeNull();
+  });
+
+  it("反查源 key：记录不存在 / id 非法 → null（不抛）", async () => {
+    expect(await resolvePublicationSourceKey(db, "123456789012345678")).toBeNull();
+    expect(await resolvePublicationSourceKey(db, "not-a-number")).toBeNull();
   });
 });

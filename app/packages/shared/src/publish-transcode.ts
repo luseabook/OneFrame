@@ -16,6 +16,11 @@ import { trimVideoBuffer, type TrimResult } from "./ffmpeg-trim";
  *    绝不"悄悄复制却对外说裁过"；
  * 3. **失败不抛**：异常一律落 status=4 + `error`，调用方拿到的是 outcome 而不是异常
  *    （队列任务不该因为"片源不可解码"无限重投）。
+ *
+ * 第 58 批补第四条（原先不成立）：
+ * 4. **单执行者**：进入 2（转码中）必须是**抢占式**条件更新（仅当仍为 1），抢不到即 skipped。
+ *    入队 + 内联兜底 + worker 重投三者并存时会出现两个执行者指向同一条发布记录，
+ *    并行转两遍除了白烧 CPU，还会让 `share_token` 被后写者换掉（已发出去的分享链接中途失效）。
  */
 
 /** 与 `timeline_publications.status` 对齐（DB 里是 smallint） */
@@ -32,6 +37,15 @@ export const PUB_TERMINAL_STATUSES: readonly number[] = [
   PUB_STATUS_REMOVED,
 ];
 
+/**
+ * 「转码中」多久没有心跳就认为执行者已死（分钟）。
+ *
+ * 与 worker 看门狗 `reviveStuckPublications` 的 `stuckMinutes` 默认值同源：两边判断的是
+ * 同一件事——"这个执行者还在吗"。取太短会把正在跑的长片误接管，取太长会让用户多等。
+ * 15min 远大于一次切片转码的实际耗时（源是已合成成片，裁剪只是 `-ss/-to` 重封装）。
+ */
+export const PUB_TRANSCODE_STALE_MINUTES = 15;
+
 export interface PublishTranscodeRow {
   status: number;
   /** 发布时的区间 `{ start_ms?, end_ms?, clip_ids? }`；空对象表示整片 */
@@ -47,7 +61,22 @@ export interface PublishTranscodeReadyPatch {
 
 export interface PublishTranscodeDeps {
   loadPublication(id: string): Promise<PublishTranscodeRow | null>;
-  markTranscoding(id: string): Promise<void>;
+  /**
+   * **抢占**进入转码中，返回是否抢到。
+   *
+   * 实现方必须用一条条件更新（`UPDATE ... WHERE id=? AND <可抢占> RETURNING id`）判定，
+   * 其中「可抢占」= `status = 1(排队)` **或** `status = 2(转码中) 且 updated_at 早于
+   * `PUB_TRANSCODE_STALE_MINUTES` 分钟`（执行者已死的接管）。不能只认 status=1：
+   * worker 崩溃后 BullMQ 重投的 job 面对的是停在 2 的孤儿记录，只认 1 就等于永远放弃它。
+   *
+   * 为什么必须条件更新而不是无条件 `.set({status:2})`（第 58 批修）：
+   * 入队与内联兜底、worker 重投、两个 worker 并存，都可能让**同一个发布有两个执行者**。
+   * 无条件写 status=2 时两边都能"开始"，后写的那个覆盖先写的中间状态，
+   * 结果是同一个片源被转两遍、`share_token` 被换两次（已发出去的分享链接中途失效）。
+   * 条件更新让"谁先抢到谁干"，抢不到的一方直接 skipped —— 转码幂等但昂贵，
+   * 宁可少跑一次，也不能并行跑两次。
+   */
+  markTranscoding(id: string): Promise<boolean>;
   readSource(key: string): Promise<Buffer | null>;
   putFile(key: string, buffer: Buffer): Promise<void>;
   nextShareToken(): Promise<string>;
@@ -89,7 +118,12 @@ export async function runPublishTranscode(
   }
 
   try {
-    await deps.markTranscoding(publicationId);
+    const claimed = await deps.markTranscoding(publicationId);
+    if (!claimed) {
+      // 没抢到：说明另一个执行者（或看门狗）已经把这一行推进过了。不再读源、不再写产物，
+      // 否则会重复转码并把先写好的 shareToken 覆盖掉。
+      return { result: "skipped", reason: "publication already claimed by another transcoder" };
+    }
 
     const source = await deps.readSource(sourceKey);
     if (!source || source.byteLength === 0) throw new Error("rendered product is empty");

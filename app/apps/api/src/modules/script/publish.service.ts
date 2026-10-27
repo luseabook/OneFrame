@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import {
   assets,
   episodes,
@@ -15,6 +15,7 @@ import {
 import {
   AppError,
   ErrorCode,
+  PUB_TRANSCODE_STALE_MINUTES,
   TaskStatus,
   newId,
   runPublishTranscode,
@@ -371,11 +372,28 @@ export class PublishService {
           .where(eq(timelinePublications.id, bigintId));
         return row ? { status: row.status, slice: row.slice } : null;
       },
+      // 抢占式进入转码中（第 58 批，与 worker 侧同口径）：可抢占 = 1 排队，或 2 转码中但
+      // updated_at 已超过 PUB_TRANSCODE_STALE_MINUTES（执行者已死的接管）。抢不到 → 状态机 skipped，
+      // 避免"入队 + 内联兜底 + 重投"三个来源并行转同一条发布、并把 shareToken 互相覆盖。
       markTranscoding: async (id: string) => {
-        await db
+        const staleCutoff = new Date(Date.now() - PUB_TRANSCODE_STALE_MINUTES * 60_000);
+        const claimed = await db
           .update(timelinePublications)
           .set({ status: PUB_STATUS.TRANSCODING, error: null, updatedAt: new Date() })
-          .where(eq(timelinePublications.id, BigInt(id)));
+          .where(
+            and(
+              eq(timelinePublications.id, BigInt(id)),
+              or(
+                eq(timelinePublications.status, PUB_STATUS.QUEUED),
+                and(
+                  eq(timelinePublications.status, PUB_STATUS.TRANSCODING),
+                  lt(timelinePublications.updatedAt, staleCutoff),
+                ),
+              ),
+            ),
+          )
+          .returning({ id: timelinePublications.id });
+        return claimed.length > 0;
       },
       readSource: (key: string) => this.storage.read(key),
       putFile: async (key: string, buffer: Buffer) => {
@@ -395,7 +413,15 @@ export class PublishService {
             error: null,
             updatedAt: new Date(),
           })
-          .where(eq(timelinePublications.id, BigInt(id)));
+          // 幂等保护（第 58 批补齐，与 worker 侧一致）：只允许从 1/2 推进到 3。
+          // 万一有第二个执行者晚到，它的 markReady 会因为条件不成立而落空，
+          // 不会把已经改好的 fileUri/shareToken 再覆盖一遍。
+          .where(
+            and(
+              eq(timelinePublications.id, BigInt(id)),
+              inArray(timelinePublications.status, [PUB_STATUS.QUEUED, PUB_STATUS.TRANSCODING]),
+            ),
+          );
       },
       markFailed: async (id: string, reason: string) => {
         await db
@@ -408,7 +434,12 @@ export class PublishService {
             },
             updatedAt: new Date(),
           })
-          .where(eq(timelinePublications.id, BigInt(id)))
+          .where(
+            and(
+              eq(timelinePublications.id, BigInt(id)),
+              inArray(timelinePublications.status, [PUB_STATUS.QUEUED, PUB_STATUS.TRANSCODING]),
+            ),
+          )
           .catch(() => undefined);
       },
     };

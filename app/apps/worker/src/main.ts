@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
-import { Worker } from "bullmq";
+import { Worker, Queue } from "bullmq";
 import pino from "pino";
 import { createDb } from "@app/db";
+import { timelinePublications } from "@app/db";
+import { eq } from "drizzle-orm";
 import { probeFfmpeg } from "@app/shared";
 import { assertWorkerEnv } from "./env-guard";
 import {
@@ -18,7 +20,7 @@ import { QUEUES, redisConnection, type QueueName } from "./queues";
 import { runGenerationTask, type ExecutorDeps } from "./executor";
 import { runExport } from "./export";
 import { runTimelineExport } from "./timeline-export";
-import { runPublishTranscodeJob, type PublishTranscodeJobData } from "./publish-transcode";
+import { runPublishTranscodeJob, resolvePublicationSourceKey, type PublishTranscodeJobData } from "./publish-transcode";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -209,14 +211,62 @@ schedule(
   true,
 );
 
-// 发布转码看门狗（2min）：API 进程内 fire-and-forget 的转码若中途重启，
-// 记录会永久停在 status=2（转码中）——这里超时置失败并给可读原因（不自动重跑，
-// 源产物可能已清理，静默重试会把"可诊断失败"变成"无声消耗"）
+// 发布转码看门狗（2min）：找"没有任何执行者"的发布记录（停在 1 排队 / 2 转码中）。
+//
+// 第 58 批修掉一条会把好任务误杀的链路：worker 停机期间任务正常积压在 Redis 里排队，
+// 重启时本任务 `runOnStart=true` 先跑，旧实现在"超时即失败"口径下把它们全判成 4（失败），
+// 随后队列把 job 投出来也只会被终态检查 skipped —— 第 57 批下沉换来的"重启可重投"被全抵消。
+// 现在分三步：① 仍在队列（waiting/delayed/active）→ 跳过；② 不在队列但源成片还在 → **重投**；
+// ③ 连源都找不到 → 才判失败。判定所需的两件事由这里注入真实现，看门狗本身不认识队列。
+const publishTranscodeQueue = new Queue(QUEUES.PUBLISH_TRANSCODE, { connection: redisConnection });
+
 schedule(
   "publications-watchdog",
   Number(process.env.PUBLICATIONS_WATCHDOG_INTERVAL_MS ?? 120_000),
   async () => {
-    const n = await reviveStuckPublications(db, log);
+    const n = await reviveStuckPublications(db, log, 15, undefined, {
+      pendingInQueue: async () => {
+        // 本队列 jobId 带时间戳（为了允许重投），所以只能按 data.publicationId 扫，
+        // 不能拼固定 jobId 去 getJob。一次把四个"未完成"状态里的 id 全取回，
+        // 避免逐条记录重复扫队列（积压时那是 O(n×m) 的浪费）。
+        const states = ["wait", "delayed", "active", "paused"] as const;
+        const held = new Set<string>();
+        for (const state of states) {
+          const jobs = await publishTranscodeQueue.getJobs([state], 0, 1000, true);
+          for (const job of jobs) {
+            const id = (job?.data as { publicationId?: string })?.publicationId;
+            if (id) held.add(id);
+          }
+        }
+        return held;
+      },
+      requeue: async ({ publicationId }) => {
+        const sourceKey = await resolvePublicationSourceKey(db, publicationId);
+        if (!sourceKey) {
+          log.warn({ publication_id: publicationId }, "stuck publication has no resolvable source");
+          return false;
+        }
+        const [row] = await db
+          .select({ spaceId: timelinePublications.spaceId })
+          .from(timelinePublications)
+          .where(eq(timelinePublications.id, BigInt(publicationId)));
+        if (!row) return false;
+        await publishTranscodeQueue.add(
+          "transcode",
+          { publicationId, spaceId: String(row.spaceId), sourceKey },
+          {
+            // jobId 带时间戳：同一发布允许真正重投（固定 id 会被 BullMQ 去重，
+            // 表现为"加了但没跑"，这里与 api 侧 enqueuePublishTranscode 同因）。
+            jobId: `publish-transcode-retry-${publicationId}-${Date.now()}`,
+            attempts: 1,
+            removeOnComplete: 200,
+            removeOnFail: 200,
+          },
+        );
+        log.warn({ publication_id: publicationId }, "stuck publication requeued by watchdog");
+        return true;
+      },
+    });
     if (n > 0) log.warn({ revived: n }, "stuck publications marked failed");
   },
   true,
@@ -309,6 +359,8 @@ async function shutdown(signal: string): Promise<void> {
   try {
     // close() 停止拉取新 job 并等待在途 job 完成
     await Promise.all(workers.map((w) => w.close()));
+    // 看门狗持有的 Queue 句柄也要关，否则 Redis 连接会挂到进程退出（"closed cleanly" 变成假象）
+    await publishTranscodeQueue.close();
     clearTimeout(force);
     log.info("closed cleanly");
     process.exit(0);

@@ -8,8 +8,8 @@
 // （看门狗会把停在 1/2 态的记录判为失败）；下沉到队列后任务在 Redis 里，worker 重启会重投。
 
 import { randomBytes } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
-import { timelinePublications } from "@app/db";
+import { and, eq, lt, or, inArray } from "drizzle-orm";
+import { timelineExports, timelinePublications } from "@app/db";
 import type { Db } from "@app/db";
 import {
   ErrorCode,
@@ -17,6 +17,7 @@ import {
   PUB_STATUS_QUEUED,
   PUB_STATUS_READY,
   PUB_STATUS_TRANSCODING,
+  PUB_TRANSCODE_STALE_MINUTES,
   publicationObjectKey,
   runPublishTranscode,
 } from "@app/shared";
@@ -29,10 +30,59 @@ export interface PublishTranscodeJobData {
   sourceKey: string;
 }
 
+/**
+ * 反查发布记录的源成片 key（`slice.source_export_id` → `timeline_exports.file_uri`）。
+ *
+ * 为什么需要它（第 58 批）：看门狗判定"超时且不在队列"之后要**先救再判死**，
+ * 而重投需要 `sourceKey`。这个值没有单独存列，发布时被塞进了 `slice` 的
+ * `source_export_id`（`publish.service.ts` 落库处），所以只能顺着这条线反查。
+ *
+ * 返回 null 的三种情况都是"救不了"：slice 里没有 `source_export_id`（早期记录 / 手工插入）、
+ * 对应导出记录已被删除、导出已完成但 `file_uri` 为空（导出失败残留）。
+ * 调用方据此才允许把记录判失败 —— 这就是"能重投就重投，投不了才判死"的分界线。
+ */
+export async function resolvePublicationSourceKey(
+  db: Db,
+  publicationId: string,
+): Promise<string | null> {
+  let bigintId: bigint;
+  try {
+    bigintId = BigInt(publicationId);
+  } catch {
+    return null;
+  }
+  const [pub] = await db
+    .select({ slice: timelinePublications.slice })
+    .from(timelinePublications)
+    .where(eq(timelinePublications.id, bigintId));
+  if (!pub) return null;
+  const slice = (pub.slice ?? {}) as Record<string, unknown>;
+  const rawExportId = slice.source_export_id;
+  if (rawExportId === undefined || rawExportId === null || rawExportId === "") return null;
+  let exportId: bigint;
+  try {
+    exportId = BigInt(String(rawExportId));
+  } catch {
+    return null;
+  }
+  const [row] = await db
+    .select({ fileUri: timelineExports.fileUri })
+    .from(timelineExports)
+    .where(eq(timelineExports.id, exportId));
+  const key = row?.fileUri?.trim();
+  return key ? key : null;
+}
+
 export interface PublishTranscodeJobDeps {
   db: Db;
   storage: StorageDriver;
   log?: (obj: Record<string, unknown>, msg: string) => void;
+  /**
+   * 「转码中」多久没心跳算执行者已死、可被接管（分钟）。默认与看门狗
+   * `reviveStuckPublications` 同源的 `PUB_TRANSCODE_STALE_MINUTES`；
+   * 测试注入小值来模拟"孤儿记录"而不用真等 15 分钟。
+   */
+  staleMinutes?: number;
 }
 
 /** shareToken 唯一键兜底：冲突就换一个（最多 3 次，超出即抛）——与 api 侧同口径 */
@@ -53,6 +103,7 @@ export function buildPublishTranscodeDeps(
   deps: PublishTranscodeJobDeps,
 ): PublishTranscodeDeps {
   const { db, storage } = deps;
+  const staleMinutes = deps.staleMinutes ?? PUB_TRANSCODE_STALE_MINUTES;
   const idOf = (id: string): bigint | null => {
     try {
       return BigInt(id);
@@ -71,13 +122,34 @@ export function buildPublishTranscodeDeps(
         .where(eq(timelinePublications.id, bigintId));
       return row ? { status: row.status, slice: row.slice } : null;
     },
+    // 抢占式进入转码中（第 58 批）：一条条件更新同时覆盖两种可抢占情形 ——
+    // ① status=1（排队）：正常首发，或看门狗重投；
+    // ② status=2 且 updated_at 早于 staleMinutes（执行者已死的接管）：worker 崩溃后
+    //    BullMQ 重投的 job 面对的就是这种孤儿记录，只认 1 等于永远放弃它。
+    // 两条之外（已到 3/4/5，或另一个执行者刚开始转）一律抢不到 → 状态机 skipped。
+    // 为什么不能无条件 set：入队 + 内联兜底 + 重投三者可能让同一条发布有两个执行者，
+    // 并行转两遍白烧 CPU，后写者还会覆盖先写者已生成的 shareToken（分享链接中途失效）。
     markTranscoding: async (id: string) => {
       const bigintId = idOf(id);
-      if (bigintId === null) return;
-      await db
+      if (bigintId === null) return false;
+      const staleCutoff = new Date(Date.now() - staleMinutes * 60_000);
+      const claimed = await db
         .update(timelinePublications)
         .set({ status: PUB_STATUS_TRANSCODING, error: null, updatedAt: new Date() })
-        .where(eq(timelinePublications.id, bigintId));
+        .where(
+          and(
+            eq(timelinePublications.id, bigintId),
+            or(
+              eq(timelinePublications.status, PUB_STATUS_QUEUED),
+              and(
+                eq(timelinePublications.status, PUB_STATUS_TRANSCODING),
+                lt(timelinePublications.updatedAt, staleCutoff),
+              ),
+            ),
+          ),
+        )
+        .returning({ id: timelinePublications.id });
+      return claimed.length > 0;
     },
     readSource: (key: string) => storage.read(key),
     putFile: async (key: string, buffer: Buffer) => {
