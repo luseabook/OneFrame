@@ -19,7 +19,8 @@ import type { WorkDto } from "~/types/api";
  */
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
-useHead({ title: "剪辑台 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("reelflow.metaTitle") });
 
 const api = useApi();
 const router = useRouter();
@@ -39,11 +40,10 @@ const COVER: Record<number, string> = {
   3: "linear-gradient(135deg, #2f1a44, #15101f)",
 };
 
-const DRAMA_LABEL: Record<number, string> = {
-  1: "国内仿真人剧",
-  2: "海外仿真人剧",
-  3: "2D/3D动漫",
-};
+// 剧型文案复用 `home.dramaType.*`（同一套枚举，避免再造一份同义翻译）
+const dramaKeys: Record<number, string> = { 1: "domestic", 2: "overseas", 3: "anime" };
+const dramaLabel = (type: number): string =>
+  dramaKeys[type] ? t(`home.dramaType.${dramaKeys[type]}`) : t("reelflow.dramaFallback");
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -54,7 +54,7 @@ async function load(): Promise<void> {
     list.value = data.list ?? [];
     total.value = data.total ?? 0;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("reelflow.loadFailed");
     list.value = [];
     total.value = 0;
   } finally {
@@ -64,16 +64,16 @@ async function load(): Promise<void> {
 
 // ── 按日分组（今天 / 昨天 / 更早）──────────────────────────
 function dayKey(iso: string | undefined): string {
-  if (!iso) return "更早";
+  if (!iso) return t("reelflow.earlier");
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "更早";
+  if (Number.isNaN(d.getTime())) return t("reelflow.earlier");
   const now = new Date();
   const startOf = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diffDays = Math.round((startOf(now) - startOf(d)) / 86_400_000);
-  if (diffDays <= 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays <= 7) return "最近 7 天";
-  return "更早";
+  if (diffDays <= 0) return t("reelflow.today");
+  if (diffDays === 1) return t("reelflow.yesterday");
+  if (diffDays <= 7) return t("reelflow.last7");
+  return t("reelflow.earlier");
 }
 
 interface Group {
@@ -82,7 +82,7 @@ interface Group {
 }
 
 const groups = computed<Group[]>(() => {
-  const order = ["今天", "昨天", "最近 7 天", "更早"];
+  const order = [t("reelflow.today"), t("reelflow.yesterday"), t("reelflow.last7"), t("reelflow.earlier")];
   const buckets = new Map<string, WorkDto[]>();
   for (const item of list.value) {
     const key = dayKey(item.updated_at ?? item.created_at);
@@ -106,7 +106,7 @@ function fmtEdited(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("zh-CN", {
+  return d.toLocaleString(locale.value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -145,19 +145,19 @@ onMounted(() => {
   <div class="rl">
     <!-- 顶栏：只做返回 + 品牌名（竞品此页无顶栏，但我们从工作台进来需要一个出口） -->
     <header class="rl-top">
-      <NuxtLink to="/home" class="rl-back" title="返回工作台">← 工作台</NuxtLink>
-      <span class="rl-brand">剪辑台</span>
+      <NuxtLink to="/home" class="rl-back" :title="t('reelflow.backHomeTitle')">{{ t("reelflow.backHome") }}</NuxtLink>
+      <span class="rl-brand">{{ t("reelflow.brand") }}</span>
       <span class="rl-spacer" />
-      <NuxtLink to="/projects" class="rl-link">全部项目</NuxtLink>
+      <NuxtLink to="/projects" class="rl-link">{{ t("reelflow.allProjects") }}</NuxtLink>
     </header>
 
     <!-- tab 行：项目 (N) / 已导出（竞品左上角，白字 + 2px 紫下划线） -->
     <nav class="rl-tabs">
       <button type="button" class="rl-tab" :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
-        项目 ({{ total }})
+        {{ t("reelflow.tabProjects", { count: total }) }}
       </button>
       <button type="button" class="rl-tab" :class="{ active: tab === 'exported' }" @click="tab = 'exported'">
-        已导出
+        {{ t("reelflow.tabExported") }}
       </button>
     </nav>
 
@@ -185,31 +185,31 @@ onMounted(() => {
                 <img v-if="item.cover_uri" :src="item.cover_uri" alt="" class="rl-cover__img" />
                 <span class="rl-cover__play" aria-hidden="true">▶</span>
                 <span class="rl-cover__ratio">{{ item.ratio }}</span>
-                <span v-if="item.is_sample" class="rl-cover__flag">示例</span>
+                <span v-if="item.is_sample" class="rl-cover__flag">{{ t("reelflow.sample") }}</span>
               </div>
               <div class="rl-card__body">
                 <p class="rl-card__title" :title="item.title">{{ item.title }}</p>
                 <p class="rl-card__meta">
-                  <span>{{ DRAMA_LABEL[item.drama_type] ?? "短剧" }}</span>
+                  <span>{{ dramaLabel(item.drama_type) }}</span>
                   <span class="rl-dot">·</span>
-                  <span>{{ item.episode_count }} 集</span>
+                  <span>{{ t("reelflow.episodes", { count: item.episode_count }) }}</span>
                   <span class="rl-dot">·</span>
                   <span>{{ fmtDuration(item.timeline_duration_s) }}</span>
                 </p>
-                <p class="rl-card__edited">最后编辑于 {{ fmtEdited(item.updated_at ?? item.created_at) }}</p>
+                <p class="rl-card__edited">{{ t("reelflow.editedAt", { time: fmtEdited(item.updated_at ?? item.created_at) }) }}</p>
                 <div class="rl-card__foot">
                   <span class="rl-badge" :class="item.work_state">
                     {{
                       item.work_state === "ready"
-                        ? "已成片"
+                        ? t("reelflow.stateReady")
                         : item.work_state === "producing"
-                          ? "制作中"
+                          ? t("reelflow.stateProducing")
                           : item.work_state === "archived"
-                            ? "已归档"
-                            : "草稿"
+                            ? t("reelflow.stateArchived")
+                            : t("reelflow.stateDraft")
                     }}
                   </span>
-                  <span class="rl-card__shots">{{ item.done_count }}/{{ item.shot_count }} 已出片</span>
+                  <span class="rl-card__shots">{{ t("reelflow.shots", { done: item.done_count, total: item.shot_count }) }}</span>
                 </div>
               </div>
             </article>
@@ -224,8 +224,8 @@ onMounted(() => {
               <path d="M7 9.5v5M12 9.5v5M17 9.5v5" opacity="0.5" />
             </svg>
           </span>
-          <p class="rl-empty__text">点击下方创建一个新项目</p>
-          <p class="rl-empty__hint">项目出片后在这里剪成整集：拖入已定稿分镜、排序、导出 mp4</p>
+          <p class="rl-empty__text">{{ t("reelflow.emptyCreate") }}</p>
+          <p class="rl-empty__hint">{{ t("reelflow.emptyHint") }}</p>
         </div>
       </template>
 
@@ -250,11 +250,11 @@ onMounted(() => {
             <div class="rl-card__body">
               <p class="rl-card__title" :title="item.title">{{ item.title }}</p>
               <p class="rl-card__meta">
-                <span>{{ item.timeline_episode_count ?? 0 }} 集已剪</span>
+                <span>{{ t("reelflow.clippedEpisodes", { count: item.timeline_episode_count ?? 0 }) }}</span>
                 <span class="rl-dot">·</span>
-                <span>成片 {{ fmtDuration(item.timeline_duration_s) }}</span>
+                <span>{{ t("reelflow.finalDuration", { duration: fmtDuration(item.timeline_duration_s) }) }}</span>
               </p>
-              <p class="rl-card__edited">最后编辑于 {{ fmtEdited(item.updated_at ?? item.created_at) }}</p>
+              <p class="rl-card__edited">{{ t("reelflow.editedAt", { time: fmtEdited(item.updated_at ?? item.created_at) }) }}</p>
             </div>
           </article>
         </div>
@@ -265,8 +265,8 @@ onMounted(() => {
               <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
             </svg>
           </span>
-          <p class="rl-empty__text">暂无导出记录</p>
-          <p class="rl-empty__hint">进剪辑台把已定稿分镜排进时间线并导出成片后，这里会出现记录</p>
+          <p class="rl-empty__text">{{ t("reelflow.exportedEmptyTitle") }}</p>
+          <p class="rl-empty__hint">{{ t("reelflow.exportedEmptyHint") }}</p>
         </div>
       </template>
     </div>
@@ -275,7 +275,7 @@ onMounted(() => {
     <div class="rl-fab-wrap">
       <button type="button" class="rl-fab" @click="createProject">
         <span class="rl-fab__icon" aria-hidden="true">＋</span>
-        创建项目
+        {{ t("reelflow.createProject") }}
       </button>
     </div>
   </div>

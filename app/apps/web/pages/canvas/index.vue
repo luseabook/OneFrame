@@ -17,7 +17,8 @@ import { ApiError } from "~/composables/useApi";
  * 绝不让装饰性数据拖垮列表可用性。宁可少画，也不放占位假图。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
-useHead({ title: "无限画布 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("canvas.metaTitle") });
 
 const api = useCanvasApi();
 const toast = useToast();
@@ -204,7 +205,7 @@ async function createCanvas(): Promise<void> {
   if (creating.value) return;
   creating.value = true;
   try {
-    const created = await api.create({ title: "未命名画布" });
+    const created = await api.create({ title: t("canvas.unnamed") });
     await navigateTo(`/canvas/${created.id}`);
   } catch (e) {
     toast.error(errText(e));
@@ -257,10 +258,10 @@ async function commitRename(item: CanvasListItem): Promise<void> {
     item.title = title;
     item.version = res.version;
     cancelRename();
-    toast.success("已重命名");
+    toast.success(t("canvas.renamed"));
   } catch (e) {
     if (e instanceof ApiError && e.code === CANVAS_ERR.VERSION_CONFLICT) {
-      toast.error("画布已被他人修改，请刷新");
+      toast.error(t("canvas.conflict"));
       // 必须重拉：本地 version 已过期，不刷新会让用户反复提交同一个旧 version
       await load();
     } else {
@@ -296,7 +297,7 @@ async function confirmDelete(): Promise<void> {
     } else {
       void loadThumbs(items.value);
     }
-    toast.success("画布已删除，可在历史版本中恢复");
+    toast.success(t("canvas.deleted"));
   } catch (e) {
     toast.error(errText(e));
   } finally {
@@ -319,25 +320,26 @@ async function goPage(next: number): Promise<void> {
 function errText(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   if (e instanceof Error) return e.message;
-  return "加载失败";
+  return t("canvas.loadFailed");
 }
 
 function modeLabel(mode: number): string {
   // creation_mode：1 = 制片工坊内建画布，2 = 独立无限画布（后端默认 2）
-  return mode === 1 ? "制片工坊" : "无限画布";
+  return mode === 1 ? t("canvas.modeWorkshop") : t("canvas.modeInfinite");
 }
 
 /** 相对时间：列表只需要"多久没动过"的粗粒度判断，精确到分钟即可 */
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
-  return new Date(t).toLocaleDateString("zh-CN");
+  // 本地变量不能叫 `t`：会遮蔽 i18n 的 t()，调用处直接 TS2349 "Number has no call signatures"
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return "—";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return t("canvas.justNow");
+  if (diff < 3_600_000) return t("canvas.minutesAgo", { count: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("canvas.hoursAgo", { count: Math.floor(diff / 3_600_000) });
+  if (diff < 7 * 86_400_000) return t("canvas.daysAgo", { count: Math.floor(diff / 86_400_000) });
+  return new Date(ts).toLocaleDateString(locale.value);
 }
 
 function editedAt(item: CanvasListItem): string | null {
@@ -353,20 +355,20 @@ onMounted(load);
     <!-- blank 裸壳没有顶栏，这里自建一条：返回工作台 + 品牌 + 新建 -->
     <header class="cl-topbar">
       <div class="cl-topbar-left">
-        <NuxtLink to="/home" class="cl-back" title="返回工作台">
+        <NuxtLink to="/home" class="cl-back" :title="t('canvas.backHomeTitle')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 12H5m0 0 6-6m-6 6 6 6" />
           </svg>
-          <span>工作台</span>
+          <span>{{ t("canvas.backHome") }}</span>
         </NuxtLink>
         <span class="cl-divider" aria-hidden="true" />
         <span class="cl-brand">
           <span class="cl-brand-mark" aria-hidden="true">一</span>
-          <span class="cl-brand-text">一帧 · 无限画布</span>
+          <span class="cl-brand-text">{{ t("canvas.brand") }}</span>
         </span>
       </div>
       <div class="cl-topbar-right">
-        <Button class="canvas-create" :loading="creating" @click="createCanvas">新建画布</Button>
+        <Button class="canvas-create" :loading="creating" @click="createCanvas">{{ t("canvas.create") }}</Button>
       </div>
     </header>
 
@@ -374,7 +376,7 @@ onMounted(load);
       <!-- 错误态：保留重试入口，不要只给一句红字让用户自己刷新页面 -->
       <div v-if="error" class="cl-error" role="alert">
         <span class="cl-error-text">{{ error }}</span>
-        <Button variant="ghost" size="sm" :disabled="loading" @click="load">重试</Button>
+        <Button variant="ghost" size="sm" :disabled="loading" @click="load">{{ t("canvas.retry") }}</Button>
       </div>
 
       <!-- 加载态：卡片骨架，尺寸与真实卡片一致，避免加载完成时页面跳动 -->
@@ -392,12 +394,12 @@ onMounted(load);
       <!-- 空态 -->
       <div v-else-if="items.length === 0 && !error" class="cl-empty">
         <EmptyState
-          title="还没有画布"
-          description="新建一张画布，从拖入一个文本节点开始，把文本 → 图像 → 视频串成一条生成链路。"
+          :title="t('canvas.emptyTitle')"
+          :description="t('canvas.emptyDesc')"
         >
           <!-- 空态里的 CTA 不复用 .canvas-create：顶栏那颗才是全页唯一的
                .canvas-create，E2E 用单选择器点击时不会撞上二义性 -->
-          <Button class="canvas-create-cta" :loading="creating" @click="createCanvas">新建画布</Button>
+          <Button class="canvas-create-cta" :loading="creating" @click="createCanvas">{{ t("canvas.create") }}</Button>
         </EmptyState>
       </div>
 
@@ -418,7 +420,7 @@ onMounted(load);
             <button
               type="button"
               class="cl-thumb-hit"
-              :aria-label="`打开画布 ${card.item.title}`"
+              :aria-label="t('canvas.openCanvas', { title: card.item.title })"
               @click="openCanvas(card.item)"
             />
             <svg class="cl-thumb-svg" :viewBox="`0 0 ${VB_W} ${VB_H}`" aria-hidden="true">
@@ -455,19 +457,19 @@ onMounted(load);
 
             <!-- hover 才出现的操作条：常驻会把缩略图盖掉，也更容易误触 -->
             <div class="cl-actions">
-              <button type="button" class="cl-act" title="打开" @click.stop="openCanvas(card.item)">
+              <button type="button" class="cl-act" :title="t('canvas.openTitle')" @click.stop="openCanvas(card.item)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M14 4h6v6" />
                   <path d="M20 4 10 14" />
                   <path d="M18 14.5V19a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 19V8a1.5 1.5 0 0 1 1.5-1.5H10" />
                 </svg>
               </button>
-              <button type="button" class="cl-act" title="重命名" @click.stop="startRename(card.item)">
+              <button type="button" class="cl-act" :title="t('canvas.renameTitle')" @click.stop="startRename(card.item)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20Z" />
                 </svg>
               </button>
-              <button type="button" class="cl-act is-danger" title="删除" @click.stop="askDelete(card.item)">
+              <button type="button" class="cl-act is-danger" :title="t('canvas.deleteTitle')" @click.stop="askDelete(card.item)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4.5 6.5h15M9 6.5V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.5" />
                   <path d="M6.5 6.5 7.5 19a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-12.5" />
@@ -501,9 +503,9 @@ onMounted(load);
             <p class="cl-meta">
               <span class="cl-meta-item">v{{ card.item.version }}</span>
               <span class="cl-dot" aria-hidden="true">·</span>
-              <span class="cl-meta-item">{{ card.nodeCount === null ? "—" : `${card.nodeCount} 个节点` }}</span>
+              <span class="cl-meta-item">{{ card.nodeCount === null ? "—" : t("canvas.nodesCount", { count: card.nodeCount }) }}</span>
               <span class="cl-dot" aria-hidden="true">·</span>
-              <span class="cl-meta-item" :title="editedAt(card.item) ?? ''">编辑于 {{ relativeTime(editedAt(card.item)) }}</span>
+              <span class="cl-meta-item" :title="editedAt(card.item) ?? ''">{{ t("canvas.editedAt", { time: relativeTime(editedAt(card.item)) }) }}</span>
             </p>
           </div>
         </article>
@@ -511,26 +513,26 @@ onMounted(load);
 
       <!-- 分页：只有一页时隐藏，避免给用户"还有更多"的错觉 -->
       <nav v-if="!loading && !error && total > PAGE_SIZE" class="cl-pager">
-        <Button variant="ghost" size="sm" :disabled="page <= 1" @click="goPage(page - 1)">上一页</Button>
+        <Button variant="ghost" size="sm" :disabled="page <= 1" @click="goPage(page - 1)">{{ t("canvas.prev") }}</Button>
         <span class="cl-pager-text">{{ page }} / {{ pageCount }}</span>
-        <Button variant="ghost" size="sm" :disabled="page >= pageCount" @click="goPage(page + 1)">下一页</Button>
+        <Button variant="ghost" size="sm" :disabled="page >= pageCount" @click="goPage(page + 1)">{{ t("canvas.next") }}</Button>
       </nav>
     </main>
 
     <!-- 删除二次确认：用项目里的 Modal，文案必须说清"可恢复"再让用户点删除 -->
     <Modal
       :open="pendingDelete !== null"
-      title="删除画布"
+      :title="t('canvas.deleteModalTitle')"
       width="420px"
       @close="pendingDelete = null"
     >
       <p class="cl-confirm-text">
-        确定删除画布「{{ pendingDelete?.title }}」吗？删除后它会从列表中移除，节点一并释放。
+        {{ t("canvas.deleteConfirm", { title: pendingDelete?.title ?? "" }) }}
       </p>
-      <p class="cl-confirm-hint">删除是软删除：服务端保留记录与历史快照，之后仍可从历史版本恢复。</p>
+      <p class="cl-confirm-hint">{{ t("canvas.deleteHint") }}</p>
       <template #footer>
-        <Button variant="ghost" size="sm" :disabled="deleting" @click="pendingDelete = null">取消</Button>
-        <Button variant="danger" size="sm" :loading="deleting" @click="confirmDelete">删除</Button>
+        <Button variant="ghost" size="sm" :disabled="deleting" @click="pendingDelete = null">{{ t("common.cancel") }}</Button>
+        <Button variant="danger" size="sm" :loading="deleting" @click="confirmDelete">{{ t("canvas.delete") }}</Button>
       </template>
     </Modal>
   </div>

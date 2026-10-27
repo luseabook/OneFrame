@@ -123,6 +123,28 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.7 · 多语言第 17 批：剪辑台列表 + 无限画布列表 · 2026-10-28）
+
+页面覆盖 **21 → 23/64**；全站 **97.6%** / 首发 **97.6%**（#16 保持 99%，剩余 0.08 权重对应约 5 页）。
+
+| 页面 | namespace | 迁移内容 |
+|---|---|---|
+| [reelflow/list.vue](app/apps/web/pages/reelflow/list.vue) | `reelflow`（28 key） | 顶栏（返回工作台/剪辑台/全部项目）、两个 tab（项目 N / 已导出）、按日分组四档（今天/昨天/最近 7 天/更早）、卡片（剧型/集数/时长/最后编辑/四态徽标/已出片进度/示例角标）、两处空态与底部"创建项目"胶囊 |
+| [canvas/index.vue](app/apps/web/pages/canvas/index.vue) | `canvas`（29 key） | 顶栏（工作台/品牌/新建画布）、错误态与重试、空态标题与引导、卡片（打开/重命名/删除的 aria 与 title、节点数、相对时间四档）、分页、删除确认弹窗（标题/正文/软删除说明/取消/删除）与 4 条 toast |
+
+### 三个值得记的点
+
+1. **变量遮蔽 i18n 的 `t`**：`canvas/index.vue` 的 `relativeTime()` 里原本有 `const t = new Date(iso).getTime()`，
+   加 `const { t } = useI18n()` 后 `t(...)` 直接报 `TS2349: Type 'Number' has no call signatures`。
+   已把本地变量改名 `ts` 并加注释。这是本项目**第二次**踩同类遮蔽（第一次是 `v-for="t in tags"`），已列为迁移检查项。
+2. **同义文案复用而不是再造**：`reelflow/list.vue` 的剧型标签（国内仿真人剧/海外/2D-3D 动漫）与首页同一套枚举，
+   直接复用 `home.dramaType.*`，避免两处翻译各自漂移。
+3. **两处 `<Button>新建画布</Button>` 文本相同**：批量替换必须按 class 区分（`.canvas-create` 顶栏 / `.canvas-create-cta` 空态），
+   否则会漏一处（i18n-check 的"疑似未迁移中文字面量"正好把漏掉的那处报出来了）。
+
+**验证**：`i18n-check.cjs` 全绿（937 key / 23 页 + 4 组件）；`e2e-i18n-pages.cjs` **65/65**（新增剪辑台与画布中英对照）；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.6 · 多语言第 16 批：集市作品详情 · 2026-10-28）
 
 **#16 多语言保持 99%**（页面覆盖 20 → **21/64**）；全站 **97.6%** / 首发 **97.6%**。
