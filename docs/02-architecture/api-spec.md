@@ -1693,3 +1693,14 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | 响应新增 | `delivery` / `delivery_attempts` |
 
 **测试**：`test/film-notify.spec.ts` 5 例（真实本地 HTTP 接收端验证签名可复算、500 重试 3 次、先失败后成功、未配置零请求）。
+
+### 17.10 任务详情补签产物 URL + mock 产物为真媒体（模块 #6，2026-10-27 第 5 轮）
+
+| 变更 | 口径 |
+|---|---|
+| `GET /tasks/:id` 的 `results[]` | 新增 `url`：**仅当任务已完成（status=3）** 时为 storage key 现签 1h 地址（最多 8 张）；`uri` 原样保留。理由：轮询期结果为空、不产生签名开销；而结果页必须能直接 `<img src>` 渲染——把 storage key 直接当 src 会 404（浏览器按当前域解析相对路径）。 |
+| mock 产物（worker） | 图片类 mock 产物写**真 PNG**（64×64，纯 Node 构造 IHDR/IDAT/IEND，颜色由 taskId 派生）；音视频 mock 仍是文本占位，但结果 `meta.mock_placeholder=true`，前端据此显示"mock 占位（未接真实供应商）"而不是裂图/静默不播。 |
+| 前端 | `ImageGenWorkspace` 的产物渲染与历史缩略图优先用 `url`，回退 `uri`/`preview_uri`。 |
+
+**验证**：`_acceptance/smoke-image-chain.ps1`（真实提交→worker→产物→现签→下载 PNG 1174B/64×64/可解码）；
+`apps/worker/src/executor.spec.ts` 新增 2 例断言 PNG magic 与 placeholder 标记。
