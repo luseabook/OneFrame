@@ -1659,3 +1659,21 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 **同时修**：`script.projects` 的 `projectDto` 透出 `project_mode`（1 普通/2 广告剧/3 视频转绘）——否则前端无法区分"我的广告剧/转绘项目"与普通项目（`source_type` 两者都是 2）。
 
 **真实链路证据**：`_acceptance/smoke-creator.ps1` —— 存草稿(1) → 编辑(标题/价格生效) → 提审(2 待审核) → 收益总览 → 提现越界被拒(400101 `amount exceeds available balance`) → 提现列表/收益明细 → 内容树。
+
+### 17.8 影视版导出改真 xlsx（模块 #8，2026-10-27 第 4 轮）
+
+**变更**：`POST /film/projects/:project_id/exports` 的 `format="xlsx"` 由"给 CSV/ZIP 并在 `delivered_format` 标注"改为**真 .xlsx**（多表=多 worksheet）。
+
+- 实现：`modules/film/xlsx-writer.ts`（~130 行，用已有 `jszip` 拼 OOXML，**不引第三方 xlsx 库**）。
+  支持多 sheet / inlineStr 文本 / 数字 / 布尔 / 空单元格 / 表头加粗；**不支持**公式、合并单元格、图片、样式扩展。
+- 一致性：CSV 与 XLSX 共用 `tableToMatrix()`（列序、单元格值、公式注入防护完全一致）——
+  两条路径各读一次会导致"同一次导出两种格式内容不一致"。
+- `format="csv"` 路径**保持不变**（单表 csv / 多表 zip），避免影响已对接前端。
+- `delivered_format === "xlsx"`、`file_uri` 以 `tables.xlsx` 结尾、`content_type` 为
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
+**安全**：与 CSV 同口径的公式注入防护（`= + - @` 开头文本前置单引号）——导出文件会被别人用 Excel 打开。
+
+**验证**：
+- `test/film-xlsx.spec.ts` 9 例（zip magic、6 个必需部件、多 sheet 名、inlineStr/数字/布尔、公式防护、XML 转义与控制字符剥离、表名清洗/重名、列号进位、空表拒绝）
+- `_acceptance/verify-film-xlsx.cjs` **15/15** 真实 HTTP：登录 → 开 film_enabled → 建两张表 → 导出 xlsx（2988B）→ 下载 → jszip 解出 7 个部件且 workbook 含两个 sheet 名
