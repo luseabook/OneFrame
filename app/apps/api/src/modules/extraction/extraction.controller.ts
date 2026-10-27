@@ -32,6 +32,16 @@ const createTaskSchema = z.object({
 
 const redoSchema = z.object({ task_id: z.string().min(1) });
 
+/** 任务列表筛选：状态/类型/项目/分集（全部可选，默认最近 20 条） */
+const listTasksQuery = z.object({
+  status: z.coerce.number().int().min(1).max(4).optional(),
+  task_type: z.coerce.number().int().min(1).max(5).optional(),
+  project_id: z.string().min(1).optional(),
+  episode_id: z.string().min(1).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 const listDraftsQuery = z.object({
   task_id: z.string().min(1).optional(),
   eed_id: z.string().min(1).optional(),
@@ -90,6 +100,21 @@ export class ExtractionController {
     return this.extraction.createTask(m.spaceId, m.userId, input);
   }
 
+  /** 1.5 任务列表：分页 + 状态/类型/项目/分集筛选（竞品无独立 list 端点，为其 task/progress + versions 的聚合） */
+  @Get("tasks")
+  async listTasks(@Req() req: AuthedRequest, @Query() query: unknown) {
+    const m = await this.ctx(req);
+    const q = parseOrThrow(listTasksQuery, query ?? {});
+    return this.extraction.listTasks(m.spaceId, q);
+  }
+
+  /** 1.6 取消进行中的任务（四态无"已取消"，落地为失效 4 = 竞品 task/delete 语义） */
+  @Post("tasks/:id/cancel")
+  async cancelTask(@Req() req: AuthedRequest, @Param("id") id: string) {
+    const m = await this.ctx(req);
+    return this.extraction.cancelTask(m.spaceId, id);
+  }
+
   /** 2. 查询任务状态（四态 1 进行中 / 2 成功 / 3 失败 / 4 失效） */
   @Get("tasks/:id")
   async getTask(@Req() req: AuthedRequest, @Param("id") id: string) {
@@ -103,6 +128,13 @@ export class ExtractionController {
     const m = await this.ctx(req);
     const input = parseOrThrow(redoSchema, body);
     return this.extraction.redoTask(m.spaceId, input.task_id);
+  }
+
+  /** 3.5 按 task_type 的成功/失败率（竞品只有单任务 progress，此处为服务端聚合） */
+  @Get("stats")
+  async stats(@Req() req: AuthedRequest) {
+    const m = await this.ctx(req);
+    return this.extraction.stats(m.spaceId);
   }
 
   /** 4. 草稿列表（默认只主形态；`is_all=true` 主/子平铺） */
@@ -129,3 +161,4 @@ export class ExtractionController {
     return this.extraction.promoteDrafts(m.spaceId, input);
   }
 }
+

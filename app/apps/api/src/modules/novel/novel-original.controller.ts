@@ -1,12 +1,14 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
-import { AppError, ErrorCode, novelEpisodePatchSchema, novelFinalizeSchema, novelScriptGenerateSchema } from "@app/shared";
+import { AppError, ErrorCode, novelCharacterCreateSchema, novelCharacterPatchSchema, novelEpisodePatchSchema, novelFinalizeSchema, novelScriptGenerateSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { NovelOriginalService } from "./novel-original.service";
 import {
+  charactersGenerateSchema,
   originalChapterOutlineGenerateSchema,
   originalEpisodeOutlineGenerateSchema,
   originalIdeaGenerateSchema,
+  originalIdeaPatchSchema,
   originalIdeaSelectSchema,
   originalMaterialGenerateSchema,
   originalMaterialPatchSchema,
@@ -71,6 +73,25 @@ export class NovelOriginalController {
     const { spaceId } = this.ctx(req);
     const input = parseOrThrow(originalIdeaSelectSchema, body ?? {});
     return this.original.selectIdea(spaceId, ntId, input.ni_id);
+  }
+
+  /** 单条创意方案详情（竞品 `routes.txt:558` `original_script/idea/:ni_id`） */
+  @Get("idea/:niId")
+  async getIdea(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("niId") niId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.getIdea(spaceId, ntId, niId);
+  }
+
+  /** 编辑单条方案（标题/卖点/题材/基调）；已选中也可改，下游已生成时回显 downstream_stale */
+  @Patch("idea/:niId")
+  async patchIdea(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("niId") niId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = this.ctx(req);
+    return this.original.patchIdea(spaceId, ntId, niId, parseOrThrow(originalIdeaPatchSchema, body ?? {}));
   }
 
   // ── 2. 素材 ────────────────────────────────────────────────
@@ -159,6 +180,51 @@ export class NovelOriginalController {
   ) {
     const { spaceId } = this.ctx(req);
     return this.original.patchChapterOutline(spaceId, ntId, ncoId, parseOrThrow(outlinePatchSchema, body ?? {}));
+  }
+
+  // ── 4b. 角色卡（5 条**路径别名**，见 service 注释：语义同 content-analysis / core_character）──
+
+  /** 角色卡列表（路径别名，语义同 `GET /content-analysis/detail` 的 characters） */
+  @Get("characters")
+  async listCharacters(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.listCharacters(spaceId, ntId);
+  }
+
+  /**
+   * 生成角色卡（路径别名，语义同 `POST /content-analysis/novel_character_cards/generate`）。
+   * 静态段 `generate` 必须声明在 `:ncId` 参数路由之前，避免被当成 nc_id。
+   */
+  @Post("characters/generate")
+  async generateCharacters(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = this.ctx(req);
+    return this.original.generateCharacters(spaceId, ntId, parseOrThrow(charactersGenerateSchema, body ?? {}));
+  }
+
+  /** 新增单张角色卡（路径别名，语义同 `POST /content-analysis/novel_character_cards`；同名即覆盖） */
+  @Post("characters")
+  async createCharacter(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = this.ctx(req);
+    return this.original.createCharacter(spaceId, ntId, parseOrThrow(novelCharacterCreateSchema, body ?? {}));
+  }
+
+  /** 编辑单张角色卡（路径别名，语义同 `PATCH /content-analysis/novel_character_cards/:ncc_id`） */
+  @Patch("characters/:ncId")
+  async patchCharacter(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("ncId") ncId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = this.ctx(req);
+    return this.original.patchCharacter(spaceId, ntId, ncId, parseOrThrow(novelCharacterPatchSchema, body ?? {}));
+  }
+
+  /** 确认单张角色卡（路径别名，语义同 `core_character`：置 is_core=true，重复确认幂等） */
+  @Post("characters/:ncId/confirm")
+  async confirmCharacter(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.confirmCharacter(spaceId, ntId, ncId);
   }
 
   // ── 5. 集纲 → 分集剧本 ─────────────────────────────────────

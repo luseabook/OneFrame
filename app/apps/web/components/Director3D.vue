@@ -369,6 +369,27 @@ async function saveNow(): Promise<void> {
   if (ok) saveState();
 }
 
+/**
+ * 删除当前场景。删除不可逆（服务端软删），所以先 confirm；
+ * 删完把本地存档也清掉——否则下次打开会"载入"一个服务端已不存在的场景。
+ */
+async function removeSceneNow(): Promise<void> {
+  if (!persistence.sceneId.value) {
+    showSnap("当前场景还没保存过");
+    return;
+  }
+  if (!window.confirm(`删除场景「${persistence.sceneName.value}」？删除后不可恢复。`)) return;
+  const ok = await persistence.removeScene();
+  if (ok) {
+    try {
+      localStorage.removeItem(STORAGE_KEY());
+    } catch {
+      // 隐私模式下 localStorage 不可用：忽略
+    }
+    showSnap("场景已删除");
+  }
+}
+
 async function syncFromServer(): Promise<void> {
   if (!props.projectId) return;
   await persistence.loadPresets();
@@ -1105,6 +1126,14 @@ onUnmounted(() => {
               <button type="button" class="d3-btn d3-btn--ghost" @click="switchView">切换视角</button>
               <button v-if="projectId" type="button" class="d3-btn d3-btn--ghost" @click="persistence.duplicate()">
                 复制场景
+              </button>
+              <button
+                v-if="projectId && persistence.sceneId.value"
+                type="button"
+                class="d3-btn d3-btn--ghost d3-btn--danger"
+                @click="removeSceneNow"
+              >
+                删除场景
               </button>
             </div>
             <p class="d3-muted">

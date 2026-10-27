@@ -1475,7 +1475,7 @@ export class ScriptService {
     userId: string,
     projectId: string,
     episodeId: string,
-    input: GenerateVideosBatchRequest,
+    input: GenerateVideosBatchRequest & { prompt_inject_mode?: "append" | "replace" },
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
@@ -1715,10 +1715,15 @@ export class ScriptService {
       let durationAdjusted =
         duration !== requestedDuration ? { from: requestedDuration, to: duration } : undefined;
       // 闸门 3 · 生成注入：已定稿资产按绑定顺序展开成 images[]，并给出
-      // 「名称 → [[@imgN]]」映射（storyboard.md:308-310）。原 prompt 不被改写，
-      // 标记版只作为附加字段，避免用户可见提示词被悄悄替换。
+      // 「名称 → [[@imgN]]」映射（storyboard.md:308-310）。
+      // `prompt_inject_mode=replace` 时才把标记版当 video_prompt 注入；
+      // 默认 append 保持现状（原 prompt 不被改写，标记版只作附加字段）。
+      // replace 与竞品形态一致但会改变用户可见提示词 → **需产品确认，默认不启用**。
       const injection =
         generateMode === "universal_reference" ? this.gates.injectImages(prompt, linked) : null;
+      const injectMode = input.prompt_inject_mode ?? "append";
+      const effectivePrompt =
+        injection && injectMode === "replace" ? injection.prompt_with_images : prompt;
       const request: GenerationRequest = {
         mode: generateMode,
         model: model.name,
@@ -1734,13 +1739,14 @@ export class ScriptService {
                   last_frame_uri: lastFrameUri!,
                 }
               : {
-                  prompt,
+                  prompt: effectivePrompt,
                   reference_uris: generateMode === "universal_reference" ? refs : [],
                   ...(injection
                     ? {
                         images: injection.images,
                         image_subjects: injection.image_subjects,
                         prompt_with_images: injection.prompt_with_images,
+                        prompt_inject_mode: injectMode,
                       }
                     : {}),
                 } as GenerationRequest["input"],
@@ -2445,6 +2451,7 @@ export class ScriptService {
     );
   }
 }
+
 
 
 

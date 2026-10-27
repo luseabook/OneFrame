@@ -23,6 +23,10 @@ const mainNav: NavItem[] = [
   // 2026-10-27：ReelFlow 剪辑台（出片之后的时间线编辑；对齐竞品 /reelflow/list）
   { key: "reelflow", to: "/reelflow/list", labelKey: "sidebar.reelflow", icon: "film" },
   { key: "tools", to: "/tools", labelKey: "sidebar.tools", icon: "wand" },
+  // 2026-10-27（第 3 轮）：两种"项目模式"——广告剧与视频转绘。
+  // 它们复用剧本项目的集/分镜/资产骨架，只是在前面多一段专属流程，故放在主分组末尾。
+  { key: "ad-drama", to: "/ad-drama/create", labelKey: "sidebar.adDrama", icon: "script" },
+  { key: "video-redraw", to: "/video-redraw/create", labelKey: "sidebar.videoRedraw", icon: "film" },
 ];
 const teamNav: NavItem[] = [
   { key: "assets", to: "/assets", labelKey: "sidebar.assets", icon: "folder" },

@@ -402,4 +402,87 @@ describe("extraction e2e", () => {
     expect(again.code).toBe(0);
     expect(again.data.items.every((item: { created: boolean }) => item.created === false)).toBe(true);
   });
+
+  it("lists tasks with status/task_type filters and pagination (task/progress 的服务端聚合)", async () => {
+    const all = await inject("GET", "/extraction/tasks");
+    expect(all.code).toBe(0);
+    expect(all.data.total).toBeGreaterThanOrEqual(2);
+    expect(all.data.page).toBe(1);
+    expect(all.data.has_more).toBe(false);
+
+    const type1 = await inject("GET", "/extraction/tasks?task_type=1");
+    expect(type1.code).toBe(0);
+    expect((type1.data.list as Array<{ task_type: number }>).every((row) => row.task_type === 1)).toBe(true);
+    expect(type1.data.list.length).toBeGreaterThan(0);
+
+    const succeeded = await inject("GET", "/extraction/tasks?status=2");
+    expect(succeeded.code).toBe(0);
+    expect((succeeded.data.list as Array<{ status: number }>).every((row) => row.status === 2)).toBe(true);
+
+    const page1 = await inject("GET", "/extraction/tasks?page=1&page_size=1");
+    expect(page1.code).toBe(0);
+    expect(page1.data.list).toHaveLength(1);
+    expect(page1.data.page_size).toBe(1);
+    expect(page1.data.has_more).toBe(page1.data.total > 1);
+    const page2 = await inject("GET", "/extraction/tasks?page=2&page_size=1");
+    expect(page2.code).toBe(0);
+    if (page1.data.has_more) {
+      expect(page2.data.list[0].id).not.toBe(page1.data.list[0].id);
+    }
+
+    expect((await inject("GET", "/extraction/tasks?status=9")).code).toBe(400101);
+    expect((await inject("GET", "/extraction/tasks?task_type=0")).code).toBe(400101);
+  });
+
+  it("cancels a running task (→ 失效 4); terminal tasks cannot be cancelled", async () => {
+    const created = await inject("POST", "/extraction/tasks", { project_id: projectId, task_type: 2 });
+    expect(created.code).toBe(0);
+    // 同步抽取会立刻到终态：造一条"进行中"任务来验证取消状态机
+    await db.execute(sql`update extraction_tasks set status = 1 where id = ${BigInt(created.data.id)}`);
+
+    const cancelled = await inject("POST", `/extraction/tasks/${created.data.id}/cancel`);
+    expect(cancelled.code).toBe(0);
+    expect(cancelled.data.cancelled).toBe(true);
+    // 四态里没有"已取消"：落地为失效(4)；失效不可重做
+    expect(cancelled.data.status).toBe(4);
+    expect(cancelled.data.status_name).toBe("invalid");
+    expect(cancelled.data.retryable).toBe(false);
+
+    expect((await inject("POST", `/extraction/tasks/${created.data.id}/cancel`)).code).toBe(400101);
+    expect((await inject("POST", `/extraction/tasks/${listTaskId}/cancel`)).code).toBe(400101);
+  });
+
+  it("stats aggregates success/failure rate per task_type", async () => {
+    const failedTask = await inject("POST", "/extraction/tasks", { project_id: projectId, task_type: 4 });
+    expect(failedTask.code).toBe(0);
+    await db.execute(
+      sql`update extraction_tasks set status = 3, error = '{"code":745901}'::jsonb where id = ${BigInt(failedTask.data.id)}`,
+    );
+
+    const res = await inject("GET", "/extraction/stats");
+    expect(res.code).toBe(0);
+    const items = res.data.items as Array<{
+      task_type: number;
+      total: number;
+      succeeded: number;
+      failed: number;
+      invalid: number;
+      running: number;
+      success_rate: number;
+    }>;
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.map((item) => item.task_type)).toEqual([...items.map((item) => item.task_type)].sort((a, b) => a - b));
+    for (const item of items) {
+      expect(item.total).toBe(item.succeeded + item.failed + item.invalid + item.running);
+      expect(item.success_rate).toBeGreaterThanOrEqual(0);
+      expect(item.success_rate).toBeLessThanOrEqual(1);
+    }
+    const type4 = items.find((item) => item.task_type === 4);
+    expect(type4?.failed).toBeGreaterThanOrEqual(1);
+    expect(type4?.success_rate).toBe(0);
+    const totals = res.data.totals as { total: number; success_rate: number };
+    expect(totals.total).toBeGreaterThanOrEqual(3);
+    expect(totals.success_rate).toBeGreaterThanOrEqual(0);
+    expect(totals.success_rate).toBeLessThanOrEqual(1);
+  });
 });

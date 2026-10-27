@@ -1,5 +1,8 @@
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { extname, join } from "node:path";
 import { flagString, type ParsedArgs } from "./args";
 import {
   cacheDir as cacheDirPath,
@@ -97,6 +100,11 @@ async function login(ctx: BuiltinContext): Promise<BuiltinResult> {
   let spaceId: string | undefined;
   let uid: string | undefined;
 
+  // `--handoff`：浏览器 handoff（本机 loopback 收一次性 token）
+  if (parsed.flags.handoff === true) {
+    return loginViaHandoff(ctx);
+  }
+
   if (tokenFile) {
     const raw = tokenFile === "-" ? readFileSync(0, "utf8") : readFileSync(tokenFile, "utf8");
     let token = raw.trim();
@@ -163,6 +171,141 @@ async function login(ctx: BuiltinContext): Promise<BuiltinResult> {
   saveConfig(runtime, config);
   return {
     data: { uid: profile.uid, space_id: profile.space_id, credential_store: "file", config_dir: runtime.dir },
+  };
+}
+
+/**
+ * 浏览器 handoff 登录（`login --handoff`）。
+ *
+ * 做法：CLI 在 **127.0.0.1** 起一个一次性回环服务，把带 nonce 的 URL 打到 stderr；
+ * 用户在浏览器登录后，Web 页面把凭据 POST 回该端口（`state` 必须与 nonce 一致）。
+ *
+ * 为什么是 loopback 而不是"轮询服务端设备码"：服务端目前**没有** CLI 设备码/回调端点
+ * （`auth.controller` 只有 sms-code/login/refresh/logout/me/oauth）。按本批约束
+ * 「若需新端点写进回报、不要自己加」，这里选了不依赖新端点的方案。
+ *
+ * ⚠️ 端到端还需 Web 侧 ~5 行（不在本批写权限内，已登记 report「受限」）：
+ * 登录页读 `?cli_handoff=<port>&state=<nonce>`，成功后
+ * `fetch('http://127.0.0.1:<port>/token', {method:'POST', headers:{'content-type':'application/json'},
+ *   body: JSON.stringify({ access_token, uid, space_id, state })})`。
+ *
+ * 安全：只监听回环；nonce 一次性且校验；默认 120s 超时后立刻关端口；收到即关闭。
+ */
+async function loginViaHandoff(ctx: BuiltinContext): Promise<BuiltinResult> {
+  const { runtime, config, parsed } = ctx;
+  const timeoutMs = parseDuration(flagString(parsed, "timeout"), 120_000);
+  const nonce = randomBytes(16).toString("base64url");
+  const webBase = resolveWebBaseUrl(config, runtime.env).replace(/\/+$/, "");
+
+  let settle: ((value: Record<string, unknown>) => void) | undefined;
+  const received = new Promise<Record<string, unknown>>((resolve) => {
+    settle = resolve;
+  });
+
+  const server = createServer((req, res) => {
+    // 浏览器从 Web 源跨端口 POST 到 127.0.0.1 必须放行（含预检）
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-headers", "content-type");
+    res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+    const url = req.url ?? "";
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && url.startsWith("/health")) {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, state: nonce }));
+      return;
+    }
+    if (req.method === "POST" && url.startsWith("/token")) {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += String(chunk);
+      });
+      req.on("end", () => {
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(raw || "{}") as Record<string, unknown>;
+        } catch {
+          body = {};
+        }
+        if (body.state !== nonce) {
+          res.statusCode = 403;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: "state_mismatch" }));
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true }));
+        settle?.(body);
+      });
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address() as AddressInfo | null;
+      if (!address) {
+        reject(new Error("cannot bind loopback port"));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+
+  const handoffUrl = `${webBase}/login?cli_handoff=${port}&state=${encodeURIComponent(nonce)}`;
+  // URL 属于"人读信息" → stderr（`--json` 时 stdout 仍只有一个 envelope）
+  runtime.stderr(`[handoff] 在浏览器打开：${handoffUrl}\n`);
+  runtime.stderr(`[handoff] 等待回调（最多 ${Math.round(timeoutMs / 1000)}s），完成后凭据自动落盘\n`);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    received,
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  server.close();
+
+  if (!outcome) {
+    throw new CliError("timeout", `handoff 超时（${Math.round(timeoutMs / 1000)}s）：未收到浏览器回调`, {
+      exitCode: EXIT.TIMEOUT,
+      retryable: false,
+      raw: {
+        handoff_url: handoffUrl,
+        hint: "Web 侧回调未接通时，改用 `login --phone <PHONE> --code <CODE>` 或 `login --token-file -`",
+      },
+    });
+  }
+
+  const token = String(outcome.access_token ?? outcome.token ?? "").trim();
+  if (!token) throw new CliError("auth", "handoff 回调缺少 access_token");
+  const baseUrl = resolveApiBaseUrl(config, runtime.env, flagString(parsed, "api-url"));
+  const me = await new ApiClient({ baseUrl, transport: runtime.transport, token })
+    .call<Record<string, unknown>>({ method: "GET", path: "/me" })
+    .catch(() => null);
+  const uid = String(outcome.uid ?? (me ? asRecord(me.user).id : "") ?? "");
+  const spaceId = String(outcome.space_id ?? (me ? asRecord(me.space).id : "") ?? "");
+  if (!uid) throw new CliError("auth", "handoff 回调无法解析 uid（服务端不可达？）");
+
+  config.profiles[uid] = {
+    uid,
+    space_id: spaceId,
+    access_token: token,
+    signed_in_at: runtime.now().toISOString(),
+  };
+  config.current_uid = uid;
+  saveConfig(runtime, config);
+  return {
+    data: { uid, space_id: spaceId, credential_store: "file", via: "handoff", handoff_url: handoffUrl },
   };
 }
 
@@ -383,8 +526,84 @@ function ledgerResolve(ctx: BuiltinContext): BuiltinResult {
   return { data: { key, state: entry.state, resolved: !dryRun, dry_run: dryRun } };
 }
 
-function fileTreeInfo(dir: string): { entries: { name: string; files: number; bytes: number }[] } {
-  if (!existsSync(dir)) return { entries: [] };
+/**
+ * `task download`：把任务产物落到 `<cwd>/outputs/`（文件名 `<task_id>-<n>.<ext>`）。
+ *
+ * 契约（竞品 `commands/task.md:165`）：读 `task_infos[].asset_info.file_id` 下载全部产物；
+ * 我方对应链路是 `GET /tasks/:id`（results 数组）→ `GET /tasks/:id/results/:n/download-url`
+ * （返回预签名 URL）→ 取字节写盘。
+ *
+ * 两条设计约束：
+ * 1. **输出里不出现签名 URL**（`download-url` 的 URL 带时效签名，等于短期凭据，
+ *    与 "日志/JSON 不得出现 token/cookie"（error-codes.md:23）同一条红线）——只回本地路径与字节数；
+ * 2. **单个失败不阻断整包**（对齐 `batchDownload` 的"部分成功"语义），最后汇总 `failed[]`；
+ *    全部失败才算失败（400102 语义）。
+ */
+async function taskDownload(ctx: BuiltinContext): Promise<BuiltinResult> {
+  const { runtime, config, parsed, args } = ctx;
+  requireProfile(config);
+  const taskId = args[0] ?? flagString(parsed, "task-id");
+  if (!taskId) throw usageError("task download 需要 TASK_ID");
+  const client = createClient({ runtime, config });
+
+  const detail = await client.call<Record<string, unknown>>({ method: "GET", path: `/tasks/${taskId}` });
+  const results = Array.isArray(detail.results) ? (detail.results as Array<{ uri?: string }>) : [];
+  if (results.length === 0) {
+    throw new CliError("not_found", `任务 ${taskId} 没有产物（可能还在跑或已失败）`, {
+      raw: { task_id: taskId, status: detail.status ?? null },
+    });
+  }
+
+  const outDir = join(runtime.cwd, "outputs");
+  mkdirSync(outDir, { recursive: true });
+
+  const files: Array<{ n: number; path: string; bytes: number }> = [];
+  const failed: Array<{ n: number; error: string }> = [];
+  for (let index = 1; index <= results.length; index += 1) {
+    try {
+      const signed = await client.call<{ url?: string; filename?: string }>({
+        method: "GET",
+        path: `/tasks/${taskId}/results/${index}/download-url`,
+      });
+      if (!signed.url) throw new Error("download-url 缺少 url");
+      const buffer = await runtime.fetchBinary(signed.url);
+      const ext = pickExtension(signed.filename, results[index - 1]?.uri);
+      const target = join(outDir, `${taskId}-${index}.${ext}`);
+      writeFileSync(target, buffer);
+      if (parsed.json !== true) runtime.stderr(`[download] ${target} (${buffer.length}B)\n`);
+      files.push({ n: index, path: target, bytes: buffer.length });
+    } catch (error) {
+      failed.push({ n: index, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  if (files.length === 0) {
+    throw new CliError("not_found", `任务 ${taskId} 的产物全部下载失败`, {
+      raw: { task_id: taskId, failed },
+    });
+  }
+  return {
+    data: {
+      task_id: taskId,
+      dir: outDir,
+      count: files.length,
+      files,
+      failed,
+      // 明确说明：不输出签名 URL（时效凭据不进 stdout/stderr）
+      url_exposed: false,
+    },
+  };
+}
+
+/** 扩展名优先取服务端 filename，其次取 uri，最后兜底 bin（清洗成 1~5 位字母数字） */
+function pickExtension(filename: string | undefined, uri: string | undefined): string {
+  const fromName = filename ? extname(filename).replace(/^\./, "") : "";
+  const fromUri = uri && !uri.endsWith("/") ? extname(uri.split("?")[0]).replace(/^\./, "") : "";
+  const candidate = (fromName || fromUri || "").toLowerCase();
+  return /^[a-z0-9]{1,5}$/.test(candidate) ? candidate : "bin";
+}
+
+function fileTreeInfo(dir: string): { entries: { name: string; files: number; bytes: number }[] } {  if (!existsSync(dir)) return { entries: [] };
   const rows = readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -499,6 +718,8 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
       return workflowDetect(ctx, "resume");
     case "task-wait":
       return taskWait(ctx);
+    case "task-download":
+      return taskDownload(ctx);
     case "ledger-list":
       return ledgerList(ctx);
     case "ledger-show":

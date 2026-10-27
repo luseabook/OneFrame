@@ -20,8 +20,11 @@ import { PERMISSION_CATALOG } from "../src/modules/team/permission-catalog";
  * 4. 边界：未知码拒绝（不静默丢弃）、owner 角色不可改、非特权成员 403、跨 space 角色 400102；
  * 5. `temp-info`：能推导的给真值，推不出来的给 null + unverified（不用假 false 冒充）。
  *
- * ⚠️ 本批**不做**全站入口拦截（会把既有 13 个 e2e suite 全打红），所以这里也**不**断言
- * "某成员没有某码就访问不了某端点"——那是下一批的事，见回报的边界说明。
+ * ⚠️ 拦截边界（本批已落**渐进式**拦截，只开 3 个码）：
+ * `team.edit`（PATCH /cam/team/info）、`team.permission`（PUT /cam/roles/:id/permissions）、
+ * `member.create`（POST /cam/team/member/batch = 邀请入口）。
+ * 判定语义是**默认放行**：角色没有显式 power_list 时视为拥有全部权限，否则存量 13 个
+ * e2e（成员都是 role=3 且无 power_list）会全红。清单见 `enforced-permissions.ts`。
  */
 describe("team permissions (cam) e2e", () => {
   let app: NestFastifyApplication;
@@ -331,5 +334,297 @@ describe("team permissions (cam) e2e", () => {
     await inject("PATCH", "/cam/team/info", { film_enabled: true }, owner.token, teamSpaceId);
     const again = await inject("GET", "/cam/temp-info", undefined, owner.token, teamSpaceId);
     expect((again.data as { film_enabled: boolean }).film_enabled).toBe(true);
+  });
+
+  // ══ 渐进式入口拦截（模块 #7 收尾）════════════════════════════════════
+  //
+  // 三个已落拦截的端点见 `src/modules/team/enforced-permissions.ts`。
+  // 必须守住的语义是**默认放行**：角色没有显式 power_list 时视为拥有全部权限；
+  // 只有"被显式配置过、且码不在集合里"才拒绝。否则存量 13 个 e2e（成员都是
+  // role=3 且无 power_list）会全红——那是把灰度做成了全量破坏。
+
+  /**
+   * 确保 space 内存在该 role_code 的角色行。
+   *
+   * 为什么需要：`POST /cam/team` 建团队时只落 `master` 一行，`listRoles` 见"已有行"
+   * 就不会再初始化内置 11 级角色（幂等逻辑的副作用）。而 `requirePermission` 的
+   * 第 3 步是"岗位没有角色行 → 默认放行"，所以不先建行的话，无论怎么配 power_list
+   * 都不会生效——测试会误判成"拦截没做"。
+   */
+  async function ensureRole(spaceId: string, roleCode: string): Promise<void> {
+    const id = BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+    await db.execute(sql`
+      insert into team_roles (id, space_id, role_code, role_name, role_level, is_system, created_at, updated_at)
+      values (${id}, ${BigInt(spaceId)}, ${roleCode}, ${roleCode}, 5, false, now(), now())
+      on conflict (space_id, role_code) do nothing
+    `);
+  }
+
+  /**
+   * 直接写角色的 power_list（`null` = 清空 = 恢复"未配置 → 默认放行"）。
+   *
+   * 为什么直接落库而不走 `PUT /cam/roles/:id/permissions`：那个端点本身也被拦截，
+   * 拿它做前置会在"谁有权改权限"上绕圈，测试反而不稳。
+   */
+  async function setRolePowerList(
+    spaceId: string,
+    roleCode: string,
+    codes: string[] | null,
+  ): Promise<void> {
+    await ensureRole(spaceId, roleCode);
+    // 注意：`power_list` 是 NOT NULL（默认 '[]'），所以"未配置"的表达是**空数组**，
+    // 不是 SQL NULL。`powerListToCodes([])` → [] → 判定链第 4 步"未配置 → 放行"。
+    const payload =
+      codes === null
+        ? "[]"
+        : JSON.stringify(
+            [...new Set(codes)].sort().map((code) => {
+              const idx = code.indexOf(".");
+              return idx < 0
+                ? { module: code, action: "*", permission_code: code }
+                : {
+                    module: code.slice(0, idx),
+                    action: code.slice(idx + 1),
+                    permission_code: code,
+                  };
+            }),
+          );
+    await db.execute(sql`
+      update team_roles set power_list = ${payload}::jsonb, updated_at = now()
+      where space_id = ${BigInt(spaceId)} and role_code = ${roleCode}
+    `);
+  }
+
+  /** 角色 role_code → role_id（缺失的岗位先补行） */
+  async function roleIdByCode(
+    token: string,
+    spaceId: string,
+  ): Promise<Record<string, string>> {
+    await ensureRole(spaceId, "producer");
+    const res = await inject("GET", "/cam/role/list", undefined, token, spaceId);
+    expect(res.code).toBe(0);
+    const roles = (res.data as { list?: Array<{ id: string; role_code: string }> }).list ?? [];
+    const map: Record<string, string> = {};
+    for (const role of roles) map[role.role_code] = String(role.id);
+    return map;
+  }
+
+  /** owner + 一个指定 role/role_code 的成员 + 团队空间 */
+  async function setupTeamWithMember(
+    tagOwner: string,
+    tagMember: string,
+    memberRole: number,
+    memberRoleCode: string | null,
+  ) {
+    const owner = await loginNewUser(tagOwner);
+    const member = await loginNewUser(tagMember);
+    const teamSpaceId = await createTeam(owner, "权限拦截团队");
+    await addMember(teamSpaceId, member.userId, memberRoleCode ?? "animator", memberRole);
+    if (memberRoleCode === null) {
+      // addMember 的默认 role_code 是 animator；要测"无岗位码"必须显式清掉
+      await db.execute(sql`
+        update space_members set role_code = null
+        where space_id = ${BigInt(teamSpaceId)} and user_id = ${BigInt(member.userId)}
+      `);
+    }
+    return { owner, member, teamSpaceId };
+  }
+
+  it("enforced 清单：正好 3 个码、与端点一一对应、且都在权限目录里", async () => {
+    const { owner, teamSpaceId } = await setupTeamWithMember("41", "42", 3, "producer");
+
+    const res = await inject("GET", "/cam/permissions", undefined, owner.token, teamSpaceId);
+    expect(res.code).toBe(0);
+    const data = res.data as {
+      list: Array<{ code: string; enforced: boolean }>;
+      enforced: Array<{ code: string; method: string; endpoint: string; note: string }>;
+      enforced_count: number;
+    };
+    expect(data.enforced_count).toBe(3);
+    expect(data.enforced.map((item) => item.code).sort()).toEqual([
+      "member.create",
+      "team.edit",
+      "team.permission",
+    ]);
+    // 每个 enforced 码必须真实存在于目录（否则前端矩阵无处显示"生效中"）
+    const allCodes = new Set(data.list.map((entry) => entry.code));
+    for (const item of data.enforced) expect(allCodes.has(item.code)).toBe(true);
+    // 逐码布尔位：3 个 true，其余 false
+    const byCode = new Map(data.list.map((entry) => [entry.code, entry.enforced]));
+    expect(byCode.get("team.edit")).toBe(true);
+    expect(byCode.get("team.permission")).toBe(true);
+    expect(byCode.get("member.create")).toBe(true);
+    expect(byCode.get("project.view")).toBe(false);
+    // 端点形状可直接对着 curl
+    expect(data.enforced.find((item) => item.code === "team.edit")).toMatchObject({
+      method: "PATCH",
+      endpoint: "/v1/cam/team/info",
+    });
+  });
+
+  it("默认放行①：owner（role=1/master）短路 —— 角色被限制也照样能改团队设置", async () => {
+    const { owner, teamSpaceId } = await setupTeamWithMember("43", "44", 3, "producer");
+    // 把 owner 的 master 角色写成空集合（模拟"被误配"），owner 仍应可
+    await setRolePowerList(teamSpaceId, "master", []);
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `owner-改-${Date.now()}` },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(res.code, res.msg).toBe(0);
+  });
+
+  it("默认放行②：有岗位码但 power_list 未配置（null）→ 放行", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("45", "46", 3, "producer");
+    await roleIdByCode(member.token, teamSpaceId); // 懒建角色行
+    await setRolePowerList(teamSpaceId, "producer", null);
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `未配置-${Date.now()}` },
+      member.token,
+      teamSpaceId,
+    );
+    expect(res.code, res.msg).toBe(0);
+  });
+
+  it("默认放行③：无岗位码的 admin（role=2）→ 放行", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("47", "48", 2, null);
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `无岗位码-${Date.now()}` },
+      member.token,
+      teamSpaceId,
+    );
+    expect(res.code, res.msg).toBe(0);
+  });
+
+  it("显式收紧：power_list 里没有 team.edit → 403101，且 msg 带缺失码", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("51", "52", 3, "producer");
+    await roleIdByCode(member.token, teamSpaceId);
+    await setRolePowerList(teamSpaceId, "producer", ["team.view", "project.view"]);
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `应被拒-${Date.now()}` },
+      member.token,
+      teamSpaceId,
+    );
+    expect(res.code).toBe(403101);
+    expect(res.msg).toContain("team.edit");
+  });
+
+  it("放开即时生效：加回 team.edit → 200（不需要重启/清缓存）", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("53", "54", 3, "producer");
+    await roleIdByCode(member.token, teamSpaceId);
+    await setRolePowerList(teamSpaceId, "producer", ["team.view"]);
+    const denied = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: "先拒" },
+      member.token,
+      teamSpaceId,
+    );
+    expect(denied.code).toBe(403101);
+
+    await setRolePowerList(teamSpaceId, "producer", ["team.view", "team.edit"]);
+    const allowed = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `后放-${Date.now()}` },
+      member.token,
+      teamSpaceId,
+    );
+    expect(allowed.code, allowed.msg).toBe(0);
+  });
+
+  it("改角色权限矩阵需要 team.permission：缺 → 403101；给 → 200", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("55", "56", 3, "producer");
+    const roles = await roleIdByCode(member.token, teamSpaceId);
+    const roleId = roles.producer;
+    expect(roleId).toBeTruthy();
+
+    await setRolePowerList(teamSpaceId, "producer", ["team.view"]);
+    const denied = await inject(
+      "PUT",
+      `/cam/roles/${roleId}/permissions`,
+      { permissions: ["project.view"] },
+      member.token,
+      teamSpaceId,
+    );
+    expect(denied.code).toBe(403101);
+    expect(denied.msg).toContain("team.permission");
+
+    await setRolePowerList(teamSpaceId, "producer", ["team.view", "team.permission"]);
+    const allowed = await inject(
+      "PUT",
+      `/cam/roles/${roleId}/permissions`,
+      { permissions: ["project.view", "project.edit"] },
+      member.token,
+      teamSpaceId,
+    );
+    expect(allowed.code, allowed.msg).toBe(0);
+    expect((allowed.data as { permissions: string[] }).permissions.sort()).toEqual([
+      "project.edit",
+      "project.view",
+    ]);
+  });
+
+  it("邀请/批量加成员需要 member.create：缺 → 403101；给 → 200", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("57", "58", 3, "producer");
+    const invitee = await loginNewUser("59");
+    await roleIdByCode(member.token, teamSpaceId);
+
+    await setRolePowerList(teamSpaceId, "producer", ["team.view"]);
+    const denied = await inject(
+      "POST",
+      "/cam/team/member/batch",
+      { members: [{ user_id: invitee.userId }] },
+      member.token,
+      teamSpaceId,
+    );
+    expect(denied.code).toBe(403101);
+    expect(denied.msg).toContain("member.create");
+
+    await setRolePowerList(teamSpaceId, "producer", ["team.view", "member.create"]);
+    const allowed = await inject(
+      "POST",
+      "/cam/team/member/batch",
+      { members: [{ user_id: invitee.userId }] },
+      member.token,
+      teamSpaceId,
+    );
+    expect(allowed.code, allowed.msg).toBe(0);
+  });
+
+  it("非成员访问 → 403101（L2 成员闸门先于权限码，且 msg 可区分）", async () => {
+    const { teamSpaceId } = await setupTeamWithMember("61", "62", 3, "producer");
+    const outsider = await loginNewUser("63");
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: "outsider" },
+      outsider.token,
+      teamSpaceId,
+    );
+    expect(res.code).toBe(403101);
+    expect(res.msg).toContain("not a member");
+  });
+
+  it("历史脏码不影响已授权码判定（power_list 含目录外旧码也能通过）", async () => {
+    const { member, teamSpaceId } = await setupTeamWithMember("64", "65", 3, "producer");
+    await roleIdByCode(member.token, teamSpaceId);
+    await setRolePowerList(teamSpaceId, "producer", ["legacy.unknown.code", "team.edit"]);
+    const res = await inject(
+      "PATCH",
+      "/cam/team/info",
+      { name: `脏码-${Date.now()}` },
+      member.token,
+      teamSpaceId,
+    );
+    expect(res.code, res.msg).toBe(0);
   });
 });

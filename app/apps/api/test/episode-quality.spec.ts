@@ -8,6 +8,7 @@ import { newId } from "@app/shared";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 import { AppModule } from "../src/app.module";
+import { QUALITY_RUBRIC_VERSION } from "../src/modules/script/quality-check.service";
 import { db, pool } from "../src/db/database";
 
 /**
@@ -169,6 +170,9 @@ describe("episode quality-check / film-synthesis / parse e2e", () => {
     expect(res.code).toBe(0);
     expect(res.data.read_only).toBe(true);
     expect(res.data.ep_id).toBe(episodeId);
+    // 口径版本必须随响应返回：竞品只有路由无字段证据，我方五维是自建口径；
+    // 以后调权重时靠这个版本号解释"同一集分数为什么变了"
+    expect(res.data.rubric_version).toBe(QUALITY_RUBRIC_VERSION);
     expect(res.data.score).toBeGreaterThanOrEqual(0);
     expect(res.data.score).toBeLessThanOrEqual(100);
     expect(["pass", "warn", "fail"]).toContain(res.data.status);

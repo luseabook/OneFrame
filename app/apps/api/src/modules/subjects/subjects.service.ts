@@ -81,6 +81,10 @@ export interface SubjectListQuery {
   review_status?: number;
   project_id?: string;
   q?: string;
+  /** 只看星标主体（竞品主体库可置顶常用角色/场景，列表 starred 优先） */
+  starred?: boolean;
+  /** IP/模板筛（`ip:my-hero` 这类归类键） */
+  template_key?: string;
   page?: number;
   page_size?: number;
 }
@@ -94,6 +98,8 @@ export interface SubjectCreateInput {
   business_list?: number[];
   tags?: string[];
   files?: SubjectFileInput[];
+  is_starred?: boolean;
+  template_key?: string | null;
 }
 
 export interface SubjectPatchInput {
@@ -108,6 +114,8 @@ export interface SubjectPatchInput {
   reject_reason?: string | null;
   files?: SubjectFileInput[];
   remove_file_ids?: string[];
+  is_starred?: boolean;
+  template_key?: string | null;
 }
 
 export interface SubjectFromAssetInput {
@@ -138,12 +146,15 @@ export class SubjectsService {
       query.review_status ? eq(subjects.reviewStatus, query.review_status) : undefined,
       query.project_id ? eq(subjects.projectId, this.parseId(query.project_id, "project_id")) : undefined,
       query.q ? sql`${subjects.name} ilike ${`%${query.q}%`}` : undefined,
+      query.starred ? eq(subjects.isStarred, true) : undefined,
+      query.template_key ? eq(subjects.templateKey, query.template_key) : undefined,
     );
     const rows = await db
       .select()
       .from(subjects)
       .where(where)
-      .orderBy(desc(subjects.createdAt), desc(subjects.id))
+      // 星标置顶（同组内仍按创建时间倒序）：置顶是"常用角色/场景"的主要用法
+      .orderBy(desc(subjects.isStarred), desc(subjects.createdAt), desc(subjects.id))
       .limit(pageSize)
       .offset((page - 1) * pageSize);
     const [countRow] = await db
@@ -187,6 +198,9 @@ export class SubjectsService {
         reviewStatus: SubjectReviewStatus.REVIEWING,
         businessList: input.business_list ?? DEFAULT_BUSINESS_LIST,
         tags: (input.tags ?? []).slice(0, 20),
+        // 星标与 IP 模板归类（迁移 0031）：星标置顶、模板键用于"同 IP 系列"筛选
+        isStarred: input.is_starred === true,
+        templateKey: input.template_key ?? null,
         projectId,
         createdBy: userId ? BigInt(userId) : null,
       })
@@ -360,6 +374,8 @@ export class SubjectsService {
         ...(input.review_status !== undefined ? { reviewStatus: input.review_status } : {}),
         ...(input.review_status === SubjectReviewStatus.APPROVED ? { rejectReason: null } : {}),
         ...(input.reject_reason !== undefined ? { rejectReason: input.reject_reason } : {}),
+        ...(input.is_starred !== undefined ? { isStarred: input.is_starred } : {}),
+        ...(input.template_key !== undefined ? { templateKey: input.template_key } : {}),
         updatedAt: new Date(),
       })
       .where(eq(subjects.id, row.id))
@@ -609,6 +625,9 @@ export class SubjectsService {
       reject_reason: row.rejectReason,
       business_list: (row.businessList as number[] | null) ?? [],
       tags: row.tags,
+      // 星标（置顶）与 IP/模板归类键（迁移 0031）
+      is_starred: row.isStarred,
+      template_key: row.templateKey,
       project_id: row.projectId ? String(row.projectId) : null,
       files: await Promise.all(
         files.map(async (file) => ({

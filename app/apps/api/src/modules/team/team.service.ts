@@ -117,6 +117,46 @@ export class TeamService {
   }
 
   /**
+   * 按权限码判权（**渐进式拦截**，默认放行）。
+   *
+   * 判定顺序（每一步都能让存量用例继续通过）：
+   * 1. **owner 短路**：`role=1`（space owner）或 `roleCode="master"` 直接通过——
+   *    owner 的特权来自契约 `isOwner` 判定，不该被 power_list 影响；
+   * 2. **没有岗位码**（`roleCode` 为空）→ 放行。存量 13 个 e2e 的成员都是 role=3 且无岗位；
+   * 3. **岗位在该 space 没有角色行** → 放行（历史数据/自定义岗位）；
+   * 4. **角色 power_list 为空** → 放行。这是"默认放行"的核心：没有显式配置 = 尚未收紧；
+   * 5. 否则要求 `code` 精确出现在 power_list 里（竞品 `hasPermission` 也是精确串匹配）。
+   *
+   * 只对 `ENFORCED_PERMISSIONS` 里列出的码调用（见 `enforced-permissions.ts`）；
+   * 不要把这个方法挂到全站端点上——那是另一批"全量迁移存量角色默认权限"的活。
+   */
+  async requirePermission(spaceId: string, userId: string, code: string): Promise<TeamContext> {
+    const ctx = await this.requireMember(spaceId, userId);
+    // 1) owner 短路
+    if (ctx.role === 1 || ctx.roleCode === "master") return ctx;
+    // 2) 未分配岗位 → 默认放行
+    const roleCode = ctx.roleCode;
+    if (!roleCode) return ctx;
+    // 3) 岗位无角色行 → 默认放行
+    const [role] = await db
+      .select({ powerList: teamRoles.powerList })
+      .from(teamRoles)
+      .where(and(eq(teamRoles.spaceId, BigInt(spaceId)), eq(teamRoles.roleCode, roleCode)));
+    if (!role) return ctx;
+    // 4) 未显式配置权限 → 默认放行
+    const codes = powerListToCodes(role.powerList);
+    if (codes.length === 0) return ctx;
+    // 5) 显式配置过 → 精确匹配
+    if (codes.includes(code)) return ctx;
+    // details 不出网（AllExceptionsFilter 只回 code+msg），所以把码写进 msg
+    throw new AppError(ErrorCode.FORBIDDEN, `permission denied: ${code}`, {
+      reason: "permission_denied",
+      code,
+      role_code: roleCode,
+    });
+  }
+
+  /**
    * 创建团队空间（对齐参照「去开通」这一步）。
    * 团队不是新表：建的是 `spaces(type=2)` + 积分账户 + owner 成员 + 内置角色（ADR-010）。
    * 同一用户可拥有多个团队；`X-Space-Id` 决定"当前在哪个团队里操作"。

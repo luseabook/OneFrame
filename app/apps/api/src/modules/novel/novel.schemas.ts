@@ -203,3 +203,20 @@ export const reopenSchema = z.object({
   memo: z.string().max(500).optional(),
 });
 export type ReopenRequest = z.infer<typeof reopenSchema>;
+
+/** 原创创意方案的单条编辑（`PATCH /original_script/idea/:ni_id`） */
+export const originalIdeaPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX).optional(),
+    logline: z.string().trim().min(1).max(300).optional(),
+    genre: z.string().trim().min(1).max(50).optional(),
+    tone: z.string().trim().min(1).max(50).optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "至少需要一个可更新字段",
+  });
+export type OriginalIdeaPatch = z.infer<typeof originalIdeaPatchSchema>;
+
+// 原创链角色卡生成**复用**既有的 `charactersGenerateSchema`（count + instructions）：
+// 薄路径只是换个前缀，参数形状必须与 `/content-analysis/novel_character_cards/generate` 完全一致，
+// 否则同一动作出现两套校验口径（前端还得记哪个端点用哪套）。

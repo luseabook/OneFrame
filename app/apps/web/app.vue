@@ -31,6 +31,9 @@ const workspacePaths = [
   "/creator-center",
   "/activities",
   "/invite",
+  // 第 3 轮：广告剧 / 视频转绘（登录后整页工作台）
+  "/ad-drama",
+  "/video-redraw",
 ];
 const adminPaths = ["/admin"];
 const adminLoginPaths = ["/admin/login"];

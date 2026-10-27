@@ -9,7 +9,9 @@ import type { WorkDto, WorksListDto } from "~/types/api";
  * 前端过滤会让"共 N 部"与列表条数对不上（分页只拿到当前页）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "我的作品 · 一帧" });
+// i18n（第 8 批补完）：页面骨架与状态名走语言包；作品标题/封面等是后端数据，不翻译
+const { t, locale } = useI18n();
+useHead({ title: () => t("works.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -32,13 +34,23 @@ const loading = ref(true);
 const error = ref("");
 const busyId = ref("");
 
-const STATE_META: Record<string, { label: string; tone: "neutral" | "brand" | "info" | "success" | "warning" }> = {
-  draft: { label: "草稿", tone: "neutral" },
-  producing: { label: "制作中", tone: "brand" },
-  ready: { label: "已成片", tone: "success" },
-  archived: { label: "已归档", tone: "info" },
-  canvas: { label: "画布", tone: "brand" },
-};
+/** 四态 / 画布态的展示名与色调：label 随语言，tone 是视觉语义（不翻译） */
+function stateMeta(state: string): { label: string; tone: "neutral" | "brand" | "info" | "success" | "warning" } {
+  switch (state) {
+    case "draft":
+      return { label: t("works.stateDraft"), tone: "neutral" };
+    case "producing":
+      return { label: t("works.stateProducing"), tone: "brand" };
+    case "ready":
+      return { label: t("works.stateReady"), tone: "success" };
+    case "archived":
+      return { label: t("works.statusArchived"), tone: "info" };
+    case "canvas":
+      return { label: t("works.canvasTag"), tone: "brand" };
+    default:
+      return { label: state, tone: "neutral" };
+  }
+}
 
 function fromIso(): string | undefined {
   if (range.value === "all") return undefined;
@@ -62,7 +74,7 @@ async function load(): Promise<void> {
     hasMore.value = data.has_more;
     tabCounts.value = data.tabs;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("errors.load");
   } finally {
     loading.value = false;
   }
@@ -103,10 +115,10 @@ async function archive(work: WorkDto): Promise<void> {
   busyId.value = work.id;
   try {
     await api.post(`/projects/${work.id}/archive`, { archived: next });
-    toast.success(next ? "已归档" : "已恢复");
+    toast.success(next ? t("works.archivedDone") : t("works.restoredDone"));
     await load();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "操作失败";
+    const msg = e instanceof Error ? e.message : t("errors.operation");
     error.value = msg;
     toast.error(msg);
   } finally {
@@ -120,7 +132,7 @@ async function addEpisode(work: WorkDto): Promise<void> {
     await api.post(`/projects/${work.id}/episodes`, { count: 1 });
     await router.push(`/projects/${work.id}`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "新增失败";
+    error.value = e instanceof Error ? e.message : t("works.addFailed");
   } finally {
     busyId.value = "";
   }
@@ -136,10 +148,10 @@ async function duplicateSample(work: WorkDto): Promise<void> {
     const res = await api.post<{ id: string; episodes: number; characters: number }>(
       `/projects/${work.id}/duplicate`,
     );
-    toast.success(`已复制「${work.title}」：${res.episodes} 集 · ${res.characters} 个角色`);
+    toast.success(t("works.duplicateDone", { title: work.title, episodes: res.episodes, characters: res.characters }));
     await router.push(`/projects/${res.id}`);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "复制失败";
+    const msg = e instanceof Error ? e.message : t("works.duplicateFailed");
     error.value = msg;
     toast.error(msg);
   } finally {
@@ -154,63 +166,63 @@ onMounted(load);
   <div class="works">
     <header class="head">
       <div class="head-main">
-        <h1>全部项目</h1>
+        <h1>{{ t("works.title") }}</h1>
         <p class="sub">
-          工坊项目与无限画布在同一清单里；筛选走服务端，分页总数与列表一致。
+          {{ t("works.sub") }}
         </p>
       </div>
       <div class="head-actions">
-        <Button @click="router.push('/projects')">+ 新建作品</Button>
+        <Button @click="router.push('/projects')">{{ t("works.newWork") }}</Button>
       </div>
     </header>
 
     <!-- 形态 tab：工坊 / 画布 / 全部（对应后端 tab=workshop|canvas|all） -->
     <nav class="tabs">
       <button
-        v-for="t in [
-          { key: 'workshop' as const, label: '工坊项目' },
-          { key: 'canvas' as const, label: '画布项目' },
-          { key: 'all' as const, label: '全部' },
+        v-for="tabItem in [
+          { key: 'workshop' as const, label: t('works.tabWorkshop') },
+          { key: 'canvas' as const, label: t('works.tabCanvas') },
+          { key: 'all' as const, label: t('works.tabAll') },
         ]"
-        :key="t.key"
+        :key="tabItem.key"
         type="button"
         class="tab"
-        :class="{ on: tab === t.key }"
-        @click="switchTab(t.key)"
+        :class="{ on: tab === tabItem.key }"
+        @click="switchTab(tabItem.key)"
       >
-        {{ t.label }}
-        <span class="tab-count">{{ tabCounts[t.key === "all" ? "workshop" : t.key] ?? 0 }}</span>
+        {{ tabItem.label }}
+        <span class="tab-count">{{ tabCounts[tabItem.key === "all" ? "workshop" : tabItem.key] ?? 0 }}</span>
       </button>
-      <span class="total">共 {{ total }} 部</span>
+      <span class="total">{{ t("works.totalWorks", { count: total }) }}</span>
     </nav>
 
     <!-- 二级筛选：状态 / 四态 / 时间 / 关键词（画布视图下归档与四态不适用） -->
     <div class="filters">
       <select v-if="tab !== 'canvas'" v-model="statusFilter" class="mini-select" @change="applyFilters">
-        <option value="active">未归档</option>
-        <option value="archived">已归档</option>
-        <option value="all">全部状态</option>
+        <option value="active">{{ t("works.statusActive") }}</option>
+        <option value="archived">{{ t("works.statusArchived") }}</option>
+        <option value="all">{{ t("works.statusAllStatus") }}</option>
       </select>
       <select v-if="tab !== 'canvas'" v-model="stateFilter" class="mini-select" @change="applyFilters">
-        <option value="all">全部进度</option>
-        <option value="draft">草稿</option>
-        <option value="producing">制作中</option>
-        <option value="ready">已成片</option>
+        <option value="all">{{ t("works.stateAll") }}</option>
+        <option value="draft">{{ t("works.stateDraft") }}</option>
+        <option value="producing">{{ t("works.stateProducing") }}</option>
+        <option value="ready">{{ t("works.stateReady") }}</option>
       </select>
       <select v-model="range" class="mini-select" @change="applyFilters">
-        <option value="all">不限时间</option>
-        <option value="7d">近 7 天</option>
-        <option value="30d">近 30 天</option>
+        <option value="all">{{ t("works.rangeAll") }}</option>
+        <option value="7d">{{ t("works.range7d") }}</option>
+        <option value="30d">{{ t("works.range30d") }}</option>
       </select>
       <input
         v-model="keyword"
         class="mini-input"
-        placeholder="按标题搜索"
+        :placeholder="t('works.searchPlaceholder')"
         maxlength="40"
         @keyup.enter="applyFilters"
       />
-      <Button size="sm" variant="ghost" :disabled="loading" @click="applyFilters">筛选</Button>
-      <Button size="sm" variant="text" :disabled="loading" @click="resetFilters">重置</Button>
+      <Button size="sm" variant="ghost" :disabled="loading" @click="applyFilters">{{ t("works.filter") }}</Button>
+      <Button size="sm" variant="text" :disabled="loading" @click="resetFilters">{{ t("works.reset") }}</Button>
     </div>
 
     <p v-if="error" class="err">{{ error }}</p>
@@ -224,19 +236,19 @@ onMounted(load);
           <template v-if="w.kind === 'canvas'">
             <NuxtLink :to="`/canvas/${w.id}`" class="cover">
               <div class="cover-empty">
-                <span>画布 · {{ w.node_count ?? 0 }} 节点</span>
+                <span>{{ t("works.canvasWithNodes", { count: w.node_count ?? 0 }) }}</span>
               </div>
-              <Tag class="state-tag" tone="brand" size="sm" dot>画布</Tag>
+              <Tag class="state-tag" tone="brand" size="sm" dot>{{ t("works.canvasTag") }}</Tag>
             </NuxtLink>
             <div class="body">
               <NuxtLink :to="`/canvas/${w.id}`" class="title">{{ w.title }}</NuxtLink>
               <p class="meta">
-                {{ w.node_count ?? 0 }} 个节点
+                {{ t("works.nodeCount", { count: w.node_count ?? 0 }) }}
                 <span class="sep">·</span>
-                {{ w.creation_mode === 1 ? "制片工坊画布" : "无限画布" }}
+                {{ w.creation_mode === 1 ? t("works.creationStudio") : t("works.creationCanvas") }}
               </p>
-              <p v-if="w.failed_nodes" class="meta warn">失败节点 {{ w.failed_nodes }}</p>
-              <p class="time">最后编辑 {{ new Date(w.updated_at ?? w.created_at).toLocaleString("zh-CN") }}</p>
+              <p v-if="w.failed_nodes" class="meta warn">{{ t("works.failedNodes", { count: w.failed_nodes }) }}</p>
+              <p class="time">{{ t("works.lastEdited", { date: new Date(w.updated_at ?? w.created_at).toLocaleString(locale) }) }}</p>
             </div>
           </template>
 
@@ -246,22 +258,22 @@ onMounted(load);
               <div v-else class="cover-empty">
                 <span>{{ w.ratio }}</span>
               </div>
-              <Tag class="state-tag" :tone="w.is_sample ? 'brand' : (STATE_META[w.work_state]?.tone ?? 'neutral')" size="sm" dot>
-                {{ w.is_sample ? "示例模板" : (STATE_META[w.work_state]?.label ?? w.work_state) }}
+              <Tag class="state-tag" :tone="w.is_sample ? 'brand' : (stateMeta(w.work_state).tone ?? 'neutral')" size="sm" dot>
+                {{ w.is_sample ? t("works.sample") : stateMeta(w.work_state).label }}
               </Tag>
             </NuxtLink>
 
             <div class="body">
               <NuxtLink :to="`/projects/${w.id}`" class="title">{{ w.title }}</NuxtLink>
               <p class="meta">
-                {{ w.episode_count }} 集
+                {{ t("works.episodes", { count: w.episode_count }) }}
                 <span class="sep">·</span>
-                {{ w.done_count }}/{{ w.shot_count }} 镜已出片
+                {{ t("works.shotsDone", { done: w.done_count, total: w.shot_count }) }}
               </p>
               <div v-if="w.shot_count" class="prog">
                 <Progress :value="progress(w)" :tone="progress(w) === 100 ? 'success' : 'brand'" />
               </div>
-              <p class="time">{{ new Date(w.created_at).toLocaleDateString("zh-CN") }}</p>
+              <p class="time">{{ new Date(w.created_at).toLocaleDateString(locale) }}</p>
 
               <div class="ops">
                 <Button
@@ -270,10 +282,10 @@ onMounted(load);
                   :disabled="busyId === w.id"
                   @click="duplicateSample(w)"
                 >
-                  复制为我的项目
+                  {{ t("works.duplicate") }}
                 </Button>
                 <Button v-else size="sm" variant="ghost" :disabled="busyId === w.id" @click="addEpisode(w)">
-                  续做一集
+                  {{ t("works.addEpisode") }}
                 </Button>
                 <Button
                   v-if="!w.is_sample"
@@ -282,7 +294,7 @@ onMounted(load);
                   :disabled="busyId === w.id"
                   @click="archive(w)"
                 >
-                  {{ w.work_state === "archived" ? "恢复" : "归档" }}
+                  {{ w.work_state === "archived" ? t("works.restore") : t("works.archive") }}
                 </Button>
               </div>
             </div>
@@ -293,23 +305,23 @@ onMounted(load);
       <div v-else class="empty-wrap">
         <EmptyState
           icon="▦"
-          :title="tab === 'canvas' ? '还没有画布项目' : '还没有作品'"
+          :title="tab === 'canvas' ? t('works.emptyCanvasTitle') : t('works.emptyWorksTitle')"
           :description="
             tab === 'canvas'
-              ? '到「无限画布」新建一张画布，它也会出现在这里。'
-              : '从一句话或一段小说开始，AI 帮你拆成 3~6 集并生成分镜，一集可出片。'
+              ? t('works.emptyCanvasDesc')
+              : t('works.emptyWorksDesc')
           "
         >
           <Button @click="router.push(tab === 'canvas' ? '/canvas' : '/projects')">
-            {{ tab === "canvas" ? "去新建画布" : "新建第一部作品" }}
+            {{ tab === "canvas" ? t("works.emptyCanvasCta") : t("works.emptyWorksCta") }}
           </Button>
         </EmptyState>
       </div>
 
       <div v-if="total > pageSize" class="pager">
-        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
-        <span>第 {{ page }} 页</span>
-        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
+        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">{{ t("common.prevPage") }}</Button>
+        <span>{{ t("common.pageNo", { page }) }}</span>
+        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">{{ t("common.nextPage") }}</Button>
       </div>
     </template>
   </div>

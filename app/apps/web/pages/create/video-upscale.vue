@@ -44,25 +44,39 @@ const uploading = ref(false);
 
 // ── 区域拖拽（归一化坐标 0~1，左上原点）────────────────────
 const stage = ref<HTMLDivElement | null>(null);
-const region = reactive({ x: 0.1, y: 0.72, w: 0.8, h: 0.2 });
+/**
+ * 框选列表（多个字幕区域）。
+ *
+ * 为什么要多框：一部片子的字幕可能同时出现在底部与顶部/侧边（双语、角标），
+ * 只允许一个框时用户只能分批跑任务，白白多花积分与时间。
+ *
+ * 提交口径：**后端当前只接受单组 `region_x/y/w/h`**（`normalizeToolOptions` 只归一单框），
+ * 所以这里列表是"编辑体验"，提交时只下发**当前选中框**，UI 明确写「仅选中框生效」——
+ * 不假装多框已生效（等后端支持 `regions[]` 再改提交）。
+ */
+const regions = ref<Array<{ x: number; y: number; w: number; h: number }>>([
+  { x: 0.1, y: 0.72, w: 0.8, h: 0.2 },
+]);
+const activeIndex = ref(0);
+const region = computed(() => regions.value[activeIndex.value] ?? regions.value[0]!);
 const dragging = ref(false);
-const drawn = ref(false);
+const drawn = ref(true);
 const dragOrigin = { x: 0, y: 0 };
 
 const regionFields = computed(() => [
-  { key: "region_x", label: "X", value: region.x },
-  { key: "region_y", label: "Y", value: region.y },
-  { key: "region_w", label: "宽", value: region.w },
-  { key: "region_h", label: "高", value: region.h },
+  { key: "region_x", label: "X", value: region.value.x },
+  { key: "region_y", label: "Y", value: region.value.y },
+  { key: "region_w", label: "宽", value: region.value.w },
+  { key: "region_h", label: "高", value: region.value.h },
 ]);
 
-/** 遮罩样式：用百分比，窗口缩放/视频自适应都不会错位 */
-const maskStyle = computed(() => ({
-  left: `${region.x * 100}%`,
-  top: `${region.y * 100}%`,
-  width: `${region.w * 100}%`,
-  height: `${region.h * 100}%`,
-}));
+/** 每个框的遮罩样式（百分比 → 窗口缩放/视频自适应都不会错位） */
+const boxStyle = (box: { x: number; y: number; w: number; h: number }) => ({
+  left: `${box.x * 100}%`,
+  top: `${box.y * 100}%`,
+  width: `${box.w * 100}%`,
+  height: `${box.h * 100}%`,
+});
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
@@ -75,47 +89,75 @@ function pointFromEvent(event: PointerEvent): { x: number; y: number } {
   };
 }
 
+/** 拖拽中的临时框（松手才入列表：避免拖动过程产生一堆碎框） */
+const draftBox = ref<{ x: number; y: number; w: number; h: number } | null>(null);
+
 function onPointerDown(event: PointerEvent): void {
   if (!videoUrl.value) return;
   const point = pointFromEvent(event);
   dragging.value = true;
   dragOrigin.x = point.x;
   dragOrigin.y = point.y;
-  region.x = point.x;
-  region.y = point.y;
-  region.w = 0;
-  region.h = 0;
-  drawn.value = true;
+  draftBox.value = { x: point.x, y: point.y, w: 0, h: 0 };
   // 捕获指针：拖出画面外也不会丢事件（否则矩形会"卡住"）
   (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 }
 
 function onPointerMove(event: PointerEvent): void {
-  if (!dragging.value) return;
+  if (!dragging.value || !draftBox.value) return;
   const point = pointFromEvent(event);
-  region.x = Math.min(dragOrigin.x, point.x);
-  region.y = Math.min(dragOrigin.y, point.y);
-  region.w = Math.abs(point.x - dragOrigin.x);
-  region.h = Math.abs(point.y - dragOrigin.y);
+  draftBox.value = {
+    x: Math.min(dragOrigin.x, point.x),
+    y: Math.min(dragOrigin.y, point.y),
+    w: Math.abs(point.x - dragOrigin.x),
+    h: Math.abs(point.y - dragOrigin.y),
+  };
 }
 
 function onPointerUp(): void {
   if (!dragging.value) return;
   dragging.value = false;
-  // 太小的矩形视为误触：保留一个可用默认框，避免提交 0 面积区域被服务端拒
-  if (region.w < 0.02 || region.h < 0.02) {
+  const box = draftBox.value;
+  draftBox.value = null;
+  // 太小的矩形视为误触（点一下画面不应产生 0 面积框）
+  if (!box || box.w < 0.02 || box.h < 0.02) return;
+  regions.value.push(box);
+  activeIndex.value = regions.value.length - 1;
+  drawn.value = true;
+  scheduleEstimate();
+}
+
+/** 撤销最后画的一个框（回到默认框而不是空列表：提交必须有框） */
+function undoRegion(): void {
+  if (regions.value.length <= 1) {
     resetRegion();
     return;
   }
+  regions.value.pop();
+  activeIndex.value = Math.min(activeIndex.value, regions.value.length - 1);
+  scheduleEstimate();
+}
+
+/** 删除当前选中框（只剩一个时退化为重置） */
+function deleteRegion(): void {
+  if (regions.value.length <= 1) {
+    resetRegion();
+    return;
+  }
+  regions.value.splice(activeIndex.value, 1);
+  activeIndex.value = Math.min(activeIndex.value, regions.value.length - 1);
+  scheduleEstimate();
+}
+
+function selectRegion(index: number): void {
+  activeIndex.value = index;
   scheduleEstimate();
 }
 
 function resetRegion(): void {
-  region.x = 0.1;
-  region.y = 0.72;
-  region.w = 0.8;
-  region.h = 0.2;
-  drawn.value = false;
+  regions.value = [{ x: 0.1, y: 0.72, w: 0.8, h: 0.2 }];
+  activeIndex.value = 0;
+  drawn.value = true;
   credits.value = null;
 }
 
@@ -123,7 +165,10 @@ function onRegionInput(key: string, event: Event): void {
   const raw = Number((event.target as HTMLInputElement).value);
   if (!Number.isFinite(raw)) return;
   const field = key.replace("region_", "") as "x" | "y" | "w" | "h";
-  region[field] = clamp01(raw);
+  const index = activeIndex.value;
+  const box = regions.value[index];
+  if (!box) return;
+  regions.value[index] = { ...box, [field]: clamp01(raw) };
   drawn.value = true;
   scheduleEstimate();
 }
@@ -186,10 +231,10 @@ function requestBody(): Record<string, unknown> {
       resolution: current.default_resolution,
       duration: 5,
       count: 1,
-      region_x: Number(region.x.toFixed(4)),
-      region_y: Number(region.y.toFixed(4)),
-      region_w: Number(region.w.toFixed(4)),
-      region_h: Number(region.h.toFixed(4)),
+      region_x: Number(region.value.x.toFixed(4)),
+      region_y: Number(region.value.y.toFixed(4)),
+      region_w: Number(region.value.w.toFixed(4)),
+      region_h: Number(region.value.h.toFixed(4)),
       inpaint: true,
     },
   };
@@ -202,7 +247,7 @@ function scheduleEstimate(): void {
 
 async function estimate(): Promise<void> {
   if (!tool.value || !videoUrl.value) return;
-  if (region.w < 0.01 || region.h < 0.01) {
+  if (region.value.w < 0.01 || region.value.h < 0.01) {
     credits.value = null;
     return;
   }
@@ -223,7 +268,7 @@ async function submit(): Promise<void> {
     toolError.value = "请先上传视频";
     return;
   }
-  if (region.w < 0.02 || region.h < 0.02) {
+  if (region.value.w < 0.02 || region.value.h < 0.02) {
     toolError.value = "请先在画面上框出字幕区域";
     return;
   }
@@ -331,6 +376,18 @@ const STATUS_TEXT: Record<number, string> = {
           {{ uploading ? "上传中…" : videoUrl ? "重新选择视频" : "选择视频" }}
         </Button>
         <span v-if="videoName" class="muted small">{{ videoName }}</span>
+        <Button v-if="videoUrl" variant="ghost" size="sm" @click="undoRegion">
+          撤销上一个
+        </Button>
+        <Button
+          v-if="videoUrl"
+          variant="ghost"
+          size="sm"
+          :disabled="regions.length <= 1"
+          @click="deleteRegion"
+        >
+          删除选中
+        </Button>
         <Button v-if="videoUrl" variant="ghost" size="sm" @click="resetRegion">重置框选</Button>
       </div>
 
@@ -344,7 +401,20 @@ const STATUS_TEXT: Record<number, string> = {
         @pointercancel="onPointerUp"
       >
         <video v-if="videoUrl" :src="videoUrl" muted playsinline controls class="stage-video" />
-        <div v-if="drawn" class="mask" :style="maskStyle" aria-hidden="true"></div>
+        <!-- 已画的框（可点选切换"当前框"；只有选中框会用于提交） -->
+        <div
+          v-for="(box, index) in regions"
+          :key="`box-${index}`"
+          class="mask"
+          :class="{ 'mask--active': index === activeIndex }"
+          :style="boxStyle(box)"
+          aria-hidden="true"
+          @click.stop="selectRegion(index)"
+        >
+          <span class="mask-index">{{ index + 1 }}</span>
+        </div>
+        <!-- 拖拽中的临时框 -->
+        <div v-if="draftBox" class="mask mask--draft" :style="boxStyle(draftBox)" aria-hidden="true" />
         <p v-if="!videoUrl" class="stage-hint">先选择视频，再在这里拖拽框选字幕区域</p>
       </div>
 
@@ -362,6 +432,10 @@ const STATUS_TEXT: Record<number, string> = {
           />
         </label>
         <span class="muted small">归一化坐标（0~1，左上原点）</span>
+        <span class="muted small">
+          共 {{ regions.length }} 个框，当前第 {{ activeIndex + 1 }} 个；
+          <b>提交时仅选中框生效</b>（后端目前接受单组 region 参数）
+        </span>
       </div>
 
       <div class="actions">
@@ -440,6 +514,27 @@ const STATUS_TEXT: Record<number, string> = {
   display: block;
   width: 100%;
   height: auto;
+}
+.mask--active {
+  border-color: var(--brand-1, #6d5efc);
+  box-shadow: 0 0 0 2px rgba(109, 94, 252, 0.55);
+}
+.mask--draft {
+  border-style: dashed;
+  pointer-events: none;
+}
+.mask-index {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--brand-1, #6d5efc);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
 }
 .mask {
   position: absolute;

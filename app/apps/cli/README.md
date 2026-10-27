@@ -66,24 +66,27 @@ oneframe storyboard batch-generate <EP_ID> --set ai_model_mark=MODEL \
   `applied` 按重放短路返回上次结果、`pending`/`in_doubt` 拒绝
   （`commands/ledger.md:5-16`）。
 
-## 命令组状态（196 条：可用 118 / 骨架 78，37 组）
+## 命令组状态（196 条：可用 139 / 骨架 57，37 组）
+
+> 下面三处计数（本段、`--help` 顶层、`test/cli.spec.ts`）由**同一份注册表**驱动；
+> `test/cli.spec.ts` 会读本 README 校验数字，改注册表忘了改文档就会红。
 
 可用（API 端点已在位）：
 
 | 组 | 可用/总数 | 说明 |
 |---|---|---|
-| login / logout / account / env / cache / version | 9/9 | 纯客户端 |
+| login / logout / account / env / cache / version | 9/9 | 纯客户端；`login` 支持 `--phone/--code`、`--token-file -`、`--handoff` |
 | workflow | 3/3 | detect / status / resume（阶段判定在服务端 `GET /workflow/detect`） |
-| model | 3/4 | list / search / params（`price` 无只读端点） |
-| task | 6/8 | get/list/wait/cancel/retry/download |
+| model | 3/4 | list / search / params（`price` 无 C 端只读端点） |
+| task | 7/8 | get/list/wait/cancel/retry/**regenerate**/**download（落盘 ./outputs/）** |
 | credits | 3/4 | balance / flows / estimate |
 | workspace | 7/7 | 我方 = `script_projects`（create/list/info/edit/delete/use/show） |
-| episode | 5/15 | list/create/get/edit/split |
-| storyboard | 5/18 | list/batch-generate/batch-generate-video/edit/match-assets |
+| episode | 11/15 | + split-list / match-resources / save-resource-matches / parse / parse-retry / parse-result |
+| storyboard | 5/18 | list / batch-generate / batch-generate-video / edit / match-assets |
 | upload | 1/1 | `POST /projects/parse-script` |
-| resource | 7/16 | list / extract / extract-status / extract-redo / draft-list / draft-import / generate-list |
+| resource | 11/16 | + add / generate / confirm / unconfirm |
 | subject | 7/10 | list / get / create / edit / delete / status / save-from-resource |
-| asset-lib | 4/12 | list / dir-list / rename / delete |
+| asset-lib | 6/12 | list / dir-list / **dir-create** / rename / delete / **import** |
 | canvas | 10/10 | 含 template-* 与 snapshots |
 | node | 10/10 | 含 table-import / table-confirm / edge |
 | group / pin-group | 7/9 | 组模板与固定组 |
@@ -93,20 +96,26 @@ oneframe storyboard batch-generate <EP_ID> --set ai_model_mark=MODEL \
 | ledger | 3/3 | list / show / resolve（纯本地） |
 | team | 2/2 | info / permission |
 | agent | 3/5 | session create/list/delete |
+| **novel** | **5/6** | create / analyze / list / get / finalize（模块已落地，本轮接通） |
+| **market** | **3/3** | list / get / mine（市场 + 我的上架作品） |
 
-骨架（执行时明确返回 `kind=unsupported` + 未落地原因，**绝不伪造成功**）：
+骨架（执行时明确返回 `kind=unsupported` + **可执行指引**，绝不伪造成功）：
 
-| 组 | 未落地原因 |
-|---|---|
-| episode（10 条） | 无删除/批量建集/拆集列表/模板目录端点；`parse*` 是 episode 级解析，我方抽取链只有项目级 `POST /extraction/tasks` |
-| storyboard（13 条） | 无单条增删/重排/草稿/ext/跨集全量/xlsx 模板端点 |
-| resource（9 条）/ subject（3 条） | asset-core 的 generate/confirm 族与 `from-resource`/`reset`/`batch-details` 端点未落地 |
-| novel / film 相关 | `packages/db` 有表，`apps/api` 无对应模块（本批不接入） |
-| market(3) / ad(3) / redraw(2) / ai(2) / clip(2) / voice(1) / sync-fm(1) | 后续批次 / 外部集成 |
-| model.price / credits.log / task.delete / task.regenerate / export.download / file.*(3) / asset-lib(8) | 我方确实没有这些只读/写端点（原因逐条写在 `registry.ts`） |
+| 组 | 条数 | 为什么仍是骨架（每条完整原因见 `registry.ts`） |
+|---|---:|---|
+| storyboard | 13 | 分镜无删除/重排/草稿/ext/xlsx 端点；可控替代写在 reason 里（如 `storyboard edit`、`node table-import`） |
+| resource | 5 | 单资源详情/批量确认/提取等待/xlsx 模板 → reason 指向 `resource generate-list`、`task wait` 等 |
+| asset-lib | 6 | 素材详请/搜索/移动/批量删 → reason 指向 `PATCH /assets/:id`（tags/folder_id 字段可达）与 knowledge 域搜索 |
+| episode | 4 | 删集/批量建集/拆集结果删除/模板目录 → reason 指向 `PATCH`、`count=N`、`--set prompt_type=` |
+| subject | 3 | batch-details / from-resource / reset → 指向 `subject status`、`save-from-resource`、`episode parse-retry` |
+| file | 3 | 无独立文件端点 → 指向 `task get` 的 results 与 `task download` |
+| material | 3 | 批量加/单条/确认 → 指向 `node batch-create` 与 `material list` |
+| ad / redraw | 5 | 域由队友本轮落地，CLI 下一轮接（**当前确实无端点**） |
+| ai / clip / voice / sync-fm | 6 | 无独立端点或外部集成未落地（ai 类指向工具箱 `POST /generations`） |
+| model.price / credits.log / task.delete / export.download / agent.enter·run / group.execute·template-get / novel.config / resource.extract-wait·batch-confirm·prompt-* | 12 | 逐条给了替代命令（如 `credits flows`、`export get`、canvas chat REST） |
 
-`oneframe <组> --help` 会把每条骨架的原因打出来；`test/help.spec.ts` 断言
-「骨架必须有 reason，且不等于占位符」。
+`oneframe <组> --help` 会把每条骨架的原因打出来；`test/cli.spec.ts` 断言
+「每条骨架都有 **可执行** reason（含端点/命令/待取证），而不是一句"未落地"」。
 
 ## 已知偏离（逐条登记）
 

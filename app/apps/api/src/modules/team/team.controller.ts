@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import { ENFORCED_PERMISSIONS, isEnforcedPermission } from "./enforced-permissions";
 import { TeamService } from "./team.service";
 
 /**
@@ -147,6 +148,8 @@ export class TeamController {
   async updateInfo(@Req() req: AuthedRequest, @Body() body: unknown) {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "edit team");
+    // 渐进式拦截（默认放行）：只有角色被显式配置过、且缺 team.edit 时才 403
+    await this.team.requirePermission(c.spaceId, c.userId, "team.edit");
     return this.team.updateTeam(c.spaceId, parseOrThrow(teamEditBody, body ?? {}));
   }
 
@@ -212,7 +215,17 @@ export class TeamController {
   @Get("permissions")
   async permissions(@Req() req: AuthedRequest) {
     await this.ctx(req);
-    return this.team.permissionCatalog();
+    const catalog = this.team.permissionCatalog();
+    // `enforced` 有两种读法，这里都给（都廉价）：
+    // - 每个码上的布尔位：前端矩阵逐行标「生效中」；
+    // - 顶层清单：运维/报告直接看"当前到底拦了哪几个端点"。
+    // 只读快照，不是权威判权入口——真正判权在 TeamService.requirePermission。
+    return {
+      ...catalog,
+      list: catalog.list.map((entry) => ({ ...entry, enforced: isEnforcedPermission(entry.code) })),
+      enforced: ENFORCED_PERMISSIONS,
+      enforced_count: ENFORCED_PERMISSIONS.length,
+    };
   }
 
   /** 某角色的权限（含 power_list 原样、未知码单列，便于发现历史脏数据） */
@@ -231,6 +244,8 @@ export class TeamController {
   async setRolePermissions(@Req() req: AuthedRequest, @Param("role_id") roleId: string, @Body() body: unknown) {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "edit role permissions");
+    // 改权限矩阵 = 改整个团队的边界，必须是显式授予 team.permission 的角色才能动
+    await this.team.requirePermission(c.spaceId, c.userId, "team.permission");
     const input = parseOrThrow(rolePermissionsBody, body ?? {});
     return this.team.setRolePermissions(c.spaceId, roleId, input.permissions, input.module_id_list);
   }
@@ -303,6 +318,8 @@ export class TeamController {
   async addMembers(@Req() req: AuthedRequest, @Body() body: unknown) {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "add members");
+    // 邀请入口：目录里没有 `team.member`，语义对应的真实码是 `member.create`
+    await this.team.requirePermission(c.spaceId, c.userId, "member.create");
     return this.team.addMembers(c.spaceId, c.userId, parseOrThrow(batchMembersBody, body));
   }
 

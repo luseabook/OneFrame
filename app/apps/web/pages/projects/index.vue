@@ -3,7 +3,9 @@ import type { ProjectDto } from "~/types/api";
 
 // 项目页（对齐参照产品：顶部「项目 / 已导出」+ 空状态 + 底部悬浮「创建项目」）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "项目 · 一帧" });
+// i18n（第 8 批补完）：页面骨架与剧目类型名走语言包；项目标题等是后端数据，不翻译
+const { t, locale } = useI18n();
+useHead({ title: () => t('projects.metaTitle') });
 
 const api = useApi();
 const router = useRouter();
@@ -16,11 +18,19 @@ const error = ref("");
 const showCreate = ref(false);
 const tab = ref<"projects" | "exports">("projects");
 
-const DRAMA_LABEL: Record<number, string> = {
-  1: "国内仿真人剧",
-  2: "海外仿真人剧",
-  3: "2D/3D动漫",
-};
+/** 剧目类型展示名（1 国内仿真人剧 / 2 海外仿真人剧 / 3 2D3D 动漫） */
+function dramaLabel(type: number): string {
+  switch (type) {
+    case 1:
+      return t('projects.dramaDomestic');
+    case 2:
+      return t('projects.dramaOverseas');
+    case 3:
+      return t('projects.dramaAnime');
+    default:
+      return t('projects.shortDrama');
+  }
+}
 // 封面按剧目类型给不同色相，保证卡片可区分
 const DRAMA_COVER: Record<number, string> = {
   1: "linear-gradient(135deg, #3a2030, #16121c)",
@@ -35,7 +45,7 @@ async function load(): Promise<void> {
     list.value = data.list;
     total.value = data.total;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("errors.load");
   } finally {
     loading.value = false;
   }
@@ -64,10 +74,10 @@ onMounted(async () => {
   <div class="projects-page">
     <nav class="tabs">
       <button type="button" class="tab" :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
-        项目
+        {{ t("projects.tabProjects") }}
       </button>
       <button type="button" class="tab" :class="{ active: tab === 'exports' }" @click="tab = 'exports'">
-        已导出
+        {{ t("projects.tabExports") }}
       </button>
     </nav>
 
@@ -80,16 +90,16 @@ onMounted(async () => {
         <NuxtLink v-for="item in list" :key="item.id" :to="`/projects/${item.id}`" class="proj-card">
           <div class="cover" :style="{ background: DRAMA_COVER[item.drama_type] ?? DRAMA_COVER[1] }">
             <span class="ratio-chip">{{ item.ratio }}</span>
-            <span v-if="item.is_sample" class="flag">示例</span>
-            <span v-else-if="item.archived_at" class="flag muted">已归档</span>
+            <span v-if="item.is_sample" class="flag">{{ t("projects.sampleFlag") }}</span>
+            <span v-else-if="item.archived_at" class="flag muted">{{ t("projects.archivedFlag") }}</span>
             <span class="cover-title">{{ item.title }}</span>
           </div>
           <div class="body">
             <p class="title" :title="item.title">{{ item.title }}</p>
             <p class="meta">
-              {{ DRAMA_LABEL[item.drama_type] ?? "短剧" }}
+              {{ dramaLabel(item.drama_type) }}
               <span class="sep">·</span>
-              {{ new Date(item.created_at).toLocaleDateString("zh-CN") }}
+              {{ new Date(item.created_at).toLocaleDateString(locale) }}
             </p>
           </div>
         </NuxtLink>
@@ -102,8 +112,8 @@ onMounted(async () => {
             <path d="M12 9.5v5.5M9.5 12H14.5" opacity="0.7" />
           </svg>
         </span>
-        <p class="empty-text">点击下方创建一个新项目</p>
-        <p v-if="total === 0" class="empty-hint">上传剧本或粘贴文本，AI 帮你拆集、定妆、出分镜</p>
+        <p class="empty-text">{{ t("projects.emptyCreate") }}</p>
+        <p v-if="total === 0" class="empty-hint">{{ t("projects.emptyHint") }}</p>
       </div>
     </template>
 
@@ -114,8 +124,8 @@ onMounted(async () => {
           <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
         </svg>
       </span>
-      <p class="empty-text">暂无导出记录</p>
-      <p class="empty-hint">在项目流水线内完成分镜并导出后，成片记录会出现在这里</p>
+      <p class="empty-text">{{ t("projects.exportsEmpty") }}</p>
+      <p class="empty-hint">{{ t("projects.exportsHint") }}</p>
     </div>
 
     <div class="fab-wrap">
@@ -125,7 +135,7 @@ onMounted(async () => {
             <path d="M12 5v14M5 12h14" />
           </svg>
         </span>
-        创建项目
+        {{ t("projects.create") }}
       </button>
     </div>
 

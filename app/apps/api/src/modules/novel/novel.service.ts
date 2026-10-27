@@ -537,17 +537,50 @@ export class NovelService {
   async analysisDetail(spaceId: string, ntId: string) {
     const novel = await this.requireNovel(spaceId, ntId);
     const [worldview] = await db.select().from(novelWorldviews).where(eq(novelWorldviews.novelId, novel.id));
-    const cards = await db
+    return {
+      worldview: worldview ? worldviewDto(worldview) : null,
+      characters: (await this.listCharacters(spaceId, ntId)).list,
+      counts: await this.countsOf(novel.id),
+      llm_mode: this.llm.mode,
+    };
+  }
+
+  /**
+   * 角色卡列表（**唯一实现**，三个入口都读这里，不许各写一份查询）：
+   * - `GET /novel/:nt/content-analysis/detail`（改编链的内容分析详情）
+   * - `GET /novel/:nt/original_script/characters`（原创链薄路径，语义同本方法）
+   * - `GET /novel/:nt/core_character/list`（只取 `is_core=true` 的子集，走 listCoreCharacters）
+   */
+  async listCharacters(spaceId: string, ntId: string) {
+    const novel = await this.requireNovel(spaceId, ntId);
+    const rows = await db
       .select()
       .from(novelCharacters)
       .where(eq(novelCharacters.novelId, novel.id))
       .orderBy(asc(novelCharacters.roleType), asc(novelCharacters.createdAt));
-    return {
-      worldview: worldview ? worldviewDto(worldview) : null,
-      characters: cards.map(characterDto),
-      counts: await this.countsOf(novel.id),
-      llm_mode: this.llm.mode,
-    };
+    return { list: rows.map(characterDto), total: rows.length };
+  }
+
+  /**
+   * 确认单张角色卡 = 置 `is_core=true`（"这张卡可以用于资产一致性"）。
+   *
+   * 为什么 confirm 落在 `is_core` 而不是新状态列：`novel_characters` 只有 `is_core`
+   * （`packages/db/src/schema.ts`），改 schema 不在本任务范围；而"确认"在业务上要表达的
+   * 正是"进入核心角色集合"。所以它与 `core_character` 子链是同一字段的两次入口，
+   * 不做第二套状态机。重复确认幂等（`replayed: true`）。
+   */
+  async confirmCharacter(spaceId: string, ntId: string, nccId: string) {
+    const novel = await this.requireNovel(spaceId, ntId);
+    this.assertDraftLike(novel, "characters/confirm-single");
+    const row = await this.findCharacter(novel.id, nccId);
+    if (row.isCore) return { character: characterDto(row), replayed: true };
+    const [updated] = await db
+      .update(novelCharacters)
+      .set({ isCore: true, updatedAt: new Date() })
+      .where(eq(novelCharacters.id, row.id))
+      .returning();
+    await this.touchNovel(novel.id);
+    return { character: characterDto(updated!), replayed: false };
   }
 
   async analysisText(novel: NovelRow): Promise<string> {

@@ -1,8 +1,33 @@
 <script setup lang="ts">
 import type { ShareBatchDownloadDto, ShareView } from "~/types/api";
-import { statusLabel } from "~/types/api";
 
 definePageMeta({ ssr: false });
+
+// i18n（第 8 批补完）：分享页是公开页，外语用户常直接打开；文案全部走语言包。
+// 任务状态名不再用 ~/types/api 的 statusLabel（模块级常量，不能跟随语言）。
+const { t, locale } = useI18n();
+useHead({ title: () => t('share.title') });
+
+function statusText(status: number): string {
+  switch (status) {
+    case 1:
+      return t('status.queued');
+    case 2:
+      return t('status.running');
+    case 3:
+      return t('status.done');
+    case 4:
+      return t('status.failed');
+    case 5:
+      return t('status.canceled');
+    case 6:
+      return t('status.reviewing');
+    case 7:
+      return t('status.reviewRejected');
+    default:
+      return t('status.unknown', { status });
+  }
+}
 
 const route = useRoute();
 const api = useApi();
@@ -30,11 +55,11 @@ async function downloadAll(): Promise<void> {
   downloadMsg.value = "";
   try {
     const data = await api.post<ShareBatchDownloadDto>(`/share/${String(route.params.token)}/batch-download`, {});
-    downloadMsg.value = `已打包 ${data.count} 个文件`;
+    downloadMsg.value = t("share.packed", { count: data.count });
     // 预签名 URL 有时效（默认 1 小时），直接交给浏览器下载/打开
     window.open(data.url, "_blank", "noopener,noreferrer");
   } catch (e) {
-    downloadMsg.value = e instanceof Error ? e.message : "打包失败";
+    downloadMsg.value = e instanceof Error ? e.message : t("share.packFailed");
   } finally {
     downloading.value = false;
   }
@@ -49,11 +74,11 @@ async function submitReport(): Promise<void> {
       detail: reportDetail.value || undefined,
       contact: reportContact.value || undefined,
     });
-    reportMsg.value = "举报已提交，我们会尽快处理。";
+    reportMsg.value = t("share.ok");
     reportOpen.value = false;
     reportDetail.value = "";
   } catch (e) {
-    reportMsg.value = e instanceof Error ? e.message : "举报提交失败";
+    reportMsg.value = e instanceof Error ? e.message : t("share.failed");
   } finally {
     reporting.value = false;
   }
@@ -63,7 +88,7 @@ onMounted(async () => {
   try {
     share.value = await api.get<ShareView>(`/share/${String(route.params.token)}`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "分享不存在或已过期";
+    error.value = e instanceof Error ? e.message : t("share.expired");
   } finally {
     loading.value = false;
   }
@@ -72,17 +97,17 @@ onMounted(async () => {
 
 <template>
   <main class="page">
-    <p v-if="loading" class="loading">加载中…</p>
+    <p v-if="loading" class="loading">{{ t("common.loading") }}</p>
     <section v-else-if="error" class="panel">
-      <h1>分享不可用</h1>
+      <h1>{{ t("share.unavailable") }}</h1>
       <p class="muted">{{ error }}</p>
-      <NuxtLink to="/" class="link">返回首页</NuxtLink>
+      <NuxtLink to="/" class="link">{{ t("share.backHome") }}</NuxtLink>
     </section>
     <section v-else-if="share" class="panel">
       <header class="head">
-        <h1>作品分享</h1>
+        <h1>{{ t("share.title") }}</h1>
         <p class="meta">
-          {{ share.mode }} · {{ statusLabel(share.status) }} · {{ new Date(share.created_at).toLocaleString() }}
+          {{ share.mode }} · {{ statusText(share.status) }} · {{ new Date(share.created_at).toLocaleString(locale) }}
         </p>
       </header>
 
@@ -92,58 +117,58 @@ onMounted(async () => {
             <pre>{{ item.text }}</pre>
           </template>
           <template v-else>
-            <p class="muted">结果 {{ index + 1 }}</p>
-            <a :href="item.url" target="_blank" rel="noreferrer" class="download">下载 / 打开结果</a>
+            <p class="muted">{{ t("share.resultIndex", { index: index + 1 }) }}</p>
+            <a :href="item.url" target="_blank" rel="noreferrer" class="download">{{ t("share.openResult") }}</a>
           </template>
         </div>
       </div>
-      <p v-else class="muted">生成完成后即可查看结果。</p>
+      <p v-else class="muted">{{ t("share.pending") }}</p>
 
       <p v-if="share.error?.message" class="error">{{ share.error.message }}</p>
 
       <!-- 批量下载：公开接口（只认本页 token），打包范围由服务端按 share 行决定 -->
       <div v-if="share.results.length > 0" class="batch">
         <Button size="sm" :loading="downloading" @click="downloadAll">
-          {{ downloading ? "打包中…" : "打包下载全部" }}
+          {{ downloading ? t("share.batching") : t("share.batchAll") }}
         </Button>
         <span v-if="downloadMsg" class="muted small">{{ downloadMsg }}</span>
       </div>
 
-      <p class="muted small">链接有效期至 {{ new Date(share.expires_at).toLocaleString() }} · 内容由 AI 生成，请仔细甄别</p>
+      <p class="muted small">{{ t("share.expires", { date: new Date(share.expires_at).toLocaleString(locale) }) }}</p>
 
       <div class="report">
-        <Button v-if="!reportOpen" variant="ghost" size="sm" @click="reportOpen = true">举报内容</Button>
+        <Button v-if="!reportOpen" variant="ghost" size="sm" @click="reportOpen = true">{{ t("share.report") }}</Button>
         <div v-else class="report-form">
           <label class="field">
-            <span class="label">举报类型</span>
+            <span class="label">{{ t("share.reasonLabel") }}</span>
             <select v-model="reportReason" class="input">
-              <option value="illegal">违法违规</option>
-              <option value="porn">色情低俗</option>
-              <option value="violence">暴力血腥</option>
-              <option value="infringement">侵权盗用</option>
-              <option value="spam">垃圾广告</option>
-              <option value="other">其他</option>
+              <option value="illegal">{{ t("share.reasonIllegal") }}</option>
+              <option value="porn">{{ t("share.reasonPorn") }}</option>
+              <option value="violence">{{ t("share.reasonViolence") }}</option>
+              <option value="infringement">{{ t("share.reasonInfringement") }}</option>
+              <option value="spam">{{ t("share.reasonSpam") }}</option>
+              <option value="other">{{ t("share.reasonOther") }}</option>
             </select>
           </label>
           <label class="field">
-            <span class="label">补充说明（可选）</span>
+            <span class="label">{{ t("share.detailLabel") }}</span>
             <textarea v-model="reportDetail" class="input textarea" maxlength="500" />
           </label>
           <label class="field">
-            <span class="label">联系方式（可选）</span>
+            <span class="label">{{ t("share.contactLabel") }}</span>
             <input v-model="reportContact" class="input" maxlength="100" />
           </label>
           <div class="report-actions">
             <Button size="sm" :loading="reporting" @click="submitReport">
-              {{ reporting ? "提交中…" : "提交举报" }}
+              {{ reporting ? t("share.submitting") : t("share.submit") }}
             </Button>
-            <Button variant="ghost" size="sm" @click="reportOpen = false">取消</Button>
+            <Button variant="ghost" size="sm" @click="reportOpen = false">{{ t("common.cancel") }}</Button>
           </div>
         </div>
         <p v-if="reportMsg" class="info">{{ reportMsg }}</p>
       </div>
 
-      <NuxtLink to="/" class="link">AI 漫剧工作台</NuxtLink>
+      <NuxtLink to="/" class="link">{{ t("share.brand") }}</NuxtLink>
     </section>
   </main>
 </template>

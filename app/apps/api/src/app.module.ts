@@ -33,6 +33,10 @@ import { CampaignModule } from "./modules/campaign/campaign.module";
 // 第 6 批「生态」B 组：剧本集市（market，含 ops/admin）+ 团队知识库（knowledge）
 import { MarketModule } from "./modules/market/market.module";
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
+// 第 8 批「补充」：视频转绘（复用 script_project 骨架，project_mode=3）
+import { RedrawModule } from "./modules/redraw/redraw.module";
+// 第 8 批「补充」：广告剧（复用 script_project 骨架，project_mode=2）
+import { AdModule } from "./modules/ad/ad.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -75,6 +79,10 @@ import { StorageModule } from "./storage/storage.module";
     // 第 6 批「生态」B 组：集市 29+admin + 知识库 29
     MarketModule,
     KnowledgeModule,
+    // 视频转绘（模块 #14）：8 端点 + 我方补充 1 条列表
+    RedrawModule,
+    // 广告剧（模块 #13）：竞品 12 端点
+    AdModule,
   ],
   controllers: [AppController, HealthController, MetricsController],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],

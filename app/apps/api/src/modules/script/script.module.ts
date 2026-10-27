@@ -7,6 +7,7 @@ import { SubjectsModule } from "../subjects/subjects.module";
 import { AssetGatesService } from "./asset-gates.service";
 import { FilmSynthesisService } from "./film-synthesis.service";
 import { ParseService } from "./parse.service";
+import { PublishPublicController } from "./publish.controller";
 import { PublishService } from "./publish.service";
 import { QualityCheckService } from "./quality-check.service";
 import { WorksService } from "./works.service";
@@ -25,7 +26,7 @@ import { ScriptService } from "./script.service";
  */
 @Module({
   imports: [GenerationsModule, CreditsModule, ModelsModule, SubjectsModule, NovelModule],
-  controllers: [ScriptController],
+  controllers: [ScriptController, PublishPublicController],
   providers: [
     LlmService,
     ScriptService,

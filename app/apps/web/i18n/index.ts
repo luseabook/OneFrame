@@ -1,12 +1,13 @@
 /**
  * 轻量 i18n 内核（不引 `@nuxtjs/i18n`）。
  *
- * 为什么自己写一层而不用现成库（ADR 决策，已在 `_acceptance/_team/report-i18n.md` 记录）：
- * 1. 本仓库只有一个 Nuxt 应用、5 个语言、7 个 namespace，库能提供的能力（路由前缀、
- *    hreflang、SEO 地图、多域）我们一个都不用；而它会改路由、注册中间件、引入约 1MB 依赖
- *    与一套自己的打包约定——为了 170 个 key 换一次构建链风险不划算。
- * 2. 竞品的语言协商是**请求头 `X-Lang`**（`reelmate-feature-map.md:152`、`:414`），
- *    不是路径前缀；`@nuxtjs/i18n` 的默认形态恰恰是路径前缀，接进来要一路关掉它的默认行为。
+ * 为什么自己写一层而不用现成库（ADR 决策，记录在 `_acceptance/_team/report-i18n.md` /
+ * `report-i18n2.md`）：
+ * 1. 本仓库只有一个 Nuxt 应用；库会改路由（给每个页面套语言前缀路由）、注册自己的中间件、
+ *    引入依赖与打包约定——为了 300+ key 换一次构建链风险不划算。
+ * 2. 我们要的前缀语义很窄：**竞品那种 `/en /ja /br /es` 只是入口别名**，落地仍是同一份页面；
+ *    用一层中间件解析前缀 → 设语言 → 跳到无前缀 canonical 即可（见 `middleware/i18n-prefix.global.ts`），
+ *    不需要真的复制一套 `/en/**` 路由目录（那会与同轮队友的页面改动全面冲突）。
  *
  * 本文件只做纯函数（无 Vue 依赖），便于被 Node 脚本与单测直接引用；
  * 响应式与副作用在 `composables/useI18n.ts` 与 `plugins/i18n.ts`。
@@ -156,4 +157,82 @@ export function flattenKeys(tree: MessageTree, prefix = ""): string[] {
     else out.push(...flattenKeys(value, path));
   }
   return out;
+}
+
+// ── 路径前缀 ───────────────────────────────────────────────
+/**
+ * 语言的 URL 前缀。竞品的 i18n 前缀是 `/en /ja /br /es`（`rea-reelmate/routes.txt:50/52/60`、
+ * `报告:23`）；**中文（默认语言）不带前缀**，与竞品「zh 默认无前缀」一致。
+ *
+ * 注意 pt-BR 的前缀是 `br`（竞品如此），不是 `pt`/`pt-BR`。
+ */
+export const LOCALE_PREFIX: Record<Locale, string> = {
+  "zh-CN": "",
+  en: "en",
+  ja: "ja",
+  "pt-BR": "br",
+  es: "es",
+};
+
+/** 前缀 → 语言（含 `pt-br` 这种完整写法，便于人工输入/外链） */
+export const PREFIX_TO_LOCALE: Record<string, Locale> = {
+  en: "en",
+  ja: "ja",
+  br: "pt-BR",
+  es: "es",
+  "pt-br": "pt-BR",
+  "zh-cn": "zh-CN",
+};
+
+/**
+ * 公开可索引页面（sitemap / hreflang / robots 的口径）。
+ *
+ * **只列未登录也能看的页**：`/admin`、`/canvas`、`/tasks`、`/projects` 这类进去就跳登录，
+ * 列进 sitemap 等于给爬虫一批 302 → 收录质量差，也把私有路径暴露在外。
+ * 新增公开页时改这一处即可（sitemap 与 hreflang 同源）。
+ */
+export const PUBLIC_PATHS = ["/", "/pricing", "/login", "/terms", "/privacy", "/report"] as const;
+
+/** 去掉路径上的语言前缀；不认识的段原样保留 */
+export function stripLocalePrefix(path: string): string {
+  const clean = path.startsWith("/") ? path : `/${path}`;
+  const segments = clean.split("/");
+  const first = segments[1] ?? "";
+  if (!PREFIX_TO_LOCALE[first.toLowerCase()]) return clean === "" ? "/" : clean;
+  const rest = "/" + segments.slice(2).join("/");
+  return rest === "/" ? "/" : rest.replace(/\/$/, "");
+}
+
+/** 解析路径前缀：返回命中的语言（没有则 null）与剥离后的路径 */
+export function parseLocalePrefix(path: string): { locale: Locale | null; path: string } {
+  const clean = path.startsWith("/") ? path : `/${path}`;
+  const first = (clean.split("/")[1] ?? "").toLowerCase();
+  const locale = PREFIX_TO_LOCALE[first] ?? null;
+  return { locale, path: locale ? stripLocalePrefix(clean) : clean };
+}
+
+/**
+ * 生成某语言下的路径。**替换**而非叠加前缀：
+ * `localizedPath("/en/pricing", "ja")` → `/ja/pricing`（不是 `/ja/en/pricing`）；
+ * 中文 → `/pricing`（去前缀）；根路径 → `/`、`/en`。
+ */
+export function localizedPath(path: string, locale: Locale): string {
+  const canonical = stripLocalePrefix(path);
+  const prefix = LOCALE_PREFIX[locale];
+  if (!prefix) return canonical;
+  return canonical === "/" ? `/${prefix}` : `/${prefix}${canonical}`;
+}
+
+/** hreflang 用的 5 条 alternate（含 x-default，指向无前缀中文） */
+export function buildAlternates(path: string, origin: string): Array<{ hreflang: string; href: string }> {
+  const canonical = stripLocalePrefix(path);
+  const base = origin.replace(/\/+$/, "");
+  // 显式标注为 `string`：下面要 push `x-default`，而 `Locale` 联合里没有它
+  // （x-default 是 Google 的"默认语言"约定，不是我们的 Locale 之一）。
+  const alternates: Array<{ hreflang: string; href: string }> = SUPPORTED_LOCALES.map((locale) => ({
+    hreflang: locale,
+    href: `${base}${localizedPath(canonical, locale)}`,
+  }));
+  alternates.push({ hreflang: "x-default", href: `${base}${canonical}` });
+  return alternates;
 }

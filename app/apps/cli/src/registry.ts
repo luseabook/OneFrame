@@ -45,6 +45,7 @@ export type BuiltinName =
   | "workflow-status"
   | "workflow-resume"
   | "task-wait"
+  | "task-download"
   | "ledger-list"
   | "ledger-show"
   | "ledger-resolve"
@@ -88,6 +89,8 @@ export interface CommandSpec {
   bodyParams?: BodyParam[];
   /** 写命令：flag → body 字段名（如 `--left` → `src_node_id`） */
   flagBody?: Record<string, string>;
+  /** 写命令：固定写入 body 的常量（如 resource confirm → `{status:2}`） */
+  fixedBody?: Record<string, unknown>;
   /** 付费/批量写：dry-run 输出里给出 credits_estimate 口径 */
   paid?: boolean;
   transform?: TransformName;
@@ -194,13 +197,16 @@ const taskCommands: CommandSpec[] = [
     write: true,
     paid: true,
   }),
-  http("task", "download", "POST", "tasks/batch-download", "获取任务产物下载信息（不落盘）", "commands/task.md:165", {
-    write: true,
-    positionals: [{ display: "TASK_ID", desc: "任务 ID（可重复）", required: true }],
-    bodyParams: [{ key: "task_ids", index: 0, as: "array" }],
+  local("task", "download", "把任务产物下载到 ./outputs/<task_id>-<n>.<ext>（不输出签名 URL）", "commands/task.md:165", "task-download", {
+    positionals: [{ display: "TASK_ID", desc: "任务 ID", required: true }],
   }),
-  todo("task", "regenerate", "用原任务信息重新提交生成", "commands/task.md:143", "我方无重新生成端点（tasks.controller.ts 只有 cancel/retry）"),
-  todo("task", "delete", "删除任务记录", "commands/task.md:195", "我方无删除任务端点（tasks.controller.ts:9-77）"),
+  http("task", "regenerate", "POST", "tasks/{task_id}/regenerate", "用原任务信息重新提交生成（会再次扣费，先 --dry-run）", "commands/task.md:143", {
+    slots: ["task_id"],
+    positionals: [{ display: "TASK_ID", desc: "原任务 ID", required: true }],
+    write: true,
+    paid: true,
+    }),
+  todo("task", "delete", "删除任务记录", "commands/task.md:195", "我方无删除任务端点；结果按 tasks.expire_at（90 天）自动过期，需要“看不见”请在列表侧过滤"),
 ];
 
 // ── 积分（commands/credits.md）─────────────────────────────────────────
@@ -275,16 +281,35 @@ const episodeCommands: CommandSpec[] = [
   http("episode", "split", "POST", "projects/{project_id}/episodes/split", "按剧本文本拆集", "commands/episode.md:160", {
     write: true,
   }),
-  todo("episode", "delete", "删除剧集", "commands/episode.md:126", "我方无删除剧集端点（script.controller.ts 无 DELETE episodes）"),
-  todo("episode", "batch-create", "批量建集", "commands/episode.md:142", "我方只有按 count 新增（POST /projects/:id/episodes），无批量载荷端点"),
-  todo("episode", "split-list", "查看拆集结果列表", "commands/episode.md:176", "我方无独立拆集结果端点（拆集结果直接落 episodes）"),
-  todo("episode", "split-delete", "删除拆集结果", "commands/episode.md:195", "我方无拆集结果端点"),
-  todo("episode", "prompt-templates", "提示词模板目录", "commands/episode.md:211", "依赖「提示词模板」批次未落地（无模板目录端点）"),
-  todo("episode", "match-resources", "提交批量资产匹配组合任务", "commands/episode.md:261", "依赖 asset-core 批次未落地（无 match-resources 端点）"),
-  todo("episode", "save-resource-matches", "保存资产匹配结果", "commands/episode.md:368", "依赖 asset-core 批次未落地"),
-  todo("episode", "parse", "逐集解析角色/场景/道具", "commands/episode.md:389", "我方抽取链是项目级 POST /extraction/tasks（resource 族口径），无 episode 级 parse 端点"),
-  todo("episode", "parse-retry", "重试解析", "commands/episode.md:407", "同上：无 episode 级解析任务端点（可对项目级任务用 resource extract-redo）"),
-  todo("episode", "parse-result", "查看解析结果", "commands/episode.md:429", "同上：解析结果落在 /extraction/drafts，用 resource draft-list 查"),
+  todo("episode", "delete", "删除剧集", "commands/episode.md:126", "我方无 DELETE episodes；不要的集用 PATCH /projects/:id/episodes/:eid 清空内容，整项目用 workspace delete（归档）"),
+  todo("episode", "batch-create", "批量建集", "commands/episode.md:142", "我方只支持按数量新增：`oneframe episode create --workspace <SP> --set count=N`（无逐集标题载荷端点）"),
+  http("episode", "split-list", "GET", "projects/{project_id}/matrix", "查看拆集结果（= 项目剧集矩阵，拆集结果直接落 episodes）", "commands/episode.md:176", {
+    transform: "episodesOfProject",
+    }),
+  todo("episode", "split-delete", "删除拆集结果", "commands/episode.md:195", "拆集结果直接落 episodes，没有独立的“拆集结果”实体（我方无该端点）；要删请 PATCH 单集，整项目用 workspace delete（归档）"),
+  todo("episode", "prompt-templates", "提示词模板目录", "commands/episode.md:211", "我方无提示词模板目录端点（模板批次未落地）；当前用 `--set prompt_type=` / `--set prompt_ukid=` 直接传模板标识"),
+  http("episode", "match-resources", "POST", "projects/{project_id}/episodes/{episode_id}/match-resources", "提交资产匹配组合任务（异步，返回 task_id）", "commands/episode.md:261", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+    paid: true,
+    }),
+  http("episode", "save-resource-matches", "POST", "projects/{project_id}/episodes/{episode_id}/save-resource-matches", "保存资产匹配结果", "commands/episode.md:368", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+    }),
+  http("episode", "parse", "POST", "projects/{project_id}/episodes/parse", "逐集解析角色/场景/道具（项目级，异步）", "commands/episode.md:389", {
+    write: true,
+    paid: true,
+    }),
+  http("episode", "parse-retry", "POST", "projects/{project_id}/episodes/parse-retry", "重试解析", "commands/episode.md:407", {
+    write: true,
+    }),
+  http("episode", "parse-result", "GET", "projects/{project_id}/episodes/{episode_id}/match-result", "查看解析/匹配结果", "commands/episode.md:429", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    }),
 ];
 
 // ── 分镜（commands/storyboard.md）──────────────────────────────────────
@@ -322,19 +347,19 @@ const storyboardCommands: CommandSpec[] = [
     ],
     write: true,
   }),
-  todo("storyboard", "add", "新增分镜", "commands/storyboard.md:93", "我方无单条新增分镜端点（只有 AI 生成 POST .../storyboards/generate）"),
-  todo("storyboard", "delete", "删除分镜", "commands/storyboard.md:137", "我方无删除分镜端点"),
-  todo("storyboard", "batch-delete", "批量删除分镜", "commands/storyboard.md:153", "我方无删除分镜端点"),
-  todo("storyboard", "num-update", "重排分镜号", "commands/storyboard.md:170", "我方无分镜号重排端点"),
-  todo("storyboard", "link-draft", "关联草稿", "commands/storyboard.md:186", "依赖分镜草稿批次未落地"),
-  todo("storyboard", "ext", "分镜扩展参数", "commands/storyboard.md:202", "我方无 ext 端点"),
-  todo("storyboard", "total-list", "跨集全量分镜", "commands/storyboard.md:220", "我方无跨集全量分镜端点"),
-  todo("storyboard", "batch-add", "批量新增分镜", "commands/storyboard.md:236", "我方无批量新增端点"),
-  todo("storyboard", "prompt-template", "生成官方分镜提示词空表", "commands/storyboard.md:263", "依赖 xlsx 模板批次未落地"),
-  todo("storyboard", "sheet-read", "回读分镜提示词表", "commands/storyboard.md:281", "依赖 xlsx 模板批次未落地"),
-  todo("storyboard", "draft-import", "导入分镜草稿", "commands/storyboard.md:302", "依赖分镜草稿批次未落地"),
-  todo("storyboard", "draft-delete", "删除分镜草稿", "commands/storyboard.md:331", "依赖分镜草稿批次未落地"),
-  todo("storyboard", "draft-batch-update", "批量更新分镜草稿", "commands/storyboard.md:350", "依赖分镜草稿批次未落地"),
+  todo("storyboard", "add", "新增分镜", "commands/storyboard.md:93", "我方无单条新增分镜；用 `storyboard batch-generate <EP_ID>`（AI 生成）或 `node table-import` 导表"),
+  todo("storyboard", "delete", "删除分镜", "commands/storyboard.md:137", "我方无删除分镜端点（storyboard 目前只可改不可删）；要重来用 `storyboard batch-generate` 覆盖"),
+  todo("storyboard", "batch-delete", "批量删除分镜", "commands/storyboard.md:153", "我方无批量删除分镜端点；同上，用重新生成覆盖"),
+  todo("storyboard", "num-update", "重排分镜号", "commands/storyboard.md:170", "我方无分镜号重排端点；编号随 shot_no 生成，需改请 `storyboard edit` 逐条"),
+  todo("storyboard", "link-draft", "关联草稿", "commands/storyboard.md:186", "我方无“分镜草稿”概念（草稿批次未落地、无端点）；分镜即正式数据，直接 `storyboard edit`"),
+  todo("storyboard", "ext", "分镜扩展参数", "commands/storyboard.md:202", "我方无 ext 端点；扩展字段走 `storyboard edit --set key=value`（PATCH 既有 storyboards）"),
+  todo("storyboard", "total-list", "跨集全量分镜", "commands/storyboard.md:220", "我方无跨集全量分镜端点；用 `episode list --workspace <SP>` 拿矩阵（含每集分镜数）再逐集 `storyboard list`"),
+  todo("storyboard", "batch-add", "批量新增分镜", "commands/storyboard.md:236", "我方无批量新增端点；批量来源请走 `node table-import`（表格节点导入）"),
+  todo("storyboard", "prompt-template", "生成官方分镜提示词空表", "commands/storyboard.md:263", "xlsx 模板导出端点未落地（待取证）；当前直接 `--set` 提交 JSON，或用 `node table-import` 导表"),
+  todo("storyboard", "sheet-read", "回读分镜提示词表", "commands/storyboard.md:281", "xlsx 回读端点未落地（待取证）；表格数据请走 `node table-import` + `node table-confirm`"),
+  todo("storyboard", "draft-import", "导入分镜草稿", "commands/storyboard.md:302", "分镜草稿批次未落地（我方无草稿表）；直接 `storyboard batch-add` 不适用，改用 AI 生成"),
+  todo("storyboard", "draft-delete", "删除分镜草稿", "commands/storyboard.md:331", "分镜草稿批次未落地（我方无草稿表、无端点）；无对应操作，正式分镜不提供删除"),
+  todo("storyboard", "draft-batch-update", "批量更新分镜草稿", "commands/storyboard.md:350", "分镜草稿批次未落地；正式分镜用 `storyboard edit` 逐条改"),
 ];
 
 // ── 上传（commands/upload.md）──────────────────────────────────────────
@@ -365,17 +390,25 @@ const assetLibCommands: CommandSpec[] = [
     positionals: [{ display: "ASSET_ID", desc: "资产 ID", required: true }],
     write: true,
   }),
-  todo("asset-lib", "dir-create", "创建资产目录", "commands/asset-lib.md:41", "我方 POST /asset-folders 存在，但目录改名/删除端点缺失，三合一命令族暂不开放"),
-  todo("asset-lib", "get", "查看资产详情", "commands/asset-lib.md:121", "我方无 GET /assets/:id（只有列表 + PATCH/DELETE）"),
-  todo("asset-lib", "import", "导入资产", "commands/asset-lib.md:137", "依赖资产库批次未落地"),
-  todo("asset-lib", "search", "搜索资产", "commands/asset-lib.md:185", "我方无资产搜索端点（列表无 q 参数）"),
-  todo("asset-lib", "resource-list", "asset-lib resource list", "commands/asset-lib.md:201", "依赖 asset-core 批次未落地"),
-  todo("asset-lib", "tag-add", "资产打标签", "commands/asset-lib.md:249", "我方无资产标签端点"),
-  todo("asset-lib", "move", "移动资产到目录", "commands/asset-lib.md:281", "我方无资产移动端点"),
-  todo("asset-lib", "batch-delete", "批量删除资产", "commands/asset-lib.md:297", "我方无批量删除资产端点（canvas 素材有，asset 没有）"),
-  todo("file", "metadata", "查看文件元数据", "commands/file.md:21", "我方无文件元数据端点"),
-  todo("file", "object", "查看对象", "commands/file.md:43", "我方无对象端点"),
-  todo("file", "sign-url", "获取文件签名 URL", "commands/file.md:65", "签名 URL 内嵌在任务/资源响应里（tasks.service downloadUrl），无独立端点"),
+  http("asset-lib", "dir-create", "POST", "asset-folders", "创建资产目录", "commands/asset-lib.md:41", {
+    write: true,
+    positionals: [{ display: "NAME", desc: "目录名（也可 --name）" }],
+    bodyParams: [{ key: "name", index: 0 }],
+    }),
+  todo("asset-lib", "get", "查看资产详情", "commands/asset-lib.md:121", "我方无 GET /assets/:id；用 `asset-lib list --set page=1` 过滤，或从 `task get` 的 results 取"),
+  http("asset-lib", "import", "POST", "assets/from-task", "从生成任务导入资产（= 素材入库）", "commands/asset-lib.md:137", {
+    write: true,
+    positionals: [{ display: "TASK_ID", desc: "任务 ID", required: true }],
+    bodyParams: [{ key: "task_id", index: 0 }],
+    }),
+  todo("asset-lib", "search", "搜索资产", "commands/asset-lib.md:185", "我方素材列表无 q 参数；知识库侧有搜索：`GET /v1/knowledge/assets/search`（CLI 尚未建组，见回报）"),
+  todo("asset-lib", "resource-list", "asset-lib resource list", "commands/asset-lib.md:201", "“资源”语义在我方分两处：项目资产用 `resource list --workspace <SP>`，素材用 `asset-lib list`"),
+  todo("asset-lib", "tag-add", "资产打标签", "commands/asset-lib.md:249", "素材(PATCH /assets/:id)支持 tags 字段：`asset-lib rename <ID> --set tags=[a]` 可达；独立 tag 端点无"),
+  todo("asset-lib", "move", "移动资产到目录", "commands/asset-lib.md:281", "用 `asset-lib rename <ID> --set folder_id=<DIR>`（PATCH /assets/:id 支持 folder_id）"),
+  todo("asset-lib", "batch-delete", "批量删除资产", "commands/asset-lib.md:297", "我方无批量删除；逐条 `asset-lib delete <ID>`（DELETE /assets/:id 是软删，可用 `POST /assets/:id/restore` 找回）"),
+  todo("file", "metadata", "查看文件元数据", "commands/file.md:21", "我方无独立文件端点；产物元数据在 `task get <ID>` 的 results 里（含 size/content_type）"),
+  todo("file", "object", "查看对象", "commands/file.md:43", "我方无对象存储浏览端点（key 由服务端生成，不对外枚举）"),
+  todo("file", "sign-url", "获取文件签名 URL", "commands/file.md:65", "签名 URL 内嵌在 `GET /tasks/:id/results/:n/download-url`；用 `task download <ID>` 一步落盘"),
 ];
 
 // ── 资源/主体（commands/resource.md、subject.md）────────────────────────
@@ -444,18 +477,35 @@ const resourceCommands: CommandSpec[] = [
       { key: "asset_id", index: 1 },
     ],
   }),
-  todo("subject", "batch-details", "批量主体详情", "commands/subject.md:156", "我方无批量详情端点（只有 POST /subjects/status 返回逐条审核态）；可用 subject get 逐条取"),
-  todo("subject", "from-resource", "从资源创建主体（含 confirm 流程）", "commands/subject.md:172", "我方只有 POST /subjects/from-asset（从项目资产保存），无竞品 from-resource 的 type+confirm 流程"),
-  todo("subject", "reset", "重置解析/匹配状态", "commands/subject.md:228", "我方无 reset 端点（ep_id+kind 维度的状态重置未实现）"),
-  todo("resource", "get", "查看单个资源", "commands/resource.md:223", "依赖 asset-core 批次的单资源读取端点未落地"),
-  todo("resource", "add", "新增资源", "commands/resource.md:255", "依赖 asset-core 批次未落地"),
-  todo("resource", "generate", "生成资产图", "commands/resource.md:317", "依赖 asset-core 批次未落地"),
-  todo("resource", "confirm", "确认资产", "commands/resource.md:359", "依赖 asset-core 批次未落地"),
-  todo("resource", "unconfirm", "取消确认", "commands/resource.md:406", "依赖 asset-core 批次未落地"),
-  todo("resource", "batch-confirm", "批量确认", "commands/resource.md:422", "依赖 asset-core 批次未落地"),
-  todo("resource", "extract-wait", "阻塞等待提取任务", "commands/resource.md:586", "用 `task wait`/轮询 extract-status 组合即可，本批不单独实现"),
-  todo("resource", "prompt-template", "生成官方资产提示词空表", "commands/resource.md:145", "依赖 xlsx 模板批次未落地"),
-  todo("resource", "prompt-sheet-read", "回读资产提示词表", "commands/resource.md:163", "依赖 xlsx 模板批次未落地"),
+  todo("subject", "batch-details", "批量主体详情", "commands/subject.md:156", "我方无批量详情端点；用 `subject status --set 'subject_ids=[…]'` 拿逐条审核态，或 `subject get` 逐条"),
+  todo("subject", "from-resource", "从资源创建主体（含 confirm 流程）", "commands/subject.md:172", "我方只有 `subject save-from-resource`（POST /subjects/from-asset，从项目资产保存、同资产幂等）；无 type+confirm 二次流程"),
+  todo("subject", "reset", "重置解析/匹配状态", "commands/subject.md:228", "我方无 reset 端点（ep_id+kind 维度状态重置未实现）；重跑解析用 `episode parse-retry`"),
+  todo("resource", "get", "查看单个资源", "commands/resource.md:223", "我方无单资源详情端点；用 `resource generate-list <SP> <RES>`（候选）或 `resource list --workspace <SP> --set kind=scene`"),
+  http("resource", "add", "POST", "projects/{project_id}/assets", "新增项目资产（kind=scene|prop|other，角色走 characters）", "commands/resource.md:255", {
+    write: true,
+    }),
+  http("resource", "generate", "POST", "projects/{project_id}/assets/{asset_id}/generate-image", "生成资产参考图（异步，返回 task_id）", "commands/resource.md:317", {
+    slots: ["asset_id"],
+    positionals: [{ display: "RESOURCE_ID", desc: "项目资产 ID", required: true }],
+    write: true,
+    paid: true,
+    }),
+  http("resource", "confirm", "PATCH", "projects/{project_id}/assets/{asset_id}", "确认资产（status=2 定稿）", "commands/resource.md:359", {
+    slots: ["asset_id"],
+    positionals: [{ display: "RESOURCE_ID", desc: "项目资产 ID", required: true }],
+    write: true,
+    fixedBody: { status: 2 },
+    }),
+  http("resource", "unconfirm", "PATCH", "projects/{project_id}/assets/{asset_id}", "取消确认（status=1 退回草稿）", "commands/resource.md:406", {
+    slots: ["asset_id"],
+    positionals: [{ display: "RESOURCE_ID", desc: "项目资产 ID", required: true }],
+    write: true,
+    fixedBody: { status: 1 },
+    }),
+  todo("resource", "batch-confirm", "批量确认", "commands/resource.md:422", "我方无批量确认端点；逐条 `resource confirm <SP> <RES>`（PATCH status=2）"),
+  todo("resource", "extract-wait", "阻塞等待提取任务", "commands/resource.md:586", "组合即可：`resource extract-status <ET_ID>` 轮询，或 `task wait <TASK_ID>`（提取任务也落 tasks）"),
+  todo("resource", "prompt-template", "生成官方资产提示词空表", "commands/resource.md:145", "xlsx 模板导出端点未落地（待取证）；当前 `--set` 直接提交 JSON"),
+  todo("resource", "prompt-sheet-read", "回读资产提示词表", "commands/resource.md:163", "xlsx 回读端点未落地（待取证）；批量导入用 `resource draft-import --set @assets.json`"),
 ];
 
 // ── 画布（commands/canvas.md）──────────────────────────────────────────
@@ -596,8 +646,8 @@ const groupCommands: CommandSpec[] = [
     write: true,
   }),
   http("pin-group", "list", "GET", "canvases/{canvas_id}/pin-groups", "列出固定组（我方端点，竞品无对应子命令）", "commands/pin-group.md:63"),
-  todo("group", "execute", "组执行（整组跑生成）", "commands/group.md:53", "依赖组执行批次未落地（canvas 无 group execute 端点）"),
-  todo("group", "template-get", "查看单个组模板", "commands/group.md:157", "我方无 GET 单个组模板端点"),
+  todo("group", "execute", "组执行（整组跑生成）", "commands/group.md:53", "canvas 域无 group execute 端点；逐节点 `node generate <TYPE> <NODE_ID>` 提交"),
+  todo("group", "template-get", "查看单个组模板", "commands/group.md:157", "我方只有 `group template-list`（GET /canvas/canvases/:id/group-templates 列表），无单模板端点"),
 ];
 
 // ── 素材 / 脚本（commands/material.md、script.md）────────────────────────
@@ -642,9 +692,9 @@ const materialCommands: CommandSpec[] = [
     write: true,
     paid: true,
   }),
-  todo("material", "batch-add", "批量添加素材", "commands/material.md:86", "我方无批量添加素材端点"),
-  todo("material", "get", "查看素材信息", "commands/material.md:131", "我方无 GET 单条素材端点"),
-  todo("material", "confirm", "确认素材", "commands/material.md:167", "我方无素材确认端点"),
+  todo("material", "batch-add", "批量添加素材", "commands/material.md:86", "我方无批量加素材端点；用 `node batch-create` 或循环 `material add`"),
+  todo("material", "get", "查看素材信息", "commands/material.md:131", "我方无单条素材端点；用 `material list --canvas <ID> --set page=1` 过滤"),
+  todo("material", "confirm", "确认素材", "commands/material.md:167", "我方素材无确认态（POST /canvas/.../materials 落库即用）"),
 ];
 
 // ── 导出（commands/export.md）──────────────────────────────────────────
@@ -666,7 +716,7 @@ const exportCommands: CommandSpec[] = [
     positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
     write: true,
   }),
-  todo("export", "download", "下载导出产物", "commands/export.md:86", "我方合并产物走 timeline export 轮询返回 storage key，无独立下载端点"),
+  todo("export", "download", "下载导出产物", "commands/export.md:86", "先 `export merge <EP> --workspace <SP>` 提交，再 `export get <EP> <XID>` 轮询拿产物；无独立下载端点"),
 ];
 
 // ── 团队（commands/team.md）────────────────────────────────────────────
@@ -721,30 +771,53 @@ const pendingCommands: CommandSpec[] = [
     positionals: [{ display: "SESSION_ID", desc: "会话 ID", required: true }],
     write: true,
   }),
-  todo("agent", "enter", "进入交互式会话", "commands/agent.md:93", "交互式 REPL 未实现（本批只做非交互命令）"),
-  todo("agent", "run", "运行一轮对话", "commands/agent.md:135", "依赖 agent 批次未落地（POST /agent/task/chat 为 SSE 流，未接入）"),
+  todo("agent", "enter", "进入交互式会话", "commands/agent.md:93", "交互式 REPL 未实现；用 `agent session-create --canvas <ID>` + `POST /v1/canvas/canvases/:id/chat/sessions/:sid/messages`"),
+  todo("agent", "run", "运行一轮对话", "commands/agent.md:135", "`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）；非交互场景用 canvas chat 的 REST 消息端点"),
   // 小说（我方只有表，无 controller）
-  todo("novel", "config", "小说改写配置", "commands/novel.md:59", "依赖 novel 批次未落地（packages/db 有 novels 表，apps/api 无 novel 模块）"),
-  todo("novel", "create", "创建小说改写任务", "commands/novel.md:84", "依赖 novel 批次未落地"),
-  todo("novel", "analyze", "分析文本", "commands/novel.md:240", "依赖 novel 批次未落地"),
-  todo("novel", "list", "小说任务列表", "commands/novel.md:391", "依赖 novel 批次未落地"),
-  todo("novel", "get", "小说任务详情", "commands/novel.md:414", "依赖 novel 批次未落地"),
-  todo("novel", "finalize", "定稿", "commands/novel.md:663", "依赖 novel 批次未落地"),
+  todo("novel", "config", "小说改写配置", "commands/novel.md:59", "我方无 novel/config 端点；可配置项直接走 `novel create --set key=value`，现有任务用 `novel get <NT_ID>` 查看"),
+  http("novel", "create", "POST", "novel", "创建小说改写任务（--set title=… / source_text=…）", "commands/novel.md:84", {
+    write: true,
+    }),
+  http("novel", "analyze", "POST", "novel/{nt_id}/content-analysis", "触发内容分析（世界/角色/章节）", "commands/novel.md:240", {
+    slots: ["nt_id"],
+    positionals: [{ display: "NT_ID", desc: "小说任务 ID（先 novel create）", required: true }],
+    write: true,
+    paid: true,
+    }),
+  http("novel", "list", "GET", "novel/list", "小说任务列表", "commands/novel.md:391", {
+    queryKeys: ["page", "page_size", "status", "keyword"],
+    }),
+  http("novel", "get", "GET", "novel/{nt_id}", "小说任务详情", "commands/novel.md:414", {
+    slots: ["nt_id"],
+    positionals: [{ display: "NT_ID", desc: "小说任务 ID", required: true }],
+    }),
+  http("novel", "finalize", "POST", "novel/{nt_id}/finalize", "小说定稿（定稿后才能作为制片工坊拆集源）", "commands/novel.md:663", {
+    slots: ["nt_id"],
+    positionals: [{ display: "NT_ID", desc: "小说任务 ID", required: true }],
+    write: true,
+    }),
   // 市场 / 广告 / 重绘 / AI 工具（后续批次）
-  todo("market", "list", "市场作品列表", "commands/market.md:27", "依赖 market 批次未落地（只有 market_works 表）"),
-  todo("market", "get", "市场作品详情", "commands/market.md:51", "依赖 market 批次未落地"),
-  todo("market", "mine", "我的上架作品", "commands/market.md:99", "依赖 market 批次未落地"),
-  todo("ad", "info", "广告信息", "commands/ad.md:33", "依赖 ad 批次未落地（只有 campaigns 表）"),
-  todo("ad", "save", "保存广告素材", "commands/ad.md:49", "依赖 ad 批次未落地"),
-  todo("ad", "plan", "广告方案", "commands/ad.md:141", "依赖 ad 批次未落地"),
-  todo("redraw", "info", "重绘信息", "commands/redraw.md:27", "依赖 redraw 批次未落地"),
-  todo("redraw", "create", "创建重绘", "commands/redraw.md:68", "依赖 redraw 批次未落地"),
-  todo("ai", "upscale", "AI 放大", "commands/ai.md:29", "依赖 ai 工具批次未落地"),
-  todo("ai", "subtitle-erase", "去字幕", "commands/ai.md:45", "依赖 ai 工具批次未落地"),
-  todo("clip", "create", "创建剪辑", "commands/clip.md:23", "依赖 clip 批次未落地"),
-  todo("clip", "crop", "裁剪", "commands/clip.md:45", "依赖 clip 批次未落地"),
-  todo("voice", "list", "音色列表", "commands/voice.md:17", "依赖 voice 批次未落地（我方无 voice 端点）"),
-  todo("sync-fm", "", "同步到 Filmora", "commands/sync-fm.md:17", "依赖外部集成批次未落地"),
+  http("market", "list", "GET", "market/scripts", "市场剧本列表", "commands/market.md:27", {
+    queryKeys: ["page", "page_size", "keyword", "category_id", "sort"],
+    }),
+  http("market", "get", "GET", "market/scripts/{nm_id}/detail", "市场剧本详情", "commands/market.md:51", {
+    slots: ["nm_id"],
+    positionals: [{ display: "NM_ID", desc: "市场剧本 ID", required: true }],
+    }),
+  http("market", "mine", "GET", "market/creator/works", "我的上架作品", "commands/market.md:99", {
+    queryKeys: ["page", "page_size", "status"],
+    }),
+  todo("ad", "info", "广告信息", "commands/ad.md:33", "ad 域本轮由队友落地（modules/ad）；CLI 接线放下一轮，当前无端点"),
+  todo("ad", "save", "保存广告素材", "commands/ad.md:49", "同上：modules/ad 落地后接；当前无端点"),
+  todo("ad", "plan", "广告方案", "commands/ad.md:141", "同上：modules/ad 落地后接；当前无端点"),
+  todo("redraw", "info", "重绘信息", "commands/redraw.md:27", "redraw 域本轮由队友落地（modules/redraw）；CLI 接线放下一轮，当前无端点"),
+  todo("redraw", "create", "创建重绘", "commands/redraw.md:68", "同上：modules/redraw 落地后接；当前无端点"),
+  todo("ai", "upscale", "AI 放大", "commands/ai.md:29", "我方无 ai 工具独立端点；后处理能力在工具箱：`POST /generations`（mode 取自 GET /generations/tools）"),
+  todo("ai", "subtitle-erase", "去字幕", "commands/ai.md:45", "用工具箱入口：mode=de_subtitle_auto|de_subtitle_region（`GET /generations/tools` 目录；Web 侧 /create/video-upscale）"),
+  todo("clip", "create", "创建剪辑", "commands/clip.md:23", "clip 无独立端点（画布有 clip 节点与 timeline clips）；用 `node create clip` + `PUT .../timeline`"),
+  todo("clip", "crop", "裁剪", "commands/clip.md:45", "同上：无独立裁剪端点，走画布节点/timeline"),
+  todo("voice", "list", "音色列表", "commands/voice.md:17", "voice 端点未落地；音色相关在 /op 与 resource voice-*（两者均未落地），待取证"),
+  todo("sync-fm", "", "同步到 Filmora", "commands/sync-fm.md:17", "Filmora 外部集成未落地（无端点、无凭据契约）；待取证"),
 ];
 
 /** 全部命令（顺序即 --help 的分组顺序） */

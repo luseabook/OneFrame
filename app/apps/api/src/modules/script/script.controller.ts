@@ -57,6 +57,16 @@ const splitWithSourceSchema = splitEpisodesRequestSchema.extend({
 
 const matchDryRunSchema = z.object({ dry_run: z.boolean().optional() });
 
+/**
+ * 批量投递的 images[] 注入语义（task-18 §4）：
+ * - `append`（默认）：保持现状——`reference_uris` 传图，原 prompt 不改写；
+ * - `replace`：把「名称 → [[@imgN]]」改写后的 prompt 直接当 `video_prompt` 注入
+ *   （对齐 `storyboard.md:308-310` 的竞品形态）。**需产品确认，默认不启用**。
+ */
+const generateVideosSchema = generateVideosBatchSchema.extend({
+  prompt_inject_mode: z.enum(["append", "replace"]).optional(),
+});
+
 /** 匹配项：`resource_id` 是项目资产 id；`name` 可选（服务端以资产名为准） */
 const matchResourceEntrySchema = z.object({
   resource_id: z.string().min(1),
@@ -644,7 +654,7 @@ export class ScriptController {
     @Param("eid") eid: string,
     @Body() body: unknown,
   ) {
-    const input = parseOrThrow(generateVideosBatchSchema, body);
+    const input = parseOrThrow(generateVideosSchema, body);
     return this.script.batchGenerateVideos(
       req.auth?.spaceId ?? "",
       req.auth?.userId ?? "",
@@ -769,3 +779,4 @@ export class ScriptController {
     return this.publish.bindClipAssets(req.auth?.spaceId ?? "", id, eid, clipId, input);
   }
 }
+

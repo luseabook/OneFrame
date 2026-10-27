@@ -222,6 +222,35 @@ export function useDirectorPersistence(options: DirectorPersistenceOptions) {
     }
   }
 
+  /**
+   * 删除当前场景（软删：服务端置 `deleted_at`，列表/读取/复制都会 404）。
+   *
+   * 为什么要 UI：端点早就有（`DELETE /director/scenes/:id`）且有 spec，但导演台里
+   * 没有任何入口 —— 用户建错场景只能改名"废弃"，列表越攒越乱。删除是不可逆操作，
+   * 调用方必须自己先确认（组件里用 `window.confirm`）。
+   */
+  async function removeScene(): Promise<boolean> {
+    if (!sceneId.value) {
+      error.value = "当前场景还没保存过";
+      return false;
+    }
+    try {
+      await api.delete(`/director/scenes/${sceneId.value}`);
+      notify("场景已删除");
+      // 清空本地态：避免"删完还能点保存"把场景又建回来
+      sceneId.value = "";
+      sceneName.value = "未命名场景";
+      version.value = 0;
+      dirty.value = false;
+      conflictVersion.value = null;
+      lastSavedAt.value = null;
+      return true;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : "删除失败";
+      return false;
+    }
+  }
+
   async function uploadThumbnail(dataUrl: string): Promise<string | undefined> {
     try {
       const asset = await api.post<AssetDto>("/assets/upload", {
@@ -325,6 +354,7 @@ export function useDirectorPersistence(options: DirectorPersistenceOptions) {
     overwriteConflict,
     discardLocal,
     duplicate,
+    removeScene,
     heartbeat,
     loadPresets,
     savePreset,

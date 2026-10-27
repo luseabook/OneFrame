@@ -13,10 +13,12 @@
  * **不要**用 `role_level <= N` 推导权限：竞品 `role_level` 不是单调特权轴
  * （level 11 的 film_maker 特权高于 level 4 的导演），见 §3.1。
  *
- * ⚠️ 本批边界：**只做"目录 + 角色绑定存储"**，不做全站入口拦截。
- * 原因是既有 13 个 e2e suite 里的团队成员都是 `role=3`（普通成员）且没有 power_list，
- * 一旦把 L3 校验挂到所有 cam/film 端点上，这些测试会全红——那是另一个批次该做的事
- * （需要同时迁移存量角色的默认权限）。所以本文件只提供数据与换算，不参与鉴权判定。
+ * ⚠️ 边界（渐进式拦截，本批只开 3 个码）：
+ * 本文件负责"目录 + 角色绑定存储"，判权在 `TeamService.requirePermission`。
+ * 目前**只有** `team.edit` / `team.permission` / `member.create` 三个码挂了入口拦截
+ * （清单见 `enforced-permissions.ts`，`GET /cam/permissions` 的 `enforced` 也来自它）。
+ * 其余码仍是"可配置但不拦截"，保持与存量 13 个 e2e 兼容：**没有显式 power_list 的角色
+ * 视为拥有全部权限**（默认放行）。做全站拦截需要同时迁移存量角色默认权限，属独立批次。
  */
 
 export interface PermissionEntry {

@@ -27,6 +27,15 @@ import { ModelsService } from "../models/models.service";
 
 type TaskRow = typeof tasks.$inferSelect;
 
+/**
+ * 分享页「打包下载」的同步打包上限（产物文件数）。
+ *
+ * 该端点是**匿名公开**的，每次请求都要把产物读进内存再 zip：不设上限时一个
+ * 100+ 产物的分享就能吃满进程内存，且没有用户态可供异步任务回查。
+ * 详见 `publicShareDownload` 的注释。
+ */
+const MAX_SHARE_PACK_FILES = 100;
+
 export interface TaskDto {
   task_id: string;
   status: number;
@@ -626,6 +635,22 @@ export class TasksService {
 
     const results = Array.isArray(row.results) ? (row.results as Array<{ uri?: string }>) : [];
     if (results.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no downloadable results");
+    /**
+     * 同步打包上限：**>100 个产物直接拒**，不做异步任务化。
+     *
+     * 为什么要有上限：这是匿名公开端点，一个请求就要把 N 个对象读进内存 + zip 压缩，
+     * 116 个 4K 视频能轻松吃满进程内存（同步打包把请求拖死，还会连累同进程的其它接口）。
+     * 为什么不改成"202 + 任务态"：该端点无鉴权、无用户态可用（匿名访客没有任务中心），
+     * 异步化的结果没有地方可查、也没法回调，反而增加一个可被滥用的长任务入口。
+     * 真正的大批量下载走登录态 `POST /tasks/batch-download`（有鉴权、有配额、可审计）。
+     */
+    if (results.length > MAX_SHARE_PACK_FILES) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `too many files (${results.length} > ${MAX_SHARE_PACK_FILES}), use task batch-download`,
+        { field: "files", max: MAX_SHARE_PACK_FILES, actual: results.length },
+      );
+    }
 
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip();

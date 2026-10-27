@@ -42,6 +42,10 @@ const REVIEW_BADGE: Record<string, { text: string; cls: string }> = {
   unknown: { text: "状态未知", cls: "unknown" },
 };
 
+/** 只看星标（置顶常用角色/场景）；与 template_key 一起做服务端筛选 */
+const starOnly = ref(false);
+const templateFilter = ref("");
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
@@ -50,6 +54,10 @@ async function load(): Promise<void> {
     if (kindFilter.value) parts.push(`kind=${kindFilter.value}`);
     if (reviewFilter.value) parts.push(`review_status=${reviewFilter.value}`);
     if (keyword.value.trim()) parts.push(`q=${encodeURIComponent(keyword.value.trim())}`);
+    if (starOnly.value) parts.push("starred=1");
+    if (templateFilter.value.trim()) {
+      parts.push(`template_key=${encodeURIComponent(templateFilter.value.trim())}`);
+    }
     const data = await api.get<SubjectListDto>(`/subjects?${parts.join("&")}`);
     list.value = data.list;
     total.value = data.total;
@@ -57,6 +65,41 @@ async function load(): Promise<void> {
     error.value = e instanceof Error ? e.message : "加载主体库失败";
   } finally {
     loading.value = false;
+  }
+}
+
+/** 星标开关（PATCH is_starred）；列表按 starred 优先排序，所以置顶后刷新就能看到效果 */
+async function toggleStar(subject: SubjectDto): Promise<void> {
+  busy.value = true;
+  error.value = "";
+  try {
+    await api.patch<SubjectDto>(`/subjects/${subject.id}`, { is_starred: !subject.is_starred });
+    notice.value = subject.is_starred ? `已取消星标「${subject.name}」` : `已星标「${subject.name}」（列表置顶）`;
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "星标失败";
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** IP/模板归类键（只做归类与筛选，不做模板渲染） */
+async function editTemplateKey(subject: SubjectDto): Promise<void> {
+  const next = prompt(
+    "IP/模板归类键（例 ip:my-hero；留空清除）",
+    subject.template_key ?? "",
+  );
+  if (next === null) return;
+  busy.value = true;
+  try {
+    await api.patch<SubjectDto>(`/subjects/${subject.id}`, {
+      template_key: next.trim() ? next.trim() : null,
+    });
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "设置模板键失败";
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -275,6 +318,17 @@ onMounted(load);
         maxlength="40"
         @keyup.enter="load"
       />
+      <!-- 星标筛选 + IP/模板筛选（服务端过滤；星标项默认置顶） -->
+      <button class="star-toggle" :class="{ on: starOnly }" title="只看星标主体" @click="starOnly = !starOnly; load()">
+        {{ starOnly ? "★ 只看星标" : "☆ 只看星标" }}
+      </button>
+      <input
+        v-model="templateFilter"
+        class="mini-input"
+        placeholder="IP/模板键（ip:xxx）"
+        maxlength="80"
+        @keyup.enter="load"
+      />
       <Button size="sm" variant="ghost" :disabled="loading" @click="load">刷新</Button>
       <Button size="sm" variant="ghost" :disabled="busy || list.length === 0" @click="batchStatus">
         批量查审核态
@@ -332,8 +386,32 @@ onMounted(load);
             </span>
           </div>
           <div class="body">
-            <p class="name" :title="subject.name">{{ subject.name }}</p>
-            <p class="meta">{{ subject.kind_name }} · 参考图 {{ subject.files.length }} 张</p>
+            <p class="name" :title="subject.name">
+              <button
+                class="star-btn"
+                :class="{ on: subject.is_starred }"
+                :title="subject.is_starred ? '取消星标' : '星标置顶'"
+                :disabled="busy"
+                @click="toggleStar(subject)"
+              >
+                {{ subject.is_starred ? "★" : "☆" }}
+              </button>
+              {{ subject.name }}
+            </p>
+            <p class="meta">
+              {{ subject.kind_name }} · 参考图 {{ subject.files.length }} 张
+              <button
+                v-if="subject.template_key"
+                class="template-chip"
+                title="点击修改 IP/模板归类键"
+                @click="editTemplateKey(subject)"
+              >
+                {{ subject.template_key }}
+              </button>
+              <button v-else class="template-add" title="设置 IP/模板归类键" @click="editTemplateKey(subject)">
+                + 模板键
+              </button>
+            </p>
             <p v-if="subject.reject_reason" class="reject">驳回原因：{{ subject.reject_reason }}</p>
             <div class="thumbs">
               <span v-for="file in subject.files.slice(0, 4)" :key="file.id" class="thumb-chip">
@@ -608,5 +686,59 @@ onMounted(load);
   margin: 0;
   color: var(--text-4);
   font-size: var(--text-xs);
+}
+
+/* ── 星标与 IP/模板键（迁移 0031）────────────────────────────── */
+.star-toggle {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-2);
+  background: var(--bg-surface);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.star-toggle.on {
+  border-color: var(--brand-500);
+  background: var(--brand-soft);
+  color: var(--brand-on-soft);
+}
+.star-btn {
+  border: none;
+  background: none;
+  padding: 0 2px 0 0;
+  color: var(--text-4);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.star-btn.on {
+  color: var(--brand-300);
+}
+.star-btn:hover {
+  color: var(--brand-500);
+}
+.template-chip,
+.template-add {
+  margin-left: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-on-soft);
+  font-size: 10px;
+  cursor: pointer;
+}
+.template-add {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-4);
+}
+.template-add:hover,
+.template-chip:hover {
+  border-color: var(--brand-500);
 }
 </style>

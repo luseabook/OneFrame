@@ -921,6 +921,10 @@ export interface SubjectDto {
   /** 供应商业务线编号（Seedance = [3]） */
   business_list: number[];
   tags: string[];
+  /** 星标（置顶常用角色/场景）：列表按 starred 优先排序 */
+  is_starred: boolean;
+  /** IP/模板归类键（`ip:my-hero` 这类；只做归类与筛选，不做模板渲染） */
+  template_key: string | null;
   project_id: string | null;
   files: SubjectFileDto[];
   created_at: string;
@@ -2051,3 +2055,154 @@ export interface Paged<T> {
   page: number;
   page_size: number;
 }
+
+// ══════════════════════════════════════════════════════════════════
+// ReelFlow 公开播放页（/watch/:token）—— 只含"看作品需要的"字段，
+// 不含 space/user/project/episode 等内部标识（后端 publicWatch 已收紧键集合）。
+// ══════════════════════════════════════════════════════════════════
+
+export interface WatchPublicationDto {
+  title: string;
+  episode_no: number | null;
+  /** 3 = 可播放（其余状态端点会以错误码 + reason 返回，不会进这里） */
+  status: number;
+  /** 现签 1 小时的播放/下载地址 */
+  file_url: string;
+  duration_ms: number | null;
+  published_at: string | null;
+  /** 播放量（当前落 Redis，非数据库权威计数） */
+  view_count: number;
+}
+
+export interface WatchViewResultDto {
+  ok: boolean;
+  /** 本次是否真的 +1（同 token + 同 IP 5 分钟内只算一次） */
+  counted: boolean;
+  view_count: number;
+}
+
+// ── 视频转绘 video_redraw（模块 #14，迁移 0031）─────────────────────────
+export interface RedrawModeMeta {
+  source_uri: string;
+  source_kind: "upload" | "asset";
+  source_asset_id?: string | null;
+  style: string;
+  redraw_strength: number;
+  source_duration_s: number | null;
+  episode_ranges: Record<string, [number, number]>;
+  shot_duration_s: number;
+}
+
+export interface RedrawProjectDto {
+  id: string;
+  title: string;
+  project_mode: number;
+  ratio: string;
+  status: number;
+  mode_meta: RedrawModeMeta;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RedrawProgressDto {
+  episodes: number;
+  storyboards: number;
+  storyboards_submitted: number;
+  redraw_assets: number;
+  bound_storyboards: number;
+  percent: number;
+}
+
+export interface RedrawProjectInfoDto extends RedrawProjectDto {
+  source: { uri: string; kind: string; duration_s: number | null; asset_id: string | null };
+  style: string;
+  redraw_strength: number;
+  /** 竞品 CLI 同名字段：episode|storyboard|bind|done */
+  video_redraw_stage: "episode" | "storyboard" | "redraw" | "bind" | "done";
+  video_redraw_stage_status: 1 | 2 | 3;
+  latest_flow: { task_count: number; latest_at: string | null } | null;
+  progress: RedrawProgressDto;
+}
+
+export interface RedrawPointDto {
+  project_id: string;
+  target: "image" | "video";
+  mode: string;
+  model: string;
+  shots: number;
+  unit_credits: number;
+  total_credits: number;
+  balance: number;
+  sufficient: boolean;
+  points_code: string;
+  price_locked: boolean;
+}
+
+export interface RedrawEpisodeDto {
+  id: string;
+  project_id: string;
+  ep_no: number;
+  title: string | null;
+  synopsis: string | null;
+  status: number;
+  source_range?: [number, number];
+}
+
+export interface RedrawStoryboardDto {
+  id: string;
+  episode_id: string;
+  shot_no: number;
+  shot_desc: string | null;
+  video_prompt: string | null;
+  duration_s: number | null;
+  ratio: string | null;
+  status: number;
+  image_task_id: string | null;
+  video_task_id: string | null;
+}
+
+export interface RedrawPlanResultDto {
+  episode_id: string;
+  source_range: [number, number];
+  shot_duration_s: number;
+  shots: number;
+  created: number;
+  list: RedrawStoryboardDto[];
+}
+
+export interface RedrawGenerateResultDto {
+  project_id: string;
+  target: "image" | "video";
+  model: string | null;
+  count: number;
+  tasks: Array<{ storyboard_id: string; project_asset_id: string; task_id: string }>;
+}
+
+export interface RedrawBindResultDto {
+  project_id: string;
+  bound: number;
+  binds: Array<{ storyboard_id: string; project_asset_ids: string[] }>;
+}
+
+/** 复用既有剧本域的只读接口拿集/分镜列表（转绘不重复建列表端点） */
+export interface ScriptProjectDetailDto {
+  project: { id: string; title: string; ratio?: string };
+  episodes: Array<{ id: string; ep_no: number; title: string | null; synopsis: string | null; status: number }>;
+  characters: unknown[];
+}
+
+export interface ScriptEpisodeDetailDto {
+  episode: { id: string; ep_no: number; title: string | null; status: number };
+  storyboards: Array<{
+    id: string;
+    shot_no: number;
+    shot_desc: string | null;
+    video_prompt: string | null;
+    duration_s: number | null;
+    status: number;
+    image_task_id?: string | null;
+    video_task_id?: string | null;
+    asset_ids?: string[];
+  }>;
+}
+

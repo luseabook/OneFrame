@@ -218,6 +218,20 @@
       "when": 1793068598266,
       "tag": "0030_pink_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793071360426,
+      "tag": "0031_furry_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793072309525,
+      "tag": "0032_known_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

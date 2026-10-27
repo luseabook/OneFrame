@@ -581,6 +581,198 @@ export class ExtractionService {
     return { items };
   }
 
+  // ── 任务列表 / 取消 / 统计（竞品 rt:512-514 task/progress + versions 的服务端聚合）──
+
+  /**
+   * `GET /extraction/tasks`：分页 + 状态/类型/项目/分集筛选。
+   *
+   * 竞品没有一条独立的"任务列表"端点（只有 `df/extraction/task` 创建、`task/progress`
+   * 单任务进度、`versions` 版本表，见 `routes.txt:512-518`）；我方列表是这些语义的
+   * **服务端聚合**，不新增字段、不臆造竞品参数。
+   */
+  async listTasks(
+    spaceId: string,
+    query: {
+      status?: number;
+      task_type?: number;
+      project_id?: string;
+      episode_id?: string;
+      page?: number;
+      page_size?: number;
+    },
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, query.page_size ?? 20));
+    const conds = [eq(extractionTasks.spaceId, BigInt(spaceId))];
+    if (query.status) conds.push(eq(extractionTasks.status, query.status));
+    if (query.task_type) conds.push(eq(extractionTasks.taskType, query.task_type));
+    if (query.project_id) conds.push(eq(extractionTasks.projectId, this.parseId(query.project_id, "project_id")));
+    if (query.episode_id) conds.push(eq(extractionTasks.episodeId, this.parseId(query.episode_id, "episode_id")));
+    const where = and(...conds);
+    const rows = await db
+      .select()
+      .from(extractionTasks)
+      .where(where)
+      .orderBy(desc(extractionTasks.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+    const [countRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(extractionTasks)
+      .where(where);
+    const total = countRow?.count ?? 0;
+
+    // 草稿计数一次聚合（避免逐任务 N+1）
+    const taskIds = rows.map((row) => row.id);
+    const mainCount = new Map<string, number>();
+    const subCount = new Map<string, number>();
+    if (taskIds.length > 0) {
+      const grouped = await db
+        .select({
+          taskId: extractionDrafts.taskId,
+          parent: sql<boolean>`${extractionDrafts.parentStateId} is not null`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(extractionDrafts)
+        .where(inArray(extractionDrafts.taskId, taskIds))
+        .groupBy(extractionDrafts.taskId, sql`${extractionDrafts.parentStateId} is not null`);
+      for (const row of grouped) {
+        const key = String(row.taskId);
+        if (row.parent) subCount.set(key, Number(row.count));
+        else mainCount.set(key, Number(row.count));
+      }
+    }
+
+    return {
+      list: rows.map((row) => ({
+        id: String(row.id),
+        et_id: String(row.id),
+        project_id: row.projectId ? String(row.projectId) : null,
+        episode_id: row.episodeId ? String(row.episodeId) : null,
+        task_type: row.taskType,
+        status: row.status,
+        status_name: TASK_STATUS_NAMES[row.status] ?? "unknown",
+        // 只有失败(3)/失效(4)可重做（resource.md:602-617）
+        retryable:
+          row.status === ExtractionTaskStatus.FAILED || row.status === ExtractionTaskStatus.INVALID,
+        eed_id: row.eedId,
+        draft_count: mainCount.get(String(row.id)) ?? 0,
+        sub_draft_count: subCount.get(String(row.id)) ?? 0,
+        error: row.error,
+        finished_at: row.finishedAt ? row.finishedAt.toISOString() : null,
+        created_at: row.createdAt.toISOString(),
+        updated_at: row.updatedAt.toISOString(),
+      })),
+      total,
+      page,
+      page_size: pageSize,
+      has_more: total > page * pageSize,
+    };
+  }
+
+  /**
+   * `POST /extraction/tasks/:id/cancel`：取消进行中的抽取任务。
+   *
+   * 四态里没有"已取消"，取消落到 **失效(4)**（竞品 `df/extraction/task/delete` 同义：
+   * 删掉的抽取任务不可再重试）。未确认的草稿标记为已丢弃（`state=3`）而不是物理删除，
+   * 便于审计"这次抽取其实跑过"。
+   */
+  async cancelTask(spaceId: string, taskId: string) {
+    const row = await this.findTask(spaceId, taskId);
+    if (row.status !== ExtractionTaskStatus.RUNNING) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "only running(1) extraction tasks can be cancelled", {
+        field: "task_id",
+        status: row.status,
+        status_name: TASK_STATUS_NAMES[row.status] ?? "unknown",
+      });
+    }
+    const [updated] = await db
+      .update(extractionTasks)
+      .set({
+        status: ExtractionTaskStatus.INVALID,
+        error: { code: ErrorCode.NOT_FOUND, message: "cancelled by user", reason: "cancelled" },
+        finishedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(extractionTasks.id, row.id))
+      .returning();
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "extraction task not found");
+    await db
+      .update(extractionDrafts)
+      .set({ state: 3, updatedAt: new Date() })
+      .where(and(eq(extractionDrafts.taskId, row.id), eq(extractionDrafts.state, 1)));
+    return {
+      ...(await this.taskDto(updated)),
+      cancelled: true,
+      // 取消 = 失效，不可重做（重做只会再跑一次同样的取消/删除）
+      retryable: false,
+    };
+  }
+
+  /**
+   * `GET /extraction/stats`：按 `task_type` 的成功/失败率。
+   *
+   * 竞品只有单任务 `task/progress`（`routes.txt:512`），没有跨任务聚合端点；
+   * 我方统计是服务端聚合（复用四态定义），不新增状态码/枚举。
+   */
+  async stats(spaceId: string) {
+    const rows = await db
+      .select({
+        taskType: extractionTasks.taskType,
+        status: extractionTasks.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(extractionTasks)
+      .where(eq(extractionTasks.spaceId, BigInt(spaceId)))
+      .groupBy(extractionTasks.taskType, extractionTasks.status);
+    const byType = new Map<
+      number,
+      { task_type: number; total: number; running: number; succeeded: number; failed: number; invalid: number }
+    >();
+    for (const row of rows) {
+      const item =
+        byType.get(row.taskType) ??
+        { task_type: row.taskType, total: 0, running: 0, succeeded: 0, failed: 0, invalid: 0 };
+      const count = Number(row.count);
+      item.total += count;
+      if (row.status === ExtractionTaskStatus.RUNNING) item.running += count;
+      else if (row.status === ExtractionTaskStatus.SUCCEEDED) item.succeeded += count;
+      else if (row.status === ExtractionTaskStatus.FAILED) item.failed += count;
+      else item.invalid += count;
+      byType.set(row.taskType, item);
+    }
+    const items = [...byType.values()]
+      .sort((a, b) => a.task_type - b.task_type)
+      .map((item) => ({
+        ...item,
+        // 成功率分母只算终态（进行中的既不算成功也不算失败，否则刚提交就"成功率 0%"）
+        success_rate:
+          item.succeeded + item.failed + item.invalid > 0
+            ? Number(
+                (item.succeeded / (item.succeeded + item.failed + item.invalid)).toFixed(4),
+              )
+            : 0,
+      }));
+    const totals = items.reduce(
+      (acc, item) => ({
+        total: acc.total + item.total,
+        running: acc.running + item.running,
+        succeeded: acc.succeeded + item.succeeded,
+        failed: acc.failed + item.failed,
+        invalid: acc.invalid + item.invalid,
+      }),
+      { total: 0, running: 0, succeeded: 0, failed: 0, invalid: 0 },
+    );
+    const terminal = totals.succeeded + totals.failed + totals.invalid;
+    return {
+      items,
+      totals: {
+        ...totals,
+        success_rate: terminal > 0 ? Number((totals.succeeded / terminal).toFixed(4)) : 0,
+      },
+    };
+  }
+
   // ── 内部 ──────────────────────────────────────────────────────────────
 
   /** 执行一次抽取（task_type 决定抽哪几类、是否带提示词） */

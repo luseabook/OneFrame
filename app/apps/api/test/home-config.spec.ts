@@ -9,6 +9,7 @@ import {
   abHits,
   homeConfigs,
   models,
+  promoSlots,
   taskEvents,
   taskShares,
   tasks,
@@ -382,5 +383,129 @@ describe("home config / unread / ab e2e", () => {
     const rows = await db.select({ id: users.id }).from(users).where(inArray(users.id, [BigInt(userId)]));
     expect(rows).toHaveLength(1);
     expect(spaceId).not.toBe(otherSpaceId);
+  });
+
+  // ══════════════════════════════════════════════════════════════
+  // 首页运营位（banner）读 + 打点（模块 #1 / #27 收尾）
+  // ══════════════════════════════════════════════════════════════
+  describe("首页运营位：配置下发与曝光/点击打点", () => {
+    const slotIds: bigint[] = [];
+
+    async function seedSlot(overrides: {
+      title: string;
+      status?: number;
+      sort?: number;
+      startsAt?: Date | null;
+      endsAt?: Date | null;
+      imageUri?: string | null;
+      linkUri?: string | null;
+    }): Promise<bigint> {
+      const id = BigInt(newId());
+      await db.insert(promoSlots).values({
+        id,
+        slot: "banner",
+        title: overrides.title,
+        imageUri: overrides.imageUri ?? null,
+        linkUri: overrides.linkUri ?? null,
+        sort: overrides.sort ?? 10,
+        status: overrides.status ?? 1,
+        startsAt: overrides.startsAt ?? null,
+        endsAt: overrides.endsAt ?? null,
+      });
+      slotIds.push(id);
+      return id;
+    }
+
+    afterAll(async () => {
+      if (slotIds.length > 0) await db.delete(promoSlots).where(inArray(promoSlots.id, slotIds));
+    });
+
+    it("配置只下发「启用 + 在投放窗口内」的 banner，按 sort 升序，图片已签名", async () => {
+      const early = await seedSlot({ title: `运营位-窗口内A-${runTag}`, sort: 1, linkUri: "/pricing" });
+      await seedSlot({ title: `运营位-窗口内B-${runTag}`, sort: 5 });
+      await seedSlot({ title: `运营位-已停用-${runTag}`, status: 2 });
+      await seedSlot({ title: `运营位-未开始-${runTag}`, startsAt: new Date(Date.now() + 3600_000) });
+      await seedSlot({ title: `运营位-已结束-${runTag}`, endsAt: new Date(Date.now() - 3600_000) });
+      await seedSlot({
+        title: `运营位-带图-${runTag}`,
+        // 存的是 storage key（签名 URL 会过期），读时应由服务端现签
+        imageUri: "u/test/promo/banner.png",
+        sort: 9,
+      });
+
+      const res = await inject("GET", "/home/config", undefined, token, spaceId);
+      expect(res.code).toBe(0);
+      const promos = (
+        res.data as {
+          promos: Array<{ id: string; title: string; image_url: string | null; link_uri: string | null; sort: number }>;
+        }
+      ).promos;
+      const titles = promos.map((item) => item.title);
+      expect(titles).toContain(`运营位-窗口内A-${runTag}`);
+      expect(titles).toContain(`运营位-窗口内B-${runTag}`);
+      // 停用 / 未开始 / 已结束都不该出现在首屏（否则等于把过期活动当现行活动投放）
+      expect(titles).not.toContain(`运营位-已停用-${runTag}`);
+      expect(titles).not.toContain(`运营位-未开始-${runTag}`);
+      expect(titles).not.toContain(`运营位-已结束-${runTag}`);
+      expect(titles.indexOf(`运营位-窗口内A-${runTag}`)).toBeLessThan(titles.indexOf(`运营位-窗口内B-${runTag}`));
+      expect(promos.find((item) => item.id === String(early))?.link_uri).toBe("/pricing");
+      const withImage = promos.find((item) => item.title === `运营位-带图-${runTag}`)!;
+      expect(String(withImage.image_url ?? "")).toMatch(/^https?:\/\//);
+    });
+
+    it("曝光打点：同用户 5 分钟内只计一次，计数原子自增（不落 task_events）", async () => {
+      const id = await seedSlot({ title: `打点-曝光-${runTag}` });
+      const before = await db
+        .select({ viewCount: promoSlots.viewCount, clickCount: promoSlots.clickCount })
+        .from(promoSlots)
+        .where(eq(promoSlots.id, id));
+      expect(before[0]?.viewCount).toBe(0);
+      const eventsBefore = await db.select({ id: taskEvents.id }).from(taskEvents);
+
+      const first = await inject("POST", `/home/promo/${id}/view`, undefined, token, spaceId);
+      expect(first.code, first.msg).toBe(0);
+      expect((first.data as { counted: boolean; view_count: number }).counted).toBe(true);
+      expect((first.data as { view_count: number }).view_count).toBe(1);
+
+      // 同一用户再上报（IntersectionObserver 进出视口会反复触发）→ 去重命中
+      const second = await inject("POST", `/home/promo/${id}/view`, undefined, token, spaceId);
+      expect(second.code).toBe(0);
+      expect((second.data as { counted: boolean }).counted).toBe(false);
+      expect((second.data as { view_count: number }).view_count).toBe(1);
+
+      const after = await db
+        .select({ viewCount: promoSlots.viewCount })
+        .from(promoSlots)
+        .where(eq(promoSlots.id, id));
+      expect(after[0]?.viewCount).toBe(1);
+
+      // 打点不写 task_events（它的 FK 指向 tasks，借用会造"假任务"甚至 500）
+      const eventsAfter = await db.select({ id: taskEvents.id }).from(taskEvents);
+      expect(eventsAfter.length).toBe(eventsBefore.length);
+    });
+
+    it("点击打点：公开（匿名可上报，按 ip+UA 去重），登录用户是另一个去重主体", async () => {
+      const id = await seedSlot({ title: `打点-点击-${runTag}`, linkUri: "/pricing" });
+
+      const anon = await inject("POST", `/home/promo/${id}/click`);
+      expect(anon.code, anon.msg).toBe(0);
+      expect((anon.data as { counted: boolean }).counted).toBe(true);
+      expect((anon.data as { click_count: number }).click_count).toBe(1);
+
+      const anon2 = await inject("POST", `/home/promo/${id}/click`);
+      expect((anon2.data as { counted: boolean }).counted).toBe(false);
+      expect((anon2.data as { click_count: number }).click_count).toBe(1);
+
+      const userClick = await inject("POST", `/home/promo/${id}/click`, undefined, token, spaceId);
+      expect((userClick.data as { counted: boolean }).counted).toBe(true);
+      expect((userClick.data as { click_count: number }).click_count).toBe(2);
+    });
+
+    it("非法 id → 400101；不存在的运营位 → 400102", async () => {
+      const bad = await inject("POST", "/home/promo/not-a-number/view");
+      expect(bad.code).toBe(400101);
+      const missing = await inject("POST", "/home/promo/999999999999/view");
+      expect(missing.code).toBe(400102);
+    });
   });
 });

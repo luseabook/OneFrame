@@ -5,6 +5,19 @@ import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
 
 /**
+ * 评分口径的版本号（随响应返回）。
+ *
+ * ## 为什么要有一个"口径版本"
+ * 竞品只有路由、没有字段级证据（见下方注释），所以我方的五维权重是**自建口径**。
+ * 一旦后续拿到竞品证据（或产品调整权重），同一集的分会从 72 变成 65——
+ * 如果响应里不标明"按哪一版口径算的"，运营/客服看到的分数变化就无法解释，
+ * 也无法做"换口径前后"的对比分析。因此把版本随结果返回，并按需递增：
+ * - `2026-10-27.1`：首版五维权重（30/25/25/10/10）+ 逐镜判定口径（见下表）；
+ * - 以后改权重/增删维度的同时**必须**改这个常量，并同步 docs/02-architecture/api-spec.md。
+ */
+export const QUALITY_RUBRIC_VERSION = "2026-10-27.1";
+
+/**
  * 分集质量检查（`POST /projects/{id}/episodes/{eid}/quality-check`）——**只读**。
  *
  * 竞品证据：`rea-reelmate/routes.txt:445` 存在 `/web/v1/df/episode/:ep_id/quality-check`，
@@ -374,6 +387,8 @@ export class QualityCheckService {
       project_id: String(project.id),
       ep_id: String(episode.id),
       ep_no: episode.epNo,
+      /** 按哪一版评分口径算的（换口径时前端/运营要能对比历史分数） */
+      rubric_version: QUALITY_RUBRIC_VERSION,
       status,
       score,
       blocking: hasError,

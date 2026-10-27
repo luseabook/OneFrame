@@ -68,7 +68,9 @@ describe("--help 覆盖", () => {
     expect(skeleton).toBeDefined();
     const skeletonHelp = commandHelp(skeleton!);
     expect(skeletonHelp).toContain("骨架");
-    expect(skeletonHelp).toContain("novel 批次");
+    // 骨架命令的帮助必须能追到**竞品证据行**（这比断言某个批次标签更有意义：
+    // 批次标签会随排期改写，而证据行号是"为什么这条命令存在/为什么还没实现"的唯一依据）。
+    expect(skeletonHelp).toContain("commands/novel.md:59");
   });
 
   it("`--help` 三种层级都能跑通且退出 0", async () => {

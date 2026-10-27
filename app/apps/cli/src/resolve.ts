@@ -15,7 +15,7 @@ import type { CommandSpec } from "./registry";
  */
 
 /** 占位符 → 兜底 flag（`--workspace` 即 `--project_id`，对齐竞品 `--workspace SP_ID`） */
-const PLACEHOLDER_FLAGS: Record<string, string> = {
+export const PLACEHOLDER_FLAGS: Record<string, string> = {
   project_id: "workspace",
   canvas_id: "canvas",
   episode_id: "episode",
@@ -131,9 +131,14 @@ export function buildQuery(
   return query;
 }
 
-/** 写命令请求体：`--set`/`--update` + 位置参数映射 + flag 映射 */
+/** 写命令请求体：`--set`/`--update` + 位置参数映射 + flag 映射 + 固定常量 */
 export function buildBody(spec: CommandSpec, ctx: ResolveContext): unknown {
-  const body: Record<string, unknown> = { ...ctx.parsed.sets, ...ctx.parsed.updates };
+  // 固定常量放最前，`--set` 显式传值可覆盖（confirm 默认 status=2，但仍允许 `--set status=1`）
+  const body: Record<string, unknown> = {
+    ...(spec.fixedBody ?? {}),
+    ...ctx.parsed.sets,
+    ...ctx.parsed.updates,
+  };
 
   for (const param of spec.bodyParams ?? []) {
     if (param.as === "array") {

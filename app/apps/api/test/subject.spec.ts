@@ -301,4 +301,64 @@ describe("subjects e2e", () => {
     const list = await inject("GET", "/subjects");
     expect(list.data.list.some((item: { id: string }) => item.id === createdSubjectId)).toBe(false);
   });
+
+  it("starred & template_key: patch, filter, and starred-first ordering", async () => {
+    const templateKey = `ip:${stamp}`;
+    const plain = await inject("POST", "/subjects", {
+      name: `${stamp}-普通主体`,
+      kind: "scene",
+    });
+    expect(plain.code).toBe(0);
+    const starred = await inject("POST", "/subjects", {
+      name: `${stamp}-星标主体`,
+      kind: "scene",
+      template_key: templateKey,
+    });
+    expect(starred.code).toBe(0);
+    expect(starred.data.is_starred).toBe(false);
+    expect(starred.data.template_key).toBe(templateKey);
+
+    // 置顶：PATCH is_starred
+    const starredPatch = await inject("PATCH", `/subjects/${starred.data.id}`, { is_starred: true });
+    expect(starredPatch.code).toBe(0);
+    expect(starredPatch.data.is_starred).toBe(true);
+
+    // 默认列表：星标优先（同组内仍按创建时间倒序）
+    const list = await inject("GET", `/subjects?q=${encodeURIComponent(stamp)}`);
+    expect(list.code).toBe(0);
+    const ids = (list.data.list as Array<{ id: string }>).map((item) => item.id);
+    expect(ids[0]).toBe(starred.data.id);
+
+    // starred=1 只返回星标
+    const onlyStarred = await inject("GET", `/subjects?starred=1&q=${encodeURIComponent(stamp)}`);
+    expect(onlyStarred.code).toBe(0);
+    expect((onlyStarred.data.list as Array<{ id: string }>).map((item) => item.id)).toEqual([
+      starred.data.id,
+    ]);
+
+    // template_key 筛选（IP/模板归类）
+    const byTemplate = await inject(
+      "GET",
+      `/subjects?template_key=${encodeURIComponent(templateKey)}&q=${encodeURIComponent(stamp)}`,
+    );
+    expect(byTemplate.code).toBe(0);
+    expect((byTemplate.data.list as Array<{ id: string }>).map((item) => item.id)).toEqual([
+      starred.data.id,
+    ]);
+
+    // 取消星标 + 改模板键
+    const unstar = await inject("PATCH", `/subjects/${starred.data.id}`, {
+      is_starred: false,
+      template_key: `${templateKey}:v2`,
+    });
+    expect(unstar.code).toBe(0);
+    expect(unstar.data.is_starred).toBe(false);
+    expect(unstar.data.template_key).toBe(`${templateKey}:v2`);
+    const afterUnstar = await inject("GET", `/subjects?starred=1&q=${encodeURIComponent(stamp)}`);
+    expect(afterUnstar.data.list).toEqual([]);
+
+    // 清理
+    expect((await inject("DELETE", `/subjects/${plain.data.id}`)).code).toBe(0);
+    expect((await inject("DELETE", `/subjects/${starred.data.id}`)).code).toBe(0);
+  });
 });

@@ -193,31 +193,27 @@ describe("asset-match + consistency gates e2e", () => {
     await pool.end().catch(() => {});
   });
 
-  it("match-result before matching: projects the shot bindings into 3 arrays with status counts", async () => {
+  it("match-result is empty before matching: snapshot is the only source (no projection)", async () => {
     const res = await matchResult();
     expect(res.code).toBe(0);
     expect(res.data.ep_id).toBe(episodeId);
-    // 角色在生成分镜时就已绑定（但还没定妆图）→ 一定出现在清单里且算「未定稿」
-    expect(res.data.characters.length).toBeGreaterThan(0);
-    expect(res.data.counts.characters.total).toBe(res.data.characters.length);
-    expect(res.data.counts.characters.unfinalized).toBeGreaterThan(0);
-    // 绑定关系可回溯：至少一个角色被 4 个分镜引用
-    expect(
-      (res.data.characters as Array<{ bound_shot_count: number }>).some((row) => row.bound_shot_count > 0),
-    ).toBe(true);
-    // 三项计数之和必须等于总数（判据 §2：三态统计与实际一致）
-    for (const key of ["characters", "scenes", "props"] as const) {
-      const c = res.data.counts[key];
-      expect(c.matched + c.unfinalized + c.missing).toBe(c.total);
-    }
-    expect([0, 1, 2, 3]).toContain(res.data.status);
-    // 三选项，默认第三项「保持现状」
+    // task-18：`match-result` 改为**只读 `episode_resources` 快照**。
+    // 未跑过匹配的本集快照为空 → 三类清单都为空、总状态 0（上轮的"按绑定投影"已按 Lead 要求移除，
+    // 因为投影无法表达"属于本集但没有镜头提到"的资源，也把占位项绑进了分镜）。
+    expect(res.data.snapshot.populated).toBe(false);
+    expect(res.data.characters).toEqual([]);
+    expect(res.data.scenes).toEqual([]);
+    expect(res.data.props).toEqual([]);
+    expect(res.data.status).toBe(0);
+    expect(res.data.status_name).toBe("none");
+    expect(res.data.supplement.target_count).toBe(0);
+    // 三选项仍在，默认第三项「保持现状」
     const options = res.data.supplement.options as Array<{ value: string; default: boolean }>;
     expect(options.map((option) => option.value)).toEqual(["smart-supplement", "rematch", "keep"]);
     expect(options.filter((option) => option.default).map((option) => option.value)).toEqual(["keep"]);
   });
 
-  it("match-resources dry-run creates nothing, real run creates placeholders for missing assets", async () => {
+  it("match-resources writes the episode snapshot without creating placeholder assets", async () => {
     const before = (await inject("GET", `/projects/${projectId}/assets`)).data.list.length as number;
     const dry = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/match-resources`, {
       dry_run: true,
@@ -225,25 +221,36 @@ describe("asset-match + consistency gates e2e", () => {
     expect(dry.code).toBe(0);
     expect(dry.data.dry_run).toBe(true);
     expect(dry.data.candidates.length).toBeGreaterThan(0);
-    expect(dry.data.created_placeholders).toEqual([]);
+    expect((await matchResult()).data.snapshot.populated).toBe(false);
     expect((await inject("GET", `/projects/${projectId}/assets`)).data.list.length).toBe(before);
 
     const real = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/match-resources`, {});
     expect(real.code).toBe(0);
-    expect(real.data.created_placeholders.length).toBeGreaterThan(0);
-    const after = (await inject("GET", `/projects/${projectId}/assets`)).data.list.length as number;
-    expect(after).toBeGreaterThan(before);
+    expect(real.data.created_placeholders).toEqual([]);
+    // 本轮不再预建占位资产（竞品是补充时才 resource add）→ 资产数不变
+    expect((await inject("GET", `/projects/${projectId}/assets`)).data.list.length).toBe(before);
 
-    // 占位资产没有提示词 → 匹配结果里出现「缺失(3)」
+    // 快照落地：三类合计 > 0，且存在无资产的"缺失"条目
     const result = await matchResult();
+    expect(result.data.snapshot.populated).toBe(true);
+    expect(result.data.snapshot.row_count).toBeGreaterThan(0);
     expect(result.data.status).toBe(3);
-    expect(result.data.counts.characters.missing + result.data.counts.scenes.missing + result.data.counts.props.missing)
-      .toBeGreaterThan(0);
+    expect(result.data.totals.missing).toBeGreaterThan(0);
     expect(result.data.supplement.target_count).toBeGreaterThan(0);
-    // 幂等：再跑一次不重复建占位资产
+    const missing = [
+      ...(result.data.characters as Array<{ status: number; resource_id: string | null; prompt: string | null }>),
+      ...(result.data.scenes as Array<{ status: number; resource_id: string | null; prompt: string | null }>),
+      ...(result.data.props as Array<{ status: number; resource_id: string | null; prompt: string | null }>),
+    ].filter((entry) => entry.status === 3);
+    expect(missing.length).toBeGreaterThan(0);
+    // 缺失项只有 name（resource_id / prompt 都是空）——这是"补充时才建资源"的口径
+    expect(missing.every((entry) => entry.resource_id === null && entry.prompt === null)).toBe(true);
+
+    // 幂等：重跑匹配后快照行数稳定（按 (episode,kind,name) 唯一键重写）
+    const rowCount = result.data.snapshot.row_count as number;
     const again = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/match-resources`, {});
     expect(again.code).toBe(0);
-    expect(again.data.created_placeholders).toEqual([]);
+    expect((await matchResult()).data.snapshot.row_count).toBe(rowCount);
   });
 
   it("supplement-missing: dry-run writes nothing, real run completes prompts then returns image targets", async () => {
@@ -257,7 +264,7 @@ describe("asset-match + consistency gates e2e", () => {
 
     const real = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/supplement-missing`, {});
     expect(real.code).toBe(0);
-    // 提示词已补全的目标要落到 asset.prompt（否则生图仍无提示词）
+    // ① 提示词补全 + ③ 查重 + ④ resource add：缺失项要么复用已定稿资产、要么建了草稿资产
     const filled = real.data.pending_image as Array<{ resource_id: string; prompt: string }>;
     expect(filled.length).toBeGreaterThan(0);
     for (const item of filled) {
@@ -267,6 +274,9 @@ describe("asset-match + consistency gates e2e", () => {
         .where(eq(projectAssets.id, BigInt(item.resource_id)));
       expect(row?.prompt).toBe(item.prompt);
       expect(item.prompt.length).toBeGreaterThan(0);
+      // prompt_status 落 2（已完备）：7 条件里"prompt 为空/生成中/被拦截"都要可判
+      expect(row?.promptStatus).toBe(2);
+      expect(row?.status).toBe(1); // 新资产是草稿态，待生图+定稿
     }
     // 生图不在本端点扣费：返回 next_actions 指向既有生图端点
     expect(String(real.data.next_actions[0].path)).toContain("/generate-image");
@@ -274,6 +284,80 @@ describe("asset-match + consistency gates e2e", () => {
     const after = await matchResult();
     expect(after.data.supplement.target_count).toBe(0);
     expect(after.data.status).toBe(1);
+    // 快照条目的 project_asset_id 已回填（不留悬空条目）
+    const allEntries = [
+      ...(after.data.characters as Array<{ resource_id: string | null }>),
+      ...(after.data.scenes as Array<{ resource_id: string | null }>),
+      ...(after.data.props as Array<{ resource_id: string | null }>),
+    ];
+    expect(allEntries.every((entry) => entry.resource_id !== null)).toBe(true);
+  });
+
+  it("supplement-missing skips prompts that are blocked (prompt_status=3) or generating (1)", async () => {
+    // 造两个"缺失"目标：一个被内容安全拦截、一个提示词生成中
+    const blocked = await inject("POST", `/projects/${projectId}/assets`, {
+      kind: "prop",
+      name: `被拦截道具-${stamp}`,
+    });
+    expect(blocked.code).toBe(0);
+    const generating = await inject("POST", `/projects/${projectId}/assets`, {
+      kind: "prop",
+      name: `生成中道具-${stamp}`,
+    });
+    expect(generating.code).toBe(0);
+    await db
+      .update(projectAssets)
+      .set({ promptStatus: 3 })
+      .where(eq(projectAssets.id, BigInt(blocked.data.id)));
+    await db
+      .update(projectAssets)
+      .set({ promptStatus: 1 })
+      .where(eq(projectAssets.id, BigInt(generating.data.id)));
+
+    // 用完整快照把它们放进本集清单（prompt 为空 → status=3）
+    const saved = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/save-resource-matches`, {
+      resources: {
+        characters: [],
+        scenes: [],
+        props: [{ resource_id: blocked.data.id }, { resource_id: generating.data.id }],
+      },
+    });
+    expect(saved.code).toBe(0);
+
+    const result = await matchResult();
+    const props = result.data.props as Array<{
+      resource_id: string;
+      status: number;
+      prompt_blocked: boolean;
+      prompt_generating: boolean;
+      supplementable: boolean;
+    }>;
+    const blockedEntry = props.find((entry) => entry.resource_id === blocked.data.id);
+    const generatingEntry = props.find((entry) => entry.resource_id === generating.data.id);
+    // 7 条件第 6/7 条：生成中/被拦截都不可补（本轮用 prompt_status 真正实现的部分）
+    expect(blockedEntry?.status).toBe(3);
+    expect(blockedEntry?.prompt_blocked).toBe(true);
+    expect(blockedEntry?.supplementable).toBe(false);
+    expect(generatingEntry?.prompt_generating).toBe(true);
+    expect(generatingEntry?.supplementable).toBe(false);
+    expect(result.data.supplement.target_count).toBe(0);
+
+    // 真调补充：两个目标都不该被补（也不会改动它们的 prompt_status）
+    const supplement = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/supplement-missing`, {});
+    expect(supplement.code).toBe(0);
+    expect(supplement.data.targets).toEqual([]);
+    const [blockedRow] = await db
+      .select()
+      .from(projectAssets)
+      .where(eq(projectAssets.id, BigInt(blocked.data.id)));
+    const [generatingRow] = await db
+      .select()
+      .from(projectAssets)
+      .where(eq(projectAssets.id, BigInt(generating.data.id)));
+    expect(blockedRow?.promptStatus).toBe(3);
+    expect(blockedRow?.prompt).toBeNull();
+    expect(generatingRow?.promptStatus).toBe(1);
+    expect(generatingRow?.prompt).toBeNull();
   });
 
   it("save-resource-matches rejects partial/invalid snapshots with 400101 and leaves data untouched", async () => {
@@ -338,7 +422,20 @@ describe("asset-match + consistency gates e2e", () => {
     const props = (await matchResult()).data.props as unknown[];
     expect(props).toHaveLength(0);
 
-    // 重复提交同一快照 → 幂等（绑定数不变、统计不变）
+    // 快照表（episode_resources）才是权威：按类整类重写，空类别 0 行
+    const snapshotRows = (await db.execute(sql`
+      select kind, count(*)::int as count from episode_resources
+      where episode_id = ${BigInt(episodeId)}
+      group by kind
+    `)) as unknown as { rows?: Array<{ kind: number; count: number }> };
+    const kindCounts = new Map(
+      (snapshotRows.rows ?? []).map((row) => [Number(row.kind), Number(row.count)]),
+    );
+    expect(kindCounts.get(1)).toBe(1); // characters
+    expect(kindCounts.get(2)).toBe(1); // scenes
+    expect(kindCounts.get(3) ?? 0).toBe(0); // props 显式 [] → 这一类一条不留
+
+    // 重复提交同一快照 → 幂等（绑定数不变、统计不变、行数不变）
     const bindingsAfterFirst = await bindingCount();
     const again = await inject(
       "POST",
@@ -354,9 +451,13 @@ describe("asset-match + consistency gates e2e", () => {
     expect(again.code).toBe(0);
     expect(await bindingCount()).toBe(bindingsAfterFirst);
     expect(again.data.counts).toEqual(saved.data.counts);
+    const afterAgain = (await db.execute(sql`
+      select count(*)::int as count from episode_resources where episode_id = ${BigInt(episodeId)}
+    `)) as unknown as { rows?: Array<{ count: number }> };
+    expect(Number(afterAgain.rows?.[0]?.count ?? 0)).toBe(2);
   });
 
-  it("match-reset is destructive: dry-run only previews, real run clears the episode bindings", async () => {
+  it("match-reset is destructive: dry-run only previews, real run clears bindings + snapshot", async () => {
     const filled = await bindingCount();
     expect(filled).toBeGreaterThan(0);
     const dry = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/match-reset`, {
@@ -365,12 +466,19 @@ describe("asset-match + consistency gates e2e", () => {
     expect(dry.code).toBe(0);
     expect(dry.data.dry_run).toBe(true);
     expect(dry.data.would_remove).toBe(filled);
+    expect(dry.data.would_remove_resources).toBe(2);
     expect(await bindingCount()).toBe(filled); // dry-run 没动数据
 
     const real = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/match-reset`, {});
     expect(real.code).toBe(0);
     expect(real.data.removed).toBe(filled);
+    // 快照也一起清（这是本轮把"投影"换成快照后的破坏性口径：重置 = 回到未匹配）
+    expect(real.data.removed_resources).toBeGreaterThan(0);
     expect(await bindingCount()).toBe(0);
+    const afterReset = await matchResult();
+    expect(afterReset.data.snapshot.populated).toBe(false);
+    expect(afterReset.data.status).toBe(0);
+    expect(afterReset.data.totals.total).toBe(0);
   });
 
   it("gate 1 (finalize): generation returns 400105 per shot when no finalized asset is bound", async () => {
@@ -431,6 +539,62 @@ describe("asset-match + consistency gates e2e", () => {
     expect(input.images).toEqual([sceneRef]);
     expect(input.image_subjects?.[0]?.marker).toBe("[[@img1]]");
     expect(input.image_subjects?.[0]?.resource_id).toBe(sceneAssetId);
+  });
+
+  it("prompt_inject_mode=replace injects [[@imgN]] into prompt; default append keeps it untouched", async () => {
+    const sceneName = `匹配场景-${stamp}`;
+    const promptWithName = `电影感特写：${sceneName}，9:16 竖屏`;
+    for (const shotId of [shotIds[2]!, shotIds[3]!]) {
+      expect(
+        (
+          await inject("PATCH", `/projects/${projectId}/episodes/${episodeId}/storyboards/${shotId}`, {
+            video_prompt: promptWithName,
+          })
+        ).code,
+      ).toBe(0);
+      expect(
+        (
+          await inject("PUT", `/projects/${projectId}/episodes/${episodeId}/storyboards/${shotId}/assets`, {
+            asset_ids: [sceneAssetId],
+          })
+        ).code,
+      ).toBe(0);
+    }
+
+    // 默认 append：原 prompt 不改写，标记版只作为附加字段（上轮与既有 spec 的契约）
+    const appended = await generate(shotIds[2]!);
+    expect(appended.code).toBe(0);
+    const appendItem = appended.data.items.find((row: { shot_id: string }) => row.shot_id === shotIds[2]);
+    expect(appendItem.submitted).toBe(true);
+    const [appendTask] = await db.select().from(tasks).where(eq(tasks.id, BigInt(appendItem.task_id)));
+    const appendInput = appendTask!.input as {
+      prompt?: string;
+      prompt_with_images?: string;
+      prompt_inject_mode?: string;
+    };
+    expect(appendInput.prompt).toBe(promptWithName);
+    expect(appendInput.prompt_with_images).toContain("[[@img1]]");
+    expect(appendInput.prompt_inject_mode).toBe("append");
+
+    // replace：把「名称 → [[@imgN]]」改写后的 prompt 直接当 video_prompt 注入
+    // （对齐 storyboard.md:308-310；需产品确认，默认不启用）
+    const replaced = await generate(shotIds[3]!, { prompt_inject_mode: "replace" });
+    expect(replaced.code).toBe(0);
+    const replaceItem = replaced.data.items.find((row: { shot_id: string }) => row.shot_id === shotIds[3]);
+    expect(replaceItem.submitted).toBe(true);
+    const [replaceTask] = await db.select().from(tasks).where(eq(tasks.id, BigInt(replaceItem.task_id)));
+    const replaceInput = replaceTask!.input as {
+      prompt?: string;
+      prompt_with_images?: string;
+      prompt_inject_mode?: string;
+    };
+    expect(replaceInput.prompt_inject_mode).toBe("replace");
+    expect(replaceInput.prompt).toBe(replaceInput.prompt_with_images);
+    expect(replaceInput.prompt).toContain("[[@img1]]");
+    expect(replaceInput.prompt).not.toContain(sceneName);
+
+    // 非法枚举值 → 400101
+    expect((await generate(shotIds[3]!, { prompt_inject_mode: "prepend" })).code).toBe(400101);
   });
 
   it("subject gate: a reviewing subject linked to a bound asset blocks generation (400105, retryable)", async () => {

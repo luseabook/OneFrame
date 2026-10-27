@@ -27,6 +27,7 @@ describe("share batch-download e2e", () => {
   let app: NestFastifyApplication;
   let token = "";
   let spaceId = "";
+  let userId = "";
   let shareTaskId = "";
   let siblingTaskId = "";
   let emptyTaskId = "";
@@ -108,7 +109,7 @@ describe("share batch-download e2e", () => {
       | undefined;
     token = loginData?.access_token ?? "";
     spaceId = String(loginData?.space_id ?? "");
-    const userId = String(loginData?.user?.id ?? "");
+    userId = String(loginData?.user?.id ?? "");
 
     const keyA = seedStoredFile("a.png");
     const keyB = seedStoredFile("b.png");
@@ -209,5 +210,25 @@ describe("share batch-download e2e", () => {
     const data = res.data as { results: unknown[] };
     expect(Array.isArray(data.results)).toBe(true);
     expect(data.results).toHaveLength(2);
+  });
+
+  it("产物超过 100 个 → 400101（同步打包有上限，不再无限吃内存）", async () => {
+    /**
+     * 为什么断言在 101 个产物的**任务**上而不是"很多任务"：
+     * 该端点只打包 share 指向的那一个任务，所以上限必须按 `results.length` 判。
+     * 用一个不存在的存储 key 列表即可——上限检查发生在读存储之前，
+     * 读不到文件不是本用例要验的东西（那是"单个产物失败不阻断整包"的既有行为）。
+     */
+    const manyResults = Array.from({ length: 101 }, (_, index) => ({ uri: `u/test/missing/many-${index}.png` }));
+    const bigTaskId = await seedTask(userId, manyResults);
+    const share = await inject("POST", `/tasks/${bigTaskId}/share`, { expires_in_days: 7 }, token);
+    expect(share.code).toBe(0);
+    const token2 = (share.data as { token: string }).token;
+
+    const res = await inject("POST", `/share/${token2}/batch-download`);
+    expect(res.code).toBe(400101);
+    expect(String(res.msg)).toContain("too many files");
+    // 明确指路：大批量走登录态的任务批量下载（有鉴权/配额/审计）
+    expect(String(res.msg)).toContain("batch-download");
   });
 });

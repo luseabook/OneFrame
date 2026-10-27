@@ -1,14 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import cookie from "@fastify/cookie";
 import { sql } from "drizzle-orm";
-import { models, timelineExports, tasks } from "@app/db";
+import { models, timelineExports, timelinePublications, tasks } from "@app/db";
 import { newId } from "@app/shared";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 import { AppModule } from "../src/app.module";
 import { db, pool } from "../src/db/database";
+import { RedisService } from "../src/redis/redis.service";
 
 /**
  * ReelFlow 切片发布 + 片段资产绑定契约测试。
@@ -420,5 +422,226 @@ describe("reelflow timeline publish + clip assets e2e", () => {
       ).code,
     ).toBe(400102);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // 公开播放页（/watch/:token）—— 本批新增
+  // ────────────────────────────────────────────────────────────────────
+
+  /** 真的不带任何凭证的请求（`inject` 会带 `Bearer `，公开端点必须用这个） */
+  const publicInject = async (method: "GET" | "POST", url: string, payload?: unknown): Promise<Envelope> => {
+    const res = await app.inject({
+      method,
+      url: `/v1${url}`,
+      payload: payload as Record<string, unknown> | undefined,
+      headers: {},
+    });
+    return res.json() as Envelope;
+  };
+
+  /** 发布一条切片并轮询到终态，返回它的 share_token */
+  const publishAndWaitReady = async (title: string): Promise<{ publicationId: string; shareToken: string }> => {
+    const published = await inject("POST", `/projects/${projectId}/episodes/${episodeId}/timeline/publish`, {
+      title,
+      slice: { start_ms: 0, end_ms: 4000 },
+    });
+    expect(published.code).toBe(0);
+    const publicationId = published.data.publication_id as string;
+    let shareToken = "";
+    for (let i = 0; i < 60; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const list = await inject("GET", `/projects/${projectId}/episodes/${episodeId}/timeline/publications`);
+      const item = (list.data.list as Array<{ publication_id: string; status: number; share_token: string | null }>).find(
+        (row) => row.publication_id === publicationId,
+      );
+      if (item?.status === 3 && item.share_token) {
+        shareToken = item.share_token;
+        break;
+      }
+    }
+    expect(shareToken).toMatch(/^[0-9a-f]{32}$/);
+    return { publicationId, shareToken };
+  };
+
+  it("public watch: 可播放态返回播放信息（现签 url + 时长 + 集号），且不含 space/user/积分等内部字段", async () => {
+    const { shareToken } = await publishAndWaitReady(`公开播放-${stamp}`);
+
+    // 关键：不带 Authorization（未登录的外部访客也能看），只凭 token
+    const res = await publicInject("GET", `/watch/${shareToken}`);
+    expect(res.code).toBe(0);
+    const data = res.data as Record<string, unknown>;
+    expect(data.status).toBe(3);
+    expect(String(data.title)).toContain("公开播放");
+    expect(Number(data.episode_no)).toBeGreaterThanOrEqual(1);
+    expect(String(data.file_url)).toContain("files/local"); // 现签 1h 下载/播放地址
+    expect(Number(data.duration_ms)).toBe(4000);
+    expect(data.published_at).toBeTruthy();
+    expect(Number(data.view_count)).toBeGreaterThanOrEqual(0);
+
+    // 越权不可见：响应里不得出现内部标识
+    const forbidden = [
+      "space_id",
+      "user_id",
+      "project_id",
+      "episode_id",
+      "publication_id",
+      "share_token",
+      "created_by",
+      "slice",
+      "error",
+    ];
+    for (const key of forbidden) {
+      expect(data).not.toHaveProperty(key);
+    }
+    // 键集合收敛（多一个字段都可能泄露内部信息）
+    expect(Object.keys(data).sort()).toEqual(
+      ["duration_ms", "episode_no", "file_url", "published_at", "status", "title", "view_count"].sort(),
+    );
+  });
+
+  it("public watch: 转码中(1/2)/失败(4) 分别给 400105+transcoding / transcode_failed；不返回播放地址", async () => {
+    const makeRow = async (status: number) => {
+      // share token 必须是 32 位 hex（端点先做形状校验，畸形 token 直接 not_found）
+      const token = randomBytes(16).toString("hex");
+      await db.insert(timelinePublications).values({
+        id: BigInt(newId()),
+        spaceId: BigInt(spaceId),
+        projectId: BigInt(projectId),
+        episodeId: BigInt(episodeId),
+        title: `状态-${status}-${stamp}`,
+        slice: { unit: "ms", start_ms: 0, end_ms: 1000, duration_ms: 1000 },
+        status,
+        shareToken: token,
+      });
+      return token;
+    };
+    const queued = await makeRow(1);
+    const transcoding = await makeRow(2);
+    const failed = await makeRow(4);
+
+    const r1 = await publicInject("GET", `/watch/${queued}`);
+    expect(r1.code).toBe(400105);
+    expect(r1.msg).toContain("transcoding");
+    expect(r1.data).toBeNull();
+
+    const r2 = await publicInject("GET", `/watch/${transcoding}`);
+    expect(r2.code).toBe(400105);
+    expect(r2.msg).toContain("transcoding");
+
+    const r4 = await publicInject("GET", `/watch/${failed}`);
+    expect(r4.code).toBe(400105);
+    expect(r4.msg).toContain("transcode_failed");
+  });
+
+  it("public watch: 已下架 → 400102+off_shelf；不存在/非法 token → 400102+not_found（不泄露存在性）", async () => {
+    // 造一条"曾经可播放、现已下架"的记录（先真发布→再下架，走真实状态机）
+    const { publicationId, shareToken } = await publishAndWaitReady(`待下架-${stamp}`);
+    expect((await publicInject("GET", `/watch/${shareToken}`)).code).toBe(0);
+    const del = await inject(
+      "DELETE",
+      `/projects/${projectId}/episodes/${episodeId}/publications/${publicationId}`,
+    );
+    expect(del.code).toBe(0);
+
+    const offShelf = await publicInject("GET", `/watch/${shareToken}`);
+    expect(offShelf.code).toBe(400102);
+    expect(offShelf.msg).toContain("off_shelf");
+    expect(offShelf.data).toBeNull();
+
+    // 随机 32 位 hex（形状合法但不存在）与畸形 token 都是 not_found
+    const missing = await publicInject("GET", `/watch/${"0123456789abcdef".repeat(2)}`);
+    expect(missing.code).toBe(400102);
+    expect(missing.msg).toContain("not_found");
+
+    const malformed = await publicInject("GET", "/watch/not-a-real-token");
+    expect(malformed.code).toBe(400102);
+    expect(malformed.msg).toContain("not_found");
+
+    // 计数端点对同一 token 也应是 off_shelf（下架后不能再刷量）
+    const viewOffShelf = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect(viewOffShelf.code).toBe(400102);
+    expect(viewOffShelf.msg).toContain("off_shelf");
+  });
+
+  it("view 计数：同 IP 5 分钟内只算一次（counted 诚实），播放量单调不减", async () => {
+    const { shareToken } = await publishAndWaitReady(`计数-${stamp}`);
+
+    const first = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect(first.code).toBe(0);
+    const firstData = first.data as { counted: boolean; view_count: number };
+    expect(firstData.counted).toBe(true);
+    expect(firstData.view_count).toBeGreaterThanOrEqual(1);
+
+    // 同一 IP 立刻再点：不重复计数，但返回当前播放量（幂等语义）
+    const second = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect(second.code).toBe(0);
+    const secondData = second.data as { counted: boolean; view_count: number };
+    expect(secondData.counted).toBe(false);
+    expect(secondData.view_count).toBe(firstData.view_count);
+
+    // GET 里也能看到这个数（页面首屏就能显示播放量）
+    const watch = await publicInject("GET", `/watch/${shareToken}`);
+    expect((watch.data as { view_count: number }).view_count).toBe(firstData.view_count);
+  });
+
+  it("view 计数持久化：落 view_count 列；清空 Redis（模拟重启）后仍可读，同 IP 第二次不再 +1", async () => {
+    const { shareToken } = await publishAndWaitReady(`持久计数-${stamp}`);
+    const idRows = (await db.execute(
+      sql`select id::text as id from timeline_publications where share_token = ${shareToken} limit 1`,
+    )) as { rows?: Array<{ id: string }> };
+    const publicationId = idRows.rows?.[0]?.id ?? "";
+    expect(publicationId).not.toBe("");
+
+    const columnValue = async (): Promise<number> => {
+      const rows = (await db.execute(
+        sql`select view_count from timeline_publications where id = ${BigInt(publicationId)}`,
+      )) as { rows?: Array<{ view_count: number }> };
+      return Number(rows.rows?.[0]?.view_count ?? -1);
+    };
+
+    // 新发布的行从 0 开始；GET 读的是列（不是 Redis 计数）
+    const baseline = await publicInject("GET", `/watch/${shareToken}`);
+    expect((baseline.data as { view_count: number }).view_count).toBe(0);
+
+    const first = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect((first.data as { counted: boolean }).counted).toBe(true);
+    expect((first.data as { view_count: number }).view_count).toBe(1);
+    expect(await columnValue()).toBe(1); // 列里真的写了（双写的"落库"那一半）
+
+    // 同 IP 5 分钟内第二次：不重复计数，列值不变
+    const second = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect((second.data as { counted: boolean }).counted).toBe(false);
+    expect((second.data as { view_count: number }).view_count).toBe(1);
+    expect(await columnValue()).toBe(1);
+
+    // 清空 Redis（模拟进程/缓存重启）：去重闸丢失，但**历史播放量不能丢**
+    const redis = app.get(RedisService);
+    const dedupeKeys = await redis.client.keys(`watch:view:${publicationId}:*`);
+    if (dedupeKeys.length > 0) await redis.client.del(...dedupeKeys);
+    await redis.client.del(`watch:views:${publicationId}`); // 旧实现旁路键，存在也清掉
+    const afterFlush = await publicInject("GET", `/watch/${shareToken}`);
+    expect((afterFlush.data as { view_count: number }).view_count).toBe(1);
+
+    // 去重闸被清空后再点一次：重新计数，并从**持久值**继续 +1（不是从 0 重来）
+    const third = await publicInject("POST", `/watch/${shareToken}/view`);
+    expect((third.data as { counted: boolean }).counted).toBe(true);
+    expect((third.data as { view_count: number }).view_count).toBe(2);
+    expect(await columnValue()).toBe(2);
+  });
+
+  it("watch 只需 token：跨 space 的另一账号拿同一链接也能看（能力式授权），但内部端点仍 400102", async () => {
+    const { shareToken } = await publishAndWaitReady(`跨空间-${stamp}`);
+
+    // 另一个 space 的登录用户访问公开播放：允许（链接即凭据），且回复里仍无内部字段
+    const asOther = await raw(tokenOther, "GET", `/watch/${shareToken}`);
+    expect(asOther.code).toBe(0);
+    expect(asOther.data).not.toHaveProperty("space_id");
+    expect(asOther.data).not.toHaveProperty("project_id");
+
+    // 但内部发布端点对该账号依旧不可见（越权不泄露存在性）
+    expect(
+      (await raw(tokenOther, "GET", `/projects/${projectId}/episodes/${episodeId}/timeline/publications`)).code,
+    ).toBe(400102);
+  });
 });
+
 

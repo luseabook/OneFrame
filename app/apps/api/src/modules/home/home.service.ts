@@ -1,9 +1,12 @@
-import { Injectable } from "@nestjs/common";
-import { and, asc, eq, gt, isNull, lte, or } from "drizzle-orm";
-import { abExperiments, abHits, homeConfigs, taskEvents, taskShares, tasks } from "@app/db";
+import { Inject, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { and, asc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
+import { abExperiments, abHits, homeConfigs, promoSlots, taskEvents, taskShares, tasks } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { env } from "../../config/env";
+import { RedisService } from "../../redis/redis.service";
+import { StorageService } from "../../storage/storage.service";
 
 /**
  * 首页配置驱动 / 未读长轮询 / AB 实验位（模块 #1 收尾）。
@@ -32,6 +35,8 @@ const MAX_WAIT_MS = 25_000;
 const POLL_INTERVAL_MS = 800;
 /** 单次返回上限：一次推太多对首页红点没有意义，反而拖慢首字节 */
 const MAX_ITEMS = 50;
+/** 运营位打点去重窗口（5 分钟）：同访客同事件只计一次，避免曝光次数被渲染次数污染 */
+const PROMO_DEDUPE_TTL_S = 300;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -44,6 +49,26 @@ export interface HomeSection {
   sort: number;
 }
 
+/**
+ * 首页运营位（banner）——来自 `promo_slots`（运营后台 `/ops/admin/promo-slots` 配置）。
+ *
+ * 为什么要放进 `/home/config` 而不是让首页单开一个读接口：首页首屏是一次性渲染的
+ * （板块显隐/顺序也在这里），运营位再单独拉一次就是首屏第二个 RTT；
+ * 且 banner 的显隐本身受 `sections[].visible` 控制，两者必须同一份快照读出来
+ * （否则会出现"板块隐藏了但运营位还在请求"的浪费请求）。
+ */
+export interface HomePromo {
+  id: string;
+  slot: string;
+  title: string;
+  /** 已签名可直接放进 `<img src>`（storage key 现签；外部 URL 原样返回） */
+  image_url: string | null;
+  link_uri: string | null;
+  sort: number;
+  view_count: number;
+  click_count: number;
+}
+
 export interface HomeConfigView {
   version: number | null;
   scope: "global" | "space" | "default";
@@ -52,6 +77,8 @@ export interface HomeConfigView {
   ab_slots: Array<{ key: string; experiment: string }>;
   unread: { poll_timeout_ms: number; poll_interval_ms: number };
   updated_at: string | null;
+  /** 首页 banner 运营位（无配置时为空数组，前端回落到内置静态文案） */
+  promos: HomePromo[];
 }
 
 export interface UnreadItem {
@@ -148,9 +175,15 @@ export function pickVariant(
 
 @Injectable()
 export class HomeService {
+  constructor(
+    @Inject(RedisService) private readonly redis: RedisService,
+    @Inject(StorageService) private readonly storage: StorageService,
+  ) {}
+
   /** 首页配置：space 覆盖 > global > 内置默认（永不 500） */
   async config(spaceId?: string): Promise<HomeConfigView> {
     const space = spaceId && /^\d+$/.test(spaceId) ? BigInt(spaceId) : null;
+    const promos = await this.activePromos("banner");
 
     if (space !== null) {
       const [scoped] = await db
@@ -158,7 +191,7 @@ export class HomeService {
         .from(homeConfigs)
         .where(and(eq(homeConfigs.scope, "space"), eq(homeConfigs.spaceId, space)));
       const view = this.toView(scoped, "space");
-      if (view) return view;
+      if (view) return { ...view, promos };
     }
 
     const [global] = await db
@@ -166,7 +199,7 @@ export class HomeService {
       .from(homeConfigs)
       .where(and(eq(homeConfigs.scope, "global"), isNull(homeConfigs.spaceId)));
     const view = this.toView(global, "global");
-    if (view) return view;
+    if (view) return { ...view, promos };
 
     return {
       version: null,
@@ -176,6 +209,113 @@ export class HomeService {
       ab_slots: [],
       unread: { poll_timeout_ms: this.maxWaitMs(), poll_interval_ms: POLL_INTERVAL_MS },
       updated_at: null,
+      promos,
+    };
+  }
+
+  // ── 运营位（banner）：读 + 曝光/点击打点 ─────────────────
+
+  /** 生效口径与运营后台一致：启用 + 在投放窗口内（ends_at 用闭区间，见 admin.service 注释） */
+  private async activePromos(slot: string): Promise<HomePromo[]> {
+    const now = new Date();
+    const rows = await db
+      .select()
+      .from(promoSlots)
+      .where(
+        and(
+          eq(promoSlots.slot, slot),
+          eq(promoSlots.status, 1),
+          sql`(${promoSlots.startsAt} is null or ${promoSlots.startsAt} <= ${now})`,
+          sql`(${promoSlots.endsAt} is null or ${promoSlots.endsAt} >= ${now})`,
+        ),
+      )
+      .orderBy(asc(promoSlots.sort), asc(promoSlots.id))
+      .limit(20);
+    const out: HomePromo[] = [];
+    for (const row of rows) {
+      out.push({
+        id: String(row.id),
+        slot: row.slot,
+        title: row.title,
+        image_url: await this.signImage(row.imageUri),
+        link_uri: row.linkUri,
+        sort: row.sort,
+        view_count: row.viewCount,
+        click_count: row.clickCount,
+      });
+    }
+    return out;
+  }
+
+  /** 图片可能存的是 storage key（`u/...`，会过期）或外部 URL；前者现签，后者原样 */
+  private async signImage(uri: string | null): Promise<string | null> {
+    if (!uri) return null;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return uri;
+    try {
+      return await this.storage.signDownload(uri, 86_400);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 运营位打点（曝光 / 点击）。
+   *
+   * ## 为什么不用 `task_events` 记流水
+   * `task_events.task_id` 是 NOT NULL + FK 指向 `tasks`，运营位打点与任务无关，
+   * 借用它只能造出"假任务"（历史上确实踩过：外键一写就 500）。运营位要的只是
+   * **两个计数器**（运营后台看效果），所以直接原子自增 `promo_slots` 的两个列。
+   *
+   * ## 去重
+   * 同一访客 5 分钟内对同一运营位的同类事件只计一次（Redis `SET NX EX 300`）——
+   * 曝光用 IntersectionObserver 上报，快速滚动/来回切换 banner 会重复触发；
+   * 不去重的话 view_count 变成"渲染次数"，运营没法用它算 CTR。
+   * 去重键含"谁"：登录用户用 user_id，匿名访客用 ip+UA 的哈希（不落原始 IP）。
+   *
+   * ## 计数为什么在应用层算而不是 SQL 条件更新
+   * 需要在"未去重"时也返回当前计数给前端（前端可能展示热度），因此先判去重、
+   * 命中再 `view_count = view_count + 1` 并 `returning` 取回权威值。
+   */
+  async trackPromo(
+    id: string,
+    kind: "view" | "click",
+    actor: { userId?: string | null; ip?: string | null; userAgent?: string | null },
+  ): Promise<{ id: string; kind: "view" | "click"; counted: boolean; view_count: number; click_count: number }> {
+    if (!/^\d+$/.test(id)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid promo id", { field: "id" });
+    }
+    const [row] = await db.select().from(promoSlots).where(eq(promoSlots.id, BigInt(id)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "promo slot not found");
+
+    const who = actor.userId
+      ? `u:${actor.userId}`
+      : `a:${createHash("sha256")
+          .update(`${actor.ip ?? ""}|${actor.userAgent ?? ""}`)
+          .digest("hex")
+          .slice(0, 24)}`;
+    const key = `home:promo:${kind}:${id}:${who}`;
+    const first = await this.redis.setNx(key, String(Date.now()), PROMO_DEDUPE_TTL_S);
+    if (!first) {
+      return {
+        id: String(row.id),
+        kind,
+        counted: false,
+        view_count: row.viewCount,
+        click_count: row.clickCount,
+      };
+    }
+    const column = kind === "view" ? promoSlots.viewCount : promoSlots.clickCount;
+    const [updated] = await db
+      .update(promoSlots)
+      .set({ [kind === "view" ? "viewCount" : "clickCount"]: sql`${column} + 1`, updatedAt: new Date() })
+      .where(eq(promoSlots.id, row.id))
+      .returning({ viewCount: promoSlots.viewCount, clickCount: promoSlots.clickCount });
+    return {
+      id: String(row.id),
+      kind,
+      counted: true,
+      view_count: updated?.viewCount ?? row.viewCount + (kind === "view" ? 1 : 0),
+      click_count: updated?.clickCount ?? row.clickCount + (kind === "click" ? 1 : 0),
     };
   }
 
@@ -188,7 +328,7 @@ export class HomeService {
   private toView(
     row: typeof homeConfigs.$inferSelect | undefined,
     scope: "global" | "space",
-  ): HomeConfigView | null {
+  ): Omit<HomeConfigView, "promos"> | null {
     if (!row) return null;
     const payload = (row.payload ?? {}) as Record<string, unknown>;
     return {

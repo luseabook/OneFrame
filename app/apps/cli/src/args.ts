@@ -72,6 +72,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "help",
   "version",
   "dry-run",
+  "handoff",
+  "no-browser",
   "open",
   "global",
   "in-doubt",

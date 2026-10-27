@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@app/db";
 import { AppError, ErrorCode, TaskStatus, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { RedisService } from "../../redis/redis.service";
 import { StorageService } from "../../storage/storage.service";
 
 /**
@@ -92,7 +93,10 @@ type TimelineClip = {
 
 @Injectable()
 export class PublishService {
-  constructor(@Inject(StorageService) private readonly storage: StorageService) {}
+  constructor(
+    @Inject(StorageService) private readonly storage: StorageService,
+    @Inject(RedisService) private readonly redis: RedisService,
+  ) {}
 
   // ── 发布 ─────────────────────────────────────────────────────────────
 
@@ -582,5 +586,156 @@ export class PublishService {
       .groupBy(timelinePublications.episodeId);
     for (const row of rows) map.set(String(row.episodeId), row.count);
     return map;
+  }
+
+  // ── 公开播放（/watch/:token）─────────────────────────────────────────
+  /**
+   * `GET /v1/watch/:token` —— **公开只读**，只认 share token（能力式授权：拿到链接即可看）。
+   *
+   * ## 为什么不返回内部字段
+   * 播放页是给客户/外部人看的，响应里只放"看作品需要的"：标题、集号、时长、发布时间、
+   * 现签播放地址、播放量。**不返回** space_id / user_id / project_id / episode_id / 积分
+   * ——这些是内部标识，泄露出去等于把租户结构与配额信息交给外部。
+   *
+   * ## 四种非正常态各有明确 reason（不放白屏）
+   * 全局信封只下发 `{code,msg}`（见 task-11 口径），所以 reason 以 `（token）` 形式写进 msg，
+   * 前端按固定格式解析；同时 code 保持语义：
+   * - 无此 token → `400102` + `not_found`（不区分"从未存在"与"token 打错"）
+   * - status=5 已下架 → `400102` + `off_shelf`
+   * - status=1/2 排队/转码中 → `400105` + `transcoding`
+   * - status=4 转码失败 → `400105` + `transcode_failed`（第四个态，页面文案与"转码中"不同）
+   *
+   * ## 播放量
+   * 权威计数落 `timeline_publications.view_count`（迁移 0032 新增列），Redis 只做
+   * 「同 IP 5 分钟去重」闸（`watch:view:<pubId>:<ipHash>`）。早期实现只用 Redis，
+   * 进程/缓存重启即丢数，已纠正为双写（Redis 去重 + 列自增）。
+   */
+  async publicWatch(rawToken: string) {
+    const token = (rawToken ?? "").trim();
+    // 先做形状校验：share token 是 32 位 hex；非法形状直接 not_found，不去打库
+    if (!/^[0-9a-f]{32}$/.test(token)) {
+      throw new AppError(ErrorCode.NOT_FOUND, "watch link not found（not_found）", { reason: "not_found" });
+    }
+    const [row] = await db
+      .select()
+      .from(timelinePublications)
+      .where(eq(timelinePublications.shareToken, token))
+      .limit(1);
+    if (!row) {
+      throw new AppError(ErrorCode.NOT_FOUND, "watch link not found（not_found）", { reason: "not_found" });
+    }
+    if (row.status === PUB_STATUS.REMOVED) {
+      throw new AppError(ErrorCode.NOT_FOUND, "this video is off shelf（off_shelf）", { reason: "off_shelf" });
+    }
+    if (row.status === PUB_STATUS.READY && row.fileUri) {
+      const [episode] = await db
+        .select({ epNo: episodes.epNo, title: episodes.title })
+        .from(episodes)
+        .where(eq(episodes.id, row.episodeId))
+        .limit(1);
+      const slice = (row.slice ?? {}) as Record<string, unknown>;
+      const durationMs = Number(slice.duration_ms ?? 0);
+      return {
+        title: row.title || episode?.title || `第${episode?.epNo ?? "?"}集`,
+        episode_no: episode?.epNo ?? null,
+        status: row.status,
+        // 现签 1 小时（不落库签名 URL：落库会随过期时间腐烂）
+        file_url: await this.storage.signDownload(row.fileUri, 3600),
+        duration_ms: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : null,
+        published_at: row.publishedAt ? row.publishedAt.toISOString() : null,
+        // 权威计数读列（Redis 只做去重闸，见 recordView 注释）
+        view_count: row.viewCount,
+      };
+    }
+    if (row.status === PUB_STATUS.FAILED) {
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "this video failed to transcode（transcode_failed）", {
+        reason: "transcode_failed",
+        status: row.status,
+      });
+    }
+    // 1 排队 / 2 转码中 / 以及"状态=3 但没有产物"这种脏数据，统一按"还没好"处理
+    throw new AppError(ErrorCode.ASSET_NOT_READY, "this video is still transcoding（transcoding）", {
+      reason: "transcoding",
+      status: row.status,
+    });
+  }
+
+  /**
+   * `POST /v1/watch/:token/view` —— 公开播放计数（**双写**：Redis 5 分钟去重闸 + 列原子自增）。
+   *
+   * 去重口径：同 token + 同 IP **5 分钟内只算一次**（`SETNX` 原子占位，不依赖读改写）。
+   * 为什么按 IP 而不是 user：播放页是公开的，多数访客没有登录态；按 user 等于永远计不上。
+   * 代价：同一 NAT 后面的人只算一次 —— 这是竞品同类实现（页面播放量）的通用取舍，
+   * 因此响应里 `counted` 明确告诉调用方"这次有没有真的 +1"，前端不要假装每次都加。
+   *
+   * 计数落库用 `view_count = view_count + 1` 的**列内自增**（不是"先读再写"）：并发下
+   * 后者会丢计数，`UPDATE ... SET c = c + 1 RETURNING c` 是原子的，同时直接拿到自增后的值。
+   */
+  async recordView(rawToken: string, ip: string | undefined) {
+    const token = (rawToken ?? "").trim();
+    if (!/^[0-9a-f]{32}$/.test(token)) {
+      throw new AppError(ErrorCode.NOT_FOUND, "watch link not found（not_found）", { reason: "not_found" });
+    }
+    const [row] = await db
+      .select({
+        id: timelinePublications.id,
+        status: timelinePublications.status,
+        viewCount: timelinePublications.viewCount,
+      })
+      .from(timelinePublications)
+      .where(eq(timelinePublications.shareToken, token))
+      .limit(1);
+    if (!row) {
+      throw new AppError(ErrorCode.NOT_FOUND, "watch link not found（not_found）", { reason: "not_found" });
+    }
+    if (row.status === PUB_STATUS.REMOVED) {
+      throw new AppError(ErrorCode.NOT_FOUND, "this video is off shelf（off_shelf）", { reason: "off_shelf" });
+    }
+    if (row.status !== PUB_STATUS.READY) {
+      // 非可播放态不计播放量：给"转码中"刷量没有业务意义，还会把播放量灌成假数
+      throw new AppError(ErrorCode.ASSET_NOT_READY, "this video is still transcoding（transcoding）", {
+        reason: "transcoding",
+        status: row.status,
+      });
+    }
+    const viewerKey = `watch:view:${String(row.id)}:${this.ipFingerprint(ip)}`;
+    const firstInWindow = await this.redis.setNx(viewerKey, "1", 300);
+    if (!firstInWindow) {
+      // 去重闸内重复访问：不 +1，但回报**当前**持久计数。
+      // 为什么不复用上面 select 出来的 row.viewCount：同一页可能被两个标签页同时打开，
+      // 另一个请求可能刚自增过；这里重读一次才能保证响应里的数字是"现在"的。
+      return { ok: true, counted: false, view_count: await this.readViewCount(row.id) };
+    }
+    // **权威计数落库**：`timeline_publications.view_count` 原子自增。
+    // Redis 只承担"5 分钟同 IP 去重"（SETNX 原子占位），不作数据源——
+    // 否则 Redis 重启/淘汰就把"这部片子被看了多少次"清零，而这是创作者与运营要看的历史指标。
+    // 用 `UPDATE ... SET c = c + 1 RETURNING c` 而不是"先读再写"：并发下后者会丢计数。
+    // 注意**不动 updated_at**：播放不是内容变更，改了会让"最后编辑时间"失真。
+    const [updated] = await db
+      .update(timelinePublications)
+      .set({ viewCount: sql`${timelinePublications.viewCount} + 1` })
+      .where(eq(timelinePublications.id, row.id))
+      .returning({ viewCount: timelinePublications.viewCount });
+    return {
+      ok: true,
+      counted: true,
+      view_count: Number(updated?.viewCount ?? (await this.readViewCount(row.id))),
+    };
+  }
+
+  /** 权威播放量（读 `timeline_publications.view_count` 列；无行 = 0，不返回"假 null"） */
+  private async readViewCount(publicationId: bigint): Promise<number> {
+    const [row] = await db
+      .select({ viewCount: timelinePublications.viewCount })
+      .from(timelinePublications)
+      .where(eq(timelinePublications.id, publicationId))
+      .limit(1);
+    const n = Number(row?.viewCount ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
+  /** IP 指纹：不落明文 IP（与手机号 hash 同一口径：只用于等值去重） */
+  private ipFingerprint(ip: string | undefined): string {
+    return createHash("sha256").update(String(ip ?? "unknown")).digest("hex").slice(0, 24);
   }
 }

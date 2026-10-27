@@ -34,6 +34,32 @@ import { AppError, ErrorCode } from "@app/shared";
 
 const USER_INPUT = "一名替人写遗书的女孩，发现客户名单里有自己父亲的名字。";
 
+/**
+ * 出参类型（与 `novel.dto.ts` 的 `characterDto` / `original` state 对齐）。
+ * spec 里本地声明而不从 src 导：测试要能在服务端重构时只按**契约**断言，
+ * 而不是把内部模块的导出当成契约（那样一改内部类型测试就编译不过）。
+ */
+interface NovelCharacterDto {
+  id: string;
+  novel_id: string;
+  name: string;
+  role_type: number;
+  description: string;
+  appearance: string;
+  personality: string;
+  prompt: string;
+  is_core: boolean;
+}
+
+interface NovelOriginalIdeaDto {
+  ni_id: string;
+  title: string;
+  logline: string;
+  genre: string;
+  tone: string;
+  selected: boolean;
+}
+
 describe("novel original_script e2e", () => {
   let app: NestFastifyApplication;
   let seq = 0;
@@ -672,6 +698,196 @@ describe("novel original_script e2e", () => {
     expect(allowedData.status).toBe(1);
     expect(allowedData.previous_status).toBe(16);
     expect(allowedData.references).toEqual([]);
+  });
+  // ══════════════════════════════════════════════════════════════
+  // 6c. 原创 idea 详情 / 编辑（竞品 `routes.txt:558` `original_script/idea/:ni_id`）
+  // ══════════════════════════════════════════════════════════════
+
+  it("idea/:ni_id：详情（含 selected）/ 编辑（下游已生成时 downstream_stale）/ 404 / 400101", async () => {
+    // 用一个干净本子，才能断言"下游未生成时 downstream_stale=false"
+    const freshId = await createOriginal("idea详情");
+    const generated = await inject("POST", `/novel/${freshId}/original_script/idea`, { count: 3 }, userA);
+    expect(generated.code).toBe(0);
+    const ideas = (generated.data as { list: NovelOriginalIdeaDto[] }).list;
+    const target = ideas[0]!;
+
+    const detail = await inject("GET", `/novel/${freshId}/original_script/idea/${target.ni_id}`, undefined, userA);
+    expect(detail.code).toBe(0);
+    const detailData = detail.data as {
+      idea: NovelOriginalIdeaDto;
+      selected: boolean;
+      total: number;
+      user_input: string;
+    };
+    expect(detailData.idea.ni_id).toBe(target.ni_id);
+    expect(detailData.idea.title).toBe(target.title);
+    expect(detailData.selected).toBe(false);
+    expect(detailData.total).toBe(3);
+    expect(detailData.user_input).toBe(USER_INPUT);
+
+    const patched = await inject(
+      "PATCH",
+      `/novel/${freshId}/original_script/idea/${target.ni_id}`,
+      { title: "改过的方案标题", logline: "改过的一句话卖点", tone: "冷峻" },
+      userA,
+    );
+    expect(patched.code).toBe(0);
+    const patchedData = patched.data as {
+      idea: NovelOriginalIdeaDto;
+      selected: boolean;
+      downstream_stale: boolean;
+      list: NovelOriginalIdeaDto[];
+    };
+    expect(patchedData.idea.title).toBe("改过的方案标题");
+    expect(patchedData.idea.tone).toBe("冷峻");
+    // 还没生成素材/总纲 → 没有"下游过期"问题
+    expect(patchedData.downstream_stale).toBe(false);
+    // 只改这一条，其它方案原样
+    expect(patchedData.list.find((row) => row.ni_id === ideas[1]!.ni_id)?.title).toBe(ideas[1]!.title);
+
+    // 选中后：详情回显 selected=true（说明读写同一份 meta，不是两份状态）
+    await inject(
+      "POST",
+      `/novel/${freshId}/original_script/idea/select-op`,
+      { ni_id: target.ni_id },
+      userA,
+    );
+    const afterSelect = await inject("GET", `/novel/${freshId}/original_script/idea/${target.ni_id}`, undefined, userA);
+    expect((afterSelect.data as { selected: boolean }).selected).toBe(true);
+
+    // 已选中也允许继续编辑，但下游已生成时必须回显 stale
+    await inject("POST", `/novel/${freshId}/original_script/materials/generate`, { count: 1 }, userA);
+    const stale = await inject(
+      "PATCH",
+      `/novel/${freshId}/original_script/idea/${target.ni_id}`,
+      { logline: "再改一次卖点" },
+      userA,
+    );
+    expect(stale.code).toBe(0);
+    expect((stale.data as { downstream_stale: boolean }).downstream_stale).toBe(true);
+
+    // 不存在 → 404；空 body → 400101；跨 space → 403
+    expect(
+      (await inject("GET", `/novel/${freshId}/original_script/idea/ni_nope`, undefined, userA)).code,
+    ).toBe(ErrorCode.NOT_FOUND);
+    expect(
+      (await inject("PATCH", `/novel/${freshId}/original_script/idea/${target.ni_id}`, {}, userA)).code,
+    ).toBe(ErrorCode.INVALID_PARAM);
+    expect(
+      (await inject("GET", `/novel/${freshId}/original_script/idea/${target.ni_id}`, undefined, userB)).code,
+    ).toBe(ErrorCode.FORBIDDEN);
+    expect(
+      (await inject("PATCH", `/novel/${freshId}/original_script/idea/${target.ni_id}`, { title: "x" }, userB)).code,
+    ).toBe(ErrorCode.FORBIDDEN);
+  });
+
+  // ══════════════════════════════════════════════════════════════
+  // 6d. 原创角色卡 5 条薄路径（竞品 `routes.txt:549-553`）
+  //     —— 关键断言：它们是**别名**而不是副本（写薄路径 → core_character 读到同一条）
+  // ══════════════════════════════════════════════════════════════
+
+  it("characters 5 条薄路径：生成/列表/新增(幂等)/编辑/确认(幂等)，且与 core_character 同一份数据", async () => {
+    // ① 生成（路径别名 → content-analysis 的同一实现）
+    const generated = await inject("POST", `/novel/${ntId}/original_script/characters/generate`, { count: 2 }, userA);
+    expect(generated.code).toBe(0);
+    const generatedCards = (generated.data as { characters: NovelCharacterDto[] }).characters;
+    expect(generatedCards.length).toBe(2);
+
+    // ② 列表（与上面的生成结果同源）
+    const listed = await inject("GET", `/novel/${ntId}/original_script/characters`, undefined, userA);
+    expect(listed.code).toBe(0);
+    const listedData = listed.data as { list: NovelCharacterDto[]; total: number };
+    expect(listedData.total).toBeGreaterThanOrEqual(2);
+    expect(listedData.list.map((row) => row.id)).toEqual(expect.arrayContaining(generatedCards.map((row) => row.id)));
+
+    // ③ 新增（同名即覆盖 → 重放 replayed=true，不产生第二张卡）
+    const created = await inject(
+      "POST",
+      `/novel/${ntId}/original_script/characters`,
+      { name: "原创甲", role_type: 1, description: "原创链新增的主角卡", appearance: "旧呢帽", personality: "克制", prompt: "主角肖像" },
+      userA,
+    );
+    expect(created.code).toBe(0);
+    const createdData = created.data as { character: NovelCharacterDto; replayed: boolean };
+    expect(createdData.replayed).toBe(false);
+    const cardId = createdData.character.id;
+    const replayed = await inject(
+      "POST",
+      `/novel/${ntId}/original_script/characters`,
+      { name: "原创甲", role_type: 1, description: "原创链新增的主角卡（改）" },
+      userA,
+    );
+    expect(replayed.code).toBe(0);
+    expect((replayed.data as { replayed: boolean }).replayed).toBe(true);
+    expect((replayed.data as { character: NovelCharacterDto }).character.id).toBe(cardId);
+
+    // ④ 编辑
+    const patched = await inject(
+      "PATCH",
+      `/novel/${ntId}/original_script/characters/${cardId}`,
+      { description: "原创链编辑后的描述", personality: "克制但守信" },
+      userA,
+    );
+    expect(patched.code).toBe(0);
+    expect((patched.data as NovelCharacterDto).description).toBe("原创链编辑后的描述");
+
+    // ⑤ 确认（= 置 is_core，幂等）
+    const confirmed = await inject(
+      "POST",
+      `/novel/${ntId}/original_script/characters/${cardId}/confirm`,
+      {},
+      userA,
+    );
+    expect(confirmed.code).toBe(0);
+    const confirmedData = confirmed.data as { character: NovelCharacterDto; replayed: boolean };
+    expect(confirmedData.character.is_core).toBe(true);
+    expect(confirmedData.replayed).toBe(false);
+    const reconfirmed = await inject(
+      "POST",
+      `/novel/${ntId}/original_script/characters/${cardId}/confirm`,
+      {},
+      userA,
+    );
+    expect((reconfirmed.data as { replayed: boolean }).replayed).toBe(true);
+
+    // ⑥ **跨路径一致性**：走 core_character 列表必须读到**同一条**（证明是别名，不是副本）
+    const coreList = await inject("GET", `/novel/${ntId}/core_character/list`, undefined, userA);
+    expect(coreList.code).toBe(0);
+    const coreRows = (coreList.data as { list: NovelCharacterDto[] }).list;
+    const sameRow = coreRows.find((row) => row.id === cardId);
+    expect(sameRow).toBeTruthy();
+    // 内容也是同一份（编辑后的描述在两处一致 → 同一行，不是拷贝）
+    expect(sameRow?.description).toBe("原创链编辑后的描述");
+    // 反向再验一次：content-analysis/detail 的条数与薄路径列表条数一致（不存在"影子表"）
+    const analysis = await inject("GET", `/novel/${ntId}/content-analysis/detail`, undefined, userA);
+    const analysisCards = (analysis.data as { characters: NovelCharacterDto[] }).characters;
+    expect(analysisCards.length).toBe(listedData.total + 1); // 新增的「原创甲」在列表之后加入
+    expect(analysisCards.some((row) => row.id === cardId && row.is_core)).toBe(true);
+
+    // ⑦ 404 / 400101 / 非原创本子 400100
+    expect(
+      (await inject("PATCH", `/novel/${ntId}/original_script/characters/999999999999`, { description: "x" }, userA)).code,
+    ).toBe(ErrorCode.NOT_FOUND);
+    expect(
+      (await inject("POST", `/novel/${ntId}/original_script/characters/999999999999/confirm`, {}, userA)).code,
+    ).toBe(ErrorCode.NOT_FOUND);
+    expect(
+      (await inject("PATCH", `/novel/${ntId}/original_script/characters/${cardId}`, {}, userA)).code,
+    ).toBe(ErrorCode.INVALID_PARAM);
+    expect(
+      (await inject("PATCH", `/novel/${ntId}/original_script/characters/not-a-number`, { description: "x" }, userA)).code,
+    ).toBe(ErrorCode.INVALID_PARAM);
+    // 改编本子没有原创链（5 条同一条闸门）
+    expect(
+      (await inject("GET", `/novel/${refNtId}/original_script/characters`, undefined, userA)).code,
+    ).toBe(ErrorCode.BAD_REQUEST);
+    // 跨 space
+    expect((await inject("GET", `/novel/${ntId}/original_script/characters`, undefined, userB)).code).toBe(
+      ErrorCode.FORBIDDEN,
+    );
+    expect(
+      (await inject("POST", `/novel/${ntId}/original_script/characters/${cardId}/confirm`, {}, userB)).code,
+    ).toBe(ErrorCode.FORBIDDEN);
   });
   // ══════════════════════════════════════════════════════════════
   // 7. 4 条薄路径（裂变链，路径级 1:1）

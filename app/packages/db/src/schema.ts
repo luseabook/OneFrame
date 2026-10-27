@@ -437,6 +437,23 @@ export const scriptProjects = pgTable(
     sourceType: smallint("source_type").notNull().default(1), // 1novel 2idea 3script 4fission
     sourceText: text("source_text"),
     /**
+     * 项目编排模式（1 普通剧本 / 2 广告剧 / 3 视频转绘）。
+     *
+     * 为什么用"同一个 project + 模式"而不是三张项目表：竞品就是
+     * `/df/script_project/{drama_ad,video_redraw}/project/*`（rt:680-710）——
+     * 广告剧与转绘都复用剧本项目的集/分镜/资产骨架，只是前面多一段「卖点/brief」
+     * 或「源视频/风格」的专属流程。分成三张表会让集/分镜/资产三套 FK 各写一遍。
+     */
+    projectMode: smallint("project_mode").notNull().default(1),
+    /**
+     * 模式专属数据（服务端**不解析语义**，只做大小上限）：
+     * - 广告剧：`{ briefs:[{title,text}], selected_brief, selling_points:[], image_tips:[] }`
+     * - 视频转绘：`{ source_uri, source_kind, style, redraw_strength }`
+     * 用 jsonb 而不是逐字段建列：这两个模式的字段还没取证稳定（竞品只暴露粗粒度端点），
+     * 每加一个参数就迁移一次不划算；等证据稳定再物化成列。
+     */
+    modeMeta: jsonb("mode_meta").notNull().default(sql`'{}'::jsonb`),
+    /**
      * 来源本子（`novels.id`，可空）：`source_type=1` 且由「已定稿本子拆集」创建时写入。
      *
      * 为什么需要这一列：`POST /novel/:nt/reopen` 必须回答"这个本子有没有被拆成项目"。
@@ -499,6 +516,12 @@ export const projectAssets = pgTable(
     sourceTaskId: bigint("source_task_id", { mode: "bigint" }).references(() => tasks.id),
     portraitAssetId: bigint("portrait_asset_id", { mode: "bigint" }).references(() => assets.id),
     status: smallint("status").notNull().default(1), // 1草稿 2已定稿
+    /**
+     * 提示词完备状态（智能补充的 7 条件里"prompt 是否被拦/是否在生成"需要可存状态）：
+     * 0 未处理 / 1 生成中 / 2 已完备 / 3 被拦截（内容安全）。
+     * 之前这条只能用 `source_task_id → tasks.status` 近似，判不出"被拦截"与"生成中"的差别。
+     */
+    promptStatus: smallint("prompt_status").notNull().default(0),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2090,6 +2113,13 @@ export const subjects = pgTable(
      */
     businessList: jsonb("business_list").notNull().default(sql`'[]'::jsonb`),
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** 星标主体（竞品主体库可置顶常用角色/场景；列表按 starred 优先） */
+    isStarred: boolean("is_starred").notNull().default(false),
+    /**
+     * IP/模板主体标识（同 IP 系列的主体可归到同一模板，例 `ip:my-hero`）。
+     * 只做归类与筛选，不做模板渲染——竞品的 IP 模板语义未取证，故不臆造字段。
+     */
+    templateKey: text("template_key"),
     /** 归属项目（可空：主体库默认跨项目复用；指定后列表页可按项目筛） */
     projectId: bigint("project_id", { mode: "bigint" }).references(() => scriptProjects.id),
     createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
@@ -2909,6 +2939,12 @@ export const timelinePublications = pgTable(
     status: smallint("status").notNull().default(1),
     fileUri: text("file_uri"),
     shareToken: text("share_token"),
+    /**
+     * 播放量（公开播放页 `/watch/:token` 的权威计数）。
+     * 为什么落列而不是只存 Redis：Redis 重启/淘汰会丢数，而"这部片子被看了多少次"
+     * 是创作者/运营要看的历史指标，必须持久；Redis 只做 5 分钟去重（防刷）。
+     */
+    viewCount: integer("view_count").notNull().default(0),
     error: jsonb("error"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
@@ -3102,4 +3138,43 @@ export const marketReviewLogs = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("idx_market_review_logs_work").on(t.workId, t.createdAt.desc())],
+);
+
+// ── 分集资源清单（迁移 0031）：一致性匹配的"快照载体" ──────────────────
+/**
+ * 分集资源清单 —— 每集每类（角色/场景/道具）的**完整快照**。
+ *
+ * 为什么需要这张表（上一轮的真实偏离）：竞品 `episode.md:368-388` 的
+ * `save-resource-matches` 是"整类快照"语义，而上一轮没有表可存，只能用
+ * 「分镜绑定 ∪ 提示词提及」做投影，无法表达"某资产属于本集但没有任何镜头提到"。
+ * 有了这张表，快照就是一等公民：一次 PUT 把某类清空重写，读取就是本集权威清单。
+ *
+ * 唯一键 `(episode_id, kind, name)`：同一集同一类下同名资源只能有一条
+ * （同名不同 id 会让前端列表出现两行"同一角色"）。
+ */
+export const episodeResources = pgTable(
+  "episode_resources",
+  {
+    id: pk(),
+    episodeId: bigint("episode_id", { mode: "bigint" })
+      .notNull()
+      .references(() => episodes.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    /** 1 角色 / 2 场景 / 3 道具（与 project_assets.kind 的语义一致，但用 smallint 便于索引/枚举） */
+    kind: smallint("kind").notNull().default(1),
+    /** 指向项目资产（可空：清单里允许"待补"的占位条目，此时只有 name+prompt） */
+    projectAssetId: bigint("project_asset_id", { mode: "bigint" }).references(() => projectAssets.id),
+    name: text("name").notNull(),
+    prompt: text("prompt"),
+    /** 顺序即前端展示顺序（与资产绑定顺序同口径，避免两套排序） */
+    sort: integer("sort").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_episode_resources").on(t.episodeId, t.kind, t.name),
+    index("idx_episode_resources_episode").on(t.episodeId, t.kind, t.sort),
+  ],
 );

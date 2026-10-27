@@ -37,6 +37,10 @@ const listQuerySchema = z.object({
   review_status: z.coerce.number().int().min(1).max(3).optional(),
   project_id: z.string().min(1).optional(),
   q: z.string().max(80).optional(),
+  /** 只看星标（置顶常用主体） */
+  starred: z.union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")]).optional(),
+  /** IP/模板筛（`ip:my-hero` 这类归类键） */
+  template_key: z.string().max(80).optional(),
   page: z.coerce.number().int().min(1).optional(),
   page_size: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -50,6 +54,8 @@ const createSchema = z.object({
   business_list: z.array(z.number().int().min(0).max(99)).min(1).max(20).optional(),
   tags: z.array(z.string().max(30)).max(20).optional(),
   files: z.array(fileInputSchema).max(20).optional(),
+  is_starred: z.boolean().optional(),
+  template_key: z.string().max(80).nullish(),
 });
 
 const patchSchema = z.object({
@@ -64,6 +70,8 @@ const patchSchema = z.object({
   reject_reason: z.string().max(500).nullish(),
   files: z.array(fileInputSchema).max(20).optional(),
   remove_file_ids: z.array(z.string().min(1)).max(50).optional(),
+  is_starred: z.boolean().optional(),
+  template_key: z.string().max(80).nullish(),
 });
 
 const fromAssetSchema = z.object({
@@ -110,7 +118,17 @@ export class SubjectsController {
   async list(@Req() req: AuthedRequest, @Query() query: unknown) {
     const m = await this.ctx(req);
     const q = parseOrThrow(listQuerySchema, query ?? {});
-    return this.subjects.list(m.spaceId, { ...q, kind: toKind(q.kind) });
+    return this.subjects.list(m.spaceId, {
+      kind: toKind(q.kind),
+      review_status: q.review_status,
+      project_id: q.project_id,
+      q: q.q,
+      // 只认 "1"/"true"；显式传 0/false 等于不筛（前端清筛选时用）
+      starred: q.starred === "1" || q.starred === "true" ? true : undefined,
+      template_key: q.template_key,
+      page: q.page,
+      page_size: q.page_size,
+    });
   }
 
   /** 2. 详情（竞品 `subject get`，subject.md:108-122） */
@@ -182,3 +200,4 @@ export class SubjectsController {
     return this.subjects.remove(m.spaceId, id);
   }
 }
+

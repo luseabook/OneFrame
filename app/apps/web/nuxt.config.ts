@@ -86,6 +86,13 @@ export default defineNuxtConfig({
     "/novel-market/**": { ssr: false },
     "/knowledge": { ssr: false },
     "/knowledge/**": { ssr: false },
+    // 第 3 轮新增：广告剧 / 视频转绘（登录后整页应用）与公开播放页（首屏数据来自接口）。
+    "/ad-drama": { ssr: false },
+    "/ad-drama/**": { ssr: false },
+    "/video-redraw": { ssr: false },
+    "/video-redraw/**": { ssr: false },
+    "/watch": { ssr: false },
+    "/watch/**": { ssr: false },
   },
   app: {
     head: {

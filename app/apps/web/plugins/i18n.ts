@@ -2,8 +2,10 @@ import { computed, watch } from "vue";
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE,
+  buildAlternates,
   normalizeLocale,
   pickFromAcceptLanguage,
+  stripLocalePrefix,
   type Locale,
 } from "~/i18n";
 import { useI18nState } from "~/composables/useI18n";
@@ -75,5 +77,31 @@ export default defineNuxtPlugin(() => {
 
   useHead({
     htmlAttrs: { lang: computed(() => state.value.locale) },
+  });
+
+  /**
+   * hreflang：5 条语言 alternate + 1 条 x-default（指向无前缀中文）。
+   *
+   * 放在插件里而不是每个页面各写一次：`useHead` 在插件里是**全局**的，
+   * 新增页面自动获得 alternates，不会出现"新页面忘了加 hreflang"的漏配。
+   * 输出的是**标准 URL 集合**（与 sitemap 同源 `buildAlternates`），与当前语言无关——
+   * 这正是 hreflang 的语义："这页还有哪些语言版本"。
+   */
+  const origin = computed<string>(() => {
+    if (import.meta.client) return window.location.origin;
+    const headers = useRequestHeaders(["host", "x-forwarded-proto"]);
+    const proto = headers["x-forwarded-proto"] ?? "https";
+    const host = headers.host ?? "localhost:3000";
+    return `${proto}://${host}`;
+  });
+  const canonicalPath = computed<string>(() => stripLocalePrefix(route.path));
+  useHead({
+    link: computed(() =>
+      buildAlternates(canonicalPath.value, origin.value).map((item) => ({
+        rel: "alternate",
+        hreflang: item.hreflang,
+        href: item.href,
+      })),
+    ),
   });
 });

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   NovelChapterOutlineDto,
+  NovelCharacterDto,
   NovelEpisodeDto,
   NovelEpisodeOutlineDto,
   NovelEpisodeSummaryDto,
@@ -37,6 +38,15 @@ const state = ref<NovelOriginalStateDto | null>(null);
 const ideas = ref<NovelOriginalIdeaDto[]>([]);
 const selectedNiId = ref<string | null>(null);
 const materials = ref<NovelOriginalMaterialDto[]>([]);
+const characters = ref<NovelCharacterDto[]>([]);
+/** 正在编辑的创意方案（ni_id）与表单 */
+const editingIdeaId = ref<string | null>(null);
+const ideaForm = reactive({ title: "", logline: "", genre: "", tone: "" });
+/** 新增角色卡表单 */
+const newChar = reactive({ name: "", role_type: 2, description: "" });
+/** 正在编辑的角色卡（id）与表单 */
+const editingCharId = ref<string | null>(null);
+const charForm = reactive({ name: "", description: "", personality: "" });
 const outline = ref<NovelOriginalOutlineDto | null>(null);
 const chapters = ref<NovelChapterOutlineDto[]>([]);
 const episodeOutlines = ref<NovelEpisodeOutlineDto[]>([]);
@@ -67,6 +77,7 @@ async function loadAll(): Promise<void> {
     ideas.value = ideaList.list ?? [];
     selectedNiId.value = ideaList.selected_ni_id;
     materials.value = (await api.get<{ list: NovelOriginalMaterialDto[] }>(`${base.value}/materials`)).list ?? [];
+    await loadCharacters();
     outline.value = (await api.get<{ summary_outline: NovelOriginalOutlineDto | null }>(`${base.value}/summary_outline`))
       .summary_outline;
     chapters.value = (await api.get<{ list: NovelChapterOutlineDto[] }>(`${base.value}/chapters_outline`)).list ?? [];
@@ -126,6 +137,89 @@ async function selectIdea(idea: NovelOriginalIdeaDto): Promise<void> {
     selectedNiId.value = idea.ni_id;
     ideas.value = ideas.value.map((row) => ({ ...row, selected: row.ni_id === idea.ni_id }));
     toast.success(`已选定：${idea.title}`);
+  });
+}
+
+// ── 1b. 创意方案详情 / 编辑（GET/PATCH idea/:ni_id）──────
+async function openIdeaEditor(idea: NovelOriginalIdeaDto): Promise<void> {
+  // 先 GET 一次详情：列表可能是几分钟前拉的，编辑必须基于服务端最新值
+  await act(`idea-get-${idea.ni_id}`, async () => {
+    const data = await api.get<{ idea: NovelOriginalIdeaDto }>(`${base.value}/idea/${idea.ni_id}`);
+    editingIdeaId.value = idea.ni_id;
+    ideaForm.title = data.idea.title;
+    ideaForm.logline = data.idea.logline;
+    ideaForm.genre = data.idea.genre;
+    ideaForm.tone = data.idea.tone;
+  });
+}
+
+async function saveIdea(): Promise<void> {
+  if (!editingIdeaId.value) return;
+  await act(`idea-save-${editingIdeaId.value}`, async () => {
+    const data = await api.patch<{ idea: NovelOriginalIdeaDto; downstream_stale: boolean; list: NovelOriginalIdeaDto[] }>(
+      `${base.value}/idea/${editingIdeaId.value}`,
+      { ...ideaForm },
+    );
+    ideas.value = data.list;
+    editingIdeaId.value = null;
+    toast.success(data.downstream_stale ? "方案已保存（下游素材/总纲仍是旧方案的，需要时请重新生成）" : "方案已保存");
+  });
+}
+
+// ── 1c. 角色卡 5 条薄路径（语义同 content-analysis / core_character）──
+async function loadCharacters(): Promise<void> {
+  characters.value = (await api.get<{ list: NovelCharacterDto[] }>(`${base.value}/characters`)).list ?? [];
+}
+
+async function generateCharacters(): Promise<void> {
+  await act("characters", async () => {
+    const data = await api.post<{ characters: NovelCharacterDto[] }>(`${base.value}/characters/generate`, { count: 3 });
+    await loadCharacters();
+    toast.success(`已生成 ${data.characters.length} 张角色卡`);
+  });
+}
+
+async function addCharacter(): Promise<void> {
+  if (!newChar.name.trim()) return;
+  await act("character-add", async () => {
+    await api.post(`${base.value}/characters`, {
+      name: newChar.name.trim(),
+      role_type: newChar.role_type,
+      description: newChar.description,
+    });
+    newChar.name = "";
+    newChar.role_type = 2;
+    newChar.description = "";
+    await loadCharacters();
+    toast.success("角色卡已新增");
+  });
+}
+
+function openCharEditor(item: NovelCharacterDto): void {
+  editingCharId.value = item.id;
+  charForm.name = item.name;
+  charForm.description = item.description;
+  charForm.personality = item.personality;
+}
+
+async function saveCharacter(): Promise<void> {
+  if (!editingCharId.value) return;
+  await act(`character-save-${editingCharId.value}`, async () => {
+    await api.patch(`${base.value}/characters/${editingCharId.value}`, { ...charForm });
+    editingCharId.value = null;
+    await loadCharacters();
+    toast.success("角色卡已保存");
+  });
+}
+
+async function confirmCharacter(item: NovelCharacterDto): Promise<void> {
+  await act(`character-confirm-${item.id}`, async () => {
+    const data = await api.post<{ character: NovelCharacterDto; replayed: boolean }>(
+      `${base.value}/characters/${item.id}/confirm`,
+      {},
+    );
+    await loadCharacters();
+    toast.success(data.replayed ? "这张卡已是核心角色" : "已确认（进入核心角色集合）");
   });
 }
 
@@ -308,23 +402,98 @@ defineExpose({ loadAll });
                 <span class="tag">{{ idea.genre }} · {{ idea.tone }}</span>
               </div>
               <p class="idea__line">{{ idea.logline }}</p>
-              <Button
-                size="sm"
-                :variant="idea.ni_id === selectedNiId ? 'secondary' : 'primary'"
-                :disabled="idea.ni_id === selectedNiId"
-                :loading="busy === `select-${idea.ni_id}`"
-                @click="selectIdea(idea)"
-              >
-                {{ idea.ni_id === selectedNiId ? "已选定" : "选定这个" }}
-              </Button>
+              <div class="idea__ops">
+                <Button
+                  size="sm"
+                  :variant="idea.ni_id === selectedNiId ? 'secondary' : 'primary'"
+                  :disabled="idea.ni_id === selectedNiId"
+                  :loading="busy === `select-${idea.ni_id}`"
+                  @click="selectIdea(idea)"
+                >
+                  {{ idea.ni_id === selectedNiId ? "已选定" : "选定这个" }}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  :loading="busy === `idea-get-${idea.ni_id}`"
+                  @click="openIdeaEditor(idea)"
+                >
+                  编辑
+                </Button>
+              </div>
+              <div v-if="editingIdeaId === idea.ni_id" class="idea__edit">
+                <TextField v-model="ideaForm.title" label="标题" :maxlength="200" />
+                <TextAreaField v-model="ideaForm.logline" label="一句话卖点" :rows="2" :maxlength="300" />
+                <div class="idea__edit-row">
+                  <TextField v-model="ideaForm.genre" label="题材" :maxlength="50" />
+                  <TextField v-model="ideaForm.tone" label="基调" :maxlength="50" />
+                </div>
+                <div class="idea__ops">
+                  <Button size="sm" :loading="busy === `idea-save-${idea.ni_id}`" @click="saveIdea">保存方案</Button>
+                  <Button size="sm" variant="ghost" @click="editingIdeaId = null">取消</Button>
+                </div>
+              </div>
             </li>
           </ul>
+        </section>
+
+        <!-- 角色卡（5 条薄路径，语义同 content-analysis / core_character）-->
+        <section class="card">
+          <div class="card__head">
+            <h3>② 角色卡（{{ characters.length }}）</h3>
+            <div class="card__ops">
+              <Button size="sm" :disabled="!hasIdea" :loading="busy === 'characters'" @click="generateCharacters">
+                生成角色卡
+              </Button>
+            </div>
+          </div>
+          <p class="card__meta">
+            与「内容分析 / 核心角色」是同一份数据：这里的生成、编辑、确认走的就是
+            `content-analysis` 与 `core_character` 的同一套实现（确认 = 置为核心角色）。
+          </p>
+          <p v-if="characters.length === 0" class="card__hint">还没有角色卡。选定方案后可以生成，或手动新增。</p>
+          <ul v-else class="chars">
+            <li v-for="item in characters" :key="item.id" class="char">
+              <div class="char__head">
+                <strong>{{ item.name }}</strong>
+                <span class="tag">{{ item.role_type === 1 ? "主角" : item.role_type === 2 ? "配角" : "反派" }}</span>
+                <span v-if="item.is_core" class="tag tag--done">核心</span>
+                <div class="char__ops">
+                  <Button size="sm" variant="ghost" :loading="busy === `character-confirm-${item.id}`" @click="confirmCharacter(item)">
+                    确认
+                  </Button>
+                  <Button size="sm" variant="ghost" @click="openCharEditor(item)">编辑</Button>
+                </div>
+              </div>
+              <p class="char__desc">{{ item.description }}</p>
+              <div v-if="editingCharId === item.id" class="idea__edit">
+                <TextField v-model="charForm.name" label="姓名" :maxlength="50" />
+                <TextAreaField v-model="charForm.description" label="描述" :rows="2" :maxlength="500" />
+                <TextAreaField v-model="charForm.personality" label="性格" :rows="2" :maxlength="500" />
+                <div class="idea__ops">
+                  <Button size="sm" :loading="busy === `character-save-${item.id}`" @click="saveCharacter">保存</Button>
+                  <Button size="sm" variant="ghost" @click="editingCharId = null">取消</Button>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <div class="char-add">
+            <TextField v-model="newChar.name" placeholder="新增角色姓名" :maxlength="50" />
+            <select v-model.number="newChar.role_type" class="char-add__role">
+              <option :value="1">主角</option>
+              <option :value="2">配角</option>
+              <option :value="3">反派</option>
+            </select>
+            <Button size="sm" variant="secondary" :disabled="!newChar.name.trim()" :loading="busy === 'character-add'" @click="addCharacter">
+              新增角色
+            </Button>
+          </div>
         </section>
 
         <!-- 素材 -->
         <section class="card">
           <div class="card__head">
-            <h3>② 剧本素材（{{ materials.length }}）</h3>
+            <h3>③ 剧本素材（{{ materials.length }}）</h3>
             <Button size="sm" :disabled="!hasIdea" :loading="busy === 'materials'" @click="generateMaterials">
               生成素材
             </Button>
@@ -348,7 +517,7 @@ defineExpose({ loadAll });
         <!-- 总纲 -->
         <section class="card">
           <div class="card__head">
-            <h3>③ 总纲及设定</h3>
+            <h3>④ 总纲及设定</h3>
             <div class="card__ops">
               <Button v-if="outline" size="sm" variant="secondary" :loading="busy === 'outline-save'" @click="saveOutline">
                 保存总纲
@@ -380,7 +549,7 @@ defineExpose({ loadAll });
         <!-- 分卡章纲 -->
         <section class="card">
           <div class="card__head">
-            <h3>④ 分卡章纲（{{ chapters.length }}）</h3>
+            <h3>⑤ 分卡章纲（{{ chapters.length }}）</h3>
             <Button size="sm" :disabled="!hasOutline" :loading="busy === 'chapters'" @click="generateChapters">
               生成分卡章纲
             </Button>
@@ -401,7 +570,7 @@ defineExpose({ loadAll });
         <!-- 集纲 -->
         <section class="card">
           <div class="card__head">
-            <h3>⑤ 集纲（{{ episodeOutlines.length }}）</h3>
+            <h3>⑥ 集纲（{{ episodeOutlines.length }}）</h3>
             <Button
               size="sm"
               :disabled="!hasOutline"
@@ -423,7 +592,7 @@ defineExpose({ loadAll });
         <!-- 分集剧本 -->
         <section class="card">
           <div class="card__head">
-            <h3>⑥ 分集剧本（{{ episodes.length }}）</h3>
+            <h3>⑦ 分集剧本（{{ episodes.length }}）</h3>
             <Button size="sm" :disabled="episodeOutlines.length === 0" :loading="busy === 'episodes'" @click="generateEpisodes">
               生成分集剧本
             </Button>
@@ -459,7 +628,7 @@ defineExpose({ loadAll });
         <!-- 定稿 -->
         <section class="card">
           <div class="card__head">
-            <h3>⑦ 定稿（status=16）</h3>
+            <h3>⑧ 定稿（status=16）</h3>
             <Button
               size="sm"
               :disabled="episodes.length === 0 || state?.novel.status === 16"
@@ -569,6 +738,79 @@ defineExpose({ loadAll });
 .idea__main strong {
   color: var(--text-1);
   font-size: var(--text-sm);
+}
+.idea__ops {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.idea__edit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-2);
+  background: var(--bg-app);
+}
+.idea__edit-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.chars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.char {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.char__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.char__head strong {
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+.char__ops {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.char__desc {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+}
+.char-add {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) 120px auto;
+  gap: 8px;
+  align-items: center;
+}
+.char-add__role {
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-2);
+  background: var(--bg-sunken);
+  color: var(--text-1);
+  font-size: var(--text-xs);
 }
 .idea__line {
   margin: 0;

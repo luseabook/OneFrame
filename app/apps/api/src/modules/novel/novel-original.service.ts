@@ -6,6 +6,8 @@ import {
   ErrorCode,
   NOVEL_LIMITS,
   NovelSourceType,
+  type NovelCharacterCreateRequest,
+  type NovelCharacterPatchRequest,
   type NovelEpisodePatchRequest,
   type NovelFinalizeRequest,
   type NovelScriptGenerateRequest,
@@ -15,9 +17,11 @@ import { NovelLlmService, type OriginalIdeaItem, type OriginalSummaryOutline } f
 import { NovelService } from "./novel.service";
 import { asRecord, novelDto, type NovelRow } from "./novel.dto";
 import type {
+  CharactersGenerateRequest,
   OriginalChapterOutlineGenerateRequest,
   OriginalEpisodeOutlineGenerateRequest,
   OriginalIdeaGenerateRequest,
+  OriginalIdeaPatch,
   OriginalMaterialGenerateRequest,
   OriginalMaterialPatch,
   OriginalOutlineGenerateRequest,
@@ -209,6 +213,66 @@ export class NovelOriginalService {
     };
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 1b. 创意方案详情 / 编辑（竞品 `routes.txt:558` 的 `idea/:ni_id`）
+  //
+  // 读写都在 `novels.meta.original.ideas[]`（本文件是唯一写者），不落表：
+  // 创意方案是"生成过程快照"，没有需要 join/约束的实体属性。
+  // ══════════════════════════════════════════════════════════════
+
+  /** `GET /original_script/idea/:ni_id` —— 单条方案详情（含是否当前选中） */
+  async getIdea(spaceId: string, ntId: string, niId: string) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    const state = this.state(novel);
+    const ideas = (Array.isArray(state.ideas) ? state.ideas : []) as Array<Record<string, unknown>>;
+    const idea = ideas.find((row) => row.ni_id === niId);
+    if (!idea) throw new AppError(ErrorCode.NOT_FOUND, "idea not found", { reason: "idea_not_found" });
+    return {
+      idea,
+      selected: state.selected_ni_id === niId,
+      total: ideas.length,
+      user_input: this.userInputOf(novel),
+    };
+  }
+
+  /**
+   * `PATCH /original_script/idea/:ni_id` —— 编辑单条方案的标题/卖点/题材/基调。
+   *
+   * 允许编辑已选中的方案（用户就是想改个措辞），但如果下游（素材/总纲/章纲/集纲/剧本）
+   * 已经生成，会回显 `downstream_stale: true` 提醒"下游是按旧方案生成的"——
+   * 这里**不自动级联重置**：删掉用户已经改过的总纲比留一个提示更糟。
+   */
+  async patchIdea(spaceId: string, ntId: string, niId: string, input: OriginalIdeaPatch) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "original_script/idea/patch");
+    const state = this.state(novel);
+    const ideas = (Array.isArray(state.ideas) ? state.ideas : []) as Array<Record<string, unknown>>;
+    if (!ideas.some((row) => row.ni_id === niId)) {
+      throw new AppError(ErrorCode.NOT_FOUND, "idea not found", { reason: "idea_not_found" });
+    }
+    const next = ideas.map((row) =>
+      row.ni_id === niId
+        ? {
+            ...row,
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.logline !== undefined ? { logline: input.logline } : {}),
+            ...(input.genre !== undefined ? { genre: input.genre } : {}),
+            ...(input.tone !== undefined ? { tone: input.tone } : {}),
+            edited_at: new Date().toISOString(),
+          }
+        : row,
+    );
+    await this.patchState(novel, { ideas: next });
+    const materials = Array.isArray(state.materials) ? state.materials : [];
+    const hasOutline = Object.keys(asRecord(state.summary_outline)).length > 0;
+    return {
+      idea: next.find((row) => row.ni_id === niId),
+      selected: state.selected_ni_id === niId,
+      // 只提示、不级联：下游要不要重生成由用户决定
+      downstream_stale: materials.length > 0 || hasOutline,
+      list: next,
+    };
+  }
   // ══════════════════════════════════════════════════════════════
   // 2. 素材（竞品 `novel material` 生成 / `material list` / `material set`）
   //    `novel.md:504-526`（触发素材生成）、`:528-548`（列表，标题就是「素材1/素材2」）、
@@ -469,6 +533,50 @@ export class NovelOriginalService {
     return this.novels.confirmEpisode(spaceId, ntId, neId);
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 5b. 角色卡薄路径（竞品 `routes.txt:549-553` 的 `original_script/characters/*`）
+  //
+  // ⚠️ **全部是路径别名，不复制任何业务逻辑**：
+  // - 列表  → `NovelService.listCharacters`（与 content-analysis/detail 同一份查询）
+  // - 生成  → `NovelService.generateCharacters`（与 novel_character_cards/generate 同一实现）
+  // - 新增  → `NovelService.createCharacter`（同名即覆盖 → 幂等）
+  // - 编辑  → `NovelService.patchCharacter`（同一张 novel_characters 行、同一套字段）
+  // - 确认  → `NovelService.confirmCharacter`（= 置 is_core，与 core_character 子链同字段）
+  //
+  // 竞品给原创链单列这 5 条，是因为它的原创/改编是两个独立工程；我方两条链共用
+  // `novel_characters`，若在这里再实现一套"角色卡怎么生成/怎么确认"，就会出现第二份真相
+  // （同一张卡在两个入口表现不同、`is_core` 互相打架）。故这里只做前缀转发。
+  // ══════════════════════════════════════════════════════════════
+
+  /** `GET /original_script/characters` —— 路径别名，语义同 `GET /content-analysis/detail` 的 characters */
+  async listCharacters(spaceId: string, ntId: string) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.listCharacters(spaceId, ntId);
+  }
+
+  /** `POST /original_script/characters/generate` —— 路径别名，语义同 `novel_character_cards/generate` */
+  async generateCharacters(spaceId: string, ntId: string, input: CharactersGenerateRequest) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.generateCharacters(spaceId, ntId, input);
+  }
+
+  /** `POST /original_script/characters` —— 路径别名，语义同 `POST content-analysis/novel_character_cards` */
+  async createCharacter(spaceId: string, ntId: string, input: NovelCharacterCreateRequest) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.createCharacter(spaceId, ntId, input);
+  }
+
+  /** `PATCH /original_script/characters/:nc_id` —— 路径别名，语义同 `PATCH .../novel_character_cards/:ncc_id` */
+  async patchCharacter(spaceId: string, ntId: string, ncId: string, input: NovelCharacterPatchRequest) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.patchCharacter(spaceId, ntId, ncId, input);
+  }
+
+  /** `POST /original_script/characters/:nc_id/confirm` —— 路径别名，语义同 `core_character`（置 is_core） */
+  async confirmCharacter(spaceId: string, ntId: string, ncId: string) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.confirmCharacter(spaceId, ntId, ncId);
+  }
   // ══════════════════════════════════════════════════════════════
   // 6. 定稿（竞品 `novel finalize`，`novel.md:663-683`）
   // ══════════════════════════════════════════════════════════════

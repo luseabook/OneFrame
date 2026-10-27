@@ -19,6 +19,8 @@ export interface Runtime {
   /** 配置目录（默认 `~/.oneframe`，可用 ONEFRAME_CONFIG_DIR 覆盖） */
   dir: string;
   transport: Transport;
+  /** 二进制下载（`task download` 落盘用；与 JSON transport 分开，测试可独立注入） */
+  fetchBinary: (url: string) => Promise<Buffer>;
   stdout: (chunk: string) => void;
   stderr: (chunk: string) => void;
   now: () => Date;
@@ -29,6 +31,12 @@ export interface RuntimeOverrides extends Partial<Runtime> {
   env?: NodeJS.ProcessEnv;
 }
 
+const nodeFetchBinary = async (url: string): Promise<Buffer> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+};
+
 export function createRuntime(overrides: RuntimeOverrides = {}): Runtime {
   const env = overrides.env ?? process.env;
   return {
@@ -36,6 +44,7 @@ export function createRuntime(overrides: RuntimeOverrides = {}): Runtime {
     cwd: overrides.cwd ?? process.cwd(),
     dir: overrides.dir ?? defaultConfigDir(env),
     transport: overrides.transport ?? fetchTransport(),
+    fetchBinary: overrides.fetchBinary ?? nodeFetchBinary,
     stdout: overrides.stdout ?? ((chunk) => process.stdout.write(chunk)),
     stderr: overrides.stderr ?? ((chunk) => process.stderr.write(chunk)),
     now: overrides.now ?? (() => new Date()),
