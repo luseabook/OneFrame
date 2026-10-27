@@ -543,5 +543,36 @@
       "invite": "邀请",
       "adjust": "调整"
     }
+  },
+  "assets": {
+    "metaTitle": "资产库 · 一帧",
+    "titleAssets": "资产",
+    "titleRecycle": "回收站",
+    "tabAssets": "资产",
+    "tabSubjects": "主体库",
+    "tabQuality": "抽取与匹配",
+    "subAssets": "共 {total} 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。",
+    "subSubjects": "主体是「同一角色跨镜长得一样」的载体；只有审核通过（approved）的主体可用于生成。",
+    "subQuality": "从项目内容抽取角色/场景/道具草稿，并把资产匹配到分镜（缺失项可智能补充）。",
+    "backToAssets": "返回资产库",
+    "recycleBin": "回收站",
+    "newFolder": "新建目录",
+    "newFolderPrompt": "新目录名称",
+    "uploadImage": "上传图片",
+    "uploading": "上传中…",
+    "allFolders": "全部目录",
+    "filterHint": "点资产卡片上的标签可快速筛选",
+    "restore": "恢复",
+    "delete": "删除",
+    "deleteConfirm": "删除资产 {name}？",
+    "emptyRecycleTitle": "回收站是空的",
+    "emptyAssetsTitle": "还没有资产",
+    "emptyRecycleDesc": "删除的资产会保留 7 天，期间可从这里恢复。",
+    "emptyAssetsDesc": "上传参考图，或从任务结果转存；角色定妆图转存后可在任意项目复用。",
+    "loadFailed": "加载失败",
+    "uploadFailed": "上传失败",
+    "restoreFailed": "恢复失败",
+    "deleteFailed": "删除失败",
+    "folderFailed": "创建目录失败"
   }
 }

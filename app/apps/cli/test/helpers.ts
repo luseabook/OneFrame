@@ -20,6 +20,8 @@ export interface HarnessResult {
   stderr: string;
   /** 实际发出的请求（dry-run 场景应为空） */
   calls: TransportRequest[];
+  /** 实际发生的二进制下载 URL（断言"没泄露签名 URL"时也能对照） */
+  binaryCalls: string[];
   dir: string;
 }
 
@@ -33,6 +35,8 @@ export interface HarnessOptions {
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   cleanup?: boolean;
+  /** 二进制下载注入（`task download` 落盘用）；缺省返回固定字节，测试可断言落盘内容 */
+  fetchBinary?: (url: string) => Promise<Buffer>;
 }
 
 export function makeDir(): string {
@@ -68,6 +72,12 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
     return { status: 200, body: JSON.stringify({ code: 0, msg: "", data: { ok: true } }) };
   };
 
+  const binaryCalls: string[] = [];
+  const fetchBinary =
+    opts.fetchBinary ??
+    // 默认给一段可识别字节：测试可验证"写盘的是下载到的内容"而不是占位
+    (async (url: string) => Buffer.from(`binary:${url}`));
+
   let stdout = "";
   let stderr = "";
   const code = await run(argv, {
@@ -79,6 +89,10 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
       ONEFRAME_WEB_BASE_URL: "http://web.test",
     },
     transport,
+    fetchBinary: async (url: string) => {
+      binaryCalls.push(url);
+      return fetchBinary(url);
+    },
     stdout: (chunk) => {
       stdout += chunk;
     },
@@ -97,5 +111,5 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
   }
 
   if (opts.cleanup !== false && !opts.dir) rmSync(dir, { recursive: true, force: true });
-  return { code, stdout, output, stderr, calls, dir };
+  return { code, stdout, output, stderr, calls, dir, binaryCalls };
 }

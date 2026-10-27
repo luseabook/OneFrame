@@ -123,6 +123,37 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.0 · CLI `task download` 补测试 + 资产库 i18n · 2026-10-27）
+
+**#9 CLI/MCP 90% → 92%、#16 多语言 93% → 94%**；全站 **97.4%** / 首发 **97.6%**。
+
+### 1. `task download`：实现早就有，测试一直没有
+
+进度文档里写着"`task download` 不落盘"——**这是过期描述**。读代码后发现 `outputs/<task_id>-<n>.<ext>`
+的落盘逻辑早就写了，但没有任何测试，所以谁也不敢说它是对的（"没测过"在台账里和"没做"同罪）。
+本轮补 `apps/cli/test/task-download.spec.ts` **6 例**，钉住四件事：
+
+| 断言 | 为什么必须测 |
+|---|---|
+| 文件真的写在 `outputs/`，内容 = 下载到的字节 | 只看"命令退出 0"无法区分"写了文件"和"什么都没做" |
+| 扩展名优先取服务端 `filename`，其次 `uri`，兜底 `bin` | 产物是 `.png/.mp4`，落成 `.bin` 用户打不开 |
+| **签名 URL 不出现在 stdout/stderr**，但确实发生了下载 | `download-url` 是限时凭据（`error-codes.md:23` 同一条红线）；否定断言必须配"下载真的发生了"（`binaryCalls`） |
+| 部分失败不阻断整包；全失败才 `not_found`；缺参 `usage(2)` | 对齐 `batchDownload` 的"部分成功"语义 |
+
+顺带扩展 CLI 测试脚手架：`harness()` 现在支持注入 `fetchBinary` 并暴露 `binaryCalls`（此前只能注入 JSON transport）。
+
+### 2. 资产库页面 i18n（第 9 批）
+
+- 新增 `assets` namespace（28 key × 5 语言），迁移 [assets.vue](app/apps/web/pages/assets.vue)：
+  三视图 tab、回收站/资产库标题、上传/新建目录按钮、筛选提示、空态、删除确认、五条错误文案。
+- `TABS` 从 `as const` 常量改为 `computed`——**否则语言切换后 tab 文案不变**（常量在 setup 期只算一次）。
+- `e2e-i18n-pages.cjs` 扩到 **20/20**：新增资产库中英对照 + **三视图 tab 可切换**（computed 改动最容易回归的点）。
+- 已迁移页面 **14 / 64**，语言包 **488 key**；`i18n-check.cjs` 仍全绿。
+
+### 3. 验证
+
+`pwsh _acceptance/verify-round.ps1` → **结论：全绿**（12/12；API 810 + CLI **89** + adapters 164 + worker 33 + db 26 + shared 14 + storage 6 = **1,142 用例**）。
+
 ## 变更登记（v3.9 · 多语言第 8 批页面迁移（影视版/集市/积分） · 2026-10-27）
 
 **#16 多语言 92% → 93%**；全站 **97.3%** / 首发 **97.6%**。

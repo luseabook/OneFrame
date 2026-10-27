@@ -543,5 +543,36 @@
       "invite": "招待",
       "adjust": "調整"
     }
+  },
+  "assets": {
+    "metaTitle": "素材ライブラリ · OneFrame",
+    "titleAssets": "素材",
+    "titleRecycle": "ゴミ箱",
+    "tabAssets": "素材",
+    "tabSubjects": "主体ライブラリ",
+    "tabQuality": "抽出とマッチング",
+    "subAssets": "全 {total} 件・アップロード画像は 1600px 以下に自動圧縮され、削除後 7 日間は復元できます。",
+    "subSubjects": "主体は「同じキャラクターがカットをまたいでも同じ見た目になる」ための入れ物です。生成に使えるのは審査通過（approved）の主体だけです。",
+    "subQuality": "プロジェクト内容からキャラクター／背景／小道具の下書きを抽出し、素材を絵コンテに割り当てます（不足分は自動補完できます）。",
+    "backToAssets": "素材一覧に戻る",
+    "recycleBin": "ゴミ箱",
+    "newFolder": "フォルダを作成",
+    "newFolderPrompt": "フォルダ名",
+    "uploadImage": "画像をアップロード",
+    "uploading": "アップロード中…",
+    "allFolders": "すべてのフォルダ",
+    "filterHint": "素材カードのタグをクリックすると素早く絞り込めます",
+    "restore": "復元",
+    "delete": "削除",
+    "deleteConfirm": "素材 {name} を削除しますか？",
+    "emptyRecycleTitle": "ゴミ箱は空です",
+    "emptyAssetsTitle": "素材はまだありません",
+    "emptyRecycleDesc": "削除した素材は 7 日間保持され、その間はここから復元できます。",
+    "emptyAssetsDesc": "参照画像をアップロードするか、タスク結果から保存してください。キャラクターの設定画像は保存後どのプロジェクトでも再利用できます。",
+    "loadFailed": "読み込みに失敗しました",
+    "uploadFailed": "アップロードに失敗しました",
+    "restoreFailed": "復元に失敗しました",
+    "deleteFailed": "削除に失敗しました",
+    "folderFailed": "フォルダの作成に失敗しました"
   }
 }

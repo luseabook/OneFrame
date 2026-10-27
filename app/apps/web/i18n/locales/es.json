@@ -543,5 +543,36 @@
       "invite": "Invitación",
       "adjust": "Ajuste"
     }
+  },
+  "assets": {
+    "metaTitle": "Biblioteca de recursos · OneFrame",
+    "titleAssets": "Recursos",
+    "titleRecycle": "Papelera",
+    "tabAssets": "Recursos",
+    "tabSubjects": "Subjects",
+    "tabQuality": "Extraer y emparejar",
+    "subAssets": "{total} recursos · Las imágenes se comprimen a ≤1600px; los recursos eliminados se conservan 7 días.",
+    "subSubjects": "Un subject mantiene al mismo personaje consistente entre planos; solo los subjects aprobados pueden usarse para generar.",
+    "subQuality": "Extrae borradores de personaje/escenario/objeto del contenido del proyecto y empareja los recursos con el storyboard (las faltas se pueden completar automáticamente).",
+    "backToAssets": "Volver a recursos",
+    "recycleBin": "Papelera",
+    "newFolder": "Nueva carpeta",
+    "newFolderPrompt": "Nombre de la carpeta",
+    "uploadImage": "Subir imagen",
+    "uploading": "Subiendo…",
+    "allFolders": "Todas las carpetas",
+    "filterHint": "Haz clic en una etiqueta del recurso para filtrar rápido",
+    "restore": "Restaurar",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar el recurso {name}?",
+    "emptyRecycleTitle": "La papelera está vacía",
+    "emptyAssetsTitle": "Aún no hay recursos",
+    "emptyRecycleDesc": "Los recursos eliminados se conservan 7 días y pueden restaurarse aquí.",
+    "emptyAssetsDesc": "Sube una imagen de referencia o guarda una desde el resultado de una tarea; el retrato de un personaje puede reutilizarse en cualquier proyecto.",
+    "loadFailed": "Error al cargar",
+    "uploadFailed": "Error al subir",
+    "restoreFailed": "Error al restaurar",
+    "deleteFailed": "Error al eliminar",
+    "folderFailed": "Error al crear la carpeta"
   }
 }

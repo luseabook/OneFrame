@@ -2,7 +2,8 @@
 import type { AssetDto } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "资产库 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("assets.metaTitle") });
 
 const api = useApi();
 /**
@@ -12,11 +13,12 @@ const api = useApi();
  * 3. 抽取与匹配：项目维度的抽取流水线 + 资产×分镜匹配（extraction / asset-match 端点）。
  */
 const tab = ref<"assets" | "subjects" | "quality">("assets");
-const TABS = [
-  { value: "assets", label: "资产" },
-  { value: "subjects", label: "主体库" },
-  { value: "quality", label: "抽取与匹配" },
-] as const;
+// tab 文案走 i18n：computed 而不是常量，语言切换时标签跟着变
+const TABS = computed(() => [
+  { value: "assets" as const, label: t("assets.tabAssets") },
+  { value: "subjects" as const, label: t("assets.tabSubjects") },
+  { value: "quality" as const, label: t("assets.tabQuality") },
+]);
 const list = ref<AssetDto[]>([]);
 const total = ref(0);
 const loading = ref(false);
@@ -38,7 +40,7 @@ async function load(): Promise<void> {
     list.value = data.list;
     total.value = data.total;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("assets.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -74,7 +76,7 @@ async function onFile(event: Event): Promise<void> {
     await api.post("/assets/upload", { filename: file.name.slice(0, 200), content_type, data_base64 });
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "上传失败";
+    error.value = e instanceof Error ? e.message : t("assets.uploadFailed");
   } finally {
     uploading.value = false;
     input.value = "";
@@ -86,7 +88,7 @@ async function restore(asset: AssetDto): Promise<void> {
     await api.post(`/assets/${asset.id}/restore`);
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "恢复失败";
+    error.value = e instanceof Error ? e.message : t("assets.restoreFailed");
   }
 }
 
@@ -96,12 +98,12 @@ async function switchDeleted(): Promise<void> {
 }
 
 async function remove(asset: AssetDto): Promise<void> {
-  if (!confirm(`删除资产 ${asset.name}？`)) return;
+  if (!confirm(t("assets.deleteConfirm", { name: asset.name }))) return;
   try {
     await api.delete(`/assets/${asset.id}`);
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "删除失败";
+    error.value = e instanceof Error ? e.message : t("assets.deleteFailed");
   }
 }
 
@@ -114,13 +116,13 @@ async function loadFolders(): Promise<void> {
 }
 
 async function createFolder(): Promise<void> {
-  const name = prompt("新目录名称");
+  const name = prompt(t("assets.newFolderPrompt"));
   if (!name) return;
   try {
     await api.post("/asset-folders", { name });
     await loadFolders();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "创建目录失败";
+    error.value = e instanceof Error ? e.message : t("assets.folderFailed");
   }
 }
 
@@ -138,25 +140,25 @@ onMounted(async () => {
   <div class="assets">
     <header class="head">
       <div class="head-main">
-        <h1>{{ tab === "assets" ? (showDeleted ? "回收站" : "资产库") : tab === "subjects" ? "主体库" : "抽取与匹配" }}</h1>
+        <h1>{{ tab === "assets" ? (showDeleted ? t("assets.titleRecycle") : t("assets.titleAssets")) : tab === "subjects" ? t("assets.tabSubjects") : t("assets.tabQuality") }}</h1>
         <p class="sub">
           {{
             tab === "assets"
-              ? `共 ${total} 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。`
+              ? t("assets.subAssets", { total })
               : tab === "subjects"
-                ? "主体是「同一角色跨镜长得一样」的载体；只有审核通过（approved）的主体可用于生成。"
-                : "从项目内容抽取角色/场景/道具草稿，并把资产匹配到分镜（缺失项可智能补充）。"
+                ? t("assets.subSubjects")
+                : t("assets.subQuality")
           }}
         </p>
       </div>
       <div v-if="tab === 'assets'" class="head-actions">
         <Button variant="ghost" size="sm" @click="switchDeleted">
-          {{ showDeleted ? "返回资产库" : "回收站" }}
+          {{ showDeleted ? t("assets.backToAssets") : t("assets.recycleBin") }}
         </Button>
-        <Button variant="ghost" size="sm" @click="createFolder">新建目录</Button>
+        <Button variant="ghost" size="sm" @click="createFolder">{{ t("assets.newFolder") }}</Button>
         <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onFile" />
         <Button v-if="!showDeleted" size="sm" :disabled="uploading" @click="fileInput?.click()">
-          {{ uploading ? "上传中…" : "上传图片" }}
+          {{ uploading ? t("assets.uploading") : t("assets.uploadImage") }}
         </Button>
       </div>
     </header>
@@ -183,7 +185,7 @@ onMounted(async () => {
     <!-- 过滤条 -->
     <div class="filters">
       <select v-model="folderFilter" class="mini-select" @change="load">
-        <option value="">全部目录</option>
+        <option value="">{{ t("assets.allFolders") }}</option>
         <option v-for="folder in folders" :key="folder.id" :value="folder.id">{{ folder.name }}</option>
       </select>
       <button
@@ -193,7 +195,7 @@ onMounted(async () => {
       >
         {{ tagFilter }} ✕
       </button>
-      <span v-else class="hint">点资产卡片上的标签可快速筛选</span>
+      <span v-else class="hint">{{ t("assets.filterHint") }}</span>
     </div>
 
     <p v-if="error" class="err">{{ error }}</p>
@@ -219,8 +221,8 @@ onMounted(async () => {
               </button>
             </div>
             <div class="ops">
-              <Button v-if="showDeleted" size="sm" variant="ghost" @click="restore(asset)">恢复</Button>
-              <Button v-else size="sm" variant="text" @click="remove(asset)">删除</Button>
+              <Button v-if="showDeleted" size="sm" variant="ghost" @click="restore(asset)">{{ t("assets.restore") }}</Button>
+              <Button v-else size="sm" variant="text" @click="remove(asset)">{{ t("assets.delete") }}</Button>
             </div>
           </div>
         </article>
@@ -229,14 +231,12 @@ onMounted(async () => {
       <div v-else class="empty-wrap">
         <EmptyState
           :icon="showDeleted ? '♻' : '▣'"
-          :title="showDeleted ? '回收站是空的' : '还没有资产'"
+          :title="showDeleted ? t('assets.emptyRecycleTitle') : t('assets.emptyAssetsTitle')"
           :description="
-            showDeleted
-              ? '删除的资产会保留 7 天，期间可从这里恢复。'
-              : '上传参考图，或从任务结果转存；角色定妆图转存后可在任意项目复用。'
+            showDeleted ? t('assets.emptyRecycleDesc') : t('assets.emptyAssetsDesc')
           "
         >
-          <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">上传图片</Button>
+          <Button v-if="!showDeleted" :disabled="uploading" @click="fileInput?.click()">{{ t("assets.uploadImage") }}</Button>
         </EmptyState>
       </div>
     </template>

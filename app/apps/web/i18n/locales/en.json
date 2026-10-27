@@ -543,5 +543,36 @@
       "invite": "Invite",
       "adjust": "Adjust"
     }
+  },
+  "assets": {
+    "metaTitle": "Asset Library · OneFrame",
+    "titleAssets": "Assets",
+    "titleRecycle": "Recycle bin",
+    "tabAssets": "Assets",
+    "tabSubjects": "Subjects",
+    "tabQuality": "Extract & match",
+    "subAssets": "{total} assets · Uploads are compressed to ≤1600px; deleted assets are kept for 7 days.",
+    "subSubjects": "A subject keeps the same character consistent across shots; only approved subjects can be used for generation.",
+    "subQuality": "Extract character/scene/prop drafts from project content and match assets to storyboards (gaps can be filled automatically).",
+    "backToAssets": "Back to assets",
+    "recycleBin": "Recycle bin",
+    "newFolder": "New folder",
+    "newFolderPrompt": "Folder name",
+    "uploadImage": "Upload image",
+    "uploading": "Uploading…",
+    "allFolders": "All folders",
+    "filterHint": "Click a tag on an asset card to filter quickly",
+    "restore": "Restore",
+    "delete": "Delete",
+    "deleteConfirm": "Delete asset {name}?",
+    "emptyRecycleTitle": "The recycle bin is empty",
+    "emptyAssetsTitle": "No assets yet",
+    "emptyRecycleDesc": "Deleted assets are kept for 7 days and can be restored here.",
+    "emptyAssetsDesc": "Upload a reference image, or save one from a task result; a saved character portrait can be reused in any project.",
+    "loadFailed": "Failed to load",
+    "uploadFailed": "Upload failed",
+    "restoreFailed": "Restore failed",
+    "deleteFailed": "Delete failed",
+    "folderFailed": "Failed to create the folder"
   }
 }

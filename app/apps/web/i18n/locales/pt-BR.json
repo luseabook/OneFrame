@@ -543,5 +543,36 @@
       "invite": "Convite",
       "adjust": "Ajuste"
     }
+  },
+  "assets": {
+    "metaTitle": "Biblioteca de assets · OneFrame",
+    "titleAssets": "Assets",
+    "titleRecycle": "Lixeira",
+    "tabAssets": "Assets",
+    "tabSubjects": "Subjects",
+    "tabQuality": "Extrair e combinar",
+    "subAssets": "{total} assets · Os uploads são comprimidos para ≤1600px; assets excluídos ficam 7 dias disponíveis para restauração.",
+    "subSubjects": "Um subject mantém o mesmo personagem consistente entre planos; apenas subjects aprovados podem ser usados na geração.",
+    "subQuality": "Extraia rascunhos de personagem/cenário/objeto do conteúdo do projeto e combine os assets com o storyboard (lacunas podem ser preenchidas automaticamente).",
+    "backToAssets": "Voltar aos assets",
+    "recycleBin": "Lixeira",
+    "newFolder": "Nova pasta",
+    "newFolderPrompt": "Nome da pasta",
+    "uploadImage": "Enviar imagem",
+    "uploading": "Enviando…",
+    "allFolders": "Todas as pastas",
+    "filterHint": "Clique em uma tag no cartão do asset para filtrar rapidamente",
+    "restore": "Restaurar",
+    "delete": "Excluir",
+    "deleteConfirm": "Excluir o asset {name}?",
+    "emptyRecycleTitle": "A lixeira está vazia",
+    "emptyAssetsTitle": "Ainda não há assets",
+    "emptyRecycleDesc": "Assets excluídos ficam 7 dias disponíveis e podem ser restaurados aqui.",
+    "emptyAssetsDesc": "Envie uma imagem de referência ou salve uma a partir do resultado de uma tarefa; o retrato de um personagem pode ser reutilizado em qualquer projeto.",
+    "loadFailed": "Falha ao carregar",
+    "uploadFailed": "Falha no upload",
+    "restoreFailed": "Falha ao restaurar",
+    "deleteFailed": "Falha ao excluir",
+    "folderFailed": "Falha ao criar a pasta"
   }
 }
