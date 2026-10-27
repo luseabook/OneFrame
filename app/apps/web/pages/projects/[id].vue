@@ -1784,7 +1784,7 @@ function kindLabel(kind: string): string {
           <div class="cta-card">
             <h3>{{ t("projectDetail.ui.genCharTitle") }}</h3>
             <p>{{ t("projectDetail.ui.genCharDesc") }}</p>
-            <Button :disabled="!!busy" @click="generateCharacters">生成角色</Button>
+            <Button :disabled="!!busy" @click="generateCharacters">{{ t("projectDetail.ui.genCharacters") }}</Button>
           </div>
           <div class="cta-card">
             <h3>{{ t("projectDetail.ui.importCharTitle") }}</h3>
@@ -1812,8 +1812,8 @@ function kindLabel(kind: string): string {
                 <Button size="sm" :loading="assetImageRunning(a)" :disabled="!!assetImageBusyId" @click="generateAssetImage(a)">
                   {{ a.ref_image_uri ? t("projectDetail.ui.regenImageShort") : t("projectDetail.ui.genImage") }}
                 </Button>
-                <button v-if="a.source_task_id" type="button" class="mini-btn" :disabled="!!assetImageBusyId" @click="showAssetCandidates(a)">候选图</button>
-                <Button size="sm" variant="ghost" :disabled="!!busy" @click="openAssetForm(assetTabKind || 'scene', a)">编辑</Button>
+                <button v-if="a.source_task_id" type="button" class="mini-btn" :disabled="!!assetImageBusyId" @click="showAssetCandidates(a)">{{ t("projectDetail.ui.candidates") }}</button>
+                <Button size="sm" variant="ghost" :disabled="!!busy" @click="openAssetForm(assetTabKind || 'scene', a)">{{ t("projectDetail.ui.edit") }}</Button>
                 <Button v-if="a.status !== 2" size="sm" :disabled="!!busy" @click="patchProjectAsset(a, { status: 2 })">{{ t("projectDetail.ui.finalize") }}</Button>
                 <Button v-else size="sm" variant="ghost" :disabled="!!busy" @click="patchProjectAsset(a, { status: 1 })">{{ t("projectDetail.ui.unfinalize") }}</Button>
                 <button type="button" class="mini-btn" @click="removeProjectAsset(a)">{{ t("projectDetail.ui.delete") }}</button>
@@ -1846,9 +1846,9 @@ function kindLabel(kind: string): string {
       <!-- 左：分镜条 -->
       <aside class="rail">
         <button class="rail-ai" type="button" :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">
-          <span>AI拆分镜</span><i>首次免费</i>
+          <span>{{ t("projectDetail.ui.aiSplit") }}</span><i>{{ t("projectDetail.ui.freeFirst") }}</i>
         </button>
-        <p class="rail-group">分镜({{ shots.length }})</p>
+        <p class="rail-group">{{ t("projectDetail.ui.railGroupShots", { n: shots.length }) }}</p>
         <div class="rail-list">
           <button
             v-for="s in shots"
@@ -1863,11 +1863,11 @@ function kindLabel(kind: string): string {
               <img v-if="shotThumb(s)" :src="shotThumb(s) || ''" alt="" @error="hideBrokenImage" />
               <i v-else />
             </span>
-            <span class="shot-chip__state">{{ s.video_task_id ? "已投递" : s.status === 5 ? "已定稿" : "未定稿" }}</span>
+            <span class="shot-chip__state">{{ s.video_task_id ? t("projectDetail.ui.shotSubmitted") : s.status === 5 ? t("projectDetail.ui.shotFinalized") : t("projectDetail.ui.shotNotFinalized") }}</span>
           </button>
         </div>
-        <button class="rail-add" type="button" disabled title="新增空白分镜需要后端支持（P1.5）">+ 添加分镜</button>
-        <p v-if="!shots.length" class="rail-empty">先点上方「AI拆分镜」按本集剧本拆分镜头</p>
+        <button class="rail-add" type="button" disabled :title="t('projectDetail.ui.addShotDisabled')">{{ t("projectDetail.ui.addShot") }}</button>
+        <p v-if="!shots.length" class="rail-empty">{{ t("projectDetail.ui.railEmpty") }}</p>
       </aside>
 
       <!-- 中：素材区 -->
@@ -1886,63 +1886,63 @@ function kindLabel(kind: string): string {
         </div>
 
         <template v-if="selectedShot">
-          <label class="field-label">分镜描述</label>
+          <label class="field-label">{{ t("projectDetail.ui.shotDescLabel") }}</label>
           <textarea
             v-model="selectedShot.shot_desc"
             class="stage-desc"
-            placeholder="请填写分镜描述，记录分镜对应的画面内容"
+            :placeholder="t('projectDetail.ui.shotDescPlaceholder')"
             @blur="saveSelectedShot"
           />
 
           <div v-if="stageTab !== 'video'" class="mats">
             <figure v-for="m in boundAssets" :key="m.id" class="mat">
-              <button type="button" class="mat__rm" title="移出本镜" @click="removeShotAsset(m.id)">✕</button>
+              <button type="button" class="mat__rm" :title="t('projectDetail.ui.removeFromShot')" @click="removeShotAsset(m.id)">✕</button>
               <img v-if="assetImage(m)" :src="assetImage(m) || ''" :alt="m.name" @error="hideBrokenImage" />
               <i v-else />
               <figcaption>
                 {{ m.name }}
-                <em>{{ m.status === 2 ? "已定稿" : "草稿" }}</em>
+                <em>{{ m.status === 2 ? t("projectDetail.ui.statusFinalized") : t("projectDetail.ui.statusDraftShort") }}</em>
               </figcaption>
             </figure>
             <p v-if="!boundAssets.length" class="stage-empty">
               <span class="stage-empty__icon">▤</span>
-              暂无素材<br /><em>点右侧「项目资产」勾选角色/场景/道具作为本镜参考</em>
+              {{ t("projectDetail.ui.noMaterial") }}<br /><em>{{ t("projectDetail.ui.noMaterialHint") }}</em>
             </p>
           </div>
 
           <div v-else class="mats">
             <div v-for="b in submittedShots" :key="b.shot_id" class="video-row">
-              <Tag v-if="b.task_id" tone="success" size="sm" dot>已投递</Tag>
+              <Tag v-if="b.task_id" tone="success" size="sm" dot>{{ t("projectDetail.ui.shotSubmitted") }}</Tag>
               <Tag v-else tone="danger" size="sm" dot>{{ batchReason(b) }}</Tag>
               <span class="mono">{{ b.task_id ? b.task_id.slice(-8) : "—" }}</span>
               <Tag v-if="b.task_id && taskMap[b.task_id]" tone="info" size="sm">{{ statusLabel(taskMap[b.task_id].status) }}</Tag>
             </div>
             <p v-if="!submittedShots.length" class="stage-empty">
               <span class="stage-empty__icon">▶</span>
-              暂无出片<br /><em>填写提示词后点「立即生成」</em>
+              {{ t("projectDetail.ui.noOutput") }}<br /><em>{{ t("projectDetail.ui.noOutputHint") }}</em>
             </p>
           </div>
 
           <p class="stage-foot">
-            或 <NuxtLink to="/assets" class="link">本地上传</NuxtLink> · 时长由所选模型枚举约束
+            {{ t("projectDetail.ui.localUpload") }} <NuxtLink to="/assets" class="link">{{ t("projectDetail.ui.localUpload") }}</NuxtLink> · {{ t("projectDetail.ui.durationByModel") }}
           </p>
         </template>
 
         <EmptyState
           v-else
           icon="▤"
-          title="还没有分镜"
-          description="选择左上「AI拆分镜」按本集剧本生成分镜表；生成后可逐镜编辑。"
+          :title="t('projectDetail.ui.emptyShotTitle')"
+          :description="t('projectDetail.ui.emptyShotDesc')"
         >
-          <Button :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">生成分镜</Button>
+          <Button :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">{{ t("projectDetail.ui.genStoryboards") }}</Button>
         </EmptyState>
       </section>
 
       <!-- 右：生成台 -->
       <aside class="gen">
         <div class="gen-tabs">
-          <button type="button" class="gen-tab" :class="{ on: genTab === 'image' }" @click="genTab = 'image'">图片生成</button>
-          <button type="button" class="gen-tab" :class="{ on: genTab === 'video' }" @click="genTab = 'video'">视频生成</button>
+          <button type="button" class="gen-tab" :class="{ on: genTab === 'image' }" @click="genTab = 'image'">{{ t("projectDetail.ui.tabImage") }}</button>
+          <button type="button" class="gen-tab" :class="{ on: genTab === 'video' }" @click="genTab = 'video'">{{ t("projectDetail.ui.tabVideo") }}</button>
         </div>
 
         <template v-if="genTab === 'video'">
@@ -1963,18 +1963,18 @@ function kindLabel(kind: string): string {
           <p class="gen-hint">{{ modeHint }}</p>
 
           <div v-if="mode === 'first_frame' || mode === 'first_last' || selectedShot?.first_frame_uri" class="gen-frame">
-            <span class="gen-label">首帧</span>
+            <span class="gen-label">{{ t("projectDetail.ui.firstFrame") }}</span>
             <img
               v-if="selectedShot?.first_frame_url"
               :src="selectedShot.first_frame_url || ''"
               class="gen-frame__img"
-              alt="首帧"
+              :alt="t('projectDetail.ui.firstFrame')"
               @error="hideBrokenImage"
             />
-            <span v-else class="gen-frame__ph">{{ selectedShot?.first_frame_uri ? "已设置" : "未设置" }}</span>
+            <span v-else class="gen-frame__ph">{{ selectedShot?.first_frame_uri ? t("projectDetail.ui.set") : t("projectDetail.ui.notSet") }}</span>
             <span class="gen-frame__ops">
               <button class="mini-link" type="button" :disabled="firstFrameBusy" @click="director3dOpen = true">
-                {{ firstFrameBusy ? "上传中…" : "3D 定格" }}
+                {{ firstFrameBusy ? t("projectDetail.ui.uploading") : t("projectDetail.ui.frame3d") }}
               </button>
               <button
                 v-if="selectedShot?.first_frame_uri"
@@ -1983,61 +1983,61 @@ function kindLabel(kind: string): string {
                 :disabled="firstFrameBusy"
                 @click="clearFirstFrame"
               >
-                清空
+                {{ t("projectDetail.ui.clear") }}
               </button>
             </span>
           </div>
 
           <div class="gen-row">
-            <span class="gen-label">模型</span>
+            <span class="gen-label">{{ t("projectDetail.ui.modelLabel") }}</span>
             <select v-model="modelName" class="mini-select gen-select">
               <option v-for="m in videoModels" :key="m.name" :value="m.name">{{ m.display_name }}</option>
             </select>
           </div>
           <p class="gen-hint">
-            参考生视频要求绑定资产「已定稿 + 有参考图」，否则该镜会被拒绝（400105）；文生视频只用提示词
+            {{ t("projectDetail.ui.refHint") }}
           </p>
           <p v-if="selectedShot?.video_task_id" class="gen-hint gen-hint--warn">
-            该镜已有投递任务（{{ selectedShot.video_task_id.slice(-8) }}）：同一镜头按幂等复用，切换模式不会重新出片；需要重拍请复制为新镜头或用任务重试
+            {{ t("projectDetail.ui.idempotentHint", { id: selectedShot.video_task_id.slice(-8) }) }}
           </p>
 
           <div class="gen-row gen-row--between">
-            <span class="gen-label">选择素材</span>
-            <button class="mini-link" type="button" title="打开 3D 导演台（three.js）" @click="director3dOpen = true">3D导演台</button>
+            <span class="gen-label">{{ t("projectDetail.ui.pickMaterial") }}</span>
+            <button class="mini-link" type="button" :title="t('projectDetail.ui.director3dTitle')" @click="director3dOpen = true">{{ t("projectDetail.ui.director3dBtn") }}</button>
           </div>
           <p class="gen-quota">
-            已上传素材数：图片 {{ boundImageCount }}/30 · 视频 0/10 · 音频 0/10 · 总素材 {{ boundAssets.length }}/50
+            {{ t("projectDetail.ui.boundCount", { img: boundImageCount, total: boundAssets.length }) }}
           </p>
 
           <div class="gen-cards">
-            <button type="button" class="gen-card" @click="openDrawer"><span>+</span>项目资产</button>
-            <button type="button" class="gen-card" disabled title="更多素材源（P2）"><span>+</span>更多素材源</button>
+            <button type="button" class="gen-card" @click="openDrawer"><span>+</span>{{ t("projectDetail.ui.projectAssets") }}</button>
+            <button type="button" class="gen-card" disabled :title="t('projectDetail.ui.moreSourcesDisabled')"><span>+</span>{{ t("projectDetail.ui.moreSources") }}</button>
           </div>
 
           <div class="gen-row gen-row--between">
-            <span class="gen-label">提示词</span>
+            <span class="gen-label">{{ t("projectDetail.ui.promptLabel") }}</span>
             <span class="gen-row__ops">
-              <button class="mini-link" type="button" disabled title="按提示词自动匹配项目资产（P3）">匹配资产</button>
-              <button class="mini-link" type="button" disabled title="放大编辑（P2）">放大编辑</button>
+              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.matchAssetsDisabled')">{{ t("projectDetail.ui.matchAssets") }}</button>
+              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.zoomEditDisabled')">{{ t("projectDetail.ui.zoomEdit") }}</button>
             </span>
           </div>
           <textarea
             v-if="selectedShot"
             v-model="selectedShot.video_prompt"
             class="gen-prompt"
-            placeholder="上传并@一个或多个主体、图片，涵盖每个要素及其关系，描述想要生成的视频内容"
+            :placeholder="t('projectDetail.ui.promptPlaceholder')"
             @blur="saveSelectedShot"
           />
-          <textarea v-else class="gen-prompt" disabled placeholder="先选择左侧分镜" />
+          <textarea v-else class="gen-prompt" disabled :placeholder="t('projectDetail.ui.pickShotFirst')" />
 
-          <p class="gen-foot__note">内容由 AI 生成，请仔细甄别 · 失败/取消不扣积分</p>
+          <p class="gen-foot__note">{{ t("projectDetail.ui.aiNote") }}</p>
           <div class="gen-foot">
             <div class="gen-params">
               <span class="param">{{ selectedShot?.resolution ?? "720p" }}</span>
               <span class="param">
-                <input v-model.number="shotDuration" class="param-input" type="number" min="1" max="30" />秒
+                <input v-model.number="shotDuration" class="param-input" type="number" min="1" max="30" />{{ t("projectDetail.ui.seconds") }}
               </span>
-              <span class="param">1个</span>
+              <span class="param">{{ t("projectDetail.ui.oneItem") }}</span>
             </div>
             <button
               class="gen-btn"
@@ -2045,7 +2045,7 @@ function kindLabel(kind: string): string {
               :disabled="!!busy || !selectedShot"
               @click="selectedShot && submitShot(selectedShot)"
             >
-              立即生成
+              {{ t("projectDetail.ui.generateNow") }}
               <em v-if="shotQuote !== null">✦ {{ shotQuote }}</em>
             </button>
           </div>
@@ -2055,10 +2055,10 @@ function kindLabel(kind: string): string {
         <div v-else class="gen-image-empty">
           <EmptyState
             icon="◫"
-            title="图片生成暂未接入"
-            description="当前后端只提供分镜视频生成（storyboard_reference_video）。图片生成（定妆图）在「资产」视图的角色卡上操作。"
+            :title="t('projectDetail.ui.imageNotWired')"
+            :description="t('projectDetail.ui.imageNotWiredDesc')"
           >
-            <Button size="sm" variant="ghost" @click="tab = 'characters'">去资产生成定妆图</Button>
+            <Button size="sm" variant="ghost" @click="tab = 'characters'">{{ t("projectDetail.ui.goAssetGen") }}</Button>
           </EmptyState>
         </div>
       </aside>
@@ -2068,78 +2068,78 @@ function kindLabel(kind: string): string {
     <section v-else-if="tab === 'batch'" class="panel panel--page">
       <div class="panel__head">
         <div>
-          <h2>导出与投递</h2>
-          <p class="sub">预算触顶时该镜不投递（745703），余额不足整单拒绝；导出为整集 zip。</p>
+          <h2>{{ t("projectDetail.ui.exportTitle") }}</h2>
+          <p class="sub">{{ t("projectDetail.ui.exportSub") }}</p>
         </div>
         <div class="panel__actions">
-          <Button :disabled="!!busy || shots.length === 0" @click="submitBatch">批量投递 {{ shots.length }} 镜</Button>
+          <Button :disabled="!!busy || shots.length === 0" @click="submitBatch">{{ t("projectDetail.ui.submitBatch", { n: shots.length }) }}</Button>
         </div>
       </div>
 
       <div class="dispatch-bar">
         <label class="inline-field">
-          模型
+          {{ t("projectDetail.ui.modelLabel") }}
           <select v-model="modelName" class="mini-select gen-select">
             <option v-for="m in models" :key="m.name" :value="m.name">{{ m.display_name }}</option>
           </select>
         </label>
         <label class="inline-field">
-          预算上限
+          {{ t("projectDetail.ui.budgetCap") }}
           <input v-model.number="budget" type="number" min="1" class="cell-num" @input="budgetTouched = true" />
         </label>
-        <Button size="sm" variant="ghost" :disabled="!!busy || shots.length === 0" @click="prefillBudget">按报价预填</Button>
+        <Button size="sm" variant="ghost" :disabled="!!busy || shots.length === 0" @click="prefillBudget">{{ t("projectDetail.ui.prefillByQuote") }}</Button>
         <span class="divider" />
         <Button size="sm" variant="ghost" :disabled="exporting || shots.length === 0" @click="submitExport">
-          {{ exporting ? "提交中…" : "导出本集 zip" }}
+          {{ exporting ? t("projectDetail.ui.exportingShort") : t("projectDetail.ui.exportZip") }}
         </Button>
-        <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="link" target="_blank" rel="noreferrer">下载 zip</a>
+        <a v-if="exportJob?.download_url" :href="exportJob.download_url" class="link" target="_blank" rel="noreferrer">{{ t("projectDetail.ui.downloadZip") }}</a>
         <Tag v-else-if="exportJob" :tone="exportJob.status === 4 ? 'danger' : 'info'" size="sm">
-          {{ exportJob.status === 1 ? "排队中" : exportJob.status === 2 ? "打包中" : "失败" }}
+          {{ exportJob.status === 1 ? t("projectDetail.ui.exportQueued") : exportJob.status === 2 ? t("projectDetail.ui.exportPacking") : t("projectDetail.ui.exportFailedShort") }}
         </Tag>
-        <Button v-if="exportJob?.status === 4" size="sm" variant="text" @click="retryExportJob">重试</Button>
+        <Button v-if="exportJob?.status === 4" size="sm" variant="text" @click="retryExportJob">{{ t("projectDetail.ui.retry") }}</Button>
       </div>
 
-      <p v-if="budgetExceeded" class="banner banner--warn">部分镜头因预算触顶未投递（745703）。提高预算后可继续投递。</p>
+      <p v-if="budgetExceeded" class="banner banner--warn">{{ t("projectDetail.ui.budgetBanner") }}</p>
       <p v-if="batchItems.some((i) => i.code === 745701)" class="banner banner--warn">
-        余额不足，部分镜头未投递（745701）。充值后可继续投递剩余镜头。
+        {{ t("projectDetail.ui.balanceBanner") }}
       </p>
       <p v-if="characters.some((c) => c.status !== 2)" class="banner banner--warn">
-        有 {{ characters.filter((c) => c.status !== 2).length }} 个角色未定稿，其绑定镜头会被拒绝（400105）。
-        <button class="mini-link" type="button" @click="tab = 'characters'">去完成角色定稿 →</button>
+        {{ t("projectDetail.ui.charBanner", { n: characters.filter((c) => c.status !== 2).length }) }}
+        <button class="mini-link" type="button" @click="tab = 'characters'">{{ t("projectDetail.ui.goFinalizeChars") }}</button>
       </p>
 
       <div v-if="matrix" class="block">
         <div class="block__head">
-          <p class="block-label">分镜矩阵</p>
+          <p class="block-label">{{ t("projectDetail.ui.matrixTitle") }}</p>
           <div class="legend">
-            <span><i class="dot success" />成功</span>
-            <span><i class="dot running" />在途</span>
-            <span><i class="dot failed" />失败</span>
-            <span><i class="dot idle" />未投递</span>
+            <span><i class="dot success" />{{ t("projectDetail.ui.legendSuccess") }}</span>
+            <span><i class="dot running" />{{ t("projectDetail.ui.legendRunning") }}</span>
+            <span><i class="dot failed" />{{ t("projectDetail.ui.legendFailed") }}</span>
+            <span><i class="dot idle" />{{ t("projectDetail.ui.legendIdle") }}</span>
           </div>
         </div>
         <div v-for="ep in matrix.episodes" :key="ep.id" class="matrix-row">
-          <span class="matrix-label">第{{ ep.ep_no }}集</span>
+          <span class="matrix-label">{{ t("projectDetail.ui.matrixEp", { n: ep.ep_no }) }}</span>
           <button
             v-for="shot in ep.shots"
             :key="shot.id"
             type="button"
             class="mcell"
             :class="matrixClass(shot)"
-            :title="`镜${shot.shot_no} · 状态${shot.status}${shot.task_status ? ' · 任务' + shot.task_status : ''}`"
+            :title="t('projectDetail.ui.matrixShotTitle', { shot: shot.shot_no, status: shot.status, task: shot.task_status ? t('projectDetail.ui.matrixTaskSuffix', { status: shot.task_status }) : '' })"
             @click="openMatrixShot(ep.id)"
           >
             {{ shot.shot_no }}
           </button>
-          <span v-if="ep.shots.length === 0" class="muted">无分镜</span>
+          <span v-if="ep.shots.length === 0" class="muted">{{ t("projectDetail.ui.noShotsShort") }}</span>
         </div>
       </div>
 
       <div v-if="batchItems.length" class="block">
-        <p class="block-label">投递结果</p>
+        <p class="block-label">{{ t("projectDetail.ui.submitResult") }}</p>
         <div v-for="item in batchItems" :key="item.shot_id" class="batch-row">
-          <span class="b-no">镜 {{ shotNoOf(item.shot_id) }}</span>
-          <Tag v-if="item.submitted" tone="success" size="sm" dot>已提交</Tag>
+          <span class="b-no">{{ t("projectDetail.ui.shotNo", { n: shotNoOf(item.shot_id) }) }}</span>
+          <Tag v-if="item.submitted" tone="success" size="sm" dot>{{ t("projectDetail.ui.submittedTag") }}</Tag>
           <Tag v-else tone="danger" size="sm" dot>{{ batchReason(item) }}</Tag>
           <span v-if="item.task_id" class="mono">{{ item.task_id.slice(-8) }}</span>
           <Tag v-if="item.task_id && taskMap[item.task_id]" tone="info" size="sm">
@@ -2150,8 +2150,8 @@ function kindLabel(kind: string): string {
       <EmptyState
         v-else
         icon="▶"
-        title="准备批量出片"
-        description="确认角色定稿并生成分镜后，选择模型与预算，一键投递全部镜头。"
+        :title="t('projectDetail.ui.emptyBatchTitle')"
+        :description="t('projectDetail.ui.emptyBatchDesc')"
       />
     </section>
 
@@ -2159,10 +2159,10 @@ function kindLabel(kind: string): string {
     <div v-else-if="tab === 'timeline'" class="tl">
       <aside class="tl-rail">
         <div class="tl-rail__head">
-          <b>剧集资产</b>
+          <b>{{ t("projectDetail.ui.episodeAssets") }}</b>
           <select v-model="tlFilter" class="mini-select">
-            <option value="all">全部</option>
-            <option value="finalized">已出片</option>
+            <option value="all">{{ t("projectDetail.assetFilters.all") }}</option>
+            <option value="finalized">{{ t("projectDetail.ui.filterRendered") }}</option>
           </select>
         </div>
         <div class="tl-list">
@@ -2174,15 +2174,15 @@ function kindLabel(kind: string): string {
             @click="addShotClip(s)"
           >
             <span class="tl-item__no">{{ s.shot_no }}</span>
-            <span class="tl-item__name">{{ s.shot_desc || `分镜 ${s.shot_no}` }}</span>
-            <em :class="{ on: s.video_task_id }">{{ s.video_task_id ? '已出片' : '未出片' }}</em>
+            <span class="tl-item__name">{{ s.shot_desc || t("projectDetail.ui.shotName", { n: s.shot_no }) }}</span>
+            <em :class="{ on: s.video_task_id }">{{ s.video_task_id ? t("projectDetail.ui.rendered") : t("projectDetail.ui.notRendered") }}</em>
           </button>
-          <p v-if="!timelineShots.length" class="tl-empty-sm">本集还没有分镜：先去「分镜」生成</p>
+          <p v-if="!timelineShots.length" class="tl-empty-sm">{{ t("projectDetail.ui.tlNoShots") }}</p>
         </div>
       </aside>
 
       <section class="tl-stage">
-        <div class="tl-stage__bubble">更新分镜：时间线不会自动同步，点下方「更新分镜」按本集已出片镜头重建</div>
+        <div class="tl-stage__bubble">{{ t("projectDetail.ui.tlBubble") }}</div>
         <div v-if="activeClip" class="tl-player">
           <video
             v-if="activeClip.url"
@@ -2194,33 +2194,33 @@ function kindLabel(kind: string): string {
           />
           <div v-else class="tl-player__ph">
             <span>▶</span>
-            <p>{{ activeClip.name }} 暂无可用视频文件（mock 阶段结果为占位字节）</p>
+            <p>{{ t("projectDetail.ui.tlNoVideo", { name: activeClip.name }) }}</p>
           </div>
         </div>
         <div v-else class="tl-player__ph tl-player__ph--empty">
           <span>▶</span>
-          <p>请在左侧选择分镜资产加入至时间线</p>
+          <p>{{ t("projectDetail.ui.tlPickHint") }}</p>
         </div>
       </section>
 
       <footer class="tl-bar">
         <div class="tl-bar__head">
-          <Button size="sm" variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="rebuildTimeline">更新分镜</Button>
-          <button type="button" class="tl-play" @click="togglePlay">{{ playing ? "暂停" : "播放" }}</button>
+          <Button size="sm" variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="rebuildTimeline">{{ t("projectDetail.ui.updateStoryboards") }}</Button>
+          <button type="button" class="tl-play" @click="togglePlay">{{ playing ? t("projectDetail.ui.pause") : t("projectDetail.ui.play") }}</button>
           <span class="tl-time">{{ playheadLabel }} / {{ totalLabel }}</span>
-          <span class="tl-count">{{ clips.length }} 个片段</span>
+          <span class="tl-count">{{ t("projectDetail.ui.clipsCount", { n: clips.length }) }}</span>
           <label class="tl-zoom">
-            缩放
+            {{ t("projectDetail.ui.zoom") }}
             <input v-model.number="pxPerSec" type="range" min="16" max="120" step="4" />
           </label>
           <span class="tl-spacer" />
           <Button size="sm" :disabled="!clips.length || tlExportStatus === 1 || tlExportStatus === 2" @click="exportTimeline">
-            合成导出成片
+            {{ t("projectDetail.ui.composeExport") }}
           </Button>
           <Tag v-if="tlExportStatus" :tone="tlExportStatus === 4 ? 'danger' : tlExportStatus === 3 ? 'success' : 'info'" size="sm" dot>
             {{ tlExportLabel }}
           </Tag>
-          <a v-if="tlExportUrl" :href="tlExportUrl" class="link" target="_blank" rel="noreferrer">下载 mp4</a>
+          <a v-if="tlExportUrl" :href="tlExportUrl" class="link" target="_blank" rel="noreferrer">{{ t("projectDetail.ui.downloadMp4") }}</a>
         </div>
 
         <div class="tl-track" @click.self="seekTo(($event.offsetX) / pxPerSec)">
@@ -2243,37 +2243,37 @@ function kindLabel(kind: string): string {
               <b>{{ clip.name }}</b>
               <em>{{ clip.duration }}s</em>
               <span class="tl-clip__ops">
-                <button type="button" title="左移" @click.stop="moveClip(clip.id, -1)">‹</button>
-                <button type="button" title="右移" @click.stop="moveClip(clip.id, 1)">›</button>
-                <button type="button" title="移除" @click.stop="removeClip(clip.id)">✕</button>
+                <button type="button" :title="t('projectDetail.ui.moveLeft')" @click.stop="moveClip(clip.id, -1)">‹</button>
+                <button type="button" :title="t('projectDetail.ui.moveRight')" @click.stop="moveClip(clip.id, 1)">›</button>
+                <button type="button" :title="t('projectDetail.ui.remove')" @click.stop="removeClip(clip.id)">✕</button>
               </span>
             </div>
-            <p v-if="!clips.length" class="tl-clips__empty">时间线为空：从左侧点选分镜加入</p>
+            <p v-if="!clips.length" class="tl-clips__empty">{{ t("projectDetail.ui.tlEmpty") }}</p>
             <div class="tl-head" :style="{ left: `${playhead * pxPerSec}px` }" />
           </div>
         </div>
-        <p class="tl-note">时间线按分集保存在服务端（本浏览器有本地缓存兜底）；「合成导出成片」由服务端 ffmpeg 按时间线渲染 mp4 并叠加「AI 生成」水印。</p>
+        <p class="tl-note">{{ t("projectDetail.ui.tlNote") }}</p>
       </footer>
     </div>
     <!-- ══════════ ⑥ 资产校验（对齐参照 /series-manage/asset-confirm） ══════════ -->
     <div v-else class="cf">
       <div class="cf-head">
         <button type="button" class="cf-crumb" :class="{ on: confirmStage === 'list' }" @click="confirmStage = 'list'">
-          资产清单校验
+          {{ t("projectDetail.ui.tabCheck") }}
         </button>
         <span class="cf-arrow">➤</span>
         <button type="button" class="cf-crumb" :class="{ on: confirmStage === 'generate' }" @click="confirmStage = 'generate'">
-          批量生成资产
+          {{ t("projectDetail.ui.tabGen") }}
         </button>
         <span class="cf-spacer" />
-        <input v-model="confirmSearch" class="cf-search" type="search" placeholder="搜索资产名称 / 描述" />
+        <input v-model="confirmSearch" class="cf-search" type="search" :placeholder="t('projectDetail.ui.searchAssets')" />
         <Button size="sm" variant="ghost" :disabled="extracting || !selectedEpisodeId" @click="extractAssets('episode')">
-          {{ extracting ? "提取中…" : "重新提取" }}
+          {{ extracting ? t("projectDetail.ui.extracting") : t("projectDetail.ui.reExtract") }}
         </Button>
       </div>
 
       <div class="cf-toolbar">
-        <button type="button" class="cf-ep" :disabled="confirmEpisodeIndex <= 0" @click="prevEpisode">◀ 上一集</button>
+        <button type="button" class="cf-ep" :disabled="confirmEpisodeIndex <= 0" @click="prevEpisode">{{ t("projectDetail.ui.prevEp") }}</button>
         <span class="cf-ep-label">{{ confirmEpisodeLabel }}</span>
         <button
           type="button"
@@ -2281,27 +2281,27 @@ function kindLabel(kind: string): string {
           :disabled="confirmEpisodeIndex < 0 || confirmEpisodeIndex >= episodes.length - 1"
           @click="nextEpisode"
         >
-          下一集 ▶
+          {{ t("projectDetail.ui.nextEp") }}
         </button>
         <span class="cf-stat">
-          共 {{ confirmStats.total }} · 草稿 {{ confirmStats.drafts }} · 有图 {{ confirmStats.withImage }} · 已选
+          {{ t("projectDetail.ui.statsLine", { total: confirmStats.total, drafts: confirmStats.drafts, withImage: confirmStats.withImage, selected: confirmSelected.length }) }}
           {{ confirmStats.selected }}
         </span>
         <span class="cf-spacer" />
-        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="selectNoImageConfirm">选中缺图</button>
+        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="selectNoImageConfirm">{{ t("projectDetail.ui.selectNoImage") }}</button>
         <button type="button" class="mini-btn" :disabled="confirmBusy" @click="selectAllConfirm">
-          {{ confirmSelected.length === confirmAssets.length ? "取消全选" : "全选" }}
+          {{ confirmSelected.length === confirmAssets.length ? t("projectDetail.ui.clearAll") : t("projectDetail.ui.selectAll") }}
         </button>
       </div>
 
       <div v-if="confirmAssets.length" class="cf-list">
         <div class="cf-row cf-row--head">
           <span class="cf-check" />
-          <span>资产</span>
-          <span>类型</span>
-          <span>提示词</span>
-          <span>状态</span>
-          <span>引用</span>
+          <span>{{ t("projectDetail.ui.thAsset") }}</span>
+          <span>{{ t("projectDetail.ui.thKind") }}</span>
+          <span>{{ t("projectDetail.ui.thPrompt") }}</span>
+          <span>{{ t("projectDetail.ui.thStatus") }}</span>
+          <span>{{ t("projectDetail.ui.thRef") }}</span>
         </div>
         <label
           v-for="a in confirmAssets"
@@ -2318,33 +2318,33 @@ function kindLabel(kind: string): string {
           <span class="cf-prompt">{{ a.prompt || "—" }}</span>
           <span>
             <Tag :tone="a.status === 2 ? 'success' : 'warning'" size="sm" dot>
-              {{ a.status === 2 ? "已定稿" : "草稿" }}
+              {{ a.status === 2 ? t("projectDetail.ui.statusFinalized") : t("projectDetail.ui.statusDraftShort") }}
             </Tag>
           </span>
-          <span class="cf-bound">{{ a.bound_shot_count ?? 0 }} 镜</span>
+          <span class="cf-bound">{{ t("projectDetail.ui.boundShots", { n: a.bound_shot_count ?? 0 }) }}</span>
         </label>
       </div>
 
       <div v-else class="cf-empty">
         <span>🔍</span>
-        <p>未找到结果</p>
-        <em>先点右上「重新提取」从本集剧本抽取场景/道具</em>
+        <p>{{ t("projectDetail.ui.noResults") }}</p>
+        <em>{{ t("projectDetail.ui.noResultsHint") }}</em>
       </div>
 
       <div class="cf-foot">
-        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="batchDeleteSelected">🗑 删除勾选</button>
+        <button type="button" class="mini-btn" :disabled="confirmBusy" @click="batchDeleteSelected">{{ t("projectDetail.ui.deleteSelected") }}</button>
         <span class="cf-spacer" />
-        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(1)">取消定稿</Button>
-        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(2)">批量定稿</Button>
+        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(1)">{{ t("projectDetail.ui.unfinalize") }}</Button>
+        <Button size="sm" variant="ghost" :disabled="confirmBusy" @click="batchConfirmStatus(2)">{{ t("projectDetail.ui.batchFinalize") }}</Button>
         <Button
           v-if="confirmStage === 'list'"
           :disabled="confirmBusy || !confirmStats.selected"
           @click="confirmStage = 'generate'"
         >
-          下一步，批量生成资产图
+          {{ t("projectDetail.ui.nextGenImages") }}
         </Button>
         <Button v-else :disabled="confirmBusy || !confirmStats.selected" @click="batchGenerateSelected">
-          {{ confirmBusy ? "提交中…" : `提交生成（${confirmStats.selected}）` }}
+          {{ confirmBusy ? t("projectDetail.ui.exportingShort") : t("projectDetail.ui.submitGenN", { n: confirmStats.selected }) }}
         </Button>
       </div>
     </div>
@@ -2353,7 +2353,7 @@ function kindLabel(kind: string): string {
       <div v-if="assetDrawer" class="drawer-mask" @click.self="assetDrawer = false">
         <aside class="drawer">
           <header class="drawer__head">
-            <h3>项目资产</h3>
+            <h3>{{ t("projectDetail.ui.drawerTitle") }}</h3>
             <button type="button" class="ctl ctl--icon" @click="assetDrawer = false">✕</button>
           </header>
           <div class="av-tabs drawer__tabs">
@@ -2368,11 +2368,11 @@ function kindLabel(kind: string): string {
               {{ at.label }}
             </button>
           </div>
-          <input class="drawer__search" type="search" :placeholder="`搜索你想要的${assetTabLabel}`" />
+          <input class="drawer__search" type="search" :placeholder="t('projectDetail.ui.drawerSearch', { kind: assetTabLabel })" />
           <p class="drawer__note">
-            勾选的资产会作为本镜参考图注入生成；仅「已定稿 + 有参考图」的资产会被后端采纳，否则该镜投递会被拒绝（400105）。
+            {{ t("projectDetail.ui.drawerHint") }}
           </p>
-          <p class="block-label">全部素材（已选 {{ drawerSelection.length }}）</p>
+          <p class="block-label">{{ t("projectDetail.ui.drawerAll", { n: drawerSelection.length }) }}</p>
           <div v-if="drawerAssets.length" class="drawer__grid">
             <button
               v-for="a in drawerAssets"
@@ -2385,16 +2385,16 @@ function kindLabel(kind: string): string {
               <img v-if="assetImage(a)" :src="assetImage(a) || ''" :alt="a.name" />
               <i v-else />
               <span>{{ a.name }}</span>
-              <em>{{ a.status === 2 ? "已定稿" : "草稿" }}</em>
+              <em>{{ a.status === 2 ? t("projectDetail.ui.statusFinalized") : t("projectDetail.ui.statusDraftShort") }}</em>
             </button>
           </div>
           <div v-else class="drawer__empty">
             <span>▤</span>
-            <p>未搜索到相关资源</p>
+            <p>{{ t("projectDetail.ui.drawerEmpty") }}</p>
           </div>
           <div class="drawer__ops">
-            <Button variant="ghost" @click="assetDrawer = false">取消</Button>
-            <Button :disabled="drawerSaving" @click="applyDrawerAssets">{{ drawerSaving ? "保存中…" : "应用到当前分镜" }}</Button>
+            <Button variant="ghost" @click="assetDrawer = false">{{ t("projectDetail.ui.cancel") }}</Button>
+            <Button :disabled="drawerSaving" @click="applyDrawerAssets">{{ drawerSaving ? t("projectDetail.ui.saving") : t("projectDetail.ui.apply") }}</Button>
           </div>
         </aside>
       </div>
@@ -2410,21 +2410,21 @@ function kindLabel(kind: string): string {
     />
 
     <!-- ── 资产编辑（场景/道具/其他）── -->
-    <Modal :open="assetFormOpen" :title="assetFormId ? '编辑资产' : `新建${assetTabLabel}`" width="520px" @close="assetFormOpen = false">
+    <Modal :open="assetFormOpen" :title="assetFormId ? t('projectDetail.ui.editAsset') : t('projectDetail.ui.newKind', { kind: assetTabLabel })" width="520px" @close="assetFormOpen = false">
       <div class="af-form">
-        <label class="af-row"><span>名称</span><input v-model="assetForm.name" maxlength="50" placeholder="例如：雨夜街头 / 旧怀表" /></label>
-        <label class="af-row"><span>描述</span><input v-model="assetForm.description" maxlength="500" placeholder="一句话说明外观与用途" /></label>
-        <label class="af-row"><span>提示词</span><textarea v-model="assetForm.prompt" maxlength="1000" rows="3" placeholder="生图提示词（可选）" /></label>
-        <label class="af-row"><span>参考图 uri</span><input v-model="assetForm.ref_image_uri" maxlength="500" placeholder="可留空；用「导入」上传会自动填" /></label>
+        <label class="af-row"><span>{{ t("projectDetail.ui.fieldName") }}</span><input v-model="assetForm.name" maxlength="50" :placeholder="t('projectDetail.ui.namePlaceholder')" /></label>
+        <label class="af-row"><span>{{ t("projectDetail.ui.fieldDesc") }}</span><input v-model="assetForm.description" maxlength="500" :placeholder="t('projectDetail.ui.descPlaceholder')" /></label>
+        <label class="af-row"><span>{{ t("projectDetail.ui.promptLabel") }}</span><textarea v-model="assetForm.prompt" maxlength="1000" rows="3" :placeholder="t('projectDetail.ui.promptPlaceholder2')" /></label>
+        <label class="af-row"><span>{{ t("projectDetail.ui.fieldRefUri") }}</span><input v-model="assetForm.ref_image_uri" maxlength="500" :placeholder="t('projectDetail.ui.refPlaceholder')" /></label>
         <div class="af-ops">
-          <Button variant="ghost" @click="assetFormOpen = false">取消</Button>
-          <Button :disabled="!!busy" @click="saveAssetForm">保存</Button>
+          <Button variant="ghost" @click="assetFormOpen = false">{{ t("projectDetail.ui.cancel") }}</Button>
+          <Button :disabled="!!busy" @click="saveAssetForm">{{ t("projectDetail.ui.save") }}</Button>
         </div>
       </div>
     </Modal>
 
     <!-- ── 资产参考图候选 ── -->
-    <Modal :open="!!assetCandidates" title="选择参考图" width="720px" @close="assetCandidates = null">
+    <Modal :open="!!assetCandidates" :title="t('projectDetail.ui.pickRef')" width="720px" @close="assetCandidates = null">
       <div class="cand-grid">
         <button
           v-for="item in assetCandidates?.list ?? []"
@@ -2433,14 +2433,14 @@ function kindLabel(kind: string): string {
           class="cand"
           @click="selectAssetCandidate(item)"
         >
-          <img :src="item.url" :alt="`候选 ${item.index + 1}`" />
-          <span>候选 {{ item.index + 1 }} · 点击采用</span>
+          <img :src="item.url" :alt="t('projectDetail.ui.candidateN', { n: item.index + 1 })" />
+          <span>{{ t("projectDetail.ui.candidateClick", { n: item.index + 1 }) }}</span>
         </button>
       </div>
     </Modal>
 
     <!-- ── 定妆图候选 ── -->
-    <Modal :open="!!candidates" title="选择定妆图" width="720px" @close="candidates = null">
+    <Modal :open="!!candidates" :title="t('projectDetail.ui.pickLookLock')" width="720px" @close="candidates = null">
       <div class="cand-grid">
         <button
           v-for="item in candidates?.list ?? []"
@@ -2449,11 +2449,11 @@ function kindLabel(kind: string): string {
           class="cand"
           @click="chooseCandidate(item)"
         >
-          <img :src="item.url" :alt="`候选 ${item.index + 1}`" />
-          <span>候选 {{ item.index + 1 }}</span>
+          <img :src="item.url" :alt="t('projectDetail.ui.candidateN', { n: item.index + 1 })" />
+          <span>{{ t("projectDetail.ui.candidateN", { n: item.index + 1 }) }}</span>
         </button>
       </div>
-      <p v-if="!candidates?.list.length" class="muted">没有可用候选图。</p>
+      <p v-if="!candidates?.list.length" class="muted">{{ t("projectDetail.ui.noCandidates2") }}</p>
     </Modal>
 
     <!-- ── 3D 导演台（场景快照存服务端；打开即载入本项目最近场景）── -->
