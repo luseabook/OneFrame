@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasNodeDto } from "~/types/canvas";
 import { NODE_STATUS, NODE_TYPE_META } from "~/types/canvas";
 
@@ -56,8 +58,9 @@ function parr(key: string): unknown[] {
 
 /** 各类型的摘要行：只显示"一眼能判断这是什么"的信息，完整参数在右侧检查器 */
 const summary = computed<string>(() => {
-  const t = props.node.node_type;
-  switch (t) {
+  // 局部变量不能叫 `t`：会遮蔽 i18n 的 t()（本项目第 6 次踩同类，建议加 lint 规则）
+  const nodeType = props.node.node_type;
+  switch (nodeType) {
     case "text":
       return ps("prompt");
     case "image":
@@ -76,12 +79,12 @@ const summary = computed<string>(() => {
       const tb = pobj("table");
       const sheets = Array.isArray(tb.sheets) ? tb.sheets.length : 0;
       const src = (tb.source as Record<string, unknown> | undefined)?.type;
-      return `表格 · ${sheets} 个 Sheet · 来源 ${src ?? "manual"}`;
+      return t("canvasUi.nodeTableSummary", { sheets: String(sheets), src: String(src ?? "manual") });
     }
     case "script":
       return [
-        ps("runPhase", "storyboard") === "asset_match" ? "拆资产" : "拆分镜",
-        `${pn("shotCount", 3)} 镜`,
+        ps("runPhase", "storyboard") === "asset_match" ? t("canvasUi.nodeScriptAssetMatch") : t("canvasUi.nodeScriptStoryboard"),
+        t("canvasUi.nodeShotsCount", { n: pn("shotCount", 3) }),
         ps("sourceText"),
       ]
         .filter(Boolean)
@@ -90,20 +93,24 @@ const summary = computed<string>(() => {
       return [`${ps("activeTab", "character")}`, ps("sourceText")].filter(Boolean).join(" · ");
     case "clip": {
       const es = pobj("exportSettings");
-      return `镜头 ${parr("shotOrder").length} 段 · ${es.resolution ?? "720p"} ${es.format ?? "mp4"}`;
+      return t("canvasUi.nodeVideoSummary", {
+        segments: String(parr("shotOrder").length),
+        resolution: String(es.resolution ?? "720p"),
+        format: String(es.format ?? "mp4"),
+      });
     }
     case "director":
-      return ps("referenceLabel", "机位 / 定格编排");
+      return ps("referenceLabel", t("canvasUi.nodeShotOrderDefault"));
     case "group":
-      return `${ps("title", "分组")} · ${parr("childNodeIds").length} 个成员`;
+      return t("canvasUi.nodeGroupSummary", { title: ps("title", t("canvasUi.nodeGroupDefault")), count: parr("childNodeIds").length });
     default:
       return "";
   }
 });
 
 const statusTag = computed(() => {
-  if (props.node.status === NODE_STATUS.RUNNING) return { text: "生成中", cls: "cv-tag--brand" };
-  if (props.node.status === NODE_STATUS.DONE) return { text: "已完成", cls: "cv-tag--success" };
+  if (props.node.status === NODE_STATUS.RUNNING) return { text: t("canvasUi.nodeRunning"), cls: "cv-tag--brand" };
+  if (props.node.status === NODE_STATUS.DONE) return { text: t("canvasUi.nodeDone"), cls: "cv-tag--success" };
   return null;
 });
 
@@ -151,7 +158,7 @@ const lastErrorText = computed(() => {
         <CanvasIcon :name="iconName" :size="14" />
       </span>
       <span class="canvas-node__type">{{ meta.label }}</span>
-      <span v-if="lockHolder" class="canvas-node__lock" title="他人正在编辑">
+      <span v-if="lockHolder" class="canvas-node__lock" :title="t('canvasUi.nodeLockedByOther')">
         <CanvasIcon name="lock" :size="12" />
       </span>
       <span v-if="statusTag" class="cv-tag" :class="statusTag.cls">{{ statusTag.text }}</span>
@@ -168,7 +175,7 @@ const lastErrorText = computed(() => {
     <!-- 生成中占位：没有结果时也要让"正在生成"可见，否则用户以为没反应 -->
     <div v-else-if="node.status === NODE_STATUS.RUNNING" class="canvas-node__thumb is-placeholder">
       <span class="canvas-node__spinner" aria-hidden="true" />
-      <span class="canvas-node__thumb-label">生成中…</span>
+      <span class="canvas-node__thumb-label">{{ t("canvasUi.nodeGenerating") }}</span>
     </div>
 
     <!-- 标题 -->
@@ -183,8 +190,8 @@ const lastErrorText = computed(() => {
 
     <!-- 尾部：任务/分组标记 -->
     <footer v-if="node.task_id || node.group_ids.length" class="canvas-node__foot">
-      <span v-if="node.task_id" class="cv-tag">任务</span>
-      <span v-if="node.group_ids.length" class="cv-tag">{{ node.group_ids.length }} 组</span>
+      <span v-if="node.task_id" class="cv-tag">{{ t("canvasUi.nodeTaskTag") }}</span>
+      <span v-if="node.group_ids.length" class="cv-tag">{{ t("canvasUi.nodeGroupsTag", { count: node.group_ids.length }) }}</span>
     </footer>
   </div>
 </template>

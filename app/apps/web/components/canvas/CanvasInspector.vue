@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+const { t } = useI18n();
 import type { CanvasEdgeDto, CanvasNodeDto, CanvasNodeType } from "~/types/canvas";
 import { NODE_STATUS, NODE_TYPE_META } from "~/types/canvas";
 import type { CanvasEditor } from "~/composables/useCanvasEditor";
@@ -72,16 +74,16 @@ const compact = computed(() => props.width < 300);
 
 // ── 头部文案 ────────────────────────────────────────────
 const headTitle = computed(() => {
-  if (loading.value) return "检查器";
-  if (loadError.value) return "载入失败";
-  if (multi.value) return `已选 ${selectedIds.value.length} 个节点`;
-  if (selectedNode.value) return selectedNode.value.name || "未命名节点";
-  return "画布概览";
+  if (loading.value) return t("canvasUi.inspTitle");
+  if (loadError.value) return t("canvasUi.inspLoadFailed");
+  if (multi.value) return t("canvasUi.inspMultiTitle", { count: selectedIds.value.length });
+  if (selectedNode.value) return selectedNode.value.name || t("canvasUi.inspUnnamedNode");
+  return t("canvasUi.inspOverviewTitle");
 });
 const headSub = computed(() => {
-  if (multi.value) return "批量操作";
+  if (multi.value) return t("canvasUi.inspBatchTitle");
   if (selectedNode.value) return typeMeta.value.label;
-  return canvasTitle.value || "未命名画布";
+  return canvasTitle.value || t("canvasUi.inspUntitledCanvas");
 });
 const headIcon = computed(() => {
   if (!nodeType.value) return "organize";
@@ -229,70 +231,70 @@ interface Opt {
 }
 
 const STATUS_OPTS = [
-  { value: NODE_STATUS.IDLE, label: "空闲" },
-  { value: NODE_STATUS.RUNNING, label: "生成中" },
-  { value: NODE_STATUS.DONE, label: "完成" },
+  { value: NODE_STATUS.IDLE, label: t("canvasUi.statusIdle") },
+  { value: NODE_STATUS.RUNNING, label: t("canvasUi.statusRunning") },
+  { value: NODE_STATUS.DONE, label: t("canvasUi.statusDone") },
 ];
 
 /** image 的 16 种 mode（顺序与 node.md 一致，label 只是中文简称，写入 params 的永远是 value） */
 const IMAGE_MODE_OPTS: Opt[] = [
-  { value: "text2image", label: "文生图" },
-  { value: "image2image", label: "图生图" },
-  { value: "multi_reference", label: "多参考" },
-  { value: "upscale", label: "放大" },
-  { value: "crop", label: "裁剪" },
-  { value: "outpaint", label: "扩图" },
-  { value: "inpaint", label: "局部重绘" },
-  { value: "erase", label: "擦除" },
-  { value: "panorama", label: "全景" },
-  { value: "multi_angle_360", label: "多角度 360" },
-  { value: "panorama_360", label: "全景 360" },
-  { value: "lighting", label: "打光" },
-  { value: "multi_camera_grid_9", label: "九宫格机位" },
-  { value: "story_grid_4", label: "故事板 4" },
-  { value: "story_grid_9", label: "故事板 9" },
-  { value: "story_grid_25", label: "故事板 25" },
+  { value: "text2image", label: t("canvasUi.imgModeText2image") },
+  { value: "image2image", label: t("canvasUi.imgModeImage2image") },
+  { value: "multi_reference", label: t("canvasUi.imgModeMultiReference") },
+  { value: "upscale", label: t("canvasUi.imgModeUpscale") },
+  { value: "crop", label: t("canvasUi.imgModeCrop") },
+  { value: "outpaint", label: t("canvasUi.imgModeOutpaint") },
+  { value: "inpaint", label: t("canvasUi.imgModeInpaint") },
+  { value: "erase", label: t("canvasUi.imgModeErase") },
+  { value: "panorama", label: t("canvasUi.imgModePanorama") },
+  { value: "multi_angle_360", label: t("canvasUi.imgModeMultiAngle360") },
+  { value: "panorama_360", label: t("canvasUi.imgModePanorama360") },
+  { value: "lighting", label: t("canvasUi.imgModeLighting") },
+  { value: "multi_camera_grid_9", label: t("canvasUi.imgModeCameraGrid9") },
+  { value: "story_grid_4", label: t("canvasUi.imgModeStoryGrid4") },
+  { value: "story_grid_9", label: t("canvasUi.imgModeStoryGrid9") },
+  { value: "story_grid_25", label: t("canvasUi.imgModeStoryGrid25") },
 ];
 
 /** video 的 13 种 mode */
 const VIDEO_MODE_OPTS: Opt[] = [
-  { value: "text2video", label: "文生视频" },
-  { value: "image2video", label: "图生视频" },
-  { value: "first_frame", label: "首帧" },
-  { value: "first_last_frame", label: "首尾帧" },
-  { value: "video_reference", label: "视频参考" },
-  { value: "universal_reference", label: "通用参考" },
-  { value: "video_extend", label: "视频续写" },
-  { value: "video_clip", label: "视频截取" },
-  { value: "video_upscale", label: "视频放大" },
-  { value: "de_subtitle_auto", label: "自动去字幕" },
-  { value: "de_subtitle_region", label: "区域去字幕" },
-  { value: "frame_capture", label: "抽帧" },
-  { value: "video_edit", label: "AI 改视频" },
+  { value: "text2video", label: t("canvasUi.videoModeText2video") },
+  { value: "image2video", label: t("canvasUi.videoModeImage2video") },
+  { value: "first_frame", label: t("canvasUi.videoModeFirstFrame") },
+  { value: "first_last_frame", label: t("canvasUi.videoModeFirstLast") },
+  { value: "video_reference", label: t("canvasUi.videoModeVideoReference") },
+  { value: "universal_reference", label: t("canvasUi.videoModeUniversalReference") },
+  { value: "video_extend", label: t("canvasUi.videoModeExtend") },
+  { value: "video_clip", label: t("canvasUi.videoModeClip") },
+  { value: "video_upscale", label: t("canvasUi.videoModeUpscale") },
+  { value: "de_subtitle_auto", label: t("canvasUi.videoModeDeSubAuto") },
+  { value: "de_subtitle_region", label: t("canvasUi.videoModeDeSubRegion") },
+  { value: "frame_capture", label: t("canvasUi.videoModeFrameCapture") },
+  { value: "video_edit", label: t("canvasUi.videoModeVideoEdit") },
 ];
 
 const AUDIO_KIND_OPTS: Opt[] = [
-  { value: "voiceover", label: "旁白" },
-  { value: "music", label: "配乐" },
-  { value: "sfx", label: "音效" },
-  { value: "ambient", label: "氛围" },
+  { value: "voiceover", label: t("canvasUi.audioModeVoiceover") },
+  { value: "music", label: t("canvasUi.audioModeMusic") },
+  { value: "sfx", label: t("canvasUi.audioModeSfx") },
+  { value: "ambient", label: t("canvasUi.audioModeAmbient") },
 ];
 
 const RUN_PHASE_OPTS: Opt[] = [
-  { value: "storyboard", label: "拆分镜" },
-  { value: "asset_match", label: "拆资产" },
+  { value: "storyboard", label: t("canvasUi.scriptModeStoryboard") },
+  { value: "asset_match", label: t("canvasUi.scriptModeAssetMatch") },
 ];
 
 const ACTIVE_TAB_OPTS: Opt[] = [
-  { value: "character", label: "角色" },
-  { value: "scene", label: "场景" },
-  { value: "prop", label: "道具" },
+  { value: "character", label: t("canvasUi.assetKindCharacter") },
+  { value: "scene", label: t("canvasUi.assetKindScene") },
+  { value: "prop", label: t("canvasUi.assetKindProp") },
 ];
 
 const TABLE_SOURCE_OPTS: Opt[] = [
-  { value: "manual", label: "手工录入" },
-  { value: "excel_import", label: "Excel 导入" },
-  { value: "project_episode_import", label: "剧集导入" },
+  { value: "manual", label: t("canvasUi.tableSourceManual") },
+  { value: "excel_import", label: t("canvasUi.tableSourceExcel") },
+  { value: "project_episode_import", label: t("canvasUi.tableSourceEpisode") },
 ];
 
 // ── 表格节点 Excel 导入（两步式：先列 Sheet，再显式确认）────────────
@@ -309,7 +311,7 @@ const tableConfirming = ref("");
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("读取文件失败"));
+    reader.onerror = () => reject(new Error(t("canvasUi.readFileFailed")));
     // 去掉 "data:...;base64," 前缀：后端接受裸 base64，也接受带前缀，这里给最干净的一种
     reader.onload = () => resolve(String(reader.result ?? "").replace(/^data:[^;]*;base64,/, ""));
     reader.readAsDataURL(file);
@@ -324,7 +326,7 @@ async function onTableFilePick(ev: Event): Promise<void> {
   const n = selectedNode.value;
   if (!file || !n) return;
   if (!/\.xlsx$/i.test(file.name)) {
-    tableImportError.value = "只支持 .xlsx（旧版 .xls 请另存为 .xlsx）";
+    tableImportError.value = t("canvasUi.excelOnly");
     return;
   }
   tableImporting.value = true;
@@ -336,7 +338,7 @@ async function onTableFilePick(ev: Event): Promise<void> {
       file_base64: await readFileAsBase64(file),
     });
   } catch (err) {
-    tableImportError.value = (err as { message?: string }).message || "导入失败";
+    tableImportError.value = (err as { message?: string }).message || t("canvasUi.importFailed");
   } finally {
     tableImporting.value = false;
   }
@@ -356,9 +358,9 @@ async function onConfirmSheet(sheetId: string): Promise<void> {
     });
     // 必须用后端返回值覆盖本地：只改本地的话，下一次 commit 会用旧参数把导入结果冲掉
     setPP(["table"], res.table);
-    toast.success(`已导入「${res.sheet.name}」（${res.sheet.row_count} 行 × ${res.sheet.col_count} 列）`);
+    toast.success(t("canvasUi.tableImported", { name: res.sheet.name, rows: res.sheet.row_count, cols: res.sheet.col_count }));
   } catch (err) {
-    tableImportError.value = (err as { message?: string }).message || "确认失败";
+    tableImportError.value = (err as { message?: string }).message || t("canvasUi.confirmFailed");
   } finally {
     tableConfirming.value = "";
   }
@@ -387,8 +389,8 @@ const CLIP_RES_OPTS: Opt[] = [
 ];
 
 const EXPORT_TARGET_OPTS: Opt[] = [
-  { value: "canvas", label: "存回画布" },
-  { value: "local", label: "下载到本地" },
+  { value: "canvas", label: t("canvasUi.downloadTargetCanvas") },
+  { value: "local", label: t("canvasUi.downloadTargetLocal") },
 ];
 
 const EXPORT_FORMAT_OPTS: Opt[] = [
@@ -397,24 +399,24 @@ const EXPORT_FORMAT_OPTS: Opt[] = [
 ];
 
 const RICH_FORMAT_OPTS: Opt[] = [
-  { value: "plain", label: "纯文本" },
+  { value: "plain", label: t("canvasUi.richFormatPlain") },
   { value: "markdown", label: "Markdown" },
 ];
 
 const TONE_OPTS: Opt[] = [
-  { value: "Neutral", label: "中性" },
-  { value: "Happy", label: "开心" },
-  { value: "Sad", label: "悲伤" },
-  { value: "Surprise", label: "惊讶" },
-  { value: "Angry", label: "生气" },
+  { value: "Neutral", label: t("canvasUi.toneNeutral") },
+  { value: "Happy", label: t("canvasUi.toneHappy") },
+  { value: "Sad", label: t("canvasUi.toneSad") },
+  { value: "Surprise", label: t("canvasUi.toneSurprise") },
+  { value: "Angry", label: t("canvasUi.toneAngry") },
 ];
 
 /** 音频时长不是任意值：按 audioKind 有固定档位，所以把档位写在提示里而不是硬限制输入 */
 const audioDurationHint = computed(() => {
   const kind = sAt(["audioKind"], "voiceover");
-  if (kind === "music" || kind === "ambient") return "配乐/氛围常用 10 / 30 / 60 秒，默认 30；旁白接口不提交时长";
-  if (kind === "sfx") return "音效常用 5 / 10 / 15 秒，默认 5";
-  return "旁白（voiceover）按文本长度出时长，接口不提交 duration";
+  if (kind === "music" || kind === "ambient") return t("canvasUi.audioDurationMusic");
+  if (kind === "sfx") return t("canvasUi.audioDurationSfx");
+  return t("canvasUi.audioDurationVoiceover");
 });
 
 // ── JSON 文本域：本地缓冲 + 解析校验 ─────────────────────
@@ -484,15 +486,15 @@ function onJsonInput(path: string[], kind: JsonKind, ev: Event): void {
   try {
     parsed = JSON.parse(trimmed);
   } catch (e) {
-    jsonErrors[key] = `JSON 语法错误：${(e as Error).message}`;
+    jsonErrors[key] = t("canvasUi.jsonSyntaxError", { msg: (e as Error).message });
     return;
   }
   if (kind === "array" && !Array.isArray(parsed)) {
-    jsonErrors[key] = "这里必须是 JSON 数组（以 [ 开头）";
+    jsonErrors[key] = t("canvasUi.jsonNeedArray");
     return;
   }
   if (kind === "object" && (Array.isArray(parsed) || parsed === null || typeof parsed !== "object")) {
-    jsonErrors[key] = "这里必须是 JSON 对象（以 { 开头）";
+    jsonErrors[key] = t("canvasUi.jsonNeedObject");
     return;
   }
   delete jsonErrors[key];
@@ -556,7 +558,7 @@ function duplicateOne(): void {
 function deleteOne(): void {
   const n = selectedNode.value;
   if (!n) return;
-  if (!window.confirm(`删除节点「${n.name || "未命名"}」？相关连线会一并清理。`)) return;
+  if (!window.confirm(t("canvasUi.deleteNodeConfirm", { name: n.name || t("canvasUi.inspUnnamedNode") }))) return;
   ed.deleteNodes([n.id]);
 }
 /**
@@ -709,7 +711,11 @@ const assetCandidates = computed<AssetCandidate[]>(() => {
 });
 
 function assetKindLabel(kind: AssetCandidate["kind"]): string {
-  return kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具";
+  return kind === "character"
+    ? t("canvasUi.assetKindCharacter")
+    : kind === "scene"
+      ? t("canvasUi.assetKindScene")
+      : t("canvasUi.assetKindProp");
 }
 
 /** 资产匹配结果：`[{shot_no, character, scene, props[]}]`，逐镜渲染成一行的对照表 */
@@ -764,7 +770,7 @@ function createAssetNodes(): void {
     if (item.prompt) ed.setNodeParam(node.id, "prompt", item.prompt);
     if (item.description) ed.setNodeParam(node.id, "description", item.description);
   });
-  toast.success(`已创建 ${items.length} 个资产节点，保存后生效`);
+  toast.success(t("canvasUi.assetsCreated", { count: items.length }));
 }
 
 // ── 视频拆解（拉片）──────────────────────────────────────
@@ -802,11 +808,11 @@ async function doBatchDownload(): Promise<void> {
   downloadPacking.value = true;
   try {
     const res = await api.batchDownloadNodes(ed.canvasId.value, ids);
-    toast.success(`已打包 ${res.file_count} 个文件（${res.node_count} 个节点）`);
+    toast.success(t("canvasUi.packedFiles", { files: res.file_count, nodes: res.node_count }));
     // 交给页面打开"下载记录"抽屉：下载单是可复用凭证，用户应该能回头再取链接
     emit("download-created", res.download_list_id);
   } catch (err) {
-    toast.error((err as { message?: string }).message || "打包失败");
+    toast.error((err as { message?: string }).message || t("canvasUi.packFailed"));
   } finally {
     downloadPacking.value = false;
   }
@@ -843,7 +849,7 @@ function alignSelection(kind: AlignKind): void {
 function batchDelete(): void {
   const ids = [...selectedIds.value];
   if (ids.length === 0) return;
-  if (!window.confirm(`删除选中的 ${ids.length} 个节点？相关连线会一并清理。`)) return;
+  if (!window.confirm(t("canvasUi.deleteNodesConfirm", { count: ids.length }))) return;
   ed.deleteNodes(ids);
 }
 
@@ -863,7 +869,7 @@ function typeLabelOf(t: string): string {
   return (NODE_TYPE_META as Record<string, { label: string } | undefined>)[t]?.label ?? t;
 }
 function statusLabel(v: number): string {
-  return STATUS_OPTS.find((o) => o.value === v)?.label ?? `状态 ${v}`;
+  return STATUS_OPTS.find((o) => o.value === v)?.label ?? t("canvasUi.statusFallback", { v: v });
 }
 
 // ── 折叠区 ──────────────────────────────────────────────

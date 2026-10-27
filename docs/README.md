@@ -123,6 +123,23 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.3 · 多语言第 33 批：canvas 节点摘要 + 检查器脚本层 · 2026-10-28）
+
+`canvasUi` 扩到 **161 key**（本轮 +**90**）：
+
+| 文件 | 迁移内容 |
+|---|---|
+| [CanvasNode.vue](app/apps/web/components/canvas/CanvasNode.vue) | 五类节点摘要（表格 Sheet/来源、剧本拆资产或拆分镜 + 镜数、视频段数与分辨率格式、机位定格、分组与成员数）、三态标签（生成中/已完成）、他人编辑锁定提示、生成中、任务与分组角标 |
+| [CanvasInspector.vue](app/apps/web/components/canvas/CanvasInspector.vue)（脚本层） | 检查器标题五态（检查器/载入失败/已选 N 个节点/未命名节点/画布概览/批量操作/未命名画布）、**选项表全部翻译**：3 状态、**17 图像模式**（文生图…故事板 25）、**13 视频模式**（文生视频…AI 改视频）、4 音频、2 剧本、3 资产类型、3 表格来源、2 下载目标、富文本纯文本、5 语气；音频时长说明三档、JSON 校验三种、单/多节点删除确认、表导入四条提示与成功 toast、打包成功/失败、资产节点创建、状态回退 |
+
+### 两处类型/命名修复
+
+1. **第 6 次变量遮蔽**：`summary` computed 里原有 `const t = props.node.node_type`，加 `useI18n()` 后 6 处 `t(...)` 报 `TS2349` → 改名 `nodeType`，并再次在注释里建议加 lint 规则（这已是第 6 次，人工发现已经不可靠）。
+2. **插值类型**：`t()` 的变量表收到 `{}`（`sheets`/`src`/`es.resolution` 等 `unknown`）→ 用 `String()` 显式兜底，避免 `TS2322`。
+
+**验证**：`i18n-check.cjs` 全绿（2464 key / 40 页 + 11 组件 / canvas 进行中）；`e2e-i18n-pages.cjs` **134/134**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v6.2 · 多语言第 32 批：canvas 模块第一批 · 2026-10-28）
 
 `canvasUi`（**71 key** × 5 语言）——无限画布模块的第一批（模块共 **14 个文件、约 500 处**文案，记"进行中"）：
