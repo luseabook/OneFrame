@@ -46,6 +46,9 @@ const agreementKind = ref(1);
 
 const buying = ref(false);
 
+const { t } = useI18n();
+useHead({ title: () => t("marketDetail.metaTitle") });
+
 async function load() {
   loading.value = true;
   errorMsg.value = "";
@@ -53,7 +56,7 @@ async function load() {
     detail.value = await api.get<MarketScriptDetailDto>(`/market/scripts/${workId.value}/detail`);
     business.value = await api.get<Record<string, unknown>>(`/market/scripts/${workId.value}/business`);
   } catch (e) {
-    errorMsg.value = (e as Error).message || "作品加载失败";
+    errorMsg.value = (e as Error).message || t("marketDetail.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -71,7 +74,7 @@ async function loadContent() {
     if (e instanceof ApiError && e.code === 403101) {
       contentLocked.value = true;
     } else {
-      contentError.value = (e as Error).message || "内容加载失败";
+      contentError.value = (e as Error).message || t("marketDetail.contentLoadFailed");
     }
   } finally {
     contentLoading.value = false;
@@ -85,7 +88,7 @@ async function loadAgreement(kind?: number) {
       `/market/scripts/${workId.value}/agreement?kind=${agreementKind.value}`,
     );
   } catch (e) {
-    toast.error((e as Error).message || "协议加载失败");
+    toast.error((e as Error).message || t("marketDetail.agreementLoadFailed"));
   }
 }
 
@@ -100,15 +103,24 @@ async function purchase(kind: "buy" | "preorder") {
   if (!detail.value || buying.value) return;
   const price =
     kind === "buy" ? detail.value.price_credits : (detail.value.preorder_price_credits ?? 0);
-  const label = kind === "buy" ? "买断" : "支付定金";
-  if (!window.confirm(`确认${label}《${detail.value.title}》？将扣除 ${price.toLocaleString()} 积分。`)) return;
+  const label = kind === "buy" ? t("marketDetail.purchaseLabelBuy") : t("marketDetail.purchaseLabelDeposit");
+  if (
+    !window.confirm(
+      t("marketDetail.purchaseConfirm", {
+        label,
+        title: detail.value.title,
+        credits: price.toLocaleString(),
+      }),
+    )
+  )
+    return;
   buying.value = true;
   try {
     const res = await api.post<MarketBuyResultDto>(`/market/scripts/${workId.value}/${kind}`);
     if (res.idempotent) {
-      toast.info("你已经买过这部作品，未重复扣分");
+      toast.info(t("marketDetail.alreadyBought"));
     } else {
-      toast.success(`${label}成功，已扣除 ${price.toLocaleString()} 积分`);
+      toast.success(t("marketDetail.purchaseSuccess", { label, credits: price.toLocaleString() }));
     }
     contentTree.value = null;
     contentLocked.value = false;
@@ -117,8 +129,8 @@ async function purchase(kind: "buy" | "preorder") {
     tab.value = "content";
   } catch (e) {
     const err = e as ApiError;
-    if (err.code === 745701) toast.error("积分余额不足，请先充值");
-    else toast.error(err.message || "购买失败");
+    if (err.code === 745701) toast.error(t("marketDetail.insufficient"));
+    else toast.error(err.message || t("marketDetail.purchaseFailed"));
   } finally {
     buying.value = false;
   }
@@ -145,17 +157,21 @@ async function download() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast.success("已开始下载");
+    toast.success(t("marketDetail.downloadStarted"));
   } catch (e) {
-    toast.error((e as Error).message || "下载失败（购买后才可下载）");
+    toast.error((e as Error).message || t("marketDetail.downloadFailed"));
   }
 }
 
 const canBuy = computed(() => detail.value?.status === 3);
 const canPreorder = computed(() => detail.value?.status === 6);
 const kindName = computed(() => {
-  const map: Record<number, string> = { 1: "购买协议", 2: "预售协议", 3: "授权协议" };
-  return map[agreementKind.value] ?? "协议";
+  const map: Record<number, string> = {
+    1: t("marketDetail.kindBuy"),
+    2: t("marketDetail.kindPreorder"),
+    3: t("marketDetail.kindLicense"),
+  };
+  return map[agreementKind.value] ?? t("marketDetail.kindFallback");
 });
 
 onMounted(load);
@@ -163,12 +179,12 @@ onMounted(load);
 
 <template>
   <div class="md-page">
-    <NuxtLink to="/novel-market" class="md-back">← 返回集市</NuxtLink>
+    <NuxtLink to="/novel-market" class="md-back">{{ t("marketDetail.back") }}</NuxtLink>
 
-    <p v-if="loading" class="md-state">正在加载作品…</p>
+    <p v-if="loading" class="md-state">{{ t("marketDetail.loading") }}</p>
     <div v-else-if="errorMsg" class="md-state md-state-error">
       <p>{{ errorMsg }}</p>
-      <button type="button" class="md-btn" @click="load">重试</button>
+      <button type="button" class="md-btn" @click="load">{{ t("marketDetail.retry") }}</button>
     </div>
 
     <template v-else-if="detail">
@@ -182,15 +198,15 @@ onMounted(load);
           <p class="md-meta">
             <span class="md-status">{{ detail.status_name }}</span>
             <span>{{ detail.kind_name }}</span>
-            <span>作者 {{ detail.author.nickname || "匿名" }}</span>
-            <span>已售 {{ detail.sales_count }}</span>
+            <span>{{ t("marketDetail.author", { name: detail.author.nickname || t("marketDetail.anonymous") }) }}</span>
+            <span>{{ t("marketDetail.sold", { count: detail.sales_count }) }}</span>
           </p>
-          <p class="md-summary">{{ detail.summary || "作者没有写简介" }}</p>
+          <p class="md-summary">{{ detail.summary || t("marketDetail.noSummary") }}</p>
           <div class="md-actions">
             <span class="md-price">
-              {{ detail.price_credits.toLocaleString() }} 积分
+              {{ t("marketDetail.price", { credits: detail.price_credits.toLocaleString() }) }}
               <em v-if="detail.preorder_price_credits !== null" class="md-presale">
-                （预售定金 {{ detail.preorder_price_credits.toLocaleString() }}）
+                {{ t("marketDetail.presaleDeposit", { credits: detail.preorder_price_credits.toLocaleString() }) }}
               </em>
             </span>
             <button
@@ -200,7 +216,7 @@ onMounted(load);
               :disabled="buying"
               @click="purchase('buy')"
             >
-              立即买断
+              {{ t("marketDetail.buyNow") }}
             </button>
             <button
               v-else-if="canPreorder"
@@ -209,10 +225,10 @@ onMounted(load);
               :disabled="buying"
               @click="purchase('preorder')"
             >
-              支付预售定金
+              {{ t("marketDetail.payDeposit") }}
             </button>
-            <span v-else class="md-hint">当前状态不可购买（{{ detail.status_name }}）</span>
-            <button type="button" class="md-btn" @click="switchTab('agreement')">查看协议</button>
+            <span v-else class="md-hint">{{ t("marketDetail.cannotBuy", { status: detail.status_name }) }}</span>
+            <button type="button" class="md-btn" @click="switchTab('agreement')">{{ t("marketDetail.viewAgreement") }}</button>
           </div>
         </div>
       </header>
@@ -220,9 +236,9 @@ onMounted(load);
       <nav class="md-tabs">
         <button
           v-for="t in ([
-            { key: 'overview', label: '作品信息' },
-            { key: 'content', label: '内容结构' },
-            { key: 'agreement', label: '协议条款' },
+            { key: 'overview', label: t('marketDetail.tabOverview') },
+            { key: 'content', label: t('marketDetail.tabContent') },
+            { key: 'agreement', label: t('marketDetail.tabAgreement') },
           ] as const)"
           :key="t.key"
           type="button"
@@ -237,18 +253,22 @@ onMounted(load);
       <!-- 作品信息 -->
       <section v-if="tab === 'overview'" class="md-panel">
         <dl class="md-dl">
-          <div><dt>章节</dt><dd>{{ detail.counts.chapters }}</dd></div>
-          <div><dt>分集剧本</dt><dd>{{ detail.counts.episodes }}</dd></div>
-          <div><dt>角色卡</dt><dd>{{ detail.counts.characters }}</dd></div>
-          <div><dt>总字数</dt><dd>{{ detail.counts.total_word_count.toLocaleString() }}</dd></div>
+          <div><dt>{{ t("marketDetail.chapters") }}</dt><dd>{{ detail.counts.chapters }}</dd></div>
+          <div><dt>{{ t("marketDetail.episodes") }}</dt><dd>{{ detail.counts.episodes }}</dd></div>
+          <div><dt>{{ t("marketDetail.characters") }}</dt><dd>{{ detail.counts.characters }}</dd></div>
+          <div><dt>{{ t("marketDetail.totalWords") }}</dt><dd>{{ detail.counts.total_word_count.toLocaleString() }}</dd></div>
         </dl>
-        <p v-if="detail.audit_note" class="md-note">审核意见：{{ detail.audit_note }}</p>
+        <p v-if="detail.audit_note" class="md-note">{{ t("marketDetail.auditNote", { note: detail.audit_note }) }}</p>
         <div v-if="business" class="md-business">
-          <h3 class="md-h3">商务条款</h3>
+          <h3 class="md-h3">{{ t("marketDetail.businessTitle") }}</h3>
           <p class="md-business-line">
-            平台抽成 {{ Number(business.commission_bps ?? 0) / 100 }}% ·
-            创作者实收 {{ Number(business.creator_share_bps ?? 0) / 100 }}% ·
-            最低提现 {{ String((business.settlement as Record<string, unknown>)?.min_withdraw_credits ?? "—") }} 积分
+            {{
+              t("marketDetail.businessLine", {
+                commission: Number(business.commission_bps ?? 0) / 100,
+                share: Number(business.creator_share_bps ?? 0) / 100,
+                min: String((business.settlement as Record<string, unknown>)?.min_withdraw_credits ?? "—"),
+              })
+            }}
           </p>
           <p class="md-note">{{ String((business.settlement as Record<string, unknown>)?.note ?? "") }}</p>
         </div>
@@ -256,37 +276,37 @@ onMounted(load);
 
       <!-- 内容结构（需购买） -->
       <section v-else-if="tab === 'content'" class="md-panel">
-        <p v-if="contentLoading" class="md-state">正在加载内容结构…</p>
+        <p v-if="contentLoading" class="md-state">{{ t("marketDetail.contentLoading") }}</p>
         <div v-else-if="contentLocked" class="md-locked">
-          <p>内容结构、角色卡与正文下载需先购买本作品。</p>
-          <p class="md-note">未购买时只展示公开信息；这是竞品的购买闸门语义，不是加载失败。</p>
+          <p>{{ t("marketDetail.contentLocked") }}</p>
+          <p class="md-note">{{ t("marketDetail.contentLockedNote") }}</p>
           <button v-if="canBuy" type="button" class="md-btn md-btn-primary" @click="purchase('buy')">
-            立即买断（{{ detail.price_credits.toLocaleString() }} 积分）
+            {{ t("marketDetail.buyNowWithPrice", { credits: detail.price_credits.toLocaleString() }) }}
           </button>
           <button v-else-if="canPreorder" type="button" class="md-btn md-btn-primary" @click="purchase('preorder')">
-            支付预售定金（{{ (detail.preorder_price_credits ?? 0).toLocaleString() }} 积分）
+            {{ t("marketDetail.payDepositWithPrice", { credits: (detail.preorder_price_credits ?? 0).toLocaleString() }) }}
           </button>
         </div>
         <div v-else-if="contentError" class="md-state md-state-error">
           <p>{{ contentError }}</p>
-          <button type="button" class="md-btn" @click="contentError = ''; loadContent()">重试</button>
+          <button type="button" class="md-btn" @click="contentError = ''; loadContent()">{{ t("marketDetail.retry") }}</button>
         </div>
         <template v-else-if="contentTree">
           <div class="md-content-head">
             <p class="md-note">
-              共 {{ contentTree.chapter_count }} 章 / {{ contentTree.total_word_count.toLocaleString() }} 字
+              {{ t("marketDetail.contentSummary", { chapters: contentTree.chapter_count, words: contentTree.total_word_count.toLocaleString() }) }}
             </p>
-            <button type="button" class="md-btn" @click="download">下载正文（.md）</button>
+            <button type="button" class="md-btn" @click="download">{{ t("marketDetail.downloadMd") }}</button>
           </div>
           <ol class="md-chapters">
             <li v-for="c in contentTree.chapters" :key="c.chapter_no" class="md-chapter">
-              <span class="md-chapter-no">第 {{ c.chapter_no }} 章</span>
+              <span class="md-chapter-no">{{ t("marketDetail.chapterNo", { no: c.chapter_no }) }}</span>
               <span class="md-chapter-title">{{ c.title }}</span>
-              <span class="md-chapter-words">{{ c.word_count }} 字</span>
+              <span class="md-chapter-words">{{ t("marketDetail.words", { count: c.word_count }) }}</span>
             </li>
           </ol>
-          <p v-if="contentTree.chapters.length === 0" class="md-state">该作品还没有分章内容。</p>
-          <h3 v-if="characters.length > 0" class="md-h3">角色卡（{{ characters.length }}）</h3>
+          <p v-if="contentTree.chapters.length === 0" class="md-state">{{ t("marketDetail.noChapters") }}</p>
+          <h3 v-if="characters.length > 0" class="md-h3">{{ t("marketDetail.charactersTitle", { count: characters.length }) }}</h3>
           <ul v-if="characters.length > 0" class="md-chars">
             <li v-for="c in characters" :key="c.id" class="md-char">
               <strong>{{ c.name }}</strong>
@@ -303,9 +323,9 @@ onMounted(load);
           <div class="md-agreement-kinds">
             <button
               v-for="k in ([
-                { kind: 1, label: '购买' },
-                { kind: 2, label: '预售' },
-                { kind: 3, label: '授权' },
+                { kind: 1, label: t('marketDetail.agreementKindBuy') },
+                { kind: 2, label: t('marketDetail.agreementKindPreorder') },
+                { kind: 3, label: t('marketDetail.agreementKindLicense') },
               ] as const)"
               :key="k.kind"
               type="button"
@@ -316,9 +336,9 @@ onMounted(load);
               {{ k.label }}
             </button>
           </div>
-          <span class="md-note">{{ kindName }}（平台按成交信息自动生成）</span>
+          <span class="md-note">{{ t("marketDetail.agreementAutoNote", { kind: kindName }) }}</span>
         </div>
-        <p v-if="!agreement" class="md-state">正在加载协议…</p>
+        <p v-if="!agreement" class="md-state">{{ t("marketDetail.agreementLoading") }}</p>
         <pre v-else class="md-agreement">{{ agreement.body }}</pre>
       </section>
     </template>

@@ -123,6 +123,30 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v4.6 · 多语言第 16 批：集市作品详情 · 2026-10-28）
+
+**#16 多语言保持 99%**（页面覆盖 20 → **21/64**）；全站 **97.6%** / 首发 **97.6%**。
+
+| 文件 | namespace | 迁移内容 |
+|---|---|---|
+| [novel-market/[id].vue](app/apps/web/pages/novel-market/[id].vue) | `marketDetail`（56 key） | 返回集市、加载/错误/重试、作者与已售、价格与预售定金、买断/付定金/不可购买三态、三个 tab（作品信息/内容结构/协议条款）、四类计数、审核意见、商务条款（抽成/实收/最低提现带参）、内容闸门文案、章节与角色卡、协议三签与自动生成说明、购买确认与 8 条 toast |
+
+- 语言包 **824 → 880 key**。
+- **E2E 补上了动态路由的 fixture**：这一页需要真实作品 id，所以断言里现场跑完整上架链路
+  （`save → submit → ops approve`）再进页面，中英各检查一遍（**57/57**）。这也让 `page-content-smoke` 之外
+  的动态页面有了第一个"真数据 + 真浏览器"的先例。
+
+### 写 E2E 又踩到一个 HTTP 细节（值得记）
+
+`POST /market/creator/works/:id/submit` 是**无 body** 的端点；如果请求带了
+`content-type: application/json` 而不带 body，Fastify 直接 400100
+（`Body cannot be empty when content-type is set to 'application/json'`）。
+E2E 里统一改成"有 body 才带 content-type"，否则上架链路会在 submit 一步静默失败、
+后面 approve 再报 `work is not pending review (status=1)`——两个错误叠起来很像"页面坏了"。
+
+**验证**：`i18n-check.cjs` 全绿（880 key / 21 页 + 4 组件）；`e2e-i18n-pages.cjs` **57/57**；
+`page-content-smoke.cjs` 49/49；`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v4.5 · 多语言第 15 批：创作 Agent + 新增全站页面内容冒烟 · 2026-10-28）
 
 **#16 多语言 98% → 99%**；全站 **97.6%** / 首发 **97.6%**。
