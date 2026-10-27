@@ -112,11 +112,14 @@ const statusStr = computed({
   set: (v: string) => (editForm.value.status = Number(v)),
 });
 
+const { t, locale } = useI18n();
+useHead({ title: () => t("teamPage.metaTitle") });
+
 const tabs = computed(() => [
-  { value: "members", label: "成员管理", badge: total.value },
-  { value: "points", label: "积分管理" },
-  { value: "permissions", label: "角色权限" },
-  { value: "rules", label: "规则说明" },
+  { value: "members", label: t("teamPage.tabs.members"), badge: total.value },
+  { value: "points", label: t("teamPage.tabs.points") },
+  { value: "permissions", label: t("teamPage.tabs.permissions") },
+  { value: "rules", label: t("teamPage.tabs.rules") },
 ]);
 
 /** 数据看板入口（kds 域，对照参照产品 /team/dashboard） */
@@ -127,13 +130,13 @@ function openDashboard() {
 
 const canManage = computed(() => perm.value?.privileged === true);
 const roleName = (code: string | null): string => roles.value.find((r) => r.role_code === code)?.role_name ?? (code ?? "—");
-const groupName_ = (id: string | null): string => groups.value.find((g) => g.id === id)?.name ?? "未分组";
-const kindLabel: Record<string, string> = {
-  team_allocate_out: "分配（团队出账）",
-  team_allocate_in: "分配（成员入账）",
-  team_recover_out: "回收（成员出账）",
-  team_recover_in: "回收（团队入账）",
-};
+const groupName_ = (id: string | null): string => groups.value.find((g) => g.id === id)?.name ?? t("teamPage.ungrouped");
+const kindLabel = computed<Record<string, string>>(() => ({
+  team_allocate_out: t("teamPage.flowTypes.team_allocate_out"),
+  team_allocate_in: t("teamPage.flowTypes.team_allocate_in"),
+  team_recover_out: t("teamPage.flowTypes.team_recover_out"),
+  team_recover_in: t("teamPage.flowTypes.team_recover_in"),
+}));
 
 async function bootstrap(): Promise<void> {
   loading.value = true;
@@ -166,12 +169,12 @@ async function switchSpace(spaceId: string): Promise<void> {
   setActiveSpaceId(spaceId);
   flows.value = [];
   await bootstrap();
-  flash("已切换空间");
+  flash(t("teamPage.switched"));
 }
 
 /** 创建团队：建 spaces(type=2) → 自动切进去 */
 async function createTeam(): Promise<void> {
-  if (!newTeamName.value.trim()) return flash("请输入团队名称");
+  if (!newTeamName.value.trim()) return flash(t("teamPage.inputTeamName"));
   busy.value = true;
   error.value = "";
   try {
@@ -181,7 +184,7 @@ async function createTeam(): Promise<void> {
     newTeamOpen.value = false;
     newTeamName.value = "";
     await switchSpace(created.space_id);
-    flash("团队已创建");
+    flash(t("teamPage.teamCreated"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -256,7 +259,7 @@ function flash(msg: string): void {
 }
 
 async function doAllocate(): Promise<void> {
-  if (!allocForm.value.user_id) return flash("请选择成员");
+  if (!allocForm.value.user_id) return flash(t("teamPage.selectMember"));
   busy.value = true;
   error.value = "";
   try {
@@ -265,7 +268,7 @@ async function doAllocate(): Promise<void> {
       amount: Number(allocForm.value.amount),
       ...(allocForm.value.memo ? { memo: allocForm.value.memo } : {}),
     });
-    flash(`已分配 ${allocForm.value.amount} 积分`);
+    flash(t("teamPage.allocated", { amount: allocForm.value.amount }));
     allocForm.value.memo = "";
     await Promise.all([loadMembers(), loadPoints()]);
     if (team.value) team.value = await api.get<TeamInfo>("/cam/team/info");
@@ -277,7 +280,7 @@ async function doAllocate(): Promise<void> {
 }
 
 async function doRecover(): Promise<void> {
-  if (!recoverForm.value.user_id) return flash("请选择成员");
+  if (!recoverForm.value.user_id) return flash(t("teamPage.selectMember"));
   busy.value = true;
   error.value = "";
   try {
@@ -286,7 +289,7 @@ async function doRecover(): Promise<void> {
       amount: Number(recoverForm.value.amount),
       ...(recoverForm.value.memo ? { memo: recoverForm.value.memo } : {}),
     });
-    flash(`已回收 ${recoverForm.value.amount} 积分`);
+    flash(t("teamPage.recovered", { amount: recoverForm.value.amount }));
     recoverForm.value.memo = "";
     await Promise.all([loadMembers(), loadPoints()]);
     if (team.value) team.value = await api.get<TeamInfo>("/cam/team/info");
@@ -320,7 +323,7 @@ async function saveEdit(): Promise<void> {
       status: editForm.value.status,
     });
     editOpen.value = false;
-    flash("已保存");
+    flash(t("teamPage.saved"));
     await loadMembers();
   } catch (e) {
     error.value = (e as Error).message;
@@ -330,14 +333,14 @@ async function saveEdit(): Promise<void> {
 }
 
 async function createGroup(): Promise<void> {
-  if (!groupName.value.trim()) return flash("请输入分组名");
+  if (!groupName.value.trim()) return flash(t("teamPage.inputGroupName"));
   busy.value = true;
   try {
     await api.post("/cam/team/group", { name: groupName.value.trim() });
     groupOpen.value = false;
     groupName.value = "";
     await loadGroups();
-    flash("分组已创建");
+    flash(t("teamPage.groupCreated"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -351,9 +354,9 @@ async function inviteMembers(): Promise<void> {
     .split(/[\s,，;；]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  if (phones.length === 0) return flash("请输入至少一个手机号");
+  if (phones.length === 0) return flash(t("teamPage.inputPhones"));
   const bad = phones.filter((p) => !/^1\d{10}$/.test(p));
-  if (bad.length > 0) return flash(`手机号格式不对：${bad.slice(0, 3).join("、")}`);
+  if (bad.length > 0) return flash(t("teamPage.badPhones", { list: bad.slice(0, 3).join("、") }));
   busy.value = true;
   error.value = "";
   try {
@@ -369,7 +372,11 @@ async function inviteMembers(): Promise<void> {
     );
     inviteResult.value = res.items;
     await Promise.all([loadMembers(), bootstrapTeamInfo()]);
-    flash(`已添加 ${res.added} 人${res.failed > 0 ? `，${res.failed} 人未加入` : ""}`);
+    flash(
+      res.failed > 0
+        ? t("teamPage.addedMembersPartial", { added: res.added, failed: res.failed })
+        : t("teamPage.addedMembers", { added: res.added }),
+    );
     if (res.failed === 0) {
       inviteOpen.value = false;
       invitePhones.value = "";
@@ -398,13 +405,13 @@ function toggle(id: string): void {
 
 /** 批量改状态 */
 async function batchStatus(status: number): Promise<void> {
-  if (selected.value.length === 0) return flash("请先选择成员");
+  if (selected.value.length === 0) return flash(t("teamPage.selectFirst"));
   busy.value = true;
   try {
     await api.post("/cam/team/member/batch/status", { user_ids: selected.value, status });
     selected.value = [];
     await loadMembers();
-    flash("已更新成员状态");
+    flash(t("teamPage.statusUpdated"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -423,7 +430,7 @@ async function batchGroup(groupId: string): Promise<void> {
     });
     selected.value = [];
     await loadMembers();
-    flash("已调整成员分组");
+    flash(t("teamPage.groupAdjusted"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -446,7 +453,7 @@ function openTeamEdit(): void {
   teamEditOpen.value = true;
 }
 async function saveTeamEdit(): Promise<void> {
-  if (!teamEditForm.value.name.trim()) return flash("请输入团队名称");
+  if (!teamEditForm.value.name.trim()) return flash(t("teamPage.inputTeamName"));
   busy.value = true;
   error.value = "";
   try {
@@ -457,7 +464,7 @@ async function saveTeamEdit(): Promise<void> {
       agent_whitelist: teamEditForm.value.agent_whitelist,
     });
     teamEditOpen.value = false;
-    flash("团队设置已保存");
+    flash(t("teamPage.settingsSaved"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -477,7 +484,7 @@ function openBatchAlloc(): void {
 }
 async function doBatchAlloc(): Promise<void> {
   const amount = Number(batchAllocAmount.value);
-  if (!Number.isInteger(amount) || amount <= 0) return flash("请输入正整数积分");
+  if (!Number.isInteger(amount) || amount <= 0) return flash(t("teamPage.positiveCredits"));
   busy.value = true;
   error.value = "";
   try {
@@ -489,7 +496,11 @@ async function doBatchAlloc(): Promise<void> {
     selected.value = [];
     await Promise.all([loadMembers(), loadPoints()]);
     await bootstrapTeamInfo();
-    flash(`批量分配完成：成功 ${res.succeeded} 人${res.failed > 0 ? `，失败 ${res.failed} 人` : ""}`);
+    flash(
+      res.failed > 0
+        ? t("teamPage.batchDonePartial", { ok: res.succeeded, failed: res.failed })
+        : t("teamPage.batchDone", { ok: res.succeeded }),
+    );
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -507,11 +518,11 @@ async function exportFlows(): Promise<void> {
       "/cam/team/points-flow/export",
     );
     if (res.row_count === 0) {
-      flash("暂无可导出的团队流水");
+      flash(t("teamPage.noFlowsToExport"));
       return;
     }
     window.open(res.file_uri, "_blank");
-    flash(`已生成 ${res.filename}（${res.row_count} 行）`);
+    flash(t("teamPage.exportDone", { filename: res.filename, rows: res.row_count }));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -550,7 +561,7 @@ function exportMembers(): void {
     },
     credentials: "include",
   })
-    .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`导出失败 ${r.status}`))))
+    .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(t("teamPage.exportFailed", { status: r.status })))))
     .then((blob) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -569,15 +580,14 @@ onMounted(bootstrap);
   <div class="tm">
     <header class="tm-head">
       <div>
-        <h1 class="tm-title">团队管理</h1>
+        <h1 class="tm-title">{{ t("teamPage.title") }}</h1>
         <p class="tm-sub">
           <template v-if="team">
-            {{ team.name }} · 席位 {{ team.used_seats }}/{{ team.max_seats }} ·
-            团队积分池 <b>{{ team.credit_total }}</b>
-            <span v-if="team.frozen > 0">（冻结 {{ team.frozen }}）</span>
-            <span v-if="team.type === 1" class="tm-badge">当前是个人空间</span>
+            {{ t("teamPage.teamLine", { name: team.name, used: team.used_seats, max: team.max_seats, total: team.credit_total }) }}
+            <span v-if="team.frozen > 0">{{ t("teamPage.frozenSuffix", { frozen: team.frozen }) }}</span>
+            <span v-if="team.type === 1" class="tm-badge">{{ t("teamPage.personalBadge") }}</span>
           </template>
-          <template v-else>加载中…</template>
+          <template v-else>{{ t("teamPage.loading") }}</template>
         </p>
       </div>
       <div class="tm-head-actions">
@@ -585,46 +595,46 @@ onMounted(bootstrap);
           v-if="myTeams.length > 0"
           class="tm-space-picker"
           label=""
-          :options="myTeams.map((t) => ({ value: t.space_id, label: `${t.name}${t.type === 2 ? '（团队）' : '（个人）'}` }))"
+          :options="myTeams.map((item) => ({ value: item.space_id, label: `${item.name}${item.type === 2 ? t('teamPage.teamOptionTeam') : t('teamPage.teamOptionPersonal')}` }))"
           :model-value="activeSpace || myTeams[0]?.space_id || ''"
           @update:model-value="switchSpace"
         />
-        <Button :disabled="busy" @click="newTeamOpen = true">创建团队</Button>
-        <Button v-if="team?.type === 2" :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
-        <Button v-if="canManage" :disabled="busy" @click="inviteOpen = true">邀请成员</Button>
-        <Button :disabled="!canManage || busy" @click="groupOpen = true">新建分组</Button>
-        <Button v-if="canManage && team?.type === 2" :disabled="busy" @click="openTeamEdit">团队设置</Button>
-        <Button v-if="canManage" :disabled="busy" @click="exportMembers">导出 CSV</Button>
-        <Button :disabled="busy" @click="bootstrap">刷新</Button>
+        <Button :disabled="busy" @click="newTeamOpen = true">{{ t("teamPage.createTeam") }}</Button>
+        <Button v-if="team?.type === 2" :disabled="busy" @click="navigateTo('/pricing')">{{ t("teamPage.rechargeTeam") }}</Button>
+        <Button v-if="canManage" :disabled="busy" @click="inviteOpen = true">{{ t("teamPage.inviteMembers") }}</Button>
+        <Button :disabled="!canManage || busy" @click="groupOpen = true">{{ t("teamPage.newGroup") }}</Button>
+        <Button v-if="canManage && team?.type === 2" :disabled="busy" @click="openTeamEdit">{{ t("teamPage.teamSettings") }}</Button>
+        <Button v-if="canManage" :disabled="busy" @click="exportMembers">{{ t("teamPage.exportCsv") }}</Button>
+        <Button :disabled="busy" @click="bootstrap">{{ t("teamPage.refresh") }}</Button>
       </div>
     </header>
 
     <p v-if="error" class="tm-alert tm-alert--err">{{ error }}</p>
     <p v-if="info" class="tm-alert tm-alert--ok">{{ info }}</p>
     <p v-if="!canManage" class="tm-alert tm-alert--hint">
-      你当前是团队成员（{{ perm?.role_code ?? "member" }}），只能查看；编辑需管理员/制片等特权角色。
+      {{ t("teamPage.memberOnlyHint", { role: perm?.role_code ?? "member" }) }}
     </p>
 
     <div class="tm-tabbar-row">
       <TabBar v-model="tab" :tabs="tabs" />
-      <button type="button" class="tm-dash-entry" @click="openDashboard">数据看板 →</button>
+      <button type="button" class="tm-dash-entry" @click="openDashboard">{{ t("teamPage.dashboardEntry") }}</button>
     </div>
 
     <!-- 成员管理 -->
     <section v-if="tab === 'members'" class="tm-panel">
       <!-- 批量操作条 -->
       <div v-if="canManage && selected.length > 0" class="tm-batch">
-        <span>已选 {{ selected.length }} 人</span>
-        <Button :disabled="busy" @click="batchStatus(1)">启用</Button>
-        <Button :disabled="busy" @click="batchStatus(2)">停用</Button>
-        <Button :disabled="busy" @click="openBatchAlloc">批量分配</Button>
+        <span>{{ t("teamPage.selectedCount", { count: selected.length }) }}</span>
+        <Button :disabled="busy" @click="batchStatus(1)">{{ t("teamPage.enable") }}</Button>
+        <Button :disabled="busy" @click="batchStatus(2)">{{ t("teamPage.disable") }}</Button>
+        <Button :disabled="busy" @click="openBatchAlloc">{{ t("teamPage.batchAllocate") }}</Button>
         <SelectField
           class="tm-batch-group"
           label=""
-          :options="[{ value: '', label: '移到分组…' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
+          :options="[{ value: '', label: t('teamPage.moveToGroup') }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
           @update:model-value="batchGroup"
         />
-        <Button :disabled="busy" @click="selected = []">取消选择</Button>
+        <Button :disabled="busy" @click="selected = []">{{ t("teamPage.clearSelection") }}</Button>
       </div>
 
       <table class="tm-table">
@@ -633,8 +643,8 @@ onMounted(bootstrap);
             <th v-if="canManage" class="tm-check">
               <input type="checkbox" :checked="allSelected" @change="toggleAll" />
             </th>
-            <th>成员</th><th>账号</th><th>角色</th><th>成员组</th>
-            <th>当前积分</th><th>状态</th><th>备注</th><th v-if="canManage">操作</th>
+            <th>{{ t("teamPage.thMember") }}</th><th>{{ t("teamPage.thAccount") }}</th><th>{{ t("teamPage.thRole") }}</th><th>{{ t("teamPage.thGroup") }}</th>
+            <th>{{ t("teamPage.thCredits") }}</th><th>{{ t("teamPage.thStatus") }}</th><th>{{ t("teamPage.thRemark") }}</th><th v-if="canManage">{{ t("teamPage.thOps") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -647,15 +657,15 @@ onMounted(bootstrap);
             <td><Tag>{{ roleName(m.role_code) }}</Tag></td>
             <td>{{ groupName_(m.group_id) }}</td>
             <td class="tm-num">{{ m.credits_quota }}</td>
-            <td>{{ m.status === 1 ? "正常" : m.status === 2 ? "停用" : "待激活" }}</td>
+            <td>{{ m.status === 1 ? t("teamPage.statusNormal") : m.status === 2 ? t("teamPage.statusDisabled") : t("teamPage.statusPending") }}</td>
             <td class="tm-ellipsis">{{ m.remark || "—" }}</td>
             <td v-if="canManage">
-              <button class="tm-link" @click="openEdit(m)">编辑</button>
+              <button class="tm-link" @click="openEdit(m)">{{ t("teamPage.edit") }}</button>
             </td>
           </tr>
           <tr v-if="members.length === 0">
             <td :colspan="canManage ? 9 : 7" class="tm-empty">
-              还没有成员。团队成员用于协作制片与积分分配，点右上「邀请成员」开始。
+              {{ t("teamPage.noMembers") }}
             </td>
           </tr>
         </tbody>
@@ -666,63 +676,61 @@ onMounted(bootstrap);
     <section v-else-if="tab === 'points'" class="tm-panel">
       <div class="tm-cards">
         <Card class="tm-card">
-          <h2 class="tm-h2">团队积分池</h2>
+          <h2 class="tm-h2">{{ t("teamPage.poolTitle") }}</h2>
           <p class="tm-hint">
-            团队积分池当前 <b>{{ team?.credit_total ?? 0 }}</b> 分
-            <span v-if="(team?.frozen ?? 0) > 0">（冻结中 {{ team?.frozen }}）</span>。
-            充值是给「团队空间」下单，入账后可在下面的分配表单发给成员。
+            {{ t("teamPage.poolLine", { total: team?.credit_total ?? 0, frozen: (team?.frozen ?? 0) > 0 ? t("teamPage.frozenSuffix", { frozen: team?.frozen ?? 0 }) : "" }) }}
+            {{ t("teamPage.poolHint") }}
           </p>
           <Button :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
         </Card>
         <Card class="tm-card">
-          <h2 class="tm-h2">分配规则</h2>
+          <h2 class="tm-h2">{{ t("teamPage.allocateRulesTitle") }}</h2>
           <p class="tm-hint">
-            分配 = 团队池 → 成员个人余额；回收 = 反向。每次分配/回收都会写两条流水（出/入各一条），
-            因此「团队池 + 所有成员余额」的总额守恒，可对账。成员页的「当前积分」是<b>已分配额度</b>，不是余额。
+            {{ t("teamPage.allocateRulesText") }}
           </p>
         </Card>
       </div>
 
       <div class="tm-cards">
         <Card class="tm-card">
-          <h2 class="tm-h2">分配积分</h2>
-          <p class="tm-hint">从团队积分池转给成员个人空间（成对记账，团队池减少、成员余额增加）。</p>
+          <h2 class="tm-h2">{{ t("teamPage.allocateTitle") }}</h2>
+          <p class="tm-hint">{{ t("teamPage.allocateHint") }}</p>
           <SelectField
             v-model="allocForm.user_id"
-            label="成员"
+            :label="t('teamPage.fieldMember')"
             :disabled="!canManage"
-            :options="[{ value: '', label: '请选择' }, ...members.map((m) => ({ value: m.user_id, label: m.nickname || m.user_id }))]"
+            :options="[{ value: '', label: t('teamPage.select') }, ...members.map((m) => ({ value: m.user_id, label: m.nickname || m.user_id }))]"
           />
-          <TextField v-model="allocForm.amount" label="积分数量" type="number" :disabled="!canManage" />
-          <TextField v-model="allocForm.memo" label="备注（可选）" :disabled="!canManage" />
-          <Button :disabled="!canManage || busy" @click="doAllocate">确认分配</Button>
+          <TextField v-model="allocForm.amount" :label="t('teamPage.fieldCredits')" type="number" :disabled="!canManage" />
+          <TextField v-model="allocForm.memo" :label="t('teamPage.fieldMemo')" :disabled="!canManage" />
+          <Button :disabled="!canManage || busy" @click="doAllocate">{{ t("teamPage.confirmAllocate") }}</Button>
         </Card>
 
         <Card class="tm-card">
-          <h2 class="tm-h2">回收积分</h2>
-          <p class="tm-hint">从成员个人空间收回团队（成员余额减少、团队池增加；已分配额度回落）。</p>
+          <h2 class="tm-h2">{{ t("teamPage.recoverTitle") }}</h2>
+          <p class="tm-hint">{{ t("teamPage.recoverHint") }}</p>
           <SelectField
             v-model="recoverForm.user_id"
             label="成员"
             :disabled="!canManage"
-            :options="[{ value: '', label: '请选择' }, ...members.map((m) => ({ value: m.user_id, label: `${m.nickname || m.user_id}（已分配 ${m.credits_quota}）` }))]"
+            :options="[{ value: '', label: t('teamPage.select') }, ...members.map((m) => ({ value: m.user_id, label: t('teamPage.memberOptionWithQuota', { name: m.nickname || m.user_id, quota: m.credits_quota }) }))]"
           />
-          <TextField v-model="recoverForm.amount" label="积分数量" type="number" :disabled="!canManage" />
-          <TextField v-model="recoverForm.memo" label="备注（可选）" :disabled="!canManage" />
-          <Button :disabled="!canManage || busy" @click="doRecover">确认回收</Button>
+          <TextField v-model="recoverForm.amount" :label="t('teamPage.fieldCredits')" type="number" :disabled="!canManage" />
+          <TextField v-model="recoverForm.memo" :label="t('teamPage.fieldMemo')" :disabled="!canManage" />
+          <Button :disabled="!canManage || busy" @click="doRecover">{{ t("teamPage.confirmRecover") }}</Button>
         </Card>
       </div>
 
       <div class="tm-split">
         <div>
           <div class="tm-h2-row">
-            <h2 class="tm-h2">流水（最近 50 条，共 {{ flowTotal }}）</h2>
+            <h2 class="tm-h2">{{ t("teamPage.flowsTitle", { total: flowTotal }) }}</h2>
             <Button :disabled="flowExporting" size="sm" variant="secondary" @click="exportFlows">
-              {{ flowExporting ? "生成中…" : "导出流水" }}
+              {{ flowExporting ? t("teamPage.generating") : t("teamPage.exportFlows") }}
             </Button>
           </div>
           <table class="tm-table">
-            <thead><tr><th>时间</th><th>类型</th><th>变动</th><th>成员</th><th>备注</th></tr></thead>
+            <thead><tr><th>{{ t("teamPage.thTime") }}</th><th>{{ t("teamPage.thType") }}</th><th>{{ t("teamPage.thChange") }}</th><th>{{ t("teamPage.thMember") }}</th><th>{{ t("teamPage.thRemark") }}</th></tr></thead>
             <tbody>
               <tr v-for="f in flows" :key="f.id">
                 <td class="tm-mono">{{ new Date(f.created_at).toLocaleString() }}</td>
@@ -731,29 +739,29 @@ onMounted(bootstrap);
                 <td class="tm-mono">{{ f.target_user_id ?? "—" }}</td>
                 <td class="tm-ellipsis">{{ f.memo || "—" }}</td>
               </tr>
-              <tr v-if="flows.length === 0"><td colspan="5" class="tm-empty">暂无团队积分流水</td></tr>
+              <tr v-if="flows.length === 0"><td colspan="5" class="tm-empty">{{ t("teamPage.noFlows") }}</td></tr>
             </tbody>
           </table>
         </div>
         <div>
-          <h2 class="tm-h2">成员已分配额度排行</h2>
+          <h2 class="tm-h2">{{ t("teamPage.rankTitle") }}</h2>
           <ol class="tm-rank">
             <li v-for="(r, i) in ranking" :key="r.user_id">
               <span class="tm-rank-no">{{ i + 1 }}</span>
               <span class="tm-rank-name">{{ r.nickname || r.user_id }}</span>
               <span class="tm-num">{{ r.credits }}</span>
             </li>
-            <li v-if="ranking.length === 0" class="tm-empty">暂无数据</li>
+            <li v-if="ranking.length === 0" class="tm-empty">{{ t("teamPage.noData") }}</li>
           </ol>
         </div>
       </div>
       <div class="tm-cards">
         <Card class="tm-card tm-group-stats">
-          <h2 class="tm-h2">分组统计</h2>
-          <p class="tm-hint">成员数 / 该组在本团队空间的任务数 / 已消耗积分 / 已分配积分（按流水统计）。</p>
+          <h2 class="tm-h2">{{ t("teamPage.groupStatsTitle") }}</h2>
+          <p class="tm-hint">{{ t("teamPage.groupStatsHint") }}</p>
           <table class="tm-table">
             <thead>
-              <tr><th>分组</th><th>成员</th><th>任务</th><th>已消耗</th><th>已分配</th></tr>
+              <tr><th>{{ t("teamPage.thGroupName") }}</th><th>{{ t("teamPage.thMembers") }}</th><th>{{ t("teamPage.thTasks") }}</th><th>{{ t("teamPage.thConsumed") }}</th><th>{{ t("teamPage.thAllocated") }}</th></tr>
             </thead>
             <tbody>
               <tr v-for="g in groups" :key="g.id">
@@ -763,7 +771,7 @@ onMounted(bootstrap);
                 <td class="tm-num">{{ groupStats[g.id]?.points_used ?? "—" }}</td>
                 <td class="tm-num">{{ groupStats[g.id]?.points_allocated ?? "—" }}</td>
               </tr>
-              <tr v-if="groups.length === 0"><td colspan="5" class="tm-empty">还没有分组</td></tr>
+              <tr v-if="groups.length === 0"><td colspan="5" class="tm-empty">{{ t("teamPage.noGroups") }}</td></tr>
             </tbody>
           </table>
         </Card>
@@ -776,139 +784,136 @@ onMounted(bootstrap);
       <TeamPermissionMatrix :roles="roles" :can-manage="canManage" />
 
       <div class="tm-switches">
-        <h3 class="tm-switches-title">团队模型开关（<code>GET /cam/temp-info</code>）</h3>
-        <p v-if="tempInfoLoading" class="tm-muted">加载中…</p>
-        <p v-else-if="!tempInfo" class="tm-muted">暂无开关数据</p>
+        <h3 class="tm-switches-title">{{ t("teamPage.switchesTitle") }}</h3>
+        <p v-if="tempInfoLoading" class="tm-muted">{{ t("teamPage.loading") }}</p>
+        <p v-else-if="!tempInfo" class="tm-muted">{{ t("teamPage.noSwitchData") }}</p>
         <ul v-else class="tm-switch-list">
-          <li><span>影视版</span><strong>{{ tempInfo.film_enabled ? "已开通" : "未开通" }}</strong></li>
-          <li><span>Agent 白名单</span><strong>{{ tempInfo.agent_whitelist ? "已开通" : "未开通" }}</strong></li>
-          <li><span>自带 API Key（BYOK）</span><strong>{{ tempInfo.api_key_white ? "已配置" : "未配置" }}</strong></li>
-          <li><span>Seedance 系列模型</span><strong>{{ tempInfo.seedance_is_support ? "支持" : "不支持" }}</strong></li>
+          <li><span>{{ t("teamPage.switchFilm") }}</span><strong>{{ tempInfo.film_enabled ? t("teamPage.enabled") : t("teamPage.notEnabled") }}</strong></li>
+          <li><span>{{ t("teamPage.switchAgent") }}</span><strong>{{ tempInfo.agent_whitelist ? t("teamPage.enabled") : t("teamPage.notEnabled") }}</strong></li>
+          <li><span>{{ t("teamPage.switchByok") }}</span><strong>{{ tempInfo.api_key_white ? t("teamPage.configured") : t("teamPage.notConfigured") }}</strong></li>
+          <li><span>{{ t("teamPage.switchSeedance") }}</span><strong>{{ tempInfo.seedance_is_support ? t("teamPage.supported") : t("teamPage.notSupported") }}</strong></li>
           <li v-for="key in tempInfo.unverified" :key="key">
-            <span>{{ key }}</span><strong class="tm-unverified">未取证</strong>
+            <span>{{ key }}</span><strong class="tm-unverified">{{ t("teamPage.unverified") }}</strong>
           </li>
         </ul>
         <p v-if="tempInfo" class="tm-muted tm-switch-note">
-          开关按 <code>{{ tempInfo.derived_from }}</code> 派生；「未取证」项服务端没有判定依据，
-          未用假 false 冒充「不支持」。
+          {{ t("teamPage.switchNote", { from: tempInfo.derived_from }) }}
         </p>
       </div>
     </section>
 
     <section v-else class="tm-panel tm-rules">
-      <h2 class="tm-h2">团队积分怎么算</h2>
+      <h2 class="tm-h2">{{ t("teamPage.rulesTitle") }}</h2>
       <ul>
-        <li><b>团队积分池</b>就是团队空间的可用余额，不是另一个账本；分配/回收是「空间之间的转账」。</li>
-        <li><b>成员「当前积分」是已分配额度</b>（未回收上限），<b>不是余额</b>——回收后会回落。</li>
-        <li>每次分配都会同时写两条流水（团队出账 + 成员入账），所以全系统积分总量守恒，可对账。</li>
-        <li>成员在团队空间里消耗的是<b>团队池</b>；在自己的个人空间消耗的是<b>个人余额</b>。</li>
-        <li><b>角色决定能做什么</b>：管理员/制片/制作等特权角色可管理成员与积分；导演/编剧等创作岗位只参与制作。</li>
-        <li>席位数由订阅档位决定，满员时新增成员会提示「席位已满」。</li>
+        <li>{{ t("teamPage.rules.pool") }}</li>
+        <li>{{ t("teamPage.rules.quota") }}</li>
+        <li>{{ t("teamPage.rules.pair") }}</li>
+        <li>{{ t("teamPage.rules.consume") }}</li>
+        <li>{{ t("teamPage.rules.role") }}</li>
+        <li>{{ t("teamPage.rules.seats") }}</li>
       </ul>
     </section>
 
     <!-- 编辑成员弹窗 -->
-    <Modal :open="editOpen" title="编辑成员" @close="editOpen = false">
+    <Modal :open="editOpen" :title="t('teamPage.editMemberTitle')" @close="editOpen = false">
       <SelectField
         v-model="editForm.role_code"
-        label="角色"
-        :options="[{ value: '', label: '（不设置）' }, ...roles.map((r) => ({ value: r.role_code, label: r.role_name }))]"
+        :label="t('teamPage.roleLabel')"
+        :options="[{ value: '', label: t('teamPage.notSet') }, ...roles.map((r) => ({ value: r.role_code, label: r.role_name }))]"
       />
       <SelectField
         v-model="editForm.group_id"
-        label="成员组"
-        :options="[{ value: '', label: '未分组' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
+        :label="t('teamPage.groupLabel')"
+        :options="[{ value: '', label: t('teamPage.ungrouped') }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
       />
-      <TextField v-model="editForm.nickname" label="昵称" />
-      <TextField v-model="editForm.remark" label="备注" />
+      <TextField v-model="editForm.nickname" :label="t('teamPage.nicknameLabel')" />
+      <TextField v-model="editForm.remark" :label="t('teamPage.remarkLabel')" />
       <SelectField
         v-model="statusStr"
-        label="状态"
-        :options="[{ value: '1', label: '正常' }, { value: '2', label: '停用' }, { value: '3', label: '待激活' }]"
+        :label="t('teamPage.statusLabel')"
+        :options="[{ value: '1', label: t('teamPage.statusNormal') }, { value: '2', label: t('teamPage.statusDisabled') }, { value: '3', label: t('teamPage.statusPending') }]"
       />
       <template #footer>
-        <Button :disabled="busy" @click="saveEdit">保存</Button>
+        <Button :disabled="busy" @click="saveEdit">{{ t("teamPage.save") }}</Button>
       </template>
     </Modal>
 
     <!-- 邀请成员弹窗 -->
-    <Modal :open="inviteOpen" title="邀请成员" @close="inviteOpen = false">
+    <Modal :open="inviteOpen" :title="t('teamPage.inviteTitle')" @close="inviteOpen = false">
       <p class="tm-hint">
-        输入手机号，多个用空格或逗号分隔（单次最多 50 个）。
-        <b>仅支持已注册账号</b>——不会代建账号，未注册手机号会逐条提示。
+        {{ t("teamPage.inviteHint") }}
       </p>
       <TextAreaField
         v-model="invitePhones"
-        label="手机号"
+        :label="t('teamPage.phoneLabel')"
         placeholder="13800000000 13900000000"
       />
       <SelectField
         v-model="inviteRole"
-        label="角色（可选）"
-        :options="[{ value: '', label: '默认：项目执行' }, ...roles.map((r) => ({ value: r.role_code, label: r.role_name }))]"
+        :label="t('teamPage.roleOptional')"
+        :options="[{ value: '', label: t('teamPage.defaultRole') }, ...roles.map((r) => ({ value: r.role_code, label: r.role_name }))]"
       />
       <SelectField
         v-model="inviteGroup"
-        label="成员组（可选）"
+        :label="t('teamPage.groupOptional')"
         :options="[{ value: '', label: '未分组' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
       />
       <div v-if="inviteResult.length > 0" class="tm-invite-result">
         <p v-for="(r, i) in inviteResult" :key="i" :class="r.ok ? 'ok' : 'bad'">
-          {{ r.phone || r.user_id }} — {{ r.ok ? "已加入" : r.reason || "失败" }}
+          {{ r.phone || r.user_id }} — {{ r.ok ? t("teamPage.joined") : r.reason || t("teamPage.failed") }}
         </p>
       </div>
       <template #footer>
-        <Button :disabled="busy" @click="inviteMembers">添加成员</Button>
+        <Button :disabled="busy" @click="inviteMembers">{{ t("teamPage.addMembers") }}</Button>
       </template>
     </Modal>
 
     <!-- 新建分组弹窗 -->
-    <Modal :open="groupOpen" title="新建成员组" @close="groupOpen = false">
-      <TextField v-model="groupName" label="分组名称" placeholder="如：编剧组 / 动画组" />
+    <Modal :open="groupOpen" :title="t('teamPage.newGroupTitle')" @close="groupOpen = false">
+      <TextField v-model="groupName" :label="t('teamPage.groupNameLabel')" :placeholder="t('teamPage.groupNamePlaceholder')" />
       <template #footer>
-        <Button :disabled="busy" @click="createGroup">创建</Button>
+        <Button :disabled="busy" @click="createGroup">{{ t("teamPage.create") }}</Button>
       </template>
     </Modal>
 
     <!-- 团队设置弹窗 -->
-    <Modal :open="teamEditOpen" title="团队设置" @close="teamEditOpen = false">
-      <TextField v-model="teamEditForm.name" class="tm-team-name" label="团队名称" />
-      <TextField v-model="teamEditForm.max_seats" class="tm-team-seats" label="席位上限" type="number" />
-      <p class="tm-hint">席位不能低于当前成员数（{{ team?.used_seats ?? 0 }}），调低会被拒绝。</p>
+    <Modal :open="teamEditOpen" :title="t('teamPage.settingsTitle')" @close="teamEditOpen = false">
+      <TextField v-model="teamEditForm.name" class="tm-team-name" :label="t('teamPage.teamNameLabel')" />
+      <TextField v-model="teamEditForm.max_seats" class="tm-team-seats" :label="t('teamPage.seatsLabel')" type="number" />
+      <p class="tm-hint">{{ t("teamPage.seatsHint", { count: team?.used_seats ?? 0 }) }}</p>
       <label class="tm-check-row">
         <input v-model="teamEditForm.film_enabled" type="checkbox" />
-        <span>开启影视版（film_enabled）</span>
+        <span>{{ t("teamPage.toggleFilm") }}</span>
       </label>
       <label class="tm-check-row">
         <input v-model="teamEditForm.agent_whitelist" type="checkbox" />
-        <span>开启创作 Agent（agent_whitelist）</span>
+        <span>{{ t("teamPage.toggleAgent") }}</span>
       </label>
       <template #footer>
-        <Button :disabled="busy" @click="saveTeamEdit">保存设置</Button>
+        <Button :disabled="busy" @click="saveTeamEdit">{{ t("teamPage.saveSettings") }}</Button>
       </template>
     </Modal>
 
     <!-- 批量分配弹窗 -->
-    <Modal :open="batchAllocOpen" title="批量分配积分" @close="batchAllocOpen = false">
+    <Modal :open="batchAllocOpen" :title="t('teamPage.batchTitle')" @close="batchAllocOpen = false">
       <p class="tm-hint">
-        给选中的 {{ selected.length }} 位成员各分配相同积分；逐条独立，余额不足的会单独失败（不影响其他人）。
+        {{ t("teamPage.batchHint", { count: selected.length }) }}
       </p>
-      <TextField v-model="batchAllocAmount" class="tm-batch-amount" label="每人积分" type="number" />
-      <TextField v-model="batchAllocMemo" class="tm-batch-memo" label="备注（可选）" />
+      <TextField v-model="batchAllocAmount" class="tm-batch-amount" :label="t('teamPage.perMember')" type="number" />
+      <TextField v-model="batchAllocMemo" class="tm-batch-memo" :label="t('teamPage.fieldMemo')" />
       <template #footer>
-        <Button :disabled="busy" @click="doBatchAlloc">确认分配</Button>
+        <Button :disabled="busy" @click="doBatchAlloc">{{ t("teamPage.confirmAllocate") }}</Button>
       </template>
     </Modal>
 
     <!-- 创建团队弹窗 -->
-    <Modal :open="newTeamOpen" title="创建团队" @close="newTeamOpen = false">
+    <Modal :open="newTeamOpen" :title="t('teamPage.createTeam')" @close="newTeamOpen = false">
       <p class="tm-hint">
-        团队用于多人协作制片与积分分配。创建后你会成为团队主账号（master），
-        可邀请成员、建分组、把团队积分分配给成员。
+        {{ t("teamPage.createTeamHint") }}
       </p>
-      <TextField v-model="newTeamName" label="团队名称" placeholder="如：星辰短剧工作室" />
+      <TextField v-model="newTeamName" :label="t('teamPage.teamNameLabel')" :placeholder="t('teamPage.teamNamePlaceholder')" />
       <template #footer>
-        <Button :disabled="busy" @click="createTeam">创建并进入</Button>
+        <Button :disabled="busy" @click="createTeam">{{ t("teamPage.createAndEnter") }}</Button>
       </template>
     </Modal>
   </div>
