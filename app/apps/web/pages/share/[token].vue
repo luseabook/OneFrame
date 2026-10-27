@@ -84,15 +84,80 @@ async function submitReport(): Promise<void> {
   }
 }
 
+/**
+ * 分享页**只读实时流**：`GET /share/:token/stream`（SSE）。
+ *
+ * 为什么需要：原来只读一次快照，观看者只能手动刷新才知道任务跑完没有——
+ * "把进度分享给客户"这个场景等于不可用。
+ *
+ * 实现注意：
+ * 1. EventSource **不能带 Authorization 头**（这是它和 fetch 的关键差异），
+ *    所以这个端点必须是公开的——服务端也确实只认 token；
+ * 2. 只在**任务未到终态**时订阅（终态后再订阅是白连一条）；
+ * 3. 收到 `closed` 帧或 `done` 后主动 close，避免浏览器自动重连把连接打成永动机；
+ * 4. 出错（过期/撤销）静默降级为"静态快照"，不把用户卡在错误页。
+ */
+/** 实时进度（0~100；快照接口不返回，仅 SSE 期间有效） */
+const liveProgress = ref<number | null>(null);
+let streamHandle: EventSource | null = null;
+let pollHandle: ReturnType<typeof setInterval> | null = null;
+
+function stopStream(): void {
+  streamHandle?.close();
+  streamHandle = null;
+  if (pollHandle) {
+    clearInterval(pollHandle);
+    pollHandle = null;
+  }
+}
+
+function isTerminal(status: number): boolean {
+  // 3 成功 / 4 失败 / 5 取消 / 6 审核中 / 7 审核驳回 都算不再变化
+  return [3, 4, 5, 6, 7].includes(status);
+}
+
+function startStream(): void {
+  if (!import.meta.client || !share.value) return;
+  if (isTerminal(share.value.status)) return;
+  const token = String(route.params.token);
+  try {
+    const es = new EventSource(`/v1/share/${encodeURIComponent(token)}/stream`);
+    streamHandle = es;
+
+    es.addEventListener("status", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as { status?: number; progress?: number };
+        if (share.value && typeof data.status === "number") {
+          share.value.status = data.status;
+          // ShareView 契约里没有 progress（快照只给状态）；实时进度单独存，避免改契约类型
+          if (typeof data.progress === "number") liveProgress.value = data.progress;
+        }
+        if (share.value && isTerminal(share.value.status)) stopStream();
+      } catch {
+        /* 单帧解析失败不影响后续帧 */
+      }
+    });
+    es.addEventListener("done", () => stopStream());
+    es.addEventListener("closed", () => stopStream());
+    // 连接异常（过期/撤销/网络）：降级成"不再实时"，保留已加载的快照
+    es.addEventListener("error", () => stopStream());
+  } catch {
+    /* 浏览器不支持 EventSource：静默退化为静态快照 */
+  }
+}
+
 onMounted(async () => {
   try {
     share.value = await api.get<ShareView>(`/share/${String(route.params.token)}`);
+    startStream();
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("share.expired");
   } finally {
     loading.value = false;
   }
 });
+
+onBeforeUnmount(stopStream);
 </script>
 
 <template>
@@ -107,7 +172,10 @@ onMounted(async () => {
       <header class="head">
         <h1>{{ t("share.title") }}</h1>
         <p class="meta">
-          {{ share.mode }} · {{ statusText(share.status) }} · {{ new Date(share.created_at).toLocaleString(locale) }}
+          {{ share.mode }} · {{ statusText(share.status) }}<template v-if="liveProgress !== null">
+            · {{ liveProgress }}%</template
+          >
+          · {{ new Date(share.created_at).toLocaleString(locale) }}
         </p>
       </header>
 

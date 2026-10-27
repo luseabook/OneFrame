@@ -123,6 +123,40 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.5 · 第 45 批：#4 分享侧只读实时流 · 2026-10-28）
+
+### 补的是什么
+
+分享链接（`/share/:token`）此前只有"读一次快照"：观看者得**手动刷新**才知道任务跑完没有。
+对"把进度分享给客户看"这个场景，静态快照等于不可用。
+
+新增公开只读 SSE **`GET /share/:token/stream`**：
+
+| 设计点 | 做法 |
+|---|---|
+| 六类帧 | `open` / `status`（状态或进度变化时）/ `task_event`（增量事件，只给 type+时间）/ `ping`（15s 心跳）/ `done`（任务到终态）/ `closed`（带 reason） |
+| 安全边界 | **只认 token**，不接受 `task_id` 入参；**不推** storage key、积分、space/user；撤销或过期立即 `closed{reason:"revoked"}` 断开 |
+| 生命周期 | 任务进入 3/4/5 终态 → 推 `done` 后自关；`timeout_ms` 限连接寿命（默认 10min），避免浏览器挂着永不结束的 SSE |
+| 诚实标注 | 本仓无跨进程事件总线，SSE 由**轮询 task 行 + task_events 增量**喂（1s），注释写明"真正的发布订阅要等 Redis Pub/Sub，届时只换 `pollOnce`" |
+
+前端 [share/[token].vue](app/apps/web/pages/share/[token].vue)：未到终态时用 `EventSource` 订阅，
+收到 `done`/`closed`/`error` 主动 close（防浏览器自动重连成永动机），异常静默降级为静态快照。
+
+### 一个 `EventSource` 的硬约束
+
+`EventSource` **不能带 `Authorization` 头**——这是它和 `fetch` 的关键差异。所以这个端点**必须公开**，
+服务端也就只认 token（与 `GET /share/:token` 同级别的信任模型）。
+
+### 测试抓到一个真 bug
+
+`finish()` 原本先置 `closed = true` 再写收尾帧，而 `write()` 在 `closed` 为真时会**丢弃写入**——
+表现是"客户端永远收不到 `closed`，只能等超时"。`share-stream.spec.ts` 的 done 断言当场抓到，
+已修并把这个顺序原因写进注释。
+
+**验证**：`share-stream.spec.ts` **4/4**（有效 token 收 open+status 且不侧漏内部字段 / 终态推 done+closed /
+已撤销 404 / 非法形状 404 不打库）；api 测试 **820 → 824**；全量 **1,160 例**；gate 全绿。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**（#4 的 A 类两项已完成其一，另一项 `/agent/home/resource/*` 仍待做）。
+
 ## 变更登记（v7.4 · 第 44 批：缺口全面复核 + §3.5 分类表 · 2026-10-28）
 
 ### 为什么要做这件事
