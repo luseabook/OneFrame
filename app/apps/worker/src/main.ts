@@ -18,6 +18,7 @@ import { QUEUES, redisConnection, type QueueName } from "./queues";
 import { runGenerationTask, type ExecutorDeps } from "./executor";
 import { runExport } from "./export";
 import { runTimelineExport } from "./timeline-export";
+import { runPublishTranscodeJob, type PublishTranscodeJobData } from "./publish-transcode";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -264,6 +265,21 @@ const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
         if (!exportId) throw new Error("missing exportId");
         await runTimelineExport(exportId, timelineExportDeps);
         return { ok: true, exportId };
+      }
+      if (name === QUEUES.PUBLISH_TRANSCODE) {
+        const data = job.data as Partial<PublishTranscodeJobData>;
+        if (!data.publicationId || !data.spaceId || !data.sourceKey) {
+          throw new Error("missing publicationId/spaceId/sourceKey");
+        }
+        const outcome = await runPublishTranscodeJob(
+          { db, storage, log: (obj, msg) => log.info(obj, msg) },
+          {
+            publicationId: data.publicationId,
+            spaceId: data.spaceId,
+            sourceKey: data.sourceKey,
+          },
+        );
+        return { ok: true, ...outcome };
       }
       log.info({ queue: name, job_id: job.id }, "job received (no-op)");
       return { ok: true };

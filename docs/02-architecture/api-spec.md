@@ -1844,3 +1844,60 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 + `_acceptance/e2e-i18n-pages.cjs`（浏览器：中英对照、无 key 残留、控制台清洁，**158 例**）
 + `_acceptance/i18n-residual.py`（逐文件数「含中文且非注释」的行数 → 页面级完成度的**唯一判据**；
   注释行/行尾注释自动排除，豁免文件单列并说明理由）。
+
+### 17.16 切片转码执行位置：`PUBLISH_TRANSCODE_MODE` 与 `publish.transcode` 队列（第 57 批）
+
+> **无端点变更**。对外契约不变（`POST .../timeline/publish` 仍返回 `status=1` 的记录，前端仍轮询
+> `GET .../timeline/publications`），改的只是**转码在哪个进程执行**。
+
+**问题**：原先 `apps/api/src/modules/script/publish.service.ts` 用 `void this.transcode(...)` 在 API 进程内
+fire-and-forget。任务只活在一个进程的调用栈里：API 在转码完成前重启（发版、OOM、单机 dev 重启），
+记录就停在 `status=1/2`，15 分钟后被看门狗 `reviveStuckPublications` 判失败且**不重跑** —— 转码永久失败。
+
+**执行位置由配置决定**（`apps/api/src/config/env.ts`）：
+
+| `PUBLISH_TRANSCODE_MODE` | 行为 | 适用 |
+|---|---|---|
+| `inline`（**默认**） | API 进程内直接跑 `runPublishTranscode` | dev / 测试：无需常驻 worker，行为与改造前逐字一致 |
+| `worker` | 只入队 `publish.transcode`，由 `apps/worker` 消费 | 生产：任务在 Redis，worker 重启自动重投 |
+
+**入队失败回落内联**：Redis 短暂不可用不该把记录永远留在 `status=1`，所以 `enqueue` 抛错时
+`catch` 后直接走 `transcodeInline`（同一份状态机，不产生第二条路径）。
+
+**状态机只有一份**：`packages/shared/src/publish-transcode.ts`
+
+```ts
+runPublishTranscode(deps: PublishTranscodeDeps, input: {
+  publicationId: string; spaceId: string; sourceKey: string;
+}): Promise<{ result: "ready" | "failed" | "skipped"; transcodeMode?: string; reason?: string }>
+
+publicationObjectKey(spaceId, publicationId) // => u/<spaceId>/publications/<publicationId>.mp4
+```
+
+常量 `PUB_STATUS_QUEUED=1 / TRANSCODING=2 / READY=3 / FAILED=4 / REMOVED=5`、
+`PUB_TERMINAL_STATUSES=[3,4,5]`。三条不变量：
+
+| 不变量 | 行为 |
+|---|---|
+| **终态不覆盖** | 命中 `status ∈ {3,4,5}` → `skipped`，文件/`shareToken`/`publishedAt` 一律不动 |
+| **降级留痕** | 裁剪不可用 → 降级复制，但落 `transcode_mode` + `transcode_reason`（不"悄悄复制却说裁过"） |
+| **失败不抛** | 落 `status=4` + `error{code: 745900 VENDOR_ERROR}`，函数正常返回 outcome |
+
+**worker 侧防竞态**：`apps/worker/src/publish-transcode.ts` 的 `markReady` / `markFailed` 都带条件更新
+
+```ts
+inArray(timelinePublications.status, [PUB_STATUS_QUEUED, PUB_STATUS_TRANSCODING])
+```
+
+多实例消费同一 job（重投叠加）时谁先写谁生效，后到的不覆盖；`runPublishTranscodeJob` **不抛异常**，
+返回 outcome 并打日志 `msg="publish transcode finished"` + `result` + `publication_id`。
+
+**队列定义**（`apps/api/src/queue/queue.service.ts`）：`QUEUES.PUBLISH_TRANSCODE = "publish.transcode"`，
+`enqueuePublishTranscode({publicationId, spaceId, sourceKey})` 以 `jobId = publish-transcode-<id>` 入队
+（同发布记录天然去重），`onModuleDestroy` 里 `close()`。
+
+**测试**：`packages/shared/src/publish-transcode.spec.ts` 6 例（纯状态机）+
+`apps/worker/test/publish-transcode.spec.ts` 4 例（真库 + 真 `LocalStorage`：源缺失落 `status=4` 且不抛 /
+已 READY 重投 skipped 且字段全不变 / 记录不存在 skipped / 正常路径产物落 `u/<space>/publications/<id>.mp4`
+且 `storage.read` 可读回）；api 侧 `test/ffmpeg-trim.spec.ts` + `test/reelflow-publish.spec.ts` **18 例**
+证明默认 `inline` 模式行为与改造前完全一致。

@@ -10,6 +10,8 @@ export const QUEUES = {
   NOTIFY: "notify",
   EXPORT: "export.zip",
   TIMELINE_EXPORT: "timeline.export",
+  // 切片发布转码（第 57 批）：API 以 PUBLISH_TRANSCODE_MODE=worker 发布时入队
+  PUBLISH_TRANSCODE: "publish.transcode",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

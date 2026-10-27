@@ -123,6 +123,79 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.11 · 第 57 批：#20 切片转码异步下沉 worker · 2026-10-28）
+
+> 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.0**（同一批；本文件与主台账各有一套编号，勿混）。
+
+### 修的不是"架构改良"，是一个会毁数据的缺陷
+
+`apps/api/src/modules/script/publish.service.ts` 原先是这样触发转码的：
+
+```ts
+void this.transcode(spaceId, String(id), exportRow.fileUri); // fire-and-forget，活在 API 进程里
+```
+
+只要 API 进程在转码完成前死掉（发布 OOM、发版滚动、单机 dev 重启），这条发布记录就永远停在 `status=1/2`；
+15 分钟后看门狗 `reviveStuckPublications` 把它标成失败，**而且不重跑** —— 用户每次看到"转码失败"，
+重新发布也救不回那条记录。转码任务只存在于一个进程的调用栈里，进程没了任务就没了。
+
+下沉到 BullMQ 后，任务在 Redis 里，worker 重启会重投。
+
+### 关键设计：状态机只有一份
+
+新增 `packages/shared/src/publish-transcode.ts`，`runPublishTranscode(deps, {publicationId, spaceId, sourceKey})`
+是唯一实现，**API 内联与 worker 队列共用**。两条路径各写一遍必然漂移，会出现"队列里成功、内联路径失败"
+这种只在生产复现的问题。函数契约里写死三条不变量：
+
+| 不变量 | 具体做法 | 为什么 |
+|---|---|---|
+| **终态不覆盖** | `PUB_TERMINAL_STATUSES = [3,4,5]` 命中即 `skipped` | 重投/重复消费不能把已发布、已下架、已失败的记录打回中间态 |
+| **降级留痕** | `transcode_mode` + `transcode_reason` 落库 | 裁剪不可用时降级为复制，但**绝不"悄悄复制却说裁过"** |
+| **失败不抛** | 落 `status=4` + `error{code: VENDOR_ERROR}`，函数正常返回 | worker 不因一条坏任务反复重试；失败必须变成可查询的状态而不是日志 |
+
+`trimVideoBuffer` 一并从 `apps/api/src/modules/script/ffmpeg-trim.ts` 迁进 `packages/shared/src/ffmpeg-trim.ts`，
+api 侧只留再导出薄壳：
+
+```ts
+export { trimVideoBuffer, type TrimResult } from "@app/shared";
+```
+
+这样既有的 import 与 4 例 spec 一行不用改（薄壳的代价是"两个文件"，但它换来"迁移不碰调用点"）。
+
+### 三种运行模式
+
+新增 `PUBLISH_TRANSCODE_MODE: z.enum(["inline","worker"]).default("inline")`：
+
+| 值 | 行为 | 用途 |
+|---|---|---|
+| `inline`（默认） | API 进程内直接跑状态机 | dev / 测试：不必起常驻 worker，行为与改造前完全一致 |
+| `worker` | 只入队 `publish.transcode`（jobId `publish-transcode-<id>`，同 id 天然去重） | 生产：任务可重投，API 重启不丢 |
+
+**入队失败会回落内联** —— 这不是"兜底好看"，而是必须：Redis 抖一下就把记录永远停在 `status=1`，
+比不用队列更糟。worker 侧 `markReady`/`markFailed` 全部带条件更新
+
+```ts
+inArray(timelinePublications.status, [PUB_STATUS_QUEUED, PUB_STATUS_TRANSCODING])
+```
+
+防多实例消费同一 job 的竞态（谁先写谁生效，后到的不覆盖）。
+
+### 验证：10 例
+
+| 层 | 例数 | 覆盖 |
+|---|---:|---|
+| `packages/shared/src/publish-transcode.spec.ts` | 6 | 成功 / 裁剪失败降级 copy 且带 reason / 终态 skipped / 记录不存在 skipped / 源为空落失败且不抛 / `putFile` 抛错落失败 |
+| `apps/worker/test/publish-transcode.spec.ts`（真库 + 真 `LocalStorage`） | 4 | 源缺失 → `status=4` 且 `error.message` 含 `publication transcode failed` 且不抛 / 已 READY 重投 → skipped 且 `fileUri`+`shareToken`+`publishedAt` 全不变 / 记录不存在 → skipped / 正常路径 → 产物落 `u/<space>/publications/<id>.mp4`、`status=3`、`shareToken` 非空、`storage.read` 读回 >0 字节 |
+| api 回归 `test/ffmpeg-trim.spec.ts` + `test/reelflow-publish.spec.ts` | 18 | 默认 inline 模式行为与改造前**完全一致** |
+
+### 数字
+
+- #20 ReelFlow **97% → 99%**（7.76 → 7.92，**没给满**：真实转码质量与供应商依赖仍在外部）
+- 全站 **201.26 → 201.42/206 = 97.8%**，剩余 **4.74 → 4.58**；首发口径 **130.12/133 = 97.8%**
+- 测试 **1,216**（api 863 / adapters 164 / cli 91 / worker 41 / db 26 / shared 25 / storage 6）——
+  顺手纠正一处长期口径错误：此处原记 1,195，但把各包相加实为 1,210，说明那是某一轮的累计快照没随各包增长重算
+- 复现：`pwsh _acceptance/verify-round.ps1`（12 门禁全绿）
+
 ## 变更登记（v8.2 · 第 53 批：代码事实 vs 文档缺口对齐 · 2026-10-29）
 
 - **背景**：进度文档里的「缺口」是历轮手写的，代码却在持续前进 → 出现"缺口栏写着做不到、代码里其实早做了"的漂移。

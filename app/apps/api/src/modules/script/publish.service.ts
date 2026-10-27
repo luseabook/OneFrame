@@ -12,11 +12,19 @@ import {
   timelineExports,
   timelinePublications,
 } from "@app/db";
-import { AppError, ErrorCode, TaskStatus, newId } from "@app/shared";
+import {
+  AppError,
+  ErrorCode,
+  TaskStatus,
+  newId,
+  runPublishTranscode,
+  type PublishTranscodeDeps,
+} from "@app/shared";
 import { db } from "../../db/database";
 import { RedisService } from "../../redis/redis.service";
 import { StorageService } from "../../storage/storage.service";
-import { trimVideoBuffer } from "./ffmpeg-trim";
+import { QueueService } from "../../queue/queue.service";
+import { env } from "../../config/env";
 
 /**
  * ReelFlow 切片发布（`POST /projects/{id}/episodes/{eid}/timeline/publish` 等）。
@@ -36,12 +44,18 @@ import { trimVideoBuffer } from "./ffmpeg-trim";
  *    把已发布作品弄坏（与 schema 注释同因）。
  * 2. **必须已有可播放的成片**：发布前置是"本集有一次已成功的成片合成"（timelineExports
  *    status=3）。没有就 400105 并提示先导出——否则发布记录只能永远停在失败态。
- * 3. **转码在 API 进程内完成（1 排队 → 2 转码中 → 3 可播放 / 4 失败）**，并且**真的按 slice 裁剪**：
+ * 3. **转码按配置落在两处（1 排队 → 2 转码中 → 3 可播放 / 4 失败），状态机只有一份**，且**真的按 slice 裁剪**：
  *    运行时会探测 `ffmpeg`（`@app/shared probeFfmpeg`，也可经 `GET /meta/capabilities` 查看）——
  *      · 可用 + slice 有入/出点 → `ffmpeg -ss/-to` 真裁剪，落 `transcode_mode="ffmpeg"`；
  *      · 不可用（或 slice 覆盖全片）→ 复制成片，落 `transcode_mode="copy"` + `degrade_reason`。
  *    **降级必须留痕**：不能"悄悄复制"还对外说裁剪过——`transcode_mode` 就是给审计与前端看的。
- *    契约（状态、error、shareToken）不因裁剪方式改变；未来下沉 worker 时 API 无感。
+ *    执行体由 `PUBLISH_TRANSCODE_MODE` 决定（第 57 批）：
+ *      · `inline`（默认，dev/test）→ API 进程内 fire-and-forget 跑，跑验收不必先起 worker；
+ *      · `worker`（生产）→ 只入队 `publish.transcode`，worker 消费。**这是可靠性差异**：
+ *        内联路径在 API 重启时会把停在 1/2 态的记录丢给看门狗（15min）判失败且不重跑；
+ *        入队后任务在 Redis 里，worker 重启会重投。入队失败**回落内联**，避免记录永远停在 status=1。
+ *    两处共用 `@app/shared runPublishTranscode`，所以契约（状态、error、shareToken）与裁剪方式无关，
+ *    也不会出现"队列里成功、内联路径失败"这种只在生产复现的漂移。
  */
 
 export interface PublishSliceInput {
@@ -98,6 +112,7 @@ export class PublishService {
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(RedisService) private readonly redis: RedisService,
+    @Inject(QueueService) private readonly queue: QueueService,
   ) {}
 
   // ── 发布 ─────────────────────────────────────────────────────────────
@@ -160,8 +175,8 @@ export class PublishService {
       createdBy: userId ? BigInt(userId) : null,
     });
 
-    // 异步转码（不阻塞请求）：1 → 2 → 3/4
-    void this.transcode(spaceId, String(id), exportRow.fileUri);
+    // 异步转码（不阻塞请求）：1 → 2 → 3/4。生产走 worker 队列，开发/测试内联兜底（见 scheduleTranscode）
+    void this.scheduleTranscode(spaceId, String(id), exportRow.fileUri);
 
     return {
       publication_id: String(id),
@@ -303,72 +318,100 @@ export class PublishService {
   // ── 内部：转码状态机 ──────────────────────────────────────────────────
 
   /**
-   * 转码：1（排队，已由 publish 落库）→ 2 转码中 → 3 可播放（写 fileUri + shareToken）/ 4 失败（落 error）。
-   * 幂等：已是 3/4/5 直接返回，重复触发不会覆盖终态。
+   * 切片发布转码的**调度**（状态机本体在 `@app/shared runPublishTranscode`，与 worker 共用一份）。
+   *
+   * 两种形态由 `PUBLISH_TRANSCODE_MODE` 决定：
+   * - `inline`（默认）：API 进程内异步跑 ffmpeg。单机/开发/测试就是它——**不必为了跑一次发布验收
+   *   先起一个 worker**（本仓 E2E 与单测都靠这条路径）。
+   * - `worker`（生产）：只入队 `publish.transcode`，由 worker 消费。好处有两个：
+   *   ① 长片转码不占 API 事件循环；② **API 重启不再丢转码**（任务在 Redis 里，worker 重投）。
+   *   入队抛错（Redis 抖动/队列写失败）时**回落到内联**——发布请求已经返回，用户等的是
+   *   "作品能不能播"，不能因为"排队没成功"让记录永远停在 status=1。
+   *
+   * 为什么不是"一律入队"：没有常驻 worker 的形态下，入队只会让记录卡到看门狗（15min）把它判失败，
+   * 比内联更差。所以这里用**配置**表达"本部署有没有 worker"，而不是靠猜。
    */
-  private async transcode(spaceId: string, publicationId: string, sourceKey: string): Promise<void> {
-    let id: bigint;
-    try {
-      id = BigInt(publicationId);
-    } catch {
-      return;
-    }
-    try {
-      const [row] = await db.select().from(timelinePublications).where(eq(timelinePublications.id, id));
-      if (!row) return;
-      if (row.status === PUB_STATUS.READY || row.status === PUB_STATUS.FAILED || row.status === PUB_STATUS.REMOVED) {
+  private async scheduleTranscode(
+    spaceId: string,
+    publicationId: string,
+    sourceKey: string,
+  ): Promise<void> {
+    if (env.PUBLISH_TRANSCODE_MODE === "worker") {
+      try {
+        await this.queue.enqueuePublishTranscode({ publicationId, spaceId, sourceKey });
         return;
+      } catch {
+        // 入队失败 → 自己跑（下面内联），不向上抛：发布接口早已返回 200
       }
-      await db
-        .update(timelinePublications)
-        .set({ status: PUB_STATUS.TRANSCODING, error: null, updatedAt: new Date() })
-        .where(eq(timelinePublications.id, id));
-
-      const source = await this.storage.read(sourceKey);
-      if (!source || source.byteLength === 0) throw new Error("rendered product is empty");
-
-      // 真裁剪：能裁就裁（并留痕 transcode_mode="ffmpeg"），不能裁就复制 + 留降级原因
-      const slice = (row.slice ?? {}) as Record<string, unknown>;
-      let buffer = source;
-      let mode = "copy";
-      let degradeReason: string | null = null;
-      const trimmed = await trimVideoBuffer(source, Number(slice.start_ms ?? 0), Number(slice.end_ms ?? 0));
-      if (trimmed.ok && trimmed.buffer) {
-        buffer = trimmed.buffer;
-        mode = "ffmpeg";
-      } else {
-        degradeReason = trimmed.reason ?? "trim skipped";
-      }
-
-      const key = `u/${spaceId}/publications/${publicationId}.mp4`;
-      await this.storage.put(key, buffer, "video/mp4");
-
-      const token = await this.uniqueShareToken();
-      await db
-        .update(timelinePublications)
-        .set({
-          status: PUB_STATUS.READY,
-          fileUri: key,
-          shareToken: token,
-          publishedAt: new Date(),
-          transcodeMode: mode,
-          transcodeReason: degradeReason,
-          error: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(timelinePublications.id, id));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await db
-        .update(timelinePublications)
-        .set({
-          status: PUB_STATUS.FAILED,
-          error: { code: ErrorCode.VENDOR_ERROR, message: `publication transcode failed: ${message.slice(0, 500)}` },
-          updatedAt: new Date(),
-        })
-        .where(eq(timelinePublications.id, id))
-        .catch(() => undefined);
     }
+    await this.transcodeInline(spaceId, publicationId, sourceKey);
+  }
+
+  /** 内联路径：把 DB/storage 适配成共享状态机需要的接口 */
+  private async transcodeInline(
+    spaceId: string,
+    publicationId: string,
+    sourceKey: string,
+  ): Promise<void> {
+    await runPublishTranscode(this.transcodeDeps(), { publicationId, spaceId, sourceKey });
+  }
+
+  private transcodeDeps(): PublishTranscodeDeps {
+    return {
+      loadPublication: async (id: string) => {
+        let bigintId: bigint;
+        try {
+          bigintId = BigInt(id);
+        } catch {
+          return null;
+        }
+        const [row] = await db
+          .select({ status: timelinePublications.status, slice: timelinePublications.slice })
+          .from(timelinePublications)
+          .where(eq(timelinePublications.id, bigintId));
+        return row ? { status: row.status, slice: row.slice } : null;
+      },
+      markTranscoding: async (id: string) => {
+        await db
+          .update(timelinePublications)
+          .set({ status: PUB_STATUS.TRANSCODING, error: null, updatedAt: new Date() })
+          .where(eq(timelinePublications.id, BigInt(id)));
+      },
+      readSource: (key: string) => this.storage.read(key),
+      putFile: async (key: string, buffer: Buffer) => {
+        await this.storage.put(key, buffer, "video/mp4");
+      },
+      nextShareToken: () => this.uniqueShareToken(),
+      markReady: async (id: string, patch) => {
+        await db
+          .update(timelinePublications)
+          .set({
+            status: PUB_STATUS.READY,
+            fileUri: patch.fileUri,
+            shareToken: patch.shareToken,
+            publishedAt: new Date(),
+            transcodeMode: patch.transcodeMode,
+            transcodeReason: patch.transcodeReason,
+            error: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(timelinePublications.id, BigInt(id)));
+      },
+      markFailed: async (id: string, reason: string) => {
+        await db
+          .update(timelinePublications)
+          .set({
+            status: PUB_STATUS.FAILED,
+            error: {
+              code: ErrorCode.VENDOR_ERROR,
+              message: `publication transcode failed: ${reason}`,
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(timelinePublications.id, BigInt(id)))
+          .catch(() => undefined);
+      },
+    };
   }
 
   /** shareToken 唯一键兜底：冲突就换一个（最多 3 次，超出即抛） */

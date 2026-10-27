@@ -62,6 +62,12 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   ORDER_TTL_S: z.coerce.number().int().min(60).default(900), // 订单有效期 15min
 
+  // ── 切片发布转码（第 57 批）──
+  // inline（默认）：发布后由 API 进程内异步跑 ffmpeg —— 单机/开发/测试形态，无需常驻 worker；
+  // worker：只入队（`publish.transcode`），由 worker 消费并真转码 —— 生产形态，
+  //   API 不再跑 ffmpeg（长片不占 API 事件循环），且 **API 重启不会把转码丢掉**（任务在 Redis 里）。
+  PUBLISH_TRANSCODE_MODE: z.enum(["inline", "worker"]).default("inline"),
+
   // ── 微信支付 APIv3（WECHAT_*）──
   // 商户号
   WECHAT_MCH_ID: z.string().optional(),

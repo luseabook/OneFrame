@@ -9,6 +9,7 @@ export const QUEUES = {
   NOTIFY: "notify",
   EXPORT: "export.zip",
   TIMELINE_EXPORT: "timeline.export",
+  PUBLISH_TRANSCODE: "publish.transcode",
 } as const;
 
 function connectionOptions(): { host: string; port: number; password?: string } {
@@ -25,11 +26,13 @@ export class QueueService implements OnModuleDestroy {
   readonly submitQueue: Queue;
   readonly exportQueue: Queue;
   readonly timelineExportQueue: Queue;
+  readonly publishTranscodeQueue: Queue;
 
   constructor() {
     this.submitQueue = new Queue(QUEUES.GEN_SUBMIT, { connection: connectionOptions() });
     this.exportQueue = new Queue(QUEUES.EXPORT, { connection: connectionOptions() });
     this.timelineExportQueue = new Queue(QUEUES.TIMELINE_EXPORT, { connection: connectionOptions() });
+    this.publishTranscodeQueue = new Queue(QUEUES.PUBLISH_TRANSCODE, { connection: connectionOptions() });
   }
 
   async enqueueTask(taskId: string): Promise<void> {
@@ -73,9 +76,27 @@ export class QueueService implements OnModuleDestroy {
     );
   }
 
+  /**
+   * 切片发布转码任务（第 57 批）：publicationId 即可幂等去重——同一个发布重投不会把已发布
+   * 的作品打回转码中（状态机在 `@app/shared runPublishTranscode` 里先查终态）。
+   */
+  async enqueuePublishTranscode(payload: {
+    publicationId: string;
+    spaceId: string;
+    sourceKey: string;
+  }): Promise<void> {
+    await this.publishTranscodeQueue.add("transcode", payload, {
+      jobId: `publish-transcode-${payload.publicationId}`,
+      attempts: 1,
+      removeOnComplete: 200,
+      removeOnFail: 200,
+    });
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.submitQueue.close();
     await this.exportQueue.close();
     await this.timelineExportQueue.close();
+    await this.publishTranscodeQueue.close();
   }
 }
