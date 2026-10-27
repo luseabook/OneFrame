@@ -25,14 +25,18 @@ const api = useApi();
 const toast = useToast();
 
 type TabKey = "works" | "square" | "profile" | "fans" | "incentive";
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: "works", label: "我的作品" },
-  { key: "square", label: "作品广场" },
-  { key: "profile", label: "我的资料" },
-  { key: "fans", label: "粉丝 / 关注" },
-  { key: "incentive", label: "我的激励" },
-];
+// tab 文案走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const TABS = computed<Array<{ key: TabKey; label: string }>>(() => [
+  { key: "works", label: t("creatorCenter.tabWorks") },
+  { key: "square", label: t("creatorCenter.tabSquare") },
+  { key: "profile", label: t("creatorCenter.tabProfile") },
+  { key: "fans", label: t("creatorCenter.tabFans") },
+  { key: "incentive", label: t("creatorCenter.tabIncentive") },
+]);
 const tab = ref<TabKey>("works");
+
+const { t, locale } = useI18n();
+useHead({ title: () => t("creatorCenter.metaTitle") });
 
 const loading = ref(true);
 const errorMsg = ref("");
@@ -46,14 +50,14 @@ const fans = ref<CreatorFollowRowDto[]>([]);
 const follows = ref<CreatorFollowRowDto[]>([]);
 const incentive = ref<CreatorIncentiveDto | null>(null);
 
-const STATUS_FILTERS: Array<{ value: number; label: string }> = [
-  { value: 0, label: "全部" },
-  { value: 1, label: "草稿" },
-  { value: 2, label: "待审" },
-  { value: 3, label: "已通过" },
-  { value: 4, label: "已驳回" },
-  { value: 5, label: "已下架" },
-];
+const STATUS_FILTERS = computed<Array<{ value: number; label: string }>>(() => [
+  { value: 0, label: t("creatorCenter.filterAll") },
+  { value: 1, label: t("creatorCenter.filterDraft") },
+  { value: 2, label: t("creatorCenter.filterPending") },
+  { value: 3, label: t("creatorCenter.filterApproved") },
+  { value: 4, label: t("creatorCenter.filterRejected") },
+  { value: 5, label: t("creatorCenter.filterOffline") },
+]);
 
 // 新建作品表单（真实可用：标题必填，素材地址可选但送审时要求有素材/封面）
 const draft = reactive({ title: "", summary: "", uri: "" });
@@ -77,7 +81,7 @@ async function loadAll() {
     profileForm.bio = profile.value.bio;
     await Promise.all([loadWorks(), loadSquare(), loadFans(), loadIncentive()]);
   } catch (e) {
-    errorMsg.value = (e as Error).message || "创作者中心加载失败";
+    errorMsg.value = (e as Error).message || t("creatorCenter.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -113,7 +117,7 @@ async function withBusy(key: string, fn: () => Promise<void>) {
   try {
     await fn();
   } catch (e) {
-    toast.error((e as Error).message || "操作失败");
+    toast.error((e as Error).message || t("creatorCenter.opFailed"));
   } finally {
     busy.value = "";
   }
@@ -121,7 +125,7 @@ async function withBusy(key: string, fn: () => Promise<void>) {
 
 async function createWork() {
   if (!draft.title.trim()) {
-    toast.error("请填写作品标题");
+    toast.error(t("creatorCenter.titleRequired"));
     return;
   }
   await withBusy("create", async () => {
@@ -133,7 +137,7 @@ async function createWork() {
     draft.title = "";
     draft.summary = "";
     draft.uri = "";
-    toast.success("已存为草稿，可继续编辑后送审");
+    toast.success(t("creatorCenter.savedDraft"));
     await loadWorks();
     if (profile.value) profile.value = await api.get<CreatorProfileDto>("/crc/user/info");
   });
@@ -141,7 +145,7 @@ async function createWork() {
 
 async function changeStatus(work: CreatorWorkDto, action: "submit" | "resubmit" | "offline" | "approve" | "reject") {
   if (action === "reject" && !rejectNote.value.trim()) {
-    toast.error("驳回请填写原因（作者要据此修改）");
+    toast.error(t("creatorCenter.rejectReasonRequired"));
     return;
   }
   await withBusy(`${action}:${work.id}`, async () => {
@@ -153,12 +157,12 @@ async function changeStatus(work: CreatorWorkDto, action: "submit" | "resubmit" 
     if (action === "reject") rejectNote.value = "";
     toast.success(
       action === "submit" || action === "resubmit"
-        ? "已送审，等审核通过后才会出现在公开列表"
+        ? t("creatorCenter.submitted")
         : action === "approve"
-          ? "已通过，作品已公开"
+          ? t("creatorCenter.approvedMsg")
           : action === "reject"
-            ? "已驳回并留下原因"
-            : "已下架",
+            ? t("creatorCenter.rejectedMsg")
+            : t("creatorCenter.offlineMsg"),
     );
     await loadWorks();
     await loadSquare();
@@ -168,14 +172,14 @@ async function changeStatus(work: CreatorWorkDto, action: "submit" | "resubmit" 
 async function removeWork(work: CreatorWorkDto, mode: "delete" | "audit-fail") {
   const hint =
     mode === "audit-fail"
-      ? `删除被驳回的作品「${work.title}」？删除后不可恢复。`
-      : `删除作品「${work.title}」？删除后不可恢复。`;
+      ? t("creatorCenter.deleteConfirmAuditFail", { title: work.title })
+      : t("creatorCenter.deleteConfirm", { title: work.title });
   if (!window.confirm(hint)) return;
   await withBusy(`del:${work.id}`, async () => {
     await api.post(mode === "audit-fail" ? "/crc/assets/audit-fail/del" : "/crc/assets/delete", {
       asset_id: work.id,
     });
-    toast.success("已删除");
+    toast.success(t("creatorCenter.deleted"));
     await loadWorks();
   });
 }
@@ -189,7 +193,7 @@ async function toggleLike(work: CreatorWorkDto) {
     });
     work.liked = res.liked;
     work.like_count = res.like_count;
-    if (!res.liked && res.like_count === 0) toast.info("已取消点赞");
+    if (!res.liked && res.like_count === 0) toast.info(t("creatorCenter.unliked"));
   });
 }
 
@@ -199,14 +203,14 @@ async function toggleFollow(row: CreatorFollowRowDto, following: boolean) {
       creator_user_id: row.user_id,
       action: following ? "unfollow" : "follow",
     });
-    toast.success(res.following ? `已关注 ${row.nickname ?? row.user_id}` : "已取消关注");
+    toast.success(res.following ? t("creatorCenter.followed", { name: row.nickname ?? row.user_id }) : t("creatorCenter.unfollowed"));
     await loadFans();
   });
 }
 
 async function saveProfile() {
   if (!profileForm.nickname.trim()) {
-    toast.error("昵称不能为空");
+    toast.error(t("creatorCenter.nicknameRequired"));
     return;
   }
   await withBusy("profile", async () => {
@@ -214,7 +218,7 @@ async function saveProfile() {
       nickname: profileForm.nickname.trim(),
       bio: profileForm.bio.trim(),
     });
-    toast.success("资料已更新");
+    toast.success(t("creatorCenter.profileSaved"));
   });
 }
 
@@ -235,16 +239,15 @@ onMounted(loadAll);
   <div class="cc">
     <header class="cc-head">
       <div>
-        <h1 class="cc-title">创作者中心</h1>
+        <h1 class="cc-title">{{ t("creatorCenter.title") }}</h1>
         <p class="cc-sub">
           <template v-if="profile">
-            {{ profile.nickname }} · 作品 {{ profile.works.approved }}/{{ profile.works.total }} 已通过 ·
-            粉丝 {{ profile.follower_count }}
+            {{ t("creatorCenter.subProfile", { name: profile.nickname, approved: profile.works.approved, total: profile.works.total, fans: profile.follower_count }) }}
           </template>
-          <template v-else>投稿、涨粉与激励</template>
+          <template v-else>{{ t("creatorCenter.subDefault") }}</template>
         </p>
       </div>
-      <button type="button" class="cc-btn" :disabled="loading" @click="loadAll">刷新</button>
+      <button type="button" class="cc-btn" :disabled="loading" @click="loadAll">{{ t("creatorCenter.refresh") }}</button>
     </header>
 
     <nav class="cc-tabs">
@@ -262,25 +265,23 @@ onMounted(loadAll);
 
     <p v-if="errorMsg" class="cc-alert">
       {{ errorMsg }}
-      <button type="button" class="cc-link" @click="loadAll">重试</button>
+      <button type="button" class="cc-link" @click="loadAll">{{ t("creatorCenter.retry") }}</button>
     </p>
 
-    <div v-if="loading" class="cc-skeleton">加载中…</div>
+    <div v-if="loading" class="cc-skeleton">{{ t("creatorCenter.loading") }}</div>
 
     <template v-else>
       <!-- ── 我的作品 ───────────────────────────────── -->
       <section v-if="tab === 'works'" class="cc-panel">
         <div class="cc-card">
-          <h2 class="cc-card-title">投稿新作品</h2>
-          <p class="cc-hint">
-            先存草稿，再点「送审」进入人工审核；<strong>只有审核通过（状态=已通过）的作品才会出现在公开列表</strong>。
-          </p>
+          <h2 class="cc-card-title">{{ t("creatorCenter.createTitle") }}</h2>
+          <p class="cc-hint">{{ t("creatorCenter.createHint") }}</p>
           <div class="cc-form">
-            <input v-model="draft.title" class="cc-input" maxlength="80" placeholder="作品标题（必填）" />
-            <input v-model="draft.uri" class="cc-input" maxlength="500" placeholder="素材地址（如 s3://bucket/clip.mp4）" />
-            <input v-model="draft.summary" class="cc-input" maxlength="200" placeholder="一句话简介（可选）" />
+            <input v-model="draft.title" class="cc-input" maxlength="80" :placeholder="t('creatorCenter.titlePlaceholder')" />
+            <input v-model="draft.uri" class="cc-input" maxlength="500" :placeholder="t('creatorCenter.uriPlaceholder')" />
+            <input v-model="draft.summary" class="cc-input" maxlength="200" :placeholder="t('creatorCenter.summaryPlaceholder')" />
             <button type="button" class="cc-btn primary" :disabled="busy === 'create'" @click="createWork">
-              {{ busy === "create" ? "创建中…" : "创建草稿" }}
+              {{ busy === "create" ? t("creatorCenter.creating") : t("creatorCenter.createDraft") }}
             </button>
           </div>
         </div>
@@ -298,9 +299,7 @@ onMounted(loadAll);
           </button>
         </div>
 
-        <p v-if="works.length === 0" class="cc-empty">
-          还没有作品。上面填个标题点「创建草稿」就能开始投稿。
-        </p>
+        <p v-if="works.length === 0" class="cc-empty">{{ t("creatorCenter.worksEmpty") }}</p>
         <ul v-else class="cc-list">
           <li v-for="w in works" :key="w.id" class="cc-item">
             <div class="cc-item-main">
@@ -310,9 +309,9 @@ onMounted(loadAll);
                 <span class="cc-tag ghost">{{ w.kind_label }}</span>
               </div>
               <p class="cc-item-meta">
-                浏览 {{ w.view_count }} · 点赞 {{ w.like_count }} · 更新 {{ fmtTime(w.updated_at) }}
+                {{ t("creatorCenter.itemMeta", { views: w.view_count, likes: w.like_count, time: fmtTime(w.updated_at) }) }}
               </p>
-              <p v-if="w.review_note" class="cc-item-note">审核意见：{{ w.review_note }}</p>
+              <p v-if="w.review_note" class="cc-item-note">{{ t("creatorCenter.auditNote", { note: w.review_note }) }}</p>
             </div>
             <div class="cc-item-actions">
               <button
@@ -322,7 +321,7 @@ onMounted(loadAll);
                 :disabled="busy === `submit:${w.id}`"
                 @click="changeStatus(w, 'submit')"
               >
-                送审
+                {{ t("creatorCenter.submit") }}
               </button>
               <button
                 v-if="w.status === 5"
@@ -331,7 +330,7 @@ onMounted(loadAll);
                 :disabled="busy === `resubmit:${w.id}`"
                 @click="changeStatus(w, 'resubmit')"
               >
-                重新送审
+                {{ t("creatorCenter.resubmit") }}
               </button>
               <template v-if="w.status === 2 && canReview">
                 <button
@@ -340,16 +339,16 @@ onMounted(loadAll);
                   :disabled="busy === `approve:${w.id}`"
                   @click="changeStatus(w, 'approve')"
                 >
-                  通过
+                  {{ t("creatorCenter.approve") }}
                 </button>
-                <input v-model="rejectNote" class="cc-input sm" maxlength="200" placeholder="驳回原因" />
+                <input v-model="rejectNote" class="cc-input sm" maxlength="200" :placeholder="t('creatorCenter.rejectNotePlaceholder')" />
                 <button
                   type="button"
                   class="cc-btn danger sm"
                   :disabled="busy === `reject:${w.id}`"
                   @click="changeStatus(w, 'reject')"
                 >
-                  驳回
+                  {{ t("creatorCenter.reject") }}
                 </button>
               </template>
               <button
@@ -359,7 +358,7 @@ onMounted(loadAll);
                 :disabled="busy === `offline:${w.id}`"
                 @click="changeStatus(w, 'offline')"
               >
-                下架
+                {{ t("creatorCenter.offline") }}
               </button>
               <button
                 v-if="w.status === 4"
@@ -368,7 +367,7 @@ onMounted(loadAll);
                 :disabled="busy === `del:${w.id}`"
                 @click="removeWork(w, 'audit-fail')"
               >
-                删除
+                {{ t("creatorCenter.delete") }}
               </button>
               <button
                 v-if="w.status === 1 || w.status === 5"
@@ -377,7 +376,7 @@ onMounted(loadAll);
                 :disabled="busy === `del:${w.id}`"
                 @click="removeWork(w, 'delete')"
               >
-                删除
+                {{ t("creatorCenter.delete") }}
               </button>
             </div>
           </li>
@@ -386,19 +385,17 @@ onMounted(loadAll);
 
       <!-- ── 作品广场（点赞 / 关注） ──────────────────── -->
       <section v-else-if="tab === 'square'" class="cc-panel">
-        <p class="cc-hint">
-          这里只显示<strong>审核通过</strong>的作品。点赞与关注都是幂等接口：重复点不会重复计数。
-        </p>
-        <p v-if="square.length === 0" class="cc-empty">还没有公开作品。等你的作品审核通过后就会出现在这里。</p>
+        <p class="cc-hint">{{ t("creatorCenter.squareHint") }}</p>
+        <p v-if="square.length === 0" class="cc-empty">{{ t("creatorCenter.squareEmpty") }}</p>
         <ul v-else class="cc-grid">
           <li v-for="w in square" :key="w.id" class="cc-tile">
             <div class="cc-tile-title">{{ w.title }}</div>
             <p class="cc-tile-meta">
-              {{ w.creator?.nickname || w.kind_label }} · 浏览 {{ w.view_count }}
+              {{ t("creatorCenter.tileMeta", { name: w.creator?.nickname || w.kind_label || "", views: w.view_count }) }}
             </p>
             <div class="cc-tile-actions">
               <button type="button" class="cc-btn sm" :disabled="busy === `like:${w.id}`" @click="toggleLike(w)">
-                {{ w.liked ? "已赞" : "点赞" }} {{ w.like_count }}
+                {{ w.liked ? t("creatorCenter.liked") : t("creatorCenter.like") }} {{ w.like_count }}
               </button>
               <button
                 v-if="w.creator_user_id !== profile?.user_id"
@@ -407,7 +404,7 @@ onMounted(loadAll);
                 :disabled="busy === `follow:${w.creator_user_id}`"
                 @click="toggleFollow({ user_id: w.creator_user_id, nickname: w.creator?.nickname ?? null }, false)"
               >
-                关注作者
+                {{ t("creatorCenter.followAuthor") }}
               </button>
             </div>
           </li>
@@ -417,22 +414,22 @@ onMounted(loadAll);
       <!-- ── 资料 ──────────────────────────────────── -->
       <section v-else-if="tab === 'profile'" class="cc-panel">
         <div class="cc-card">
-          <h2 class="cc-card-title">对外资料</h2>
-          <p class="cc-hint">昵称与简介会显示在作品广场与粉丝列表里。</p>
+          <h2 class="cc-card-title">{{ t("creatorCenter.profileTitle") }}</h2>
+          <p class="cc-hint">{{ t("creatorCenter.profileHint") }}</p>
           <div class="cc-form">
-            <input v-model="profileForm.nickname" class="cc-input" maxlength="30" placeholder="昵称" />
-            <textarea v-model="profileForm.bio" class="cc-input" rows="3" maxlength="500" placeholder="简介" />
+            <input v-model="profileForm.nickname" class="cc-input" maxlength="30" :placeholder="t('creatorCenter.nicknamePlaceholder')" />
+            <textarea v-model="profileForm.bio" class="cc-input" rows="3" maxlength="500" :placeholder="t('creatorCenter.bioPlaceholder')" />
             <button type="button" class="cc-btn primary" :disabled="busy === 'profile'" @click="saveProfile">
-              {{ busy === "profile" ? "保存中…" : "保存资料" }}
+              {{ busy === "profile" ? t("creatorCenter.saving") : t("creatorCenter.saveProfile") }}
             </button>
           </div>
           <dl v-if="profile" class="cc-kv">
-            <div><dt>作品总数</dt><dd>{{ profile.works.total }}</dd></div>
-            <div><dt>已通过</dt><dd>{{ profile.works.approved }}</dd></div>
-            <div><dt>待审</dt><dd>{{ profile.works.pending }}</dd></div>
-            <div><dt>已驳回</dt><dd>{{ profile.works.rejected }}</dd></div>
-            <div><dt>总浏览</dt><dd>{{ profile.view_count }}</dd></div>
-            <div><dt>总获赞</dt><dd>{{ profile.like_count }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statWorksTotal") }}</dt><dd>{{ profile.works.total }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statApproved") }}</dt><dd>{{ profile.works.approved }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statPending") }}</dt><dd>{{ profile.works.pending }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statRejected") }}</dt><dd>{{ profile.works.rejected }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statViews") }}</dt><dd>{{ profile.view_count }}</dd></div>
+            <div><dt>{{ t("creatorCenter.statLikes") }}</dt><dd>{{ profile.like_count }}</dd></div>
           </dl>
         </div>
       </section>
@@ -440,8 +437,8 @@ onMounted(loadAll);
       <!-- ── 粉丝 / 关注 ────────────────────────────── -->
       <section v-else-if="tab === 'fans'" class="cc-panel">
         <div class="cc-card">
-          <h2 class="cc-card-title">我的粉丝（{{ fans.length }}）</h2>
-          <p v-if="fans.length === 0" class="cc-empty">还没有粉丝。公开作品被点赞/关注后会出现在这里。</p>
+          <h2 class="cc-card-title">{{ t("creatorCenter.fansTitle", { count: fans.length }) }}</h2>
+          <p v-if="fans.length === 0" class="cc-empty">{{ t("creatorCenter.fansEmpty") }}</p>
           <ul v-else class="cc-list">
             <li v-for="f in fans" :key="f.user_id" class="cc-item">
               <span class="cc-item-title">{{ f.nickname || f.user_id }}</span>
@@ -451,25 +448,25 @@ onMounted(loadAll);
                 :disabled="busy === `follow:${f.user_id}`"
                 @click="toggleFollow(f, false)"
               >
-                回关
+                {{ t("creatorCenter.followBack") }}
               </button>
             </li>
           </ul>
         </div>
         <div class="cc-card">
-          <h2 class="cc-card-title">我关注的人（{{ follows.length }}）</h2>
-          <p v-if="follows.length === 0" class="cc-empty">还没关注任何人。去「作品广场」看到喜欢的作者就关注吧。</p>
+          <h2 class="cc-card-title">{{ t("creatorCenter.followsTitle", { count: follows.length }) }}</h2>
+          <p v-if="follows.length === 0" class="cc-empty">{{ t("creatorCenter.followsEmpty") }}</p>
           <ul v-else class="cc-list">
             <li v-for="f in follows" :key="f.user_id" class="cc-item">
               <span class="cc-item-title">{{ f.nickname || f.user_id }}</span>
-              <span class="cc-item-meta">粉丝 {{ f.follower_count ?? 0 }}</span>
+              <span class="cc-item-meta">{{ t("creatorCenter.followerCount", { count: f.follower_count ?? 0 }) }}</span>
               <button
                 type="button"
                 class="cc-btn sm"
                 :disabled="busy === `follow:${f.user_id}`"
                 @click="toggleFollow(f, true)"
               >
-                取消关注
+                {{ t("creatorCenter.unfollow") }}
               </button>
             </li>
           </ul>
@@ -479,25 +476,22 @@ onMounted(loadAll);
       <!-- ── 激励 ──────────────────────────────────── -->
       <section v-else class="cc-panel">
         <div class="cc-card">
-          <h2 class="cc-card-title">我的激励</h2>
-          <p class="cc-hint">
-            激励是**只读视图**：数据来自账本的 gift 流入（活动奖励、每日奖励、兑换码、邀请奖励），
-            发放动作在各自模块走账本，这里只做汇总。
-          </p>
+          <h2 class="cc-card-title">{{ t("creatorCenter.incentiveTitle") }}</h2>
+          <p class="cc-hint">{{ t("creatorCenter.incentiveHint") }}</p>
           <div v-if="incentive" class="cc-kpis">
-            <div class="cc-kpi"><span>累计获得</span><strong>{{ incentive.total_credits }}</strong></div>
-            <div class="cc-kpi"><span>记录条数</span><strong>{{ incentive.record_count }}</strong></div>
+            <div class="cc-kpi"><span>{{ t("creatorCenter.totalEarned") }}</span><strong>{{ incentive.total_credits }}</strong></div>
+            <div class="cc-kpi"><span>{{ t("creatorCenter.recordCount") }}</span><strong>{{ incentive.record_count }}</strong></div>
             <div class="cc-kpi">
-              <span>活动奖励</span><strong>{{ incentive.by_category.campaign ?? 0 }}</strong>
+              <span>{{ t("creatorCenter.campaignReward") }}</span><strong>{{ incentive.by_category.campaign ?? 0 }}</strong>
             </div>
             <div class="cc-kpi">
-              <span>每日奖励</span><strong>{{ incentive.by_category.daily_reward ?? 0 }}</strong>
+              <span>{{ t("creatorCenter.dailyReward") }}</span><strong>{{ incentive.by_category.daily_reward ?? 0 }}</strong>
             </div>
           </div>
-          <p v-if="incentive && incentive.list.length === 0" class="cc-empty">还没有激励记录。</p>
+          <p v-if="incentive && incentive.list.length === 0" class="cc-empty">{{ t("creatorCenter.incentiveEmpty") }}</p>
           <table v-else-if="incentive" class="cc-table">
             <thead>
-              <tr><th>时间</th><th>来源</th><th>积分</th><th>备注</th></tr>
+              <tr><th>{{ t("creatorCenter.thTime") }}</th><th>{{ t("creatorCenter.thSource") }}</th><th>{{ t("creatorCenter.thCredits") }}</th><th>{{ t("creatorCenter.thMemo") }}</th></tr>
             </thead>
             <tbody>
               <tr v-for="r in incentive.list" :key="r.id">
