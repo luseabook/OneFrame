@@ -22,7 +22,8 @@ import type {
  * 三态：加载（Skeleton）/ 空（EmptyState + 下一步）/ 错误（红条 + 重试）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "改编工作台 · 一帧" });
+const { t } = useI18n();
+useHead({ title: () => t("novelStudio.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -56,7 +57,7 @@ async function loadSummary(): Promise<void> {
   try {
     summary.value = await api.get<NovelSummaryDto>(`${base.value}/summary`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("novelStudio.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -79,7 +80,7 @@ async function openChapter(no: number): Promise<void> {
   try {
     chapterDetail.value = await api.get<NovelChapterDto>(`${base.value}/chapters/${no}`);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "加载章节失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.chaptersLoadFailed"));
   }
 }
 
@@ -89,10 +90,10 @@ async function resplit(): Promise<void> {
     const body: Record<string, unknown> = {};
     const wanted = Number(splitCountInput.value); if (Number.isInteger(wanted) && wanted > 0) body.chapter_count = wanted;
     const data = await api.post<{ count: number }>(`${base.value}/split`, body);
-    toast.success(`已切分为 ${data.count} 章`);
+    toast.success(t("novelStudio.splitDone", { count: data.count }));
     await Promise.all([loadSummary(), loadChapters()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "分章失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.splitFailed"));
   } finally {
     busy.value = "";
   }
@@ -123,10 +124,10 @@ async function runAnalysis(): Promise<void> {
     const data = await api.post<{ characters: NovelCharacterDto[] }>(`${base.value}/content-analysis`, {
       character_count: Math.max(1, Math.min(Number(charCountInput.value) || 6, 10)),
     });
-    toast.success(`内容分析完成：角色卡 ${data.characters.length} 张`);
+    toast.success(t("novelStudio.analysisDone", { count: data.characters.length }));
     await Promise.all([loadSummary(), loadAnalysis()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "内容分析失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.analysisFailed"));
   } finally {
     busy.value = "";
   }
@@ -145,10 +146,10 @@ async function saveWorldview(): Promise<void> {
       rules: worldview.value.rules,
       relations: worldview.value.relations,
     });
-    toast.success("世界观已保存");
+    toast.success(t("novelStudio.worldviewSaved"));
     await loadAnalysis();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "保存失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.saveFailed"));
   } finally {
     busy.value = "";
   }
@@ -158,10 +159,10 @@ async function generateCharacters(): Promise<void> {
   busy.value = "characters";
   try {
     await api.post(`${base.value}/content-analysis/novel_character_cards/generate`, { count: Math.max(1, Math.min(Number(charCountInput.value) || 6, 10)) });
-    toast.success("已重新生成角色卡（同名会合并，不产生重复卡）");
+    toast.success(t("novelStudio.charactersRegenerated"));
     await loadAnalysis();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "生成失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.generateFailed"));
   } finally {
     busy.value = "";
   }
@@ -193,11 +194,11 @@ async function saveCharacter(): Promise<void> {
       personality: charForm.personality,
       prompt: charForm.prompt,
     });
-    toast.success("角色卡已保存");
+    toast.success(t("novelStudio.characterSaved"));
     editing.value = null;
     await loadAnalysis();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "保存失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.saveFailed"));
   } finally {
     busy.value = "";
   }
@@ -215,10 +216,10 @@ async function generateChapterOutlines(): Promise<void> {
   busy.value = "chapter_outline";
   try {
     const data = await api.post<{ count: number }>(`${base.value}/chapter_outline/generate`, {});
-    toast.success(`已生成 ${data.count} 条章纲`);
+    toast.success(t("novelStudio.chapterOutlinesDone", { count: data.count }));
     await Promise.all([loadSummary(), loadChapterOutlines()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "生成失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.generateFailed"));
   } finally {
     busy.value = "";
   }
@@ -228,9 +229,9 @@ async function saveChapterOutline(item: NovelChapterOutlineDto): Promise<void> {
   busy.value = `nco-${item.id}`;
   try {
     await api.patch(`${base.value}/chapter_outline/${item.id}`, { title: item.title, synopsis: item.synopsis });
-    toast.success(`第 ${item.chapter_no} 章纲已保存`);
+    toast.success(t("novelStudio.chapterOutlineSaved", { no: item.chapter_no }));
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "保存失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.saveFailed"));
   } finally {
     busy.value = "";
   }
@@ -251,10 +252,10 @@ async function generateEpisodeOutlines(): Promise<void> {
     const body: Record<string, unknown> = {};
     const wantedEpisodes = Number(episodeCountInput.value); if (Number.isInteger(wantedEpisodes) && wantedEpisodes > 0) body.episode_count = wantedEpisodes;
     const data = await api.post<{ count: number }>(`${base.value}/episode_outline/generate`, body);
-    toast.success(`已生成 ${data.count} 集大纲`);
+    toast.success(t("novelStudio.episodeOutlinesDone", { count: data.count }));
     await Promise.all([loadSummary(), loadEpisodeOutlines()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "生成失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.generateFailed"));
   } finally {
     busy.value = "";
   }
@@ -264,9 +265,9 @@ async function saveEpisodeOutline(item: NovelEpisodeOutlineDto): Promise<void> {
   busy.value = `neo-${item.id}`;
   try {
     await api.patch(`${base.value}/episode_outline/${item.id}`, { title: item.title, synopsis: item.synopsis });
-    toast.success(`第 ${item.episode_no} 集大纲已保存`);
+    toast.success(t("novelStudio.episodeOutlineSaved", { no: item.episode_no }));
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "保存失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.saveFailed"));
   } finally {
     busy.value = "";
   }
@@ -284,10 +285,10 @@ async function generateCoreCharacters(): Promise<void> {
   busy.value = "core_character";
   try {
     const data = await api.post<{ count: number }>(`${base.value}/core_character/generate`, { count: 3 });
-    toast.success(`已标记 ${data.count} 个核心角色`);
+    toast.success(t("novelStudio.coreCharactersDone", { count: data.count }));
     await Promise.all([loadSummary(), loadCoreCharacters(), loadAnalysis()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "生成失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.generateFailed"));
   } finally {
     busy.value = "";
   }
@@ -313,7 +314,7 @@ async function openEpisode(id: string): Promise<void> {
     episodeDetail.value = data;
     episodeText.value = data.script_text;
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "加载剧本失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.scriptsLoadFailed"));
   }
 }
 
@@ -325,12 +326,12 @@ async function generateScripts(): Promise<void> {
     const data = await api.post<{ count: number; missing: number[] }>(`${base.value}/script-generate`, body);
     toast.success(
       data.missing.length > 0
-        ? `已生成 ${data.count} 集；还缺第 ${data.missing.join("、")} 集`
-        : `已生成 ${data.count} 集剧本`,
+        ? t("novelStudio.scriptsDoneWithMissing", { count: data.count, missing: data.missing.join("、") })
+        : t("novelStudio.scriptsDone", { count: data.count }),
     );
     await Promise.all([loadSummary(), loadEpisodes()]);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "生成失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.generateFailed"));
   } finally {
     busy.value = "";
   }
@@ -344,10 +345,10 @@ async function saveEpisodeText(): Promise<void> {
       script_text: episodeText.value,
     });
     episodeDetail.value = data;
-    toast.success(`已保存（版本 v${data.version}）`);
+    toast.success(t("novelStudio.episodeSaved", { version: data.version }));
     await loadEpisodes();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "保存失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.saveFailed"));
   } finally {
     busy.value = "";
   }
@@ -358,10 +359,10 @@ async function confirmEpisode(): Promise<void> {
   busy.value = "episode-confirm";
   try {
     await api.post(`${base.value}/episode/${episodeDetail.value.id}/confirm`, {});
-    toast.success("本集已确认");
+    toast.success(t("novelStudio.episodeConfirmed"));
     await loadEpisodes();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "确认失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.confirmFailed"));
   } finally {
     busy.value = "";
   }
@@ -380,10 +381,10 @@ async function finalize(): Promise<void> {
     const data = await api.post<{ status: number; replayed: boolean }>(`${base.value}/finalize`, {
       snapshot_episodes: true,
     });
-    toast.success(data.replayed ? "本子已处于定稿状态" : "已定稿（status=16），可作为制片工坊的拆集来源");
+    toast.success(data.replayed ? t("novelStudio.alreadyFinalized") : t("novelStudio.finalizedOk"));
     await loadSummary();
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "定稿失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.finalizeFailed"));
   } finally {
     busy.value = "";
   }
@@ -405,7 +406,7 @@ async function ensureTab(next: Tab): Promise<void> {
     if (next === "script") await loadEpisodes();
   } catch (e) {
     loadedTabs.delete(next);
-    toast.error(e instanceof Error ? e.message : "加载失败");
+    toast.error(e instanceof Error ? e.message : t("novelStudio.loadFailed"));
   }
 }
 
@@ -428,21 +429,25 @@ function chapterTitle(item: NovelChapterSummaryDto): string {
  * （上下文回落到创作灵感），删掉它们等于让原创本子没法生成角色卡 —— 那是能力退化，不是收敛。
  */
 const ADAPT_TABS: Array<{ key: Tab; label: string }> = [
-  { key: "chapters", label: "章节" },
-  { key: "analysis", label: "内容分析" },
-  { key: "chapter_outline", label: "章节大纲" },
-  { key: "episode_outline", label: "分集大纲" },
-  { key: "core_character", label: "核心角色" },
-  { key: "script", label: "分集剧本" },
-  { key: "agent", label: "编辑 Agent" },
+  { key: "chapters", label: t("novelStudio.tabs.chapters") },
+  { key: "analysis", label: t("novelStudio.tabs.analysis") },
+  { key: "chapter_outline", label: t("novelStudio.tabs.chapterOutline") },
+  { key: "episode_outline", label: t("novelStudio.tabs.episodeOutline") },
+  { key: "core_character", label: t("novelStudio.tabs.coreCharacter") },
+  { key: "script", label: t("novelStudio.tabs.script") },
+  { key: "agent", label: t("novelStudio.tabs.agent") },
 ];
 
 const isOriginal = computed(() => summary.value?.novel.source_type === 2);
 const TABS = computed<Array<{ key: Tab; label: string }>>(() =>
-  isOriginal.value ? [{ key: "original", label: "原创链" }, ...ADAPT_TABS] : ADAPT_TABS,
+  isOriginal.value ? [{ key: "original", label: t("novelStudio.tabs.original") }, ...ADAPT_TABS] : ADAPT_TABS,
 );
 
-const ROLE_LABEL: Record<number, string> = { 1: "主角", 2: "配角", 3: "反派" };
+const ROLE_LABEL = computed<Record<number, string>>(() => ({
+  1: t("novelStudio.roles.lead"),
+  2: t("novelStudio.roles.support"),
+  3: t("novelStudio.roles.villain"),
+}));
 
 onMounted(async () => {
   await loadSummary();
@@ -455,14 +460,14 @@ onMounted(async () => {
 <template>
   <div class="wb">
     <header class="wb__top">
-      <NuxtLink to="/novel" class="back">← 剧本工厂</NuxtLink>
+      <NuxtLink to="/novel" class="back">{{ t("novelStudio.backToFactory") }}</NuxtLink>
       <div class="wb__title">
-        <h1 :title="summary?.novel.title">{{ summary?.novel.title ?? "加载中…" }}</h1>
+        <h1 :title="summary?.novel.title">{{ summary?.novel.title ?? t("novelStudio.loading") }}</h1>
         <span v-if="summary" class="badge" :class="{ done: finalized }">
-          {{ finalized ? "已定稿 · status=16" : "草稿 · status=1" }}
+          {{ finalized ? t("novelStudio.finalizedBadge") : t("novelStudio.draftBadge") }}
         </span>
         <span v-if="summary" class="ratio">{{ summary.novel.ratio }}</span>
-        <span v-if="summary" class="mode">{{ summary.llm_mode === "mock" ? "mock 模式（无 Key，确定性输出）" : "真实模型" }}</span>
+        <span v-if="summary" class="mode">{{ summary.llm_mode === "mock" ? t("novelStudio.mockMode") : t("novelStudio.realModel") }}</span>
       </div>
       <div class="wb__actions">
         <Button
@@ -471,7 +476,7 @@ onMounted(async () => {
           :loading="busy === 'finalize'"
           @click="finalize"
         >
-          {{ finalized ? "已定稿" : "定稿完成改编" }}
+          {{ finalized ? t("novelStudio.finalized") : t("novelStudio.finalize") }}
         </Button>
       </div>
     </header>
@@ -485,7 +490,7 @@ onMounted(async () => {
 
     <p v-if="error" class="err">
       {{ error }}
-      <button type="button" class="err__retry" @click="loadSummary">重试</button>
+      <button type="button" class="err__retry" @click="loadSummary">{{ t("novelStudio.retry") }}</button>
     </p>
 
     <div class="wb__tabs">
@@ -505,16 +510,16 @@ onMounted(async () => {
       <!-- 章节 -->
       <section v-else-if="tab === 'chapters'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">共 {{ chapters.length }} 章 · 分章是纯规则任务（按「第N章」标题切）</span>
+          <span class="pane__hint">{{ t("novelStudio.chaptersHint", { count: chapters.length }) }}</span>
           <div class="pane__ops">
-            <TextField v-model="splitCountInput" class="count-input" placeholder="章数（可选）" />
+            <TextField v-model="splitCountInput" class="count-input" :placeholder="t('novelStudio.splitPlaceholder')" />
             <Button size="sm" variant="secondary" :loading="busy === 'split'" :disabled="chapters.length === 0" @click="resplit">
-              重新分章
+              {{ t("novelStudio.resplit") }}
             </Button>
           </div>
         </div>
         <div v-if="chapters.length === 0" class="pane__empty">
-          <EmptyState icon="⌘" title="还没有章节" description="在剧本工厂新建时粘贴小说正文即可自动分章；已有本子可以回到列表页重新创建。" />
+          <EmptyState icon="⌘" :title="t('novelStudio.chaptersEmptyTitle')" :description="t('novelStudio.chaptersEmptyDesc')" />
         </div>
         <div v-else class="split">
           <ul class="chapter-list">
@@ -525,9 +530,9 @@ onMounted(async () => {
                 :class="{ on: chapterDetail?.chapter_no === item.chapter_no }"
                 @click="openChapter(item.chapter_no)"
               >
-                <span class="chapter__no">第 {{ item.chapter_no }} 章</span>
+                <span class="chapter__no">{{ t("novelStudio.chapterNo", { no: item.chapter_no }) }}</span>
                 <span class="chapter__title">{{ chapterTitle(item) }}</span>
-                <span class="chapter__words">{{ item.word_count }} 字</span>
+                <span class="chapter__words">{{ t("novelStudio.words", { count: item.word_count }) }}</span>
               </button>
             </li>
           </ul>
@@ -536,7 +541,7 @@ onMounted(async () => {
               <h2>{{ chapterDetail.title }}</h2>
               <pre class="chapter-view__text">{{ chapterDetail.content }}</pre>
             </template>
-            <p v-else class="pane__hint">选择左侧章节查看正文</p>
+            <p v-else class="pane__hint">{{ t("novelStudio.pickChapter") }}</p>
           </article>
         </div>
       </section>
@@ -544,50 +549,50 @@ onMounted(async () => {
       <!-- 内容分析 -->
       <section v-else-if="tab === 'analysis'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">世界观 + 角色卡（同名重复生成会合并，不产生重复卡）</span>
+          <span class="pane__hint">{{ t("novelStudio.analysisHint") }}</span>
           <div class="pane__ops">
-            <label class="inline">角色卡 <input v-model="charCountInput" class="num" type="number" min="1" max="10" /></label>
-            <Button size="sm" :loading="busy === 'analyze'" @click="runAnalysis">内容分析</Button>
-            <Button size="sm" variant="secondary" :loading="busy === 'characters'" @click="generateCharacters">重新生成角色卡</Button>
+            <label class="inline">{{ t("novelStudio.characterCount") }} <input v-model="charCountInput" class="num" type="number" min="1" max="10" /></label>
+            <Button size="sm" :loading="busy === 'analyze'" @click="runAnalysis">{{ t("novelStudio.runAnalysis") }}</Button>
+            <Button size="sm" variant="secondary" :loading="busy === 'characters'" @click="generateCharacters">{{ t("novelStudio.regenCharacters") }}</Button>
           </div>
         </div>
 
         <div class="analysis">
           <section class="card">
-            <h3>世界观</h3>
+            <h3>{{ t("novelStudio.worldviewTitle") }}</h3>
             <template v-if="worldview">
-              <TextField v-model="analysisForm.era" label="时代背景" :maxlength="500" />
-              <TextField v-model="analysisForm.geography" label="地理/场景基调" :maxlength="1000" />
-              <TextAreaField v-model="analysisForm.summary" label="总述" :rows="5" :maxlength="2000" />
+              <TextField v-model="analysisForm.era" :label="t('novelStudio.eraLabel')" :maxlength="500" />
+              <TextField v-model="analysisForm.geography" :label="t('novelStudio.geoLabel')" :maxlength="1000" />
+              <TextAreaField v-model="analysisForm.summary" :label="t('novelStudio.summaryLabel')" :rows="5" :maxlength="2000" />
               <div class="chips">
                 <span v-for="faction in worldview.factions" :key="faction.name" class="chip">{{ faction.name }}</span>
                 <span v-for="rule in worldview.rules" :key="rule" class="chip chip--rule">{{ rule }}</span>
               </div>
               <p v-if="worldview.relations.length" class="relations">
-                关系：<span v-for="rel in worldview.relations" :key="`${rel.from}-${rel.to}`" class="rel">
+                {{ t("novelStudio.relations") }}<span v-for="rel in worldview.relations" :key="`${rel.from}-${rel.to}`" class="rel">
                   {{ rel.from }} → {{ rel.to }}（{{ rel.kind }}）
                 </span>
               </p>
-              <Button size="sm" :loading="busy === 'worldview'" @click="saveWorldview">保存世界观</Button>
+              <Button size="sm" :loading="busy === 'worldview'" @click="saveWorldview">{{ t("novelStudio.saveWorldview") }}</Button>
             </template>
-            <p v-else class="pane__hint">还没有世界观。点右上「内容分析」一次性生成世界观与角色卡。</p>
+            <p v-else class="pane__hint">{{ t("novelStudio.noWorldview") }}</p>
           </section>
 
           <section class="card">
-            <h3>角色卡（{{ characters.length }}）</h3>
+            <h3>{{ t("novelStudio.charactersTitle", { count: characters.length }) }}</h3>
             <ul v-if="characters.length" class="chars">
               <li v-for="item in characters" :key="item.id" class="char">
                 <div class="char__head">
                   <strong>{{ item.name }}</strong>
                   <span class="tag">{{ ROLE_LABEL[item.role_type] }}</span>
-                  <span v-if="item.is_core" class="tag tag--core">核心</span>
-                  <button type="button" class="link" @click="editCharacter(item)">编辑</button>
+                  <span v-if="item.is_core" class="tag tag--core">{{ t("novelStudio.coreTag") }}</span>
+                  <button type="button" class="link" @click="editCharacter(item)">{{ t("novelStudio.edit") }}</button>
                 </div>
                 <p class="char__desc">{{ item.description }}</p>
                 <p class="char__meta">{{ item.appearance }}</p>
               </li>
             </ul>
-            <p v-else class="pane__hint">还没有角色卡。</p>
+            <p v-else class="pane__hint">{{ t("novelStudio.noCharacters") }}</p>
           </section>
         </div>
       </section>
@@ -595,15 +600,15 @@ onMounted(async () => {
       <!-- 章节大纲 -->
       <section v-else-if="tab === 'chapter_outline'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">{{ chapterOutlines.length }} 条章纲（可直接编辑后逐条保存）</span>
-          <Button size="sm" :loading="busy === 'chapter_outline'" @click="generateChapterOutlines">生成章节大纲</Button>
+          <span class="pane__hint">{{ t("novelStudio.chapterOutlinesHint", { count: chapterOutlines.length }) }}</span>
+          <Button size="sm" :loading="busy === 'chapter_outline'" @click="generateChapterOutlines">{{ t("novelStudio.genChapterOutlines") }}</Button>
         </div>
-        <p v-if="chapterOutlines.length === 0" class="pane__hint">还没有章纲。点右上生成；生成后每条都可以改标题与梗概。</p>
+        <p v-if="chapterOutlines.length === 0" class="pane__hint">{{ t("novelStudio.noChapterOutlines") }}</p>
         <ul v-else class="outlines">
           <li v-for="item in chapterOutlines" :key="item.id" class="outline">
             <TextField v-model="item.title" :maxlength="200" class="outline__title" />
             <TextAreaField v-model="item.synopsis" :rows="2" :maxlength="1000" />
-            <Button size="sm" variant="secondary" :loading="busy === `nco-${item.id}`" @click="saveChapterOutline(item)">保存</Button>
+            <Button size="sm" variant="secondary" :loading="busy === `nco-${item.id}`" @click="saveChapterOutline(item)">{{ t("novelStudio.save") }}</Button>
           </li>
         </ul>
       </section>
@@ -611,18 +616,18 @@ onMounted(async () => {
       <!-- 分集大纲 -->
       <section v-else-if="tab === 'episode_outline'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">{{ episodeOutlines.length }} 集大纲</span>
+          <span class="pane__hint">{{ t("novelStudio.episodeOutlinesHint", { count: episodeOutlines.length }) }}</span>
           <div class="pane__ops">
-            <label class="inline">集数 <input v-model="episodeCountInput" class="num" type="number" min="1" max="100" /></label>
-            <Button size="sm" :loading="busy === 'episode_outline'" @click="generateEpisodeOutlines">生成分集大纲</Button>
+            <label class="inline">{{ t("novelStudio.episodeCount") }} <input v-model="episodeCountInput" class="num" type="number" min="1" max="100" /></label>
+            <Button size="sm" :loading="busy === 'episode_outline'" @click="generateEpisodeOutlines">{{ t("novelStudio.genEpisodeOutlines") }}</Button>
           </div>
         </div>
-        <p v-if="episodeOutlines.length === 0" class="pane__hint">还没有分集大纲。先生成章节大纲效果更好（没章纲时会按原文推）。</p>
+        <p v-if="episodeOutlines.length === 0" class="pane__hint">{{ t("novelStudio.noEpisodeOutlines") }}</p>
         <ul v-else class="outlines">
           <li v-for="item in episodeOutlines" :key="item.id" class="outline">
             <TextField v-model="item.title" :maxlength="200" class="outline__title" />
             <TextAreaField v-model="item.synopsis" :rows="2" :maxlength="1000" />
-            <Button size="sm" variant="secondary" :loading="busy === `neo-${item.id}`" @click="saveEpisodeOutline(item)">保存</Button>
+            <Button size="sm" variant="secondary" :loading="busy === `neo-${item.id}`" @click="saveEpisodeOutline(item)">{{ t("novelStudio.save") }}</Button>
           </li>
         </ul>
       </section>
@@ -630,35 +635,35 @@ onMounted(async () => {
       <!-- 核心角色 -->
       <section v-else-if="tab === 'core_character'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">核心角色 = 用于资产一致性（同一角色跨镜同 face）的那几张卡</span>
-          <Button size="sm" :loading="busy === 'core_character'" @click="generateCoreCharacters">生成核心角色</Button>
+          <span class="pane__hint">{{ t("novelStudio.coreCharacterHint") }}</span>
+          <Button size="sm" :loading="busy === 'core_character'" @click="generateCoreCharacters">{{ t("novelStudio.genCoreCharacters") }}</Button>
         </div>
         <ul v-if="coreCharacters.length" class="chars">
           <li v-for="item in coreCharacters" :key="item.id" class="char">
             <div class="char__head">
               <strong>{{ item.name }}</strong>
               <span class="tag">{{ ROLE_LABEL[item.role_type] }}</span>
-              <span class="tag tag--core">核心</span>
+              <span class="tag tag--core">{{ t("novelStudio.coreTag") }}</span>
             </div>
             <p class="char__desc">{{ item.description }}</p>
             <p class="char__meta">{{ item.prompt }}</p>
           </li>
         </ul>
-        <p v-else class="pane__hint">还没有核心角色。生成时会优先从已有角色卡里挑，不够才补生成。</p>
+        <p v-else class="pane__hint">{{ t("novelStudio.noCoreCharacters") }}</p>
       </section>
 
       <!-- 分集剧本 -->
       <section v-else-if="tab === 'script'" class="pane">
         <div class="pane__bar">
-          <span class="pane__hint">{{ episodes.length }} 集剧本<template v-if="selectedNos.length"> · 已选 {{ selectedNos.length }} 集</template></span>
+          <span class="pane__hint">{{ t("novelStudio.episodesHint", { count: episodes.length }) }}<template v-if="selectedNos.length">{{ t("novelStudio.episodesSelectedHint", { count: selectedNos.length }) }}</template></span>
           <div class="pane__ops">
             <Button size="sm" :loading="busy === 'script'" @click="generateScripts">
-              {{ selectedNos.length ? "生成选中集" : "生成全部集" }}
+              {{ selectedNos.length ? t("novelStudio.genSelected") : t("novelStudio.genAll") }}
             </Button>
           </div>
         </div>
         <div v-if="episodes.length === 0" class="pane__empty">
-          <EmptyState icon="▤" title="还没有分集剧本" description="先生成分集大纲，再回这里生成剧本；生成后可用「编辑 Agent」逐集改。" />
+          <EmptyState icon="▤" :title="t('novelStudio.episodesEmptyTitle')" :description="t('novelStudio.episodesEmptyDesc')" />
         </div>
         <div v-else class="script">
           <ul class="episode-list">
@@ -667,27 +672,27 @@ onMounted(async () => {
                 <input
                   type="checkbox"
                   :checked="selectedNos.includes(item.episode_no)"
-                  :aria-label="`选择第 ${item.episode_no} 集`"
+                  :aria-label="t('novelStudio.selectEpisodeAria', { no: item.episode_no })"
                   @change="toggleSelect(item.episode_no)"
                 />
                 <button type="button" class="episode__main" @click="openEpisode(item.id)">
-                  <span class="episode__no">第 {{ item.episode_no }} 集</span>
+                  <span class="episode__no">{{ t("novelStudio.episodeNo", { no: item.episode_no }) }}</span>
                   <span class="episode__title">{{ item.title }}</span>
-                  <span class="episode__meta">{{ item.chars }} 字 · v{{ item.version }}</span>
-                  <span class="tag" :class="{ 'tag--core': item.status === 2 }">{{ item.status === 2 ? "已确认" : "草稿" }}</span>
+                  <span class="episode__meta">{{ t("novelStudio.episodeMeta", { chars: item.chars, version: item.version }) }}</span>
+                  <span class="tag" :class="{ 'tag--core': item.status === 2 }">{{ item.status === 2 ? t("novelStudio.confirmed") : t("novelStudio.draft") }}</span>
                 </button>
               </div>
             </li>
           </ul>
           <article class="script-view">
             <template v-if="episodeDetail">
-              <TextAreaField v-model="episodeText" :rows="18" :maxlength="100000" label="剧本正文（保存会产生新版本）" />
+              <TextAreaField v-model="episodeText" :rows="18" :maxlength="100000" :label="t('novelStudio.scriptBodyLabel')" />
               <div class="script-view__ops">
-                <Button size="sm" :loading="busy === 'episode-save'" @click="saveEpisodeText">保存正文</Button>
-                <Button size="sm" variant="secondary" :loading="busy === 'episode-confirm'" @click="confirmEpisode">确认这集</Button>
+                <Button size="sm" :loading="busy === 'episode-save'" @click="saveEpisodeText">{{ t("novelStudio.saveBody") }}</Button>
+                <Button size="sm" variant="secondary" :loading="busy === 'episode-confirm'" @click="confirmEpisode">{{ t("novelStudio.confirmEpisode") }}</Button>
               </div>
             </template>
-            <p v-else class="pane__hint">选择左侧剧集查看与编辑正文</p>
+            <p v-else class="pane__hint">{{ t("novelStudio.pickEpisode") }}</p>
           </article>
         </div>
       </section>
@@ -704,26 +709,26 @@ onMounted(async () => {
     </main>
 
     <!-- 角色卡编辑弹窗 -->
-    <Modal :open="!!editing" title="编辑角色卡" width="560px" @close="editing = null">
+    <Modal :open="!!editing" :title="t('novelStudio.characterModalTitle')" width="560px" @close="editing = null">
       <div class="form">
-        <TextField v-model="charForm.name" label="姓名" :maxlength="50" />
+        <TextField v-model="charForm.name" :label="t('novelStudio.nameLabel')" :maxlength="50" />
         <div class="form__row">
-          <label class="inline">类型
+          <label class="inline">{{ t("novelStudio.typeLabel") }}
             <select v-model.number="charForm.role_type" class="select">
-              <option :value="1">主角</option>
-              <option :value="2">配角</option>
-              <option :value="3">反派</option>
+              <option :value="1">{{ t("novelStudio.roles.lead") }}</option>
+              <option :value="2">{{ t("novelStudio.roles.support") }}</option>
+              <option :value="3">{{ t("novelStudio.roles.villain") }}</option>
             </select>
           </label>
         </div>
-        <TextAreaField v-model="charForm.description" label="描述" :rows="2" :maxlength="500" />
-        <TextAreaField v-model="charForm.appearance" label="外貌" :rows="2" :maxlength="1000" />
-        <TextAreaField v-model="charForm.personality" label="性格" :rows="2" :maxlength="500" />
-        <TextAreaField v-model="charForm.prompt" label="生图提示词" :rows="3" :maxlength="1000" />
+        <TextAreaField v-model="charForm.description" :label="t('novelStudio.descLabel')" :rows="2" :maxlength="500" />
+        <TextAreaField v-model="charForm.appearance" :label="t('novelStudio.appearanceLabel')" :rows="2" :maxlength="1000" />
+        <TextAreaField v-model="charForm.personality" :label="t('novelStudio.personalityLabel')" :rows="2" :maxlength="500" />
+        <TextAreaField v-model="charForm.prompt" :label="t('novelStudio.promptLabel')" :rows="3" :maxlength="1000" />
       </div>
       <template #footer>
-        <Button variant="ghost" @click="editing = null">取消</Button>
-        <Button :loading="busy === 'character'" @click="saveCharacter">保存</Button>
+        <Button variant="ghost" @click="editing = null">{{ t("novelStudio.cancel") }}</Button>
+        <Button :loading="busy === 'character'" @click="saveCharacter">{{ t("novelStudio.save") }}</Button>
       </template>
     </Modal>
   </div>

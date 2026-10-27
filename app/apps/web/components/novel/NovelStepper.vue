@@ -22,18 +22,22 @@ const props = defineProps<{
 
 defineEmits<{ pick: [key: string] }>();
 
-const DEFAULT_ORDER: Array<{ key: string; label: string }> = [
-  { key: "split", label: "分章" },
-  { key: "content_analysis", label: "内容分析" },
-  { key: "chapter_outline", label: "章节大纲" },
-  { key: "episode_outline", label: "分集大纲" },
-  { key: "core_character", label: "核心角色" },
-  { key: "script", label: "分集剧本" },
-  { key: "finalize", label: "定稿" },
-];
+// 步进器标签走 i18n（computed：常量在 setup 期固化，切语言不更新）
+// 注意 hint 文案来自服务端 `steps[key].hint`（中文数据），组件不翻译它
+const DEFAULT_ORDER = computed<Array<{ key: string; label: string }>>(() => [
+  { key: "split", label: t("novelStudio.steps.split") },
+  { key: "content_analysis", label: t("novelStudio.steps.contentAnalysis") },
+  { key: "chapter_outline", label: t("novelStudio.steps.chapterOutline") },
+  { key: "episode_outline", label: t("novelStudio.steps.episodeOutline") },
+  { key: "core_character", label: t("novelStudio.steps.coreCharacter") },
+  { key: "script", label: t("novelStudio.steps.script") },
+  { key: "finalize", label: t("novelStudio.steps.finalize") },
+]);
+
+const { t } = useI18n();
 
 const items = computed(() =>
-  (props.items ?? DEFAULT_ORDER).map((row) => ({
+  (props.items ?? DEFAULT_ORDER.value).map((row) => ({
     ...row,
     done: props.steps[row.key]?.done ?? false,
     hint: props.steps[row.key]?.hint ?? "",
@@ -42,7 +46,7 @@ const items = computed(() =>
 </script>
 
 <template>
-  <nav class="stepper" aria-label="创作链步骤">
+  <nav class="stepper" :aria-label="t('novelStudio.steps.aria')">
     <button
       v-for="(item, index) in items"
       :key="item.key"

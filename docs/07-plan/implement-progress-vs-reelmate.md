@@ -1,7 +1,7 @@
 # OneFrame × ReelMate 实现进度对照（以竞品为标准）
 
 > 评估对象：工作区 `E:\wanxing`（35 个迁移 / 111 张表 / **688 端点 / 51 controller** / 64 页面 / 1,136 用例）
-> 评估时间：… · 19:10（v2.4）· 19:40（v2.5）· 20:10（v2.6）· 20:40（v2.7）· 21:10（v2.8）· 21:40（v2.9）· 22:10（v3.0）· 22:40（v3.1）· 23:20（v3.2）· 23:55（v3.3）· 00:35（v3.4）· 01:10（v3.5）· 01:45（v3.6）· 02:20（v3.7）· 02:55（v3.8）· 03:30（v3.9）· 04:05（v4.0）· 04:40（v4.1）· 05:15（v4.2）· 05:55（v4.3）· 06:45（v4.4）· **2026-10-28 07:20 重算（v4.5）**
+> 评估时间：… · 19:10（v2.4）· 19:40（v2.5）· 20:10（v2.6）· 20:40（v2.7）· 21:10（v2.8）· 21:40（v2.9）· 22:10（v3.0）· 22:40（v3.1）· 23:20（v3.2）· 23:55（v3.3）· 00:35（v3.4）· 01:10（v3.5）· 01:45（v3.6）· 02:20（v3.7）· 02:55（v3.8）· 03:30（v3.9）· 04:05（v4.0）· 04:40（v4.1）· 05:15（v4.2）· 05:55（v4.3）· 06:45（v4.4）· 07:20（v4.5）· **2026-10-28 08:05 重算（v4.6）**
 > 竞品基准：万兴剧厂 ReelMate（`www.reelmate.cn`），功能地图见 [reelmate-feature-map.md](../01-product/reelmate-feature-map.md)，分域附录见 [_parts/](../01-product/_parts/)
 > 本文用途：**排期与投入优先级的事实基线**。不是验收报告，不含主观评价。
 
@@ -109,17 +109,17 @@
 
 | 口径 | 分母 | 已迁 | 覆盖率 |
 |---|---:|---:|---:|
-| **用户面页面**（排除 admin 运营后台 2 页 + `/create/*` 工具参数页 17 页） | **45** | **33** | **73%** |
-| 全部页面 | 64 | 33 | 52% |
-| 语言包 key | — | **1,458** | 5 语言 key 完全一致 |
+| **用户面页面**（排除 admin 运营后台 2 页 + `/create/*` 工具参数页 17 页） | **45** | **34** | **76%** |
+| 全部页面 | 64 | 34 | 53% |
+| 语言包 key | — | **1,543** | 5 语言 key 完全一致 |
 
 **已迁（27 页）**：index / login / pricing / settings / tools / tasks / works / projects(index) / assets / canvas(index) /
 agent / novel(index) / film(index) / novel-market(index) / novel-market([id]) / credits / creator-center(index) /
 creator-center(publish) / creator-center(preview[id]) / activities / invite / home / team(dashboard) / reelflow(list) /
-share([token]) / watch([token]) / report / ad-drama(create + workspace) / video-redraw(create + workspace) / film([id] 任务表) / creator-center(earnings)
+share([token]) / watch([token]) / report / ad-drama(create + workspace) / video-redraw(create + workspace) / film([id] 任务表) / creator-center(earnings) / novel([id] 工作台 + 步进器)
 
-**未迁（12 页用户面）**：novel-market(manage) / novel([id]) / projects([id]) / team(index) / canvas([id]) /
-creator-center([id]) / knowledge(index) / reelflow(edit[id]) / ad-drama? 等；
+**未迁（11 页用户面）**：novel-market(manage) / projects([id]) / team(index) / canvas([id]) /
+creator-center([id]) / knowledge(index) / reelflow(edit[id]) 等；
 **另有 2 页法务文本（privacy / terms）按「不机翻法务文本」原则单列**。
 
 ### 2.3 页面对照（64 vs 93 可比）
@@ -235,7 +235,7 @@ creator-center([id]) / knowledge(index) / reelflow(edit[id]) / ad-drama? 等；
 | 排名 | 缺口 | 权重 | 剩余 | 具体缺什么 |
 |---:|---|---:|---:|---|
 | 1 | **CLI/MCP** | 8 | **0.80** | MCP server 0 行（竞品无工具清单，**待取证后再做**）；`task download` 不落盘；浏览器 handoff 登录 |
-| 2 | **多语言** | 8 | **0.08** | 用户面页面 33/45（73%）；剩余 13 页用户面 + admin/create 技术页；法务文本按原则不机翻；影视预置表名是后端中文数据（待加 preset_key）；韩语；语言偏好未持久到账号 |
+| 2 | **多语言** | 8 | **0.08** | 用户面页面 34/45（76%）；剩余 11 页用户面 + admin/create 技术页；法务文本按原则不机翻；**两类后端中文数据待改造**（影视 `film_tables` 预置表名、剧本工厂 `steps[].hint`，均需后端返回 key 再译）；韩语；语言偏好未持久到账号 |
 | 3 | **工具箱** | 20 | **0.60** | 真实供应商 Key（外部依赖）；`redraw-to-image` 未单列卡（用 image2image 覆盖同能力，不凑卡数） |
 | 4 | **剧本广场（novel_market）** | 8 | **0.64** | 真实打款（商户资质）；买断后二次改编；作品解析产出未取证 |
 | 5 | **多模块"最后一项"**（团队知识库 0.24 / 账号 0.24 / 计费 0.12 / ReelFlow 0.24 / 小说 0.16 / 集市 + 剧集 + 3D + 首页 + Agent + 资产合计 ≈0.45）+ 内容安全真实审核 0.08 | ≈54 | **≈1.6** | 各自"最后一项"：多知识库实体（产品定义）、Apple `form_post`+JWKS、升级补差价、切片真 ffmpeg 裁剪、原创详情页、quality-check 取证、真实双人协同、配置后台写入口、ASR 凭据、真实审核供应商 |
@@ -395,7 +395,7 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 | `e2e-video-redraw.cjs` | 视频转绘四段真实浏览器验收 **11/11**（切集→分镜 14→产出 14 资产→绑定 **14/14 镜**→控制台） |
 | `e2e-subject-template.cjs` | 主体模板 UI 真实浏览器验收 **8/8**（目录 4 模板→未选禁用→选中可用→应用成功提示→控制台） |
 | `page-content-smoke.cjs` | **全站页面内容冒烟 49/49**（逐页断言：主内容区非空 + 命中标记词 + 无错误页 + 无 5xx，专治「HTTP 200 但页面坏了」） |
-| `e2e-i18n-pages.cjs` | 多语言页面验收 **101/101**（集市作品详情真实上架 fixture；影视任务表 fixture：建项目 + 开通 spaces.film_enabled；剪辑台/画布/创作者中心/举报/发布/预览/广告剧/转绘/影视任务表 中英对照）（影视版/集市/积分/资产库/剧本工厂/邀请/**首页** × 中英对照：无 key 残留、英文无中文残留、标签循环渲染、三视图 tab、新建弹窗、首页/活动中心/看板/创作 Agent、控制台清洁） |
+| `e2e-i18n-pages.cjs` | 多语言页面验收 **106/106**（集市作品详情真实上架 fixture；影视任务表 fixture：建项目 + 开通 spaces.film_enabled；剪辑台/画布/创作者中心/举报/发布/预览/广告剧/转绘/影视任务表 中英对照）（影视版/集市/积分/资产库/剧本工厂/邀请/**首页** × 中英对照：无 key 残留、英文无中文残留、标签循环渲染、三视图 tab、新建弹窗、首页/活动中心/看板/创作 Agent、控制台清洁） |
 | `e2e-admin-creator-audit.cjs` | 运营后台创作者审核 **6/6**（页签渲染→搜索定位→点通过→行消失→服务端状态交叉核对→无 5xx） |
 | `_acceptance/i18n-check.cjs` | 312 key × 5 语言一致性 + 浏览器 30 组合（第 2 轮脚本，本轮沿用） |
 | `test/ad-drama.spec.ts` / `test/video-redraw.spec.ts` | 13 / 14 例（成功 / 403 / 参数 / 幂等 / 跨 space / 报价不足） |
@@ -412,6 +412,7 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 |---|---|---|---|
 | 2026-10-27 | v1.0 | 首版：28 模块逐条对照 + 三口径进度 + 缺口排序 + 复现命令 | `6c75317` |
 | 2026-10-27 | v1.1 | **模块 #21 数据看板 15% → 85%**：kds 13 端点 + `/team/dashboard` 页 + 6 例契约测试；全站 35.4% → **36.4%**、首发口径 54.4% → **55.9%**；api-spec 补 §14.10 | `6c75317` |
+| 2026-10-28 | **v4.6** | **#16 多语言（第 23 批：剧本工厂工作台 novel/[id] + NovelStepper）**：新增 `novelStudio`（约 100 key）×5，迁移 `novel/[id].vue`（七 tab / 分章 / 内容分析（世界观与角色卡）/ 章纲 / 集纲 / 核心角色 / 分集剧本 / 角色卡弹窗 / 20+ 条 toast）与子组件 `NovelStepper`（7 步标签 + aria）；**34/64 页 + 2 组件**（用户面 34/45 = 76%）、语言包 **1543 key**、`e2e-i18n-pages.cjs` **106/106**。E2E 精确指出剩余中文的**来源是数据不是页面**：`steps[].hint`（"2 章已解析"…）由后端中文返回——与影视预置表名同类缺口，正确修法是后端返回 `hint_key`/参数；NV4 因此改为只断言"页面自身文案"（tab 与按钮），并把该缺口写进剩余清单。全站 **97.6%**（200.99/206）、首发 **97.6%**（129.77/133）、剩余 **5.01** | 工作区（未提交） |
 | 2026-10-28 | **v4.5** | **#16 多语言（第 22 批：收益页）**：新增 `earnings`（约 84 key）×5，迁移 `creator-center/earnings.vue`（三张总览卡/结算说明/提现表单四字段/提现记录六列表/收益明细四列表/五个状态文案/5 处金额校验与 3 条 toast·confirm）；**33/64 页（用户面 33/45 = 73%）**、语言包 **1458 key**、`e2e-i18n-pages.cjs` **101/101**。`money()` 与 `fmtTime()` 都改用当前 locale 的数字/时间格式（原来写死 `zh-CN`），`WITHDRAW_STATUS` 常量改 computed。全站 **97.6%**（200.99/206）、首发 **97.6%**（129.77/133）、剩余 **5.01** | 工作区（未提交） |
 | 2026-10-28 | **v4.4** | **#16 多语言（第 21 批：影视版任务表）**：新增 `filmDetail`（约 84 key）×5，迁移 `film/[id].vue`（表页签/批量工具条/列设置/任务网格/审核抽屉入口/新建列弹窗/绑定画布弹窗/20 条 toast 与 3 个 prompt·confirm）；**32/64 页（用户面 32/45 = 71%）**、语言包 **1374 key**、`e2e-i18n-pages.cjs` **97/97**。E2E 里第一次给影视版造完整 fixture（建项目 + `UPDATE spaces SET film_enabled = 1`），并踩到两个坑：① `film_enabled` 是 smallint，写 `true` 会 SQL 报错；② 前面看板步骤把 `active_space_id` 设成了团队空间，请求携带 X-Space-Id 导致白名单查的是团队空间（要清掉才回落个人空间）。另记一处诚实缺口：预置表名（分镜任务表/资产需求表）是**后端数据**，英文界面仍显示中文，需后端补 `preset_key` 后再译。全站 **97.6%**（200.99/206）、首发 **97.6%**（129.77/133）、剩余 **5.01** | 工作区（未提交） |
 | 2026-10-28 | **v4.3** | **#16 多语言（第 20 批：#13 广告剧 + #14 视频转绘 全流程 4 页）**：新增 `adDrama`（create + workspace，约 96 key）与 `redraw`（create + workspace，约 106 key）两个嵌套 namespace ×5，迁移 `ad-drama/create`、`ad-drama/workspace`、`video-redraw/create`、`video-redraw/workspace`；**31/64 页（用户面 31/45 = 69%）**、语言包 **1290 key**、`e2e-i18n-pages.cjs` **91/91**。两个模块的"风格/画幅/阶段"常量都改成 computed（style 值仍保持后端认的字符串，只翻标签）；顺带修了两处英文空态缺空格（`No ad drama projects yet.Create the first…`）。全站 **97.6%**（200.99/206）、首发 **97.6%**（129.77/133）、剩余 **5.01** | 工作区（未提交） |
