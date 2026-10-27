@@ -17,6 +17,12 @@ export interface PriceResult {
   strikeCredits: number;
   /** 实际计费时长档（就近低档回写后可能与请求不同） */
   effectiveDurationS?: number | null;
+  /**
+   * 计费依据：`tier` = 命中真实时长档；`tier_lower` = 就近取低档（PRD F2）；
+   * `seconds` = 超出最高档后按秒线性外推（`ceil(秒 × 每秒单价)`）。
+   * 必须能说清"为什么收这个数"，否则用户对账时无从解释。
+   */
+  pricingBasis?: "tier" | "tier_lower" | "seconds";
   discount: number;
   pointsCode: string;
   balance: number;
@@ -106,6 +112,7 @@ export class CreditsService {
     const [exactPrice] = await db.select().from(modelPrices).where(priceWhere);
     let priceRow = exactPrice;
     let effectiveDurationS = duration;
+    let pricingBasis: "tier" | "tier_lower" | "seconds" = "tier";
     if (!priceRow && duration !== null) {
       // PRD F2：模型/价格表只覆盖部分时长档 → 就近取低档（最大的 ≤ 请求时长）
       const tiers = await db
@@ -122,9 +129,39 @@ export class CreditsService {
         )
         .orderBy(modelPrices.durationS);
       const lower = tiers.filter((t) => t.durationS !== null && t.durationS <= duration);
+      const maxTier = tiers[tiers.length - 1];
       const picked = lower.length > 0 ? lower[lower.length - 1] : tiers[0];
       if (picked?.durationS != null) {
         effectiveDurationS = picked.durationS;
+        // 超出最高档：按秒线性外推（向上取整）。不这么做的话"请求 30s 只收 5s 档的钱"= 直接赔钱；
+        // 口径见进度文档 §5.4 #2（竞品无按秒计价证据，故为自定口径，已登记待确认）。
+        const overMax =
+          maxTier?.durationS != null &&
+          maxTier.durationS > 0 &&
+          duration > maxTier.durationS &&
+          lower.length > 0;
+        if (overMax) {
+          const maxSeconds = maxTier.durationS as number;
+          const perSecond = maxTier.credits / maxSeconds;
+          const strikePerSecond = (maxTier.strike ?? maxTier.credits) / maxSeconds;
+          pricingBasis = "seconds";
+          priceRow = {
+            id: 0n,
+            modelId: model.id,
+            mode: body.mode,
+            resolution,
+            // durationS 记录"实际请求秒数"，让对账能看到按几秒收的
+            durationS: duration,
+            credits: Math.max(1, Math.ceil(duration * perSecond)),
+            strikeCredits: Math.max(1, Math.ceil(duration * strikePerSecond)),
+            memberCredits: null,
+            timeLimitedCredits: null,
+            active: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        } else {
+        pricingBasis = lower.length > 0 ? "tier_lower" : "tier";
         priceRow = {
           id: 0n,
           modelId: model.id,
@@ -139,6 +176,7 @@ export class CreditsService {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
+        }
       }
     }
     if (!priceRow) {
@@ -161,6 +199,7 @@ export class CreditsService {
       credits: priceRow.credits,
       strikeCredits: strike,
       effectiveDurationS,
+      pricingBasis,
       discount: strike > 0 ? Math.round((priceRow.credits / strike) * 100) / 100 : 1,
       pointsCode: `v_${body.mode}_${duration ?? 0}s_${resolution}`,
       balance,
