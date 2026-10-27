@@ -123,6 +123,30 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v5.5 · 多语言第 25 批：创作者作品详情 · 2026-10-28）
+
+页面覆盖 **35 → 36/64**；**用户面 36/45 = 80%**；全站 **97.6%** / 首发 **97.6%**。
+
+[creator-center/[id].vue](app/apps/web/pages/creator-center/[id].vue) 新增 `workDetail`（约 **87 key** × 5 语言）：
+
+| 区块 | 迁移内容 |
+|---|---|
+| 页头 | 作品详情回退、`· 售出 N 笔 · 累计收益 N 积分`、预览/收益/返回三个入口 |
+| 状态机 | 六态（草稿/待审核/在售/已驳回/已下架/预售中）由常量改 computed |
+| 审核与前置条件 | 审核意见、`还不能提审：` 后按 `readiness` 逐条列「售价需 > 0」「关联本子未定稿」 |
+| 基本信息 | 查看/编辑两态：标题、售价、预售定金（0=不开）、简介；四项 `dl`（售价/预售定金/内容结构 `N 章/集 · N 字`/发布时间/简介） |
+| 操作区 | 提交审核 / 重新提审 / 下架三态按钮 + "待审核/在售不能改价，先下架→编辑→重新提审"的说明 |
+| 校验与提示 | 标题必填、保存成功/失败、下架确认、提审/下架成功、操作失败 |
+
+### 本轮的新坑：`locale` 在模板里会被自动解包
+
+`useI18n().locale` 是 `ComputedRef<Locale>`，**脚本里必须 `.value`，模板里会自动解包**。
+我在模板里写了 `toLocaleString(locale.value)` → `TS2551: Property 'value' does not exist on type ...`。
+正确写法：脚本 `locale.value`、模板 `locale`。（与"`v-for` 变量叫 `t`"并列，已归入同一类"i18n 上下文变量"注意事项。）
+
+**验证**：`i18n-check.cjs` 全绿（1717 key / 36 页 + 5 组件）；`e2e-i18n-pages.cjs` **114/114**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v5.4 · 多语言第 24 批：团队知识库 · 2026-10-28）
 
 页面覆盖 **34 → 35/64**；**用户面 35/45 = 78%**；全站 **97.6%** / 首发 **97.6%**。

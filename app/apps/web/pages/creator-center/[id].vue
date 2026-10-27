@@ -14,7 +14,8 @@
  *    下架走 `.../offline`；三个动作都要重新拉详情（状态由服务端定）。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "作品详情 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("workDetail.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
@@ -51,14 +52,15 @@ const loading = ref(true);
 const busy = ref("");
 const error = ref("");
 
-const STATUS_LABEL: Record<number, string> = {
-  1: "草稿",
-  2: "待审核",
-  3: "在售",
-  4: "已驳回",
-  5: "已下架",
-  6: "预售中",
-};
+// 状态文案走 i18n（computed：常量在 setup 期固化，切语言不更新）
+const STATUS_LABEL = computed<Record<number, string>>(() => ({
+  1: t("workDetail.statuses.draft"),
+  2: t("workDetail.statuses.pending"),
+  3: t("workDetail.statuses.onSale"),
+  4: t("workDetail.statuses.rejected"),
+  5: t("workDetail.statuses.offline"),
+  6: t("workDetail.statuses.preorder"),
+}));
 
 const canSubmit = computed(() => work.value && [1, 4, 5].includes(work.value.status));
 const canOffline = computed(() => work.value && [3, 6].includes(work.value.status));
@@ -78,7 +80,7 @@ async function load(): Promise<void> {
     form.price = detail.price_credits;
     form.preorder = detail.preorder_price_credits ?? 0;
   } catch (err) {
-    error.value = (err as Error).message || "作品加载失败";
+    error.value = (err as Error).message || t("workDetail.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -86,7 +88,7 @@ async function load(): Promise<void> {
 
 async function save(): Promise<void> {
   if (!form.title.trim()) {
-    toast.error("标题不能为空");
+    toast.error(t("workDetail.titleRequired"));
     return;
   }
   busy.value = "save";
@@ -100,25 +102,25 @@ async function save(): Promise<void> {
       price_credits: Math.floor(form.price),
       preorder_price_credits: form.preorder > 0 ? Math.floor(form.preorder) : null,
     });
-    toast.success("已保存");
+    toast.success(t("workDetail.saved"));
     editing.value = false;
     await load();
   } catch (err) {
-    toast.error((err as Error).message || "保存失败");
+    toast.error((err as Error).message || t("workDetail.saveFailed"));
   } finally {
     busy.value = "";
   }
 }
 
 async function action(kind: "submit" | "offline"): Promise<void> {
-  if (kind === "offline" && !window.confirm("下架后买家不再可见，确定？")) return;
+  if (kind === "offline" && !window.confirm(t("workDetail.offlineConfirm"))) return;
   busy.value = kind;
   try {
     await api.post(`/market/creator/works/${workId.value}/${kind}`, {});
-    toast.success(kind === "submit" ? "已提交审核" : "已下架");
+    toast.success(kind === "submit" ? t("workDetail.submitted") : t("workDetail.offlineDone"));
     await load();
   } catch (err) {
-    toast.error((err as Error).message || "操作失败");
+    toast.error((err as Error).message || t("workDetail.opFailed"));
   } finally {
     busy.value = "";
   }
@@ -131,86 +133,85 @@ onMounted(load);
   <div class="detail">
     <header class="head">
       <div>
-        <h1>{{ work?.title || "作品详情" }}</h1>
+        <h1>{{ work?.title || t("workDetail.titleFallback") }}</h1>
         <p v-if="work" class="muted">
           {{ work.kind_name }} ·
           <span class="tag" :class="`tag-${work.status}`">
             {{ work.status_name ?? STATUS_LABEL[work.status] ?? work.status }}
           </span>
-          · 售出 {{ work.sales_count ?? 0 }} 笔 · 累计收益 {{ work.revenue_credits ?? 0 }} 积分
+          {{ t("workDetail.stats", { sales: work.sales_count ?? 0, revenue: work.revenue_credits ?? 0 }) }}
         </p>
       </div>
       <div class="head-actions">
-        <NuxtLink :to="`/creator-center/preview/${workId}`" class="link">预览</NuxtLink>
-        <NuxtLink to="/creator-center/earnings" class="link">收益</NuxtLink>
-        <NuxtLink to="/creator-center" class="link">返回</NuxtLink>
+        <NuxtLink :to="`/creator-center/preview/${workId}`" class="link">{{ t("workDetail.preview") }}</NuxtLink>
+        <NuxtLink to="/creator-center/earnings" class="link">{{ t("workDetail.earnings") }}</NuxtLink>
+        <NuxtLink to="/creator-center" class="link">{{ t("workDetail.back") }}</NuxtLink>
       </div>
     </header>
 
     <p v-if="error" class="err">{{ error }}</p>
-    <p v-else-if="loading" class="muted">加载中…</p>
+    <p v-else-if="loading" class="muted">{{ t("workDetail.loading") }}</p>
 
     <template v-else-if="work">
       <!-- 审核意见 -->
       <p v-if="work.audit_note" class="audit-note">
-        审核意见：{{ work.audit_note }}
+        {{ t("workDetail.auditNote", { note: work.audit_note }) }}
       </p>
 
       <!-- 上架前置条件（后端 readiness 一次给全，前端逐条展示不复算） -->
       <p v-if="work.readiness && !work.readiness.can_submit" class="missing">
-        还不能提审：
-        <span v-if="!work.readiness.price_set">售价需 &gt; 0</span>
+        {{ t("workDetail.cannotSubmit") }}
+        <span v-if="!work.readiness.price_set">{{ t("workDetail.needPrice") }}</span>
         <span v-if="work.readiness.has_novel && work.readiness.novel_finalized !== true">
-          <template v-if="!work.readiness.price_set">；</template>关联本子未定稿
+          <template v-if="!work.readiness.price_set"> · </template>{{ t("workDetail.needFinalized") }}
         </span>
       </p>
 
       <section class="panel">
         <div class="panel-head">
-          <h2>基本信息</h2>
+          <h2>{{ t("workDetail.basicTitle") }}</h2>
           <button type="button" class="btn tiny" @click="editing = !editing">
-            {{ editing ? "取消" : "编辑" }}
+            {{ editing ? t("workDetail.cancel") : t("workDetail.edit") }}
           </button>
         </div>
         <div v-if="editing" class="grid">
           <label class="field">
-            <span>标题</span>
+            <span>{{ t("workDetail.titleLabel") }}</span>
             <input v-model="form.title" maxlength="120" />
           </label>
           <label class="field">
-            <span>售价（积分）</span>
+            <span>{{ t("workDetail.priceLabel") }}</span>
             <input v-model.number="form.price" type="number" min="0" step="1" />
           </label>
           <label class="field">
-            <span>预售定金（0=不开预售）</span>
+            <span>{{ t("workDetail.preorderLabel") }}</span>
             <input v-model.number="form.preorder" type="number" min="0" step="1" />
           </label>
           <label class="field wide">
-            <span>简介</span>
+            <span>{{ t("workDetail.summaryLabel") }}</span>
             <textarea v-model="form.summary" rows="4" maxlength="2000" />
           </label>
           <div class="row">
             <button type="button" class="btn primary" :disabled="busy === 'save'" @click="save">
-              {{ busy === "save" ? "保存中…" : "保存" }}
+              {{ busy === "save" ? t("workDetail.saving") : t("workDetail.save") }}
             </button>
           </div>
         </div>
         <dl v-else class="kv">
-          <dt>售价</dt><dd>{{ work.price_credits }} 积分</dd>
-          <dt>预售定金</dt><dd>{{ work.preorder_price_credits ?? "未开启" }}</dd>
-          <dt>内容结构</dt>
+          <dt>{{ t("workDetail.priceRow") }}</dt><dd>{{ t("earnings.creditUnit", { value: work.price_credits }) }}</dd>
+          <dt>{{ t("workDetail.preorderRow") }}</dt><dd>{{ work.preorder_price_credits ?? t("workDetail.notEnabled") }}</dd>
+          <dt>{{ t("workDetail.contentRow") }}</dt>
           <dd>
-            {{ work.counts?.chapters ?? work.counts?.episodes ?? 0 }} 章/集<template v-if="work.counts?.words">
-              · {{ work.counts.words }} 字</template>
+            {{ t("workDetail.chaptersEpisodes", { count: work.counts?.chapters ?? work.counts?.episodes ?? 0 }) }}<template v-if="work.counts?.words">{{ t("workDetail.wordsSuffix", { count: work.counts.words }) }}</template>
           </dd>
-          <dt>发布时间</dt>
-          <dd>{{ work.published_at ? new Date(work.published_at).toLocaleString() : "未发布" }}</dd>
-          <dt>简介</dt><dd class="summary">{{ work.summary || "（无）" }}</dd>
+          <dt>{{ t("workDetail.publishedRow") }}</dt>
+          <dd>{{ work.published_at ? new Date(work.published_at).toLocaleString(locale) : t("workDetail.notPublished") }}</dd>
+          <dt>{{ t("workDetail.summaryRow") }}</dt><dd class="summary">{{ work.summary || t("workDetail.noSummary") }}</dd>
         </dl>
       </section>
 
       <section class="panel">
-        <h2>操作</h2>
+        <h2>{{ t("workDetail.opsTitle") }}</h2>
         <div class="row">
           <button
             v-if="canSubmit"
@@ -219,7 +220,7 @@ onMounted(load);
             :disabled="busy === 'submit'"
             @click="action('submit')"
           >
-            {{ busy === "submit" ? "提交中…" : work.status === 4 ? "重新提审" : "提交审核" }}
+            {{ busy === "submit" ? t("workDetail.submitting") : work.status === 4 ? t("workDetail.resubmit") : t("workDetail.submitReview") }}
           </button>
           <button
             v-if="canOffline"
@@ -228,10 +229,10 @@ onMounted(load);
             :disabled="busy === 'offline'"
             @click="action('offline')"
           >
-            {{ busy === "offline" ? "下架中…" : "下架" }}
+            {{ busy === "offline" ? t("workDetail.offlining") : t("workDetail.offline") }}
           </button>
           <span class="muted small">
-            待审核/在售状态不能编辑价格（避免审核中改价）；先下架 → 编辑 → 重新提审。
+            {{ t("workDetail.statusHint") }}
           </span>
         </div>
       </section>
