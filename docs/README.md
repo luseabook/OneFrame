@@ -123,6 +123,26 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.4 · 多语言第 34 批：CanvasInspector 模板层主干 · 2026-10-28）
+
+`canvasUi` 扩到 **300 key**（本轮 +**139**，两批合并提交）——把 `CanvasInspector` 的模板主干做完：
+
+| 区块 | 内容 |
+|---|---|
+| 批量操作 | 改状态（+"状态只是进度标记，不参与生成"）、**六向对齐**（+外接框基准说明）、批量生成（可投递计数、逐条独立说明）、批量下载（**最多 50 个 + manifest.json 说明**）、删除选中 N 个 |
+| 画布概览 | 节点/连线/分组三统计、已钉住、类型分布、**五条操作提示**（双击建文本 / 单击编辑 + Shift 多选 / 连线模式 / Ctrl+Z·Y·S / 参数只改本地） |
+| 基础区 | 名称、宽度（含"自动"占位）、Z 序、状态、分组归属（空态）、节点 ID、`{类型}参数` |
+| 生成参数 | 文本（prompt/model/count/富文本格式 + hint）、图像（mode/prompt/model/count/ratio/quality/imageQuality/width/height + 三条 hint）、**3D 世界**（全景开关 + 等距柱状说明）、视频（mode/prompt/model/count/ratio/duration/fps/shotType/enableSound/mouthDrive/offPeak + 两条 hint） |
+| 派生与拆解 | 视频拆解（按次计价/拆解/候选/一键建资产/正在拆解）、文本派生四动作（优化剧本/拆解分镜/拆分资产/匹配资产）、派生结果与资产候选、匹配结果（`镜N`） |
+| 音频 | audioKind/prompt/model/duration/count + **voice 音色七项**（voiceId/voiceName/tone/speed/pitch/volume/previewPlaybackRate）+ 三档时长说明 + 取值范围说明 |
+| Excel 导入 | **两步流**（导入 → Sheet 列表 → 确认 Sheet，明确"不会自动选第一个"）、解析中/写入中、工作表计数与行列元信息、数据来源、`sheet_selection_required` |
+| 高级 JSON | sheets/columns 的 JSON 编辑与"后端未给字段级定义"的诚实说明 |
+
+剩余：检查器尾部 **110 处**（下载/3D 资产/更多参数）+ 七个面板（约 150 处），canvas 模块再 2 轮完成。
+
+**验证**：`i18n-check.cjs` 全绿（2603 key / 40 页 + 11 组件 / canvas 进行中）；`e2e-i18n-pages.cjs` **134/134**；
+`verify-round.ps1` 全绿（12/12；1,142 用例）。
+
 ## 变更登记（v6.3 · 多语言第 33 批：canvas 节点摘要 + 检查器脚本层 · 2026-10-28）
 
 `canvasUi` 扩到 **161 key**（本轮 +**90**）：
