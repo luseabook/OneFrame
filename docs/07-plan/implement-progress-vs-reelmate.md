@@ -102,13 +102,13 @@
 | **health / metrics / app / files / generations / models / reports / workflow** | 3+1+1+1+2+1+1+1 | **11** |
 | **合计** | — | **683** |
 
-### 2.3 页面对照（55 vs 93 可比）
+### 2.3 页面对照（64 vs 93 可比）
 
 | 状态 | 数量 | 页面 |
 |---|---:|---|
-| 完整对应 | 39 | `/` · `/assets`（三 tab）· `/create/*`×19 · `/pricing`（含订阅面板）· `/settings` · `/share/[token]`（含批量下载）· `/tasks` · `/team` · `/team/dashboard` · `/tools` · `/works` · `/novel` · `/novel/[id]` · `/film` · `/film/[id]` · `/agent` · `/reelflow/list` · `/reelflow/edit/[id]` · `/creator-center` · `/activities` · `/invite` · `/novel-market` · `/novel-market/[id]` · `/novel-market/manage` · `/knowledge` · `/ad-drama/create` · `/ad-drama/workspace` · `/video-redraw/create` · `/video-redraw/workspace` · `/watch/[token]` |
+| 完整对应 | 43 | `/` · `/assets`（三 tab）· `/create/*`×19 · `/pricing`（含订阅面板）· `/settings` · `/share/[token]`（含批量下载）· `/tasks` · `/team` · `/team/dashboard` · `/tools` · `/works` · `/novel` · `/novel/[id]` · `/film` · `/film/[id]` · `/agent` · `/reelflow/list` · `/reelflow/edit/[id]` · `/creator-center` · **`/creator-center/[id]` · `/creator-center/earnings` · `/creator-center/preview/[id]` · `/creator-center/publish`** · `/activities` · `/invite` · `/novel-market` · `/novel-market/[id]` · `/novel-market/manage` · `/knowledge` · `/ad-drama/create` · `/ad-drama/workspace` · `/video-redraw/create` · `/video-redraw/workspace` · `/watch/[token]` |
 | 部分对应 | 21 | `/canvas` · `/projects`（← series-manage） · `/projects/[id]` · `/home` · `/login` · `/report` · `/privacy` · `/terms` · `/credits` · `/admin` 等 |
-| 无对应 | 33 | 见 §3（广告剧 / 视频转绘 / i18n 路径前缀 / 创作者收益与预览 / 集市 admin 独立页等） |
+| 无对应 | 29 | 竞品侧重复/遗留路由与平台内部页（i18n 前缀、通配、redirect、route-permission-map 已剔除）；剩余主要是竞品「运营后台子页」与「帮助中心」类页面 |
 
 > 竞品 102 条路由中 9 条不可比（i18n 前缀 `/en /ja /br /es`、`/:path(.*)*` 通配、`/redirect*`、`/api/user/logout`、`/route-permission-map`），比较基数为 **93**。
 
