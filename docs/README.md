@@ -123,6 +123,37 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.4 · 第 44 批：缺口全面复核 + §3.5 分类表 · 2026-10-28）
+
+### 为什么要做这件事
+
+最近三轮（#19 删除 UI、#20 转码异步、#2/#9/#15）连续发现**文档缺口栏写着"缺"，代码里其实已经有了**——
+只是缺验收证据。这种漂移会让"还差 5.00"这个数字逐渐失去可信度，所以这轮做一次**逐条 grep 复核**。
+
+### 复核结果：19 个未满 100% 模块，**改判 4 条**
+
+| 模块 | 原缺口描述 | 代码事实 |
+|---|---|---|
+| #2 | 原创 `idea/:ni_id` 详情/编辑 | **已实现**：[NovelOriginalChain.vue:143-170](app/apps/web/components/novel/NovelOriginalChain.vue) 调 `GET/PATCH /novel/original/idea/:ni_id`（含 downstream_stale 回显） |
+| #9 | 浏览器 handoff 登录 | **已实现**：[builtins.ts](app/apps/cli/src/builtins.ts) `loginViaHandoff`：loopback HTTP + state nonce + 120s 超时 + CORS 预检（浏览器跨端口 POST 到 127.0.0.1） |
+| #15 | 区域拖拽无多框/撤销 | **已实现**：`regions[]` 多框 + `undoRegion`/`deleteRegion`/`selectRegion`；真正卡点是**后端 `normalizeToolOptions` 只归一单框**（UI 已诚实标注"仅选中框生效"） |
+| #4 | 分享侧实时流、`/agent/home/resource/*` | **确认确实缺失**（全仓 controller 搜索无对应路由）→ 保留为真缺口 |
+
+### 新增 §3.5「缺口分类表」
+
+把剩下的缺口按**"谁能解锁"**分五类，让 5.00 变得可决策：
+
+| 类型 | 权重 | 说明 |
+|---|---:|---|
+| A. 可独立实现 | ≈0.3 | #4 分享侧 SSE + `/agent/home/resource/*`（下批直接做）；#23 秒级计价转译层 |
+| B. 需一句话拍板 | ≈0.4 | #17 replace 语义与集级 resources 等价性、#12 二次改编许可、#23 升级补差口径、#19 像素级验收、#16 韩语 |
+| C. 需外部输入 | ≈3.6 | MCP 证据、供应商 Key、商户打款资质、Apple 账号、审核供应商 |
+| D. 明确不做 | 0 | #2 `characters/*`（免第二份真相）、#18 知识库实体 CRUD（一 space 一库） |
+| E. 环境依赖 | — | #20 真 ffmpeg 裁剪 |
+
+**验证**：本轮无代码改动，仅文档；`i18n-check` / `e2e-i18n-pages` / gate 与上一轮一致全绿。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**（改判不改分——因为改判的是"描述"，被改判的功能本来就没算进"还差"里）。
+
 ## 变更登记（v7.3 · 第 43 批：发布转码卡死看门狗 · 2026-10-28）
 
 ### 先纠正一个不准确的缺口描述
