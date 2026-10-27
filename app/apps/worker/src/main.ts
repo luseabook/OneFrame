@@ -3,7 +3,14 @@ import { Worker } from "bullmq";
 import pino from "pino";
 import { createDb } from "@app/db";
 import { assertWorkerEnv } from "./env-guard";
-import { auditLedger, expireShares, purgeOldData, reconcileOrders, reviveStuckTasks } from "./maintenance";
+import {
+  auditLedger,
+  expireShares,
+  purgeOldData,
+  reconcileOrders,
+  reviveStuckPublications,
+  reviveStuckTasks,
+} from "./maintenance";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
@@ -178,6 +185,19 @@ schedule(
   async () => {
     const n = await reviveStuckTasks(db, log);
     if (n > 0) log.warn({ revived: n }, "stuck tasks revived");
+  },
+  true,
+);
+
+// 发布转码看门狗（2min）：API 进程内 fire-and-forget 的转码若中途重启，
+// 记录会永久停在 status=2（转码中）——这里超时置失败并给可读原因（不自动重跑，
+// 源产物可能已清理，静默重试会把"可诊断失败"变成"无声消耗"）
+schedule(
+  "publications-watchdog",
+  Number(process.env.PUBLICATIONS_WATCHDOG_INTERVAL_MS ?? 120_000),
+  async () => {
+    const n = await reviveStuckPublications(db, log);
+    if (n > 0) log.warn({ revived: n }, "stuck publications marked failed");
   },
   true,
 );

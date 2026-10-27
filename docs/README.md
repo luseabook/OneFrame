@@ -123,6 +123,34 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.3 · 第 43 批：发布转码卡死看门狗 · 2026-10-28）
+
+### 先纠正一个不准确的缺口描述
+
+文档一直写着 #20 的缺口是「切片转码异步化」。审查后发现**转码早就异步**：
+`PublishService.publish()` 用 `void this.transcode(...)` 做进程内 fire-and-forget
+（好处是 API 不依赖 worker 也能跑通）。
+
+**真正的缺口是**：API 在转码中途重启/崩溃时，记录**永久停在 `status=2`（转码中）**——
+用户看到"永远转码中"，也没有任务可重试。这是"异步的代价"，不是"没做异步"。
+
+### 本轮补的：与 `reviveStuckTasks` 同构的看门狗
+
+| 层 | 改动 |
+|---|---|
+| worker | 新增 [`reviveStuckPublications`](app/apps/worker/src/maintenance.ts)：超 **15min** 仍停在 1（排队）/2（转码中）的记录 → 置 **4（失败）** 并写 `error = { code: "transcode_stalled", ... }` 可读原因 |
+| 调度 | 挂 `publications-watchdog`，默认 **2min** 周期，可用 `PUBLICATIONS_WATCHDOG_INTERVAL_MS` 关闭 |
+| Test | [maintenance-publications.spec.ts](app/apps/worker/src/maintenance-publications.spec.ts) **4 例**：超时置失败+原因、未超时不误杀、三种终态（3/4/5）不改写、幂等再跑为 0 |
+
+### 一个刻意的设计选择：**不自动重跑**
+
+源产物可能已被 retention 清理，静默重试会把"可诊断的失败"变成"无声的积分与时间消耗"。
+看门狗只把状态推到终态并给出可读原因，让创作者决定是否重新发布。理由写进了函数注释，
+避免以后有人"顺手"加上自动重试。
+
+**验证**：worker **33 → 37 例**全绿；全量 **1,156 例**；`e2e-i18n-pages` 138/138；gate 全绿。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**（健壮性补齐，模块分不变）。
+
 ## 变更登记（v7.2 · 第 42 批：发布播放页 `/watch/:token` 浏览器验收 · 2026-10-28）
 
 ### 补的是"只验了服务端、没验用户看到什么"

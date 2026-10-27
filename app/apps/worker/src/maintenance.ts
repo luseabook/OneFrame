@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { DbHandle } from "@app/db";
-import { assets, creditAccounts, creditFlows, orders, taskShares, tasks } from "@app/db";
+import { assets, creditAccounts, creditFlows, orders, taskShares, tasks, timelinePublications } from "@app/db";
 import { creditIn } from "@app/db";
 import { newId } from "@app/shared";
 
@@ -20,6 +20,7 @@ export interface MaintenanceResult {
   assetsPurged: number;
   usersPurged: number;
   resultsPurged: number;
+  publicationsRevived: number;
 }
 
 const MINUTE = 60_000;
@@ -203,6 +204,69 @@ export async function reviveStuckTasks(
       log.error({ task_id: String(t.id), err: String(err) }, "revive failed");
     }
   }
+  return revived;
+}
+
+/**
+ * 复活卡住的"发布转码"记录（ReelFlow 切片发布）。
+ *
+ * 背景：`PublishService.publish()` 是 **进程内 fire-and-forget**（`void this.transcode(...)`），
+ * 好处是不依赖 worker 也能跑通；代价是 **API 进程在转码中途重启/崩溃时，记录会永久停在
+ * status=2（转码中）** —— 用户看到"转码中"永远不结束，也没有任何任务可重试。
+ *
+ * 这里做与 `reviveStuckTasks` 同构的兜底：把超过阈值的 2（转码中）与 1（排队中）记录
+ * 标记为 4（失败）并写入可读原因。**不自动重跑转码**：源产物可能已被清理，
+ * 静默重试会把"可诊断的失败"变成"无声的资源消耗"；让创作者在编辑台重新发布更诚实。
+ */
+export async function reviveStuckPublications(
+  db: Db,
+  log: MaintenanceLogger,
+  stuckMinutes = 15,
+  /** 仅处理指定 space（运维/测试排查用）；省略时全库扫描 */
+  scopeSpaceId?: bigint,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - stuckMinutes * MINUTE);
+  const stuck = await db
+    .select({ id: timelinePublications.id, status: timelinePublications.status })
+    .from(timelinePublications)
+    .where(
+      and(
+        inArray(timelinePublications.status, [1, 2]),
+        lt(timelinePublications.updatedAt, cutoff),
+        ...(scopeSpaceId ? [eq(timelinePublications.spaceId, scopeSpaceId)] : []),
+      ),
+    )
+    .limit(200);
+
+  let revived = 0;
+  for (const row of stuck) {
+    try {
+      // 抢占式更新：只有仍是 1/2 且仍超时的那一行会被改，避免和正在跑的轮询/发布互相覆盖
+      const updated = await db
+        .update(timelinePublications)
+        .set({
+          status: 4,
+          error: {
+            code: "transcode_stalled",
+            message:
+              "转码未在预期时间内完成（服务可能重启）。请在剪辑台重新发布该切片。",
+          },
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(timelinePublications.id, row.id),
+            inArray(timelinePublications.status, [1, 2]),
+            lt(timelinePublications.updatedAt, cutoff),
+          ),
+        )
+        .returning({ id: timelinePublications.id });
+      if (updated.length > 0) revived += 1;
+    } catch (err) {
+      log.error({ publication_id: String(row.id), err: String(err) }, "revive publication failed");
+    }
+  }
+  if (revived > 0) log.warn({ revived }, "stuck publications marked failed");
   return revived;
 }
 
