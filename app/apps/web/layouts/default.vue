@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 公共布局：深色营销页（与竞品一致 #000），带页头与合规页脚
+const { t } = useI18n();
 const auth = useAuth();
 const route = useRoute();
 const user = computed(() => auth.state.value.user);
@@ -16,18 +17,18 @@ onMounted(() => {
     <header class="site-head">
       <NuxtLink to="/" class="brand">
         <span class="logo-mark" aria-hidden="true">一</span>
-        <span class="logo-text">一帧</span>
+        <span class="logo-text">{{ t("landing.brandName") }}</span>
       </NuxtLink>
       <nav class="nav">
         <!-- 登录态客户端渲染，避免 hydration 前后结构不一致 -->
         <ClientOnly>
-          <NuxtLink to="/pricing" class="nav-link">定价</NuxtLink>
+          <NuxtLink to="/pricing" class="nav-link">{{ t("nav.pricing") }}</NuxtLink>
           <template v-if="user">
-            <NuxtLink to="/home" class="cta">进入工作台</NuxtLink>
+            <NuxtLink to="/home" class="cta">{{ t("nav.enterWorkspace") }}</NuxtLink>
           </template>
           <template v-else-if="!isLoginPage">
-            <NuxtLink to="/login" class="nav-link">登录</NuxtLink>
-            <NuxtLink to="/login?redirect=/home" class="cta">立即登录</NuxtLink>
+            <NuxtLink to="/login" class="nav-link">{{ t("nav.login") }}</NuxtLink>
+            <NuxtLink to="/login?redirect=/home" class="cta">{{ t("shell.loginNow") }}</NuxtLink>
           </template>
         </ClientOnly>
       </nav>
@@ -39,11 +40,11 @@ onMounted(() => {
 
     <footer class="site-foot">
       <div class="foot-links">
-        <NuxtLink to="/terms">用户协议</NuxtLink>
-        <NuxtLink to="/privacy">隐私政策</NuxtLink>
-        <NuxtLink to="/report">举报投诉</NuxtLink>
+        <NuxtLink to="/terms">{{ t("nav.terms") }}</NuxtLink>
+        <NuxtLink to="/privacy">{{ t("nav.privacy") }}</NuxtLink>
+        <NuxtLink to="/report">{{ t("nav.report") }}</NuxtLink>
       </div>
-      <p class="copy">内容由 AI 生成，请仔细甄别 · © 2026 一帧 OneFrame</p>
+      <p class="copy">{{ t("shell.aiDisclaimer") }}</p>
     </footer>
   </div>
 </template>

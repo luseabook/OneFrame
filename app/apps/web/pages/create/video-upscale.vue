@@ -15,8 +15,9 @@
 // 归一成适配器认识的 `region{x,y,w,h}`（见 tool-catalog.ts 的 normalizeToolOptions）。
 import type { AssetDto, QuoteResponse, TaskDto, ToolCatalogDto, ToolModeDto } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true, layout: "tool", toolTitle: "视频超清" });
-useHead({ title: "视频超清 · 一帧" });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "tool", toolTitle: "shell.toolTitles.videoUpscale" });
+const { t } = useI18n();
+useHead({ title: () => t("shell.titleSuffix", { title: t("shell.toolTitles.videoUpscale") }) });
 
 const api = useApi();
 const toast = useToast();
@@ -66,8 +67,8 @@ const dragOrigin = { x: 0, y: 0 };
 const regionFields = computed(() => [
   { key: "region_x", label: "X", value: region.value.x },
   { key: "region_y", label: "Y", value: region.value.y },
-  { key: "region_w", label: "宽", value: region.value.w },
-  { key: "region_h", label: "高", value: region.value.h },
+  { key: "region_w", label: t("toolUpscale.fieldW"), value: region.value.w },
+  { key: "region_h", label: t("toolUpscale.fieldH"), value: region.value.h },
 ]);
 
 /** 每个框的遮罩样式（百分比 → 窗口缩放/视频自适应都不会错位） */
@@ -180,11 +181,11 @@ async function pickVideo(event: Event): Promise<void> {
   input.value = "";
   if (!file) return;
   if (!file.type.startsWith("video/")) {
-    toolError.value = "请选择视频文件";
+    toolError.value = t("toolUpscale.errPickVideo");
     return;
   }
   if (file.size > 32 * 1024 * 1024) {
-    toolError.value = "视频需小于 32MB";
+    toolError.value = t("toolUpscale.errTooLarge");
     return;
   }
   uploading.value = true;
@@ -193,7 +194,7 @@ async function pickVideo(event: Event): Promise<void> {
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result ?? ""));
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("toolUpscale.errRead")));
       reader.readAsDataURL(file);
     });
     const asset = await api.post<AssetDto>("/assets/upload", {
@@ -205,7 +206,7 @@ async function pickVideo(event: Event): Promise<void> {
     videoName.value = asset.name;
     scheduleEstimate();
   } catch (e) {
-    toolError.value = e instanceof Error ? e.message : "上传失败";
+    toolError.value = e instanceof Error ? e.message : t("toolUpscale.errUpload");
   } finally {
     uploading.value = false;
   }
@@ -265,11 +266,11 @@ async function estimate(): Promise<void> {
 async function submit(): Promise<void> {
   if (!tool.value) return;
   if (!videoUrl.value) {
-    toolError.value = "请先上传视频";
+    toolError.value = t("toolUpscale.errUploadFirst");
     return;
   }
   if (region.value.w < 0.02 || region.value.h < 0.02) {
-    toolError.value = "请先在画面上框出字幕区域";
+    toolError.value = t("toolUpscale.errRegionFirst");
     return;
   }
   submitting.value = true;
@@ -277,7 +278,7 @@ async function submit(): Promise<void> {
   try {
     const quote = await api.post<QuoteResponse>("/credits/quote", requestBody());
     if (!quote.sufficient) {
-      toolError.value = `积分不足（需要 ${quote.credits}）`;
+      toolError.value = t("toolUpscale.errLowCredits", { credits: quote.credits });
       return;
     }
     const created = await api.post<{ task_id: string }>(
@@ -288,9 +289,9 @@ async function submit(): Promise<void> {
     );
     await refreshTask(created.task_id);
     startPolling(created.task_id);
-    toast.info("已提交去字幕任务");
+    toast.info(t("toolUpscale.toastSubmitted"));
   } catch (e) {
-    toolError.value = e instanceof Error ? e.message : "提交失败";
+    toolError.value = e instanceof Error ? e.message : t("toolUpscale.errSubmit");
   } finally {
     submitting.value = false;
   }
@@ -322,9 +323,9 @@ async function loadTool(): Promise<void> {
   try {
     const catalog = await api.get<ToolCatalogDto>("/generations/tools");
     tool.value = catalog.tools.find((item) => item.mode === REGION_MODE) ?? null;
-    if (!tool.value) toolError.value = "服务端目录里没有 de_subtitle_region 工具";
+    if (!tool.value) toolError.value = t("toolUpscale.errNoTool");
   } catch (e) {
-    toolError.value = e instanceof Error ? e.message : "工具目录加载失败";
+    toolError.value = e instanceof Error ? e.message : t("toolUpscale.errCatalog");
   } finally {
     loadingTool.value = false;
   }
@@ -338,15 +339,16 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
 });
 
-const STATUS_TEXT: Record<number, string> = {
-  1: "排队中",
-  2: "处理中",
-  3: "已完成",
-  4: "失败",
-  5: "已取消",
-  6: "审核中",
-  7: "审核未通过",
-};
+// 状态文案随语言切换，必须是 computed 而不是 setup 常量
+const STATUS_TEXT = computed<Record<number, string>>(() => ({
+  1: t("toolUpscale.status1"),
+  2: t("toolUpscale.status2"),
+  3: t("toolUpscale.status3"),
+  4: t("toolUpscale.status4"),
+  5: t("toolUpscale.status5"),
+  6: t("toolUpscale.status6"),
+  7: t("toolUpscale.status7"),
+}));
 </script>
 
 <template>
@@ -354,15 +356,16 @@ const STATUS_TEXT: Record<number, string> = {
     <!-- 区域去字幕：可视化框选（本页新增交互） -->
     <section class="panel">
       <header class="panel-head">
-        <h1>去字幕（框选区域）</h1>
+        <h1>{{ t("toolUpscale.title") }}</h1>
         <p class="muted">
-          在画面上拖拽框出字幕所在区域，只在框内擦除字幕；提交的仍是既有的
-          <code>de_subtitle_region</code> 模式（不改后端能力）。
+          {{ t("toolUpscale.introPre") }}
+          <code>de_subtitle_region</code>
+          {{ t("toolUpscale.introPost") }}
         </p>
       </header>
 
       <p v-if="toolError" class="error">{{ toolError }}</p>
-      <p v-else-if="loadingTool" class="muted">工具目录加载中…</p>
+      <p v-else-if="loadingTool" class="muted">{{ t("toolUpscale.toolLoading") }}</p>
 
       <div class="row">
         <input
@@ -373,11 +376,11 @@ const STATUS_TEXT: Record<number, string> = {
           @change="pickVideo"
         />
         <Button size="sm" :loading="uploading" @click="fileInput?.click()">
-          {{ uploading ? "上传中…" : videoUrl ? "重新选择视频" : "选择视频" }}
+          {{ uploading ? t("toolUpscale.btnUploading") : videoUrl ? t("toolUpscale.btnReselect") : t("toolUpscale.btnSelect") }}
         </Button>
         <span v-if="videoName" class="muted small">{{ videoName }}</span>
         <Button v-if="videoUrl" variant="ghost" size="sm" @click="undoRegion">
-          撤销上一个
+          {{ t("toolUpscale.btnUndo") }}
         </Button>
         <Button
           v-if="videoUrl"
@@ -386,9 +389,9 @@ const STATUS_TEXT: Record<number, string> = {
           :disabled="regions.length <= 1"
           @click="deleteRegion"
         >
-          删除选中
+          {{ t("toolUpscale.btnRemove") }}
         </Button>
-        <Button v-if="videoUrl" variant="ghost" size="sm" @click="resetRegion">重置框选</Button>
+        <Button v-if="videoUrl" variant="ghost" size="sm" @click="resetRegion">{{ t("toolUpscale.btnReset") }}</Button>
       </div>
 
       <div
@@ -415,7 +418,7 @@ const STATUS_TEXT: Record<number, string> = {
         </div>
         <!-- 拖拽中的临时框 -->
         <div v-if="draftBox" class="mask mask--draft" :style="boxStyle(draftBox)" aria-hidden="true" />
-        <p v-if="!videoUrl" class="stage-hint">先选择视频，再在这里拖拽框选字幕区域</p>
+        <p v-if="!videoUrl" class="stage-hint">{{ t("toolUpscale.stageHint") }}</p>
       </div>
 
       <div class="fields">
@@ -431,29 +434,29 @@ const STATUS_TEXT: Record<number, string> = {
             @input="onRegionInput(field.key, $event)"
           />
         </label>
-        <span class="muted small">归一化坐标（0~1，左上原点）</span>
+        <span class="muted small">{{ t("toolUpscale.coordsHint") }}</span>
         <span class="muted small">
-          共 {{ regions.length }} 个框，当前第 {{ activeIndex + 1 }} 个；
-          <b>提交时仅选中框生效</b>（后端目前接受单组 region 参数）
+          {{ t("toolUpscale.regionCount", { n: regions.length, i: activeIndex + 1 }) }}
+          <b>{{ t("toolUpscale.regionActive") }}</b>{{ t("toolUpscale.regionActiveNote") }}
         </span>
       </div>
 
       <div class="actions">
         <Button :loading="submitting || quoting" :disabled="!videoUrl" @click="submit">
-          开始去字幕
+          {{ t("toolUpscale.btnStart") }}
         </Button>
         <span class="muted small">
-          <template v-if="quoting">报价中…</template>
-          <template v-else-if="credits !== null">预计 {{ credits }} 积分</template>
-          <template v-else>框选后自动报价</template>
+          <template v-if="quoting">{{ t("toolUpscale.quoting") }}</template>
+          <template v-else-if="credits !== null">{{ t("toolUpscale.estimate", { credits }) }}</template>
+          <template v-else>{{ t("toolUpscale.estimatePending") }}</template>
         </span>
       </div>
 
       <div v-if="task" class="task">
-        <span class="muted">任务 {{ task.task_id }}</span>
+        <span class="muted">{{ t("toolUpscale.taskId", { id: task.task_id }) }}</span>
         <b>{{ STATUS_TEXT[task.status] ?? task.status }} · {{ task.progress }}%</b>
         <a v-if="task.results?.length" :href="task.results[0]?.uri" target="_blank" rel="noreferrer" class="link">
-          查看结果
+          {{ t("toolUpscale.viewResult") }}
         </a>
       </div>
     </section>

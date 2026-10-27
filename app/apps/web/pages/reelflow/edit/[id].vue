@@ -30,7 +30,7 @@ import type { EpisodeDto, ProjectDto, StoryboardDto, TimelineClipAssetDto, Timel
  */
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
-const { t, locale } = useI18n();
+const { t } = useI18n();
 useHead({ title: () => t("editor.metaTitle") });
 
 const api = useApi();
@@ -842,7 +842,7 @@ async function bindProjectAsset(assetId: string): Promise<void> {
     await refreshClipAssets();
     toast.success(t("editor.assetBound"));
   } catch (e) {
-    clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
+    clipAssetError.value = e instanceof Error ? e.message : t("editor.bindFailed");
     toast.error(clipAssetError.value);
   } finally {
     clipAssetBusy.value = false;
@@ -864,7 +864,7 @@ async function bindShotProductToClip(): Promise<void> {
     await refreshClipAssets();
     toast.success(t("editor.shotBound"));
   } catch (e) {
-    clipAssetError.value = e instanceof Error ? e.message : "绑定失败";
+    clipAssetError.value = e instanceof Error ? e.message : t("editor.bindFailed");
     toast.error(clipAssetError.value);
   } finally {
     clipAssetBusy.value = false;
@@ -883,7 +883,7 @@ async function clearClipAssets(): Promise<void> {
     await refreshClipAssets();
     toast.success(t("editor.clearedBinding"));
   } catch (e) {
-    clipAssetError.value = e instanceof Error ? e.message : "清空失败";
+    clipAssetError.value = e instanceof Error ? e.message : t("editor.clearFailed");
   } finally {
     clipAssetBusy.value = false;
   }
@@ -1122,7 +1122,7 @@ const episodeLabel = computed(() => {
           @click="onTrackClick"
         >
           <div class="rf-ruler">
-            <span v-for="t in ticks" :key="t" class="rf-tick" :style="{ left: `${t * pxPerSec}px` }">{{ fmtTime(t) }}</span>
+            <span v-for="tick in ticks" :key="tick" class="rf-tick" :style="{ left: `${tick * pxPerSec}px` }">{{ fmtTime(tick) }}</span>
           </div>
 
           <div class="rf-clips" :style="{ width: `${trackWidth}px` }">

@@ -1,19 +1,26 @@
 <script setup lang="ts">
 // 工具布局：独立双栏页（无侧栏），顶部保留全局操作区（对齐参照产品「视频生成」页）
+const { t } = useI18n();
 const route = useRoute();
-const title = computed(() => (route.meta.toolTitle as string) || "视频生成");
+// 页面 meta 里放的是 **i18n key**（如 `shell.toolTitles.video`），不是中文标题；
+// 直接放中文会让 /create/* 的页头在非中文站点仍是中文（而这些页面共用本布局，只能在这里翻）。
+const title = computed(() => {
+  const raw = route.meta.toolTitle;
+  return typeof raw === "string" && raw ? t(raw) : t("shell.toolTitles.video");
+});
 const auth = useAuth();
 const authReady = computed(() => auth.ready.value);
 const balance = computed(() => auth.state.value.credits?.balance ?? 0);
 const user = computed(() => auth.state.value.user);
-const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).toUpperCase());
+// 头像是昵称首字；昵称为空时用问号占位（原来写「用」，英文站点会露出中文）
+const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUpperCase());
 </script>
 
 <template>
   <div class="tool-page">
     <header class="head">
       <div class="left">
-        <button class="back" aria-label="返回" @click="$router.back()">
+        <button class="back" :aria-label="t('shell.back')" @click="$router.back()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 12H5m0 0 6-6m-6 6 6 6" />
           </svg>
@@ -21,26 +28,26 @@ const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).to
         <h1>{{ title }}</h1>
       </div>
       <div class="actions">
-        <span class="mini-pill disabled">
+        <span class="mini-pill disabled" :title="t('shell.manualSoon')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M5 4.5h9.5A1.5 1.5 0 0 1 16 6v14H6.5A1.5 1.5 0 0 1 5 18.5Z" />
             <path d="M9 8h4M9 11.5h4" />
           </svg>
-          创作手册
+          {{ t("shell.manual") }}
         </span>
-        <span class="mini-pill disabled">
+        <span class="mini-pill disabled" :title="t('shell.bizSoon')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 20s-7-4.3-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.7-7 9-7 9Z" />
           </svg>
-          商务合作
+          {{ t("shell.biz") }}
         </span>
-        <NuxtLink to="/tasks" class="icon-btn" title="任务中心">
+        <NuxtLink to="/tasks" class="icon-btn" :title="t('shell.tasks')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
             <path d="M10.3 19a2 2 0 0 0 3.4 0" />
           </svg>
         </NuxtLink>
-        <NuxtLink to="/report" class="icon-btn" title="帮助与反馈">
+        <NuxtLink to="/report" class="icon-btn" :title="t('shell.feedback')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="8.5" />
             <path d="M9.6 9.3A2.5 2.5 0 0 1 14.5 10c0 1.6-2.4 2-2.4 3.4" />
@@ -53,11 +60,11 @@ const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).to
             <circle cx="9.5" cy="19" r="1.4" />
             <circle cx="16.5" cy="19" r="1.4" />
           </svg>
-          <b>会员订阅</b>
+          <b>{{ t("shell.subscribe") }}</b>
           <i class="sep" />
-          <span>视频低至 8 积分/条</span>
+          <span>{{ t("shell.lowPrice", { credits: 8 }) }}</span>
         </NuxtLink>
-        <NuxtLink to="/credits" class="credits" title="积分余额">
+        <NuxtLink to="/credits" class="credits" :title="t('shell.creditsBalance')">
           <span class="spark">✦</span>
           <b>{{ authReady ? balance : "—" }}</b>
         </NuxtLink>
@@ -65,7 +72,7 @@ const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).to
           <span class="avatar">…</span>
         </template>
         <NuxtLink v-else-if="user" to="/settings" class="avatar" :title="user.nickname">{{ avatarChar }}</NuxtLink>
-        <NuxtLink v-else to="/login" class="login-btn">立即登录</NuxtLink>
+        <NuxtLink v-else to="/login" class="login-btn">{{ t("shell.loginNow") }}</NuxtLink>
       </div>
     </header>
     <main class="body">

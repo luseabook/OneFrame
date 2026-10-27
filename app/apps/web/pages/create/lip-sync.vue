@@ -3,8 +3,9 @@
 //
 // 页面本体由 `/generations/tools` 目录驱动（`tool-catalog.ts` 单一数据源），
 // 这里只声明用哪个工具、以及工具页标题。
-definePageMeta({ ssr: false, requiresAuth: true, layout: "tool", toolTitle: "视频对口型" });
-useHead({ title: "视频对口型 · 一帧" });
+definePageMeta({ ssr: false, requiresAuth: true, layout: "tool", toolTitle: "shell.toolTitles.lipSync" });
+const { t } = useI18n();
+useHead({ title: () => t("shell.titleSuffix", { title: t("shell.toolTitles.lipSync") }) });
 </script>
 
 <template>

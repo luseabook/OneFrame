@@ -421,7 +421,7 @@ async function batchStatus(status: number): Promise<void> {
 
 /** 批量换组 */
 async function batchGroup(groupId: string): Promise<void> {
-  if (selected.value.length === 0) return flash("请先选择成员");
+  if (selected.value.length === 0) return flash(t("teamPage.selectMembersFirst"));
   busy.value = true;
   try {
     await api.post("/cam/team/member/change-group", {
@@ -477,7 +477,7 @@ const batchAllocOpen = ref(false);
 const batchAllocAmount = ref("10");
 const batchAllocMemo = ref("");
 function openBatchAlloc(): void {
-  if (selected.value.length === 0) return flash("请先选择成员");
+  if (selected.value.length === 0) return flash(t("teamPage.selectMembersFirst"));
   batchAllocAmount.value = "10";
   batchAllocMemo.value = "";
   batchAllocOpen.value = true;
@@ -681,7 +681,7 @@ onMounted(bootstrap);
             {{ t("teamPage.poolLine", { total: team?.credit_total ?? 0, frozen: (team?.frozen ?? 0) > 0 ? t("teamPage.frozenSuffix", { frozen: team?.frozen ?? 0 }) : "" }) }}
             {{ t("teamPage.poolHint") }}
           </p>
-          <Button :disabled="busy" @click="navigateTo('/pricing')">充值团队积分</Button>
+          <Button :disabled="busy" @click="navigateTo('/pricing')">{{ t("teamPage.rechargeTeam") }}</Button>
         </Card>
         <Card class="tm-card">
           <h2 class="tm-h2">{{ t("teamPage.allocateRulesTitle") }}</h2>
@@ -711,7 +711,7 @@ onMounted(bootstrap);
           <p class="tm-hint">{{ t("teamPage.recoverHint") }}</p>
           <SelectField
             v-model="recoverForm.user_id"
-            label="成员"
+            :label="t('teamPage.thMember')"
             :disabled="!canManage"
             :options="[{ value: '', label: t('teamPage.select') }, ...members.map((m) => ({ value: m.user_id, label: t('teamPage.memberOptionWithQuota', { name: m.nickname || m.user_id, quota: m.credits_quota }) }))]"
           />
@@ -856,7 +856,7 @@ onMounted(bootstrap);
       <SelectField
         v-model="inviteGroup"
         :label="t('teamPage.groupOptional')"
-        :options="[{ value: '', label: '未分组' }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
+        :options="[{ value: '', label: t('teamPage.ungrouped') }, ...groups.map((g) => ({ value: g.id, label: g.name }))]"
       />
       <div v-if="inviteResult.length > 0" class="tm-invite-result">
         <p v-for="(r, i) in inviteResult" :key="i" :class="r.ok ? 'ok' : 'bad'">

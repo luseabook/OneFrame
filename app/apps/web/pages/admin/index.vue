@@ -539,7 +539,7 @@ onMounted(async () => {
 
       <section v-if="tab === 'tasks'" class="card">
         <h2>{{ t("adminUi.auditTitle") }}</h2>
-        <div class="row task-row head-row"><span>task</span><span>space</span><span>mode</span><span>{{ t("adminUi.thStatus") }}</span><span>积分</span><span>时间</span></div>
+        <div class="row task-row head-row"><span>task</span><span>space</span><span>mode</span><span>{{ t("adminUi.thStatus") }}</span><span>{{ t("adminUi.thCredits") }}</span><span>时间</span></div>
         <div v-for="t in tasks" :key="String(t.task_id)" class="row task-row">
           <span class="mono">{{ String(t.task_id).slice(-8) }}</span>
           <span class="mono">{{ String(t.space_id).slice(-6) }}</span>

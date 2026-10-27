@@ -1809,8 +1809,38 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 | `tools` / `tasks` / `works` / `share` | 工具箱、任务、全部项目、分享页 | ~120 |
 | `film` / `market` / `credits` / `assets` / `novel` / `invite` / `home` / `onboarding`（第 9–12 批） | 影视版、剧本集市、积分流水、资产库、剧本工厂、邀请与兑换、**首页（工具矩阵/轮播/新手引导条）** | 266 |
 
-**已迁移页面 40 / 64 + 5 组件**（第 8–31 批；用户面 40/45 = 89%），`projects/[id]` 已两轮完成；法务页 privacy/terms 按原则不机翻；两类后端中文数据待改造（影视 `preset_key`、剧本工厂 `steps[].hint_key`）。
-**未迁移**：novel / creator-center / admin / team / agent / create(19 卡) / canvas / reelflow / 合集详情等（记在进度文档 §5）。
+**已迁移 43 页 + 17 组件**（第 8–56 批）。口径按「可译用户面」计：
+
+| 口径 | 分母 | 已迁 |
+|---|---:|---:|
+| 用户面可译页（64 − admin 2 − `/create/*` 19 − 法务 2） | 41 | **41（100%）** |
+| 法务文本页 privacy / terms（原则性不机翻） | 2 | 0（豁免，待法务） |
+| 运营后台（内部系统） | 2 | 2 |
+| `/create/*` 工具落地页 | 19 | 19 |
+| 全部 | 64 | 62（97%） |
+| 语言包 | — | **3,153 key × 5 语言**（50 个命名空间） |
+
+命名空间（按批）：`common/nav/lang/sidebar/errors`（壳层）、`auth/landing/pricing/settings/billing`、
+`tools/tasks/works/share`、`film/market/credits/assets/novel/invite/home/onboarding`、
+`filmDetail/marketDetail/novelStudio/reelflow/canvas/canvasUi/creatorCenter/report/publish/preview`、
+`adDrama/redraw/filmDetail/earnings/workDetail/marketManage/editor/teamPage/projectDetail/knowledge`、
+`adminUi/watchPage/toolUpscale`、`shell`（第 55 批：三布局 + 19 张 create 页头）。
+
+**第 55–56 批（壳层 + create 收尾）**：
+1. `shell` 命名空间 35 key 覆盖 `layouts/app.vue`（侧栏 12 项、顶栏订阅/积分 pill、语言切换）与
+   `layouts/tool.vue` 页头；`toolTitle` 由中文标题改为 **i18n key**（19 张 create 页统一改传 `shell.toolTitles.*`）。
+2. `/create/*` 19 张里 18 张是薄壳（页头由布局翻译即完成），`video-upscale` 是唯一自包含实现，
+   正文 34 处中文本批迁完（`toolUpscale` 41 key，含 7 个任务状态文案——状态表从 setup 常量改 `computed`，
+   否则切语言不生效）。
+3. 首页工具卡 `data-kind` 由中文类名改语义键（`soon`/`member`），避免切语言后角标配色丢失。
+4. `ad-drama/create` 的 `style` 提交值由中文标签改稳定 ASCII key（`live/anime/cartoon3d/cyber/guofeng`），
+   并保留旧中文值→译文映射；**不改后端**（`style` 是自由字符串，后端不校验枚举）——这是把「业务值存中文」
+   这类缺陷在纯前端闭环的唯一一条（其余见进度文档 §5）。
+
+**剩余 3 处中文均非页面文案**：`novel/[id]` 1 行（解析服务端「第N集」）、`projects/[id]` 1 行（切服务端标题前缀）、
+`ad-drama/create` 5 行（旧中文值兼容映射）。**页面级完成度以 `_acceptance/i18n-residual.py` 残留 0 为准，不看页头。**
 
 **校验口径**：`_acceptance/i18n-check.cjs`（静态：key 一致 / 无空值 / 外语包无中文残留 / 占位符一致 / 页面 key 齐全）
-+ `_acceptance/e2e-i18n-pages.cjs`（浏览器：中英对照、无 key 残留、控制台清洁）。
++ `_acceptance/e2e-i18n-pages.cjs`（浏览器：中英对照、无 key 残留、控制台清洁，**158 例**）
++ `_acceptance/i18n-residual.py`（逐文件数「含中文且非注释」的行数 → 页面级完成度的**唯一判据**；
+  注释行/行尾注释自动排除，豁免文件单列并说明理由）。

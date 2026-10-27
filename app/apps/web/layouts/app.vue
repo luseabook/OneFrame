@@ -48,7 +48,7 @@ const authReady = computed(() => auth.ready.value);
 const balance = computed(() => auth.state.value.credits?.balance ?? 0);
 const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
 const user = computed(() => auth.state.value.user);
-const avatarChar = computed(() => (user.value?.nickname || "用").slice(0, 1).toUpperCase());
+const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUpperCase());
 
 function isActive(to: string, key?: string): boolean {
   if (!to) return false;
@@ -79,8 +79,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
     <aside class="sidebar">
       <div class="brand">
         <span class="logo-mark" aria-hidden="true">一</span>
-        <span v-if="!collapsed" class="logo-text">一帧</span>
-        <button class="collapse-btn" :title="collapsed ? '展开' : '收起'" @click="collapsed = !collapsed">
+        <span v-if="!collapsed" class="logo-text">{{ t("landing.brandName") }}</span>
+        <button class="collapse-btn" :title="collapsed ? t('shell.expand') : t('shell.collapse')" @click="collapsed = !collapsed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <rect x="3" y="4" width="18" height="16" rx="3" />
             <path d="M9.5 4v16" />
@@ -155,7 +155,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       <div class="foot">
         <!-- 2026-10-27：影视版（第 5 批）页面已落地；准入仍走 spaces.film_enabled
              （竞品是商务开通制），未开通时页面内提示「联系商务开通」，入口不置灰。 -->
-        <NuxtLink to="/film" class="item" title="影视版（内测）">
+        <NuxtLink to="/film" class="item" :title="t('shell.filmBeta')">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
@@ -165,7 +165,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           <span v-if="!collapsed" class="foot-label">{{ t("sidebar.film") }}</span>
           <span v-if="!collapsed" class="tag-beta">{{ t("sidebar.beta") }}</span>
         </NuxtLink>
-        <span class="item disabled" title="CLI 已随包提供（apps/cli，196 条命令）；MCP 待取证，故 Web 侧无入口">
+        <span class="item disabled" :title="t('shell.cliMcpHint')">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
@@ -192,7 +192,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
               <path d="M19.5 18.5c0 1.5-1.5 2.5-4 2.5" />
             </svg>
           </span>
-          <span v-if="!collapsed">添加专属运营助手</span>
+          <span v-if="!collapsed">{{ t("shell.assistant") }}</span>
         </NuxtLink>
         <div v-if="!collapsed" class="legal">
           <NuxtLink to="/terms">{{ t("nav.terms") }}</NuxtLink>
@@ -206,27 +206,27 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
       <header class="topbar">
         <div class="crumb"><slot name="crumb" /></div>
         <div class="right">
-            <span class="mini-pill disabled" title="创作手册即将上线">
+            <span class="mini-pill disabled" :title="t('shell.manualSoon')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M5 4.5h9.5A1.5 1.5 0 0 1 16 6v14H6.5A1.5 1.5 0 0 1 5 18.5Z" />
                 <path d="M9 8h4M9 11.5h4" />
               </svg>
-              创作手册
+              {{ t("shell.manual") }}
             </span>
-            <span class="mini-pill disabled" title="商务合作即将上线">
+            <span class="mini-pill disabled" :title="t('shell.bizSoon')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 20s-7-4.3-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.7-7 9-7 9Z" />
               </svg>
-              商务合作
+              {{ t("shell.biz") }}
             </span>
             <LangSwitcher class="lang-in-topbar" />
-            <NuxtLink to="/tasks" class="icon-btn" title="任务中心">
+            <NuxtLink to="/tasks" class="icon-btn" :title="t('shell.tasks')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
                 <path d="M10.3 19a2 2 0 0 0 3.4 0" />
               </svg>
             </NuxtLink>
-            <NuxtLink to="/report" class="icon-btn" title="帮助与反馈">
+            <NuxtLink to="/report" class="icon-btn" :title="t('shell.feedback')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="8.5" />
                 <path d="M9.6 9.3A2.5 2.5 0 0 1 14.5 10c0 1.6-2.4 2-2.4 3.4" />
@@ -239,16 +239,16 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <circle cx="9.5" cy="19" r="1.4" />
                 <circle cx="16.5" cy="19" r="1.4" />
               </svg>
-              <b>会员订阅</b>
+              <b>{{ t("shell.subscribe") }}</b>
               <i class="sep" />
-              <span>视频低至 8 积分/条</span>
+              <span>{{ t("shell.lowPrice", { credits: 8 }) }}</span>
             </NuxtLink>
-            <NuxtLink to="/credits" class="credits" title="积分余额">
+            <NuxtLink to="/credits" class="credits" :title="t('shell.creditsBalance')">
               <svg class="spark" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5-4.6.6-6.9 2.9-7.5 7.5-.6-4.6-2.9-6.9-7.5-7.5 4.6-.6 6.9-2.9 7.5-7.5Z" />
               </svg>
               <b>{{ authReady ? balance : "—" }}</b>
-              <span v-if="authReady && frozen" class="frozen">冻 {{ frozen }}</span>
+              <span v-if="authReady && frozen" class="frozen">{{ t("shell.frozenAmount", { amount: frozen }) }}</span>
             </NuxtLink>
 
             <template v-if="!authReady">
@@ -261,15 +261,15 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 </button>
                 <div v-if="menuOpen" class="menu">
                   <p class="menu-name">{{ user.nickname }}</p>
-                  <NuxtLink to="/works" class="menu-item" @click="menuOpen = false">我的作品</NuxtLink>
+                  <NuxtLink to="/works" class="menu-item" @click="menuOpen = false">{{ t("shell.myWorks") }}</NuxtLink>
                   <NuxtLink to="/invite" class="menu-item" @click="menuOpen = false">{{ t("sidebar.invite") }}</NuxtLink>
-                  <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">任务中心</NuxtLink>
-                  <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">个人设置</NuxtLink>
-                  <button class="menu-item" @click="logout">退出登录</button>
+                  <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">{{ t("shell.tasks") }}</NuxtLink>
+                  <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">{{ t("shell.personalSettings") }}</NuxtLink>
+                  <button class="menu-item" @click="logout">{{ t("shell.logout") }}</button>
                 </div>
               </div>
             </template>
-            <NuxtLink v-else to="/login" class="login-btn">立即登录</NuxtLink>
+            <NuxtLink v-else to="/login" class="login-btn">{{ t("shell.loginNow") }}</NuxtLink>
 
         </div>
       </header>

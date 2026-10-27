@@ -11,7 +11,9 @@
 
 **以竞品为基准，OneFrame 全站实现进度 ≈ 97.7%（201.26/206，剩余 4.74；v1.0 基线 35.4%）；首发口径 ≈ 97.7%（129.97/133，基线 54.4%）。**
 
-第 3 轮补掉了**最后两个 0% 模块**（广告剧 / 视频转绘），并把 8 个"差最后一两项"的模块推到 92%+；剩余权重从 23.6 降到 **11.7**：
+最近两批（第 55–56 批）把**前端多语言**这条最长的尾巴收完：壳层三个布局 + 19 张 `/create/*` 落地页全部迁完，
+用户面可译页到 **41/41 = 100%**（只剩 2 页法务文本按原则不机翻），并纠正了一处"页头翻完即整页完成"的虚报。
+剩余 **4.74** 权重里已无「从零开发」，全部是外部输入与取证：
 
 | 拆分 | 模块 | 权重 | 进度 | v2.1 | v2.0 | v1.0 | 含义 |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -22,11 +24,11 @@
 
 **五个必须说清的事实：**
 
-1. **没有 0% 模块，也没有"整块未做"**。最后两个 0%（广告剧、视频转绘）在第 3 轮清零；到本轮为止 28 个模块里 **9 个 100%、13 个 97–99.9%、4 个 92–95%**。
+1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、11 个 97–99.9%、7 个 92–95%、1 个 <92%**（#5 全部项目 90%，差画布封面与跨域投影字段的竞品取证）；最低的 4 个模块（#5 90 / #9 92 / #12 92 / #18 92 / #25 92）全部卡在"竞品没给字段"或"产品未定义"。
 2. **剩余 4.74 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、MCP（竞品无证据）、真实渠道联调、升级补差价下单、多知识库产品定义。**没有一块是"从零开发"**。
 3. **核心与生态两条线都已过 97%**：核心创作闭环 97.2%、生态与规模化 98.2%。首发口径（剔除 8 个非阻塞模块）97.7%，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 4.74 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
 4. **每一轮的进度都有可复跑的证据**：`_acceptance/verify-round.ps1`（12 个任务全绿）+ 8 套真实浏览器 E2E（导演台/广告剧 12 项/转绘 11 项/创作者/分享/模板 UI/运营审核）+ 各类 smoke 脚本，命令与结论都登记在 §8。
-5. **本轮质量动作（第 7 轮）**：修掉 1 个 SSR 500（`plugins/i18n.ts` 把 `useRequestHeaders()` 放进 computed 懒取 → `/admin/login` 白屏 500）+ 3 个"端点绿但点了不对"的页面 bug（上传字段名、绑定空绑、模板区非法嵌套），并补了 3 处测试数据卫生（banner/promo_slots/creator_assets 残留逐轮污染队列）。
+5. **本轮（第 55–56 批）做了什么**：① 壳层 i18n——`layouts/app.vue`（侧栏 12 项 + 顶栏订阅/积分 pill + 语言切换）、`default.vue`、`tool.vue` 页头原来整块硬编码中文，任何英文界面里都挂着中文导航；② `toolTitle` 从中文标题改为 i18n key，19 张 create 页统一改传；③ `/create/*` 最后一张自包含页（`video-upscale` 609 行、34 处中文）迁完；④ `ad-drama` 的 `style` 业务值改 ASCII key（否则中英各提交一次库里存两种值）；⑤ 新增 `i18n-residual.py` 把"页面完成度"固化为**按文件数残留中文行**，防止再拿页头冒充整页。
 
 ---
 
@@ -109,23 +111,44 @@
 
 | 口径 | 分母 | 已迁 | 覆盖率 |
 |---|---:|---:|---:|
-| **用户面页面**（64 页 − admin 2 − `/create/*` **19**） | **43** | **41** | **95%** |
-| 运营后台页面（内部） | 2 | **2** | **100%** |
-| `/create/*` 工具参数页（与 `/tools` 卡片同源，独立成页） | 19 | 19 | 100%（口径上单列，不计入用户面分子） |
-| 全部页面 | 64 | **45** | **70%** |
-| 语言包 key | — | **2,947** | 5 语言 key 完全一致 |
+| **用户面可译页**（64 − admin 2 − `/create/*` 19 − 法务 2） | **41** | **41** | **100%** |
+| 法务文本页（privacy / terms，原则性不机翻） | 2 | 0 | 豁免（待法务出译文） |
+| 运营后台页面（内部系统） | 2 | **2** | **100%** |
+| `/create/*` 工具落地页 | 19 | **19** | **100%** |
+| 全部页面 | 64 | **62** | **97%** |
+| 语言包 key | — | **3,153**（50 个命名空间） | 5 语言 key 完全一致 |
 
-**已迁（27 页）**：index / login / pricing / settings / tools / tasks / works / projects(index) / assets / canvas(index) /
-agent / novel(index) / film(index) / novel-market(index) / novel-market([id]) / credits / creator-center(index) /
+**第 56 批修正了一处虚报**：本表此前写「`/create/*` 19/19 = 100%」，实际是把 `layouts/tool.vue` 统一翻译的
+**页头**当成了整页完成。19 张里 **18 张是 10~13 行的薄壳**（正文交给共享组件，页头来自 `toolTitle` 的 i18n key，
+所以确实完成）；**`video-upscale` 是唯一 609 行自包含实现**，正文另有 34 处中文（框选交互、状态表、报价、
+上传/提交错误），本轮才真正迁完（`toolUpscale` **41 key** ×5）。同类虚报的检查方法已固化：
+`_acceptance/i18n-residual.py` 按「含中文且非注释行」逐文件数残留，**页面级完成度以残留 0 为准**，不看页头。
+
+**已迁的 41 页用户面**（按批次）：
+index / login / pricing / settings / tools / tasks / works / projects(index) / assets / canvas(index) / agent /
+novel(index) / film(index) / novel-market(index) / novel-market([id]) / credits / creator-center(index) /
 creator-center(publish) / creator-center(preview[id]) / activities / invite / home / team(dashboard) / reelflow(list) /
-share([token]) / watch([token]) / report / ad-drama(create + workspace) / video-redraw(create + workspace) / film([id] 任务表) / creator-center(earnings) / novel([id] 工作台 + 步进器) / knowledge(index) / creator-center([id] 作品详情) / novel-market(manage) / reelflow(edit[id] 时间线导出) / team(index 团队管理)
+share([token]) / watch([token]) / report / ad-drama(create + workspace) / video-redraw(create + workspace) /
+film([id]) / creator-center(earnings) / novel([id]) / knowledge(index) / creator-center([id]) / novel-market(manage) /
+reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / admin(index + login)。
+**组件层**另迁 17 个（OnboardingBar / SubscriptionPlans / LangSwitcher / NovelStepper / CanvasInspector 等 13 个画布组件）。
 
-**本批完成的一页**：`projects/[id]` 分镜创作工作台（约 **270 处**文案，全站最大单页）分两轮完成。
+**残留中文只剩 3 处，且都不是「页面文案」**（改不改都不影响用户看到的内容）：
+1. `pages/novel/[id].vue` 1 行——**解析服务端返回的中文**（「第N集」正则），译文反而会失配；
+2. `pages/projects/[id].vue` 1 行——同上，用 `第${ep_no}集` 前缀切掉与序号重复的服务端中文标题；
+3. `pages/ad-drama/create.vue` 5 行——**旧中文业务值的兼容映射**。本批把提交给后端的 `style` 值从中文标签
+   改成稳定 ASCII key（`live/anime/cartoon3d/cyber/guofeng`），否则「中文环境提交一次、英文环境再提交一次」
+   同一需求会在库里存两种值；旧草稿里的中文值仍需能显示译文，故保留映射。
 
-**本批完成的模块**：`canvas` 无限画布（`canvas/[id]` + **13 个组件**，约 **500 处**文案，5 轮完成，`canvasUi` **513 key**）——外壳/顶栏/工具条/空态引导/小地图 + 节点摘要 + **检查器（2921 行，全站最大单文件）100%** + 七个面板（Agent 47 / Material 20 / Template 22 / Dock 20 / PinBar 15 / Comment 22 / Download 13）。
+**「业务值存中文」这一族共有 3 处，本批只闭环了能纯前端解决的那 1 处**（诚实口径，别把 1 当 3）：
+| 位置 | 能否只改前端 | 现状 |
+|---|---|---|
+| `ad-drama/create` 的 `style` | ✅ 能（后端当自由字符串存，不校验枚举） | **第 56 批已修**：新数据写 ASCII key，旧中文值仍映射译文 |
+| 影视版 `film_tables` 预置名 | ❌ 不能（预置存在服务端表里，前端拿不到 key） | 待加 `preset_key` 列 + 迁移回填，见 §5 第 14 行 |
+| 剧本工厂 `steps[].hint` | ❌ 不能（提示文案随步骤由后端下发） | 待加 `hint_key` + 参数，见 §5 第 14 行 |
 
-**未迁（6 页用户面）**：projects([id]) / canvas([id] + 13 个画布组件) / admin(2) 等；
-**另有 2 页法务文本（privacy / terms）按「不机翻法务文本」原则单列**。
+**剩下的 2 页是法务文本**（privacy / terms，各 31 / 29 行）：按「不机翻法务文本」原则单列，
+需要法务出译文或确认免责口径后才能翻，工程侧无法自行闭环——这也是 #16 停在 99.9% 而不是 100% 的原因。
 
 ### 2.3 页面对照（64 vs 93 可比）
 
@@ -167,7 +190,7 @@ share([token]) / watch([token]) / report / ad-drama(create + workspace) / video-
 | 13 | 广告剧（drama_ad） | 15 | M(3) | **97%** | 2.91 | **12 端点**（`/ad-drama/projects/*` 五段）+ 2 页面（create/workspace）+ 13 例；`project_mode=2` + `mode_meta`；每步回显消耗积分 | 竞品 STAGE/STATUS 值域未取证（我方定义）；真实出片依赖供应商 Key（浏览器五段 E2E 已通过 12/12） |
 | 14 | 视频转绘 | 8 | M(3) | **97%** | 2.91 | **9 端点**（竞品 8 + 1 列表）+ 2 页面 + 14 例；`project_mode=3`；`episode_ranges` 让分镜计划直接取切集区间 | 真实重绘能力（无 Key，mock）；`redraw_strength` 在 mock 下无可见差异（浏览器四段 E2E 已通过 11/11） |
 | 15 | 后处理族 | 0 | M(3) | **99%** | 2.97 | 6 mode 全接线 + 视频超清页 6 tab + **去字幕区域拖拽（画矩形 → region_x/y/w/h）** + 适配器 164 例 | 真实供应商 Key（mock 产物）；~~无多框/撤销~~ **已实现**（`video-upscale.vue`：`regions[]` 多框 + `undoRegion`/`deleteRegion`/`selectRegion`）；真正卡点：**后端 `normalizeToolOptions` 只归一单组 `region_x/y/w/h`**，多框需 provider 支持证据，UI 已诚实标注「仅选中框生效」 |
-| 16 | 多语言 | 0 | L(8) | **99.9%** | 7.99 | **自建 i18n**（312 key × 5 语言）+ `X-Lang` + 6 页 + 壳层导航；`i18n-check.cjs`（含 --browser 30 组合）全绿 | 用户面 41/43（剩 privacy/terms，按原则不机翻待法务）；韩语未做（产品未排期）；`/create/*` 参数页与 admin 已迁（路径前缀/hreflang/sitemap 见 `i18n-prefix.global.ts` + `buildAlternates` + `server/routes/sitemap.xml.ts`；账号级偏好在第 39 批补齐） |
+| 16 | 多语言 | 0 | L(8) | **99.9%** | 7.99 | **自建 i18n**：`i18n-check.cjs` 静态校验 **43 页 + 17 组件**（5 语言 key 完全一致 / 无空值 / 外语包无中文残留 / 占位符一致 / 页面 key 齐全）、`e2e-i18n-pages.cjs` 真浏览器中英对照 **158 例全绿**；路径前缀 + hreflang（`buildAlternates`）+ `sitemap.xml` + 账号级语言偏好持久化（第 39 批）；语言包 **3,153 key × 5**（50 命名空间） | **用户面可译页 41/41 = 100%**、admin 2/2、`/create/*` 19/19、全部 62/64；未迁的只剩 privacy / terms **2 页法务文本**（原则性不机翻，待法务，工程侧无法闭环）；韩语未排期（产品侧未定）；3 处残留中文均为数据解析/旧值兼容（见 §2.2.1） |
 
 ### 3.3 C 组：由服务前缀补齐的域
 
@@ -506,6 +529,8 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 
 | 日期 | 版本 | 变更 | 基线 HEAD |
 |---|---|---|---|
+| 2026-10-29 | **v7.9** | **`/create/*` 收尾 + 三处残留定性（第 56 批）**：① 先修一处**虚报**——上表曾写「`/create/*` 19/19 = 100%」，实为把 `tool.vue` 统一翻译的页头当成整页；19 张里 18 张是 10~13 行薄壳（确实完成），`video-upscale` 是唯一 609 行自包含实现、正文另有 **34 处**中文，本批迁完（`toolUpscale` **41 key ×5**，含状态表从 setup 常量改 `computed`、7 个任务状态文案）；② `ad-drama/create` 的 `style` 业务值从**中文标签改稳定 ASCII key**（`live/anime/cartoon3d/cyber/guofeng`），并保留旧中文值→译文的兼容映射——原来「中文环境提交、英文环境再提交」同一需求会在库里存两种值，这是 §5「后端中文数据」里唯一能纯前端闭环的一条，故从待改造降为已修；③ 清扫 `team/index` 4 处（成员选择提示、充值按钮、表头「成员」、未分组分组名）+ `admin/index` 表头「积分」；④ 新增 `_acceptance/i18n-residual.py` 把「页面级完成度」固化为**按文件数残留中文行**（排除注释、行尾注释），防止再用「页头翻完即整页完成」的口径虚报。用户面可译页 **41/41 = 100%**、`/create/*` **19/19**、全部 **62/64**；语言包 **2,947 → 3,153 key**；E2E **130 → 158 例** | `db931bf` |
+| 2026-10-29 | **v7.8** | **壳层布局 i18n（第 55 批）**：三个布局（`app.vue` 侧栏/顶栏、`default.vue`、`tool.vue` 页头）原来整块硬编码中文，任何一页英文界面里都挂着中文导航——**这是「页面迁完」之后最刺眼的残留**。新增 `shell` 命名空间 **35 key ×5**（导航 12 项、订阅/积分两颗 pill、语言切换、19 张 `/create/*` 的页头标题）；`toolTitle` 改为**存 i18n key** 而不是中文标题，19 张 create 页改传 `shell.toolTitles.*`；顺带修首页工具卡角标：`data-kind` 从中文类名改语义键（`soon`/`member`），否则切语言后渐变配色丢失；`ad-drama/create` 的 6 个风格预置同期改为「值/标签分离」的写法（值留中文→第 56 批再改 ASCII key） | `db931bf` |
 | 2026-10-27 | v1.0 | 首版：28 模块逐条对照 + 三口径进度 + 缺口排序 + 复现命令 | `6c75317` |
 | 2026-10-27 | v1.1 | **模块 #21 数据看板 15% → 85%**：kds 13 端点 + `/team/dashboard` 页 + 6 例契约测试；全站 35.4% → **36.4%**、首发口径 54.4% → **55.9%**；api-spec 补 §14.10 | `6c75317` |
 | 2026-10-29 | **v7.7** | **#22 Apple `id_token` JWKS 验签（第 54 批）**：改造前 apple 分支只做 `id_token.split(".")[1]` + base64 解码取 `sub`，注释理由是"TLS 直连换回的 token 来源可信"——**这把安全边界放在网络路径上**，一旦 token 端点被代理/中间人（企业网关、排障抓包、TLS 终止）篡改就没有第二道校验，等于 `sub` 与随手 base64 的 JSON 同强度。新增 `apps/api/src/modules/auth/apple-id-token.ts`：alg 白名单（**RS256/ES256，`none`/`HS256` 直接拒**，防"拿公钥当 HMAC 密钥"的经典攻击）、`kid` 定位公钥、`iss`/`aud`（含 aud 为数组）/`exp`/`iat` 校验（60s 时钟漂移容忍）、JWKS 5 分钟缓存 + **`kid` 未命中时强制刷新一次**（否则 Apple 轮换密钥后最长 5 分钟全员登录失败）、可注入 `jwks`/`now` 便于离线测试。19 例单测用本地生成的 RSA/EC 密钥对 + stub JWKS，**零网络**（含"签名被换 → bad_signature"这条关键负例；写它时先踩了一个测试自身的坑：`o.signing ?? default` 会把显式 `null` 兜成默认签名，测试反而变成"签对了"）。**同时纠正一条我自己的错误结论**：本文件此前把「Apple `form_post` 回调会 415」列为缺口——实测**前提不成立**，Nest 的 `FastifyAdapter` 自 v10 起默认注册了 urlencoded 解析器；为验证这点新写了一条 e2e（表单 POST + 真实 state → 登录成功 + 伪造 state → 400101），它在**不注册任何额外解析器**的情况下一次通过，所以按原计划写的 `form-body.ts` 已被删除（不留无用代码）。auth 缺口由此从 3 项降到 2 项；#22 **92% → 95%**（2.76 → 2.85）。全站 **201.17 → 201.26/206 = 97.7%**、剩余 **4.74**；api 测试 **843 → 863** | 工作区（未提交） |

@@ -504,7 +504,7 @@ function epShortTitle(ep: EpisodeDto): string {
   const prefix = `第${ep.ep_no}集`;
   const title = (ep.title ?? "").trim();
   const rest = title.startsWith(prefix) ? title.slice(prefix.length).trim() : title;
-  return rest || "未命名";
+  return rest || t("projectDetail.untitled");
 }
 
 // ══════════ 视图切换（剧本 / 资产 / 分镜 / 导出）══════════

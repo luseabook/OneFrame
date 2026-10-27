@@ -36,10 +36,19 @@ const RATIOS = computed(() => [
 ]);
 
 /** 风格：竞品 `style` 是"风格 ID"（值域未取证），我方给可读预置 + 自由输入 */
-// 风格值需要发给后端（英文/中文都可，后端按字符串存）；标签另给翻译，互不影响
-const STYLE_PRESETS = ["真人实拍", "动漫二次元", "3D 卡通", "赛博霓虹", "国风"];
+// 落库值是**稳定 ASCII key**（live/anime/...），不是中文标签：
+// 用中文当业务值会让"切到英文再提交"的同一需求在库里存两种值（同类问题还有
+// film_tables 预置名、novel 步骤提示，都登记在进度文档 §5「后端中文数据」）。
+// 历史草稿里仍是中文值，所以 styleLabel 同时映射旧中文值 → 已有数据也能显示译文。
+const STYLE_PRESETS = ["live", "anime", "cartoon3d", "cyber", "guofeng"];
 const styleLabel = (value: string): string => {
   const map: Record<string, string> = {
+    live: t("adDrama.create.styles.live"),
+    anime: t("adDrama.create.styles.anime"),
+    cartoon3d: t("adDrama.create.styles.cartoon3d"),
+    cyber: t("adDrama.create.styles.cyber"),
+    guofeng: t("adDrama.create.styles.guofeng"),
+    // 兼容旧草稿（历史版本把中文标签当值提交）
     真人实拍: t("adDrama.create.styles.live"),
     动漫二次元: t("adDrama.create.styles.anime"),
     "3D 卡通": t("adDrama.create.styles.cartoon3d"),

@@ -15,9 +15,9 @@ useHead({ title: () => t("home.metaTitle") });
  */
 const tools = computed(() => [
   { label: t("home.tools.script.label"), desc: t("home.tools.script.desc"), to: "/projects", icon: "script", enabled: true, modal: true },
-  { label: t("home.tools.plaza.label"), desc: t("home.tools.plaza.desc"), to: null, icon: "plaza", enabled: false, modal: false, tag: t("home.tools.plaza.tag") },
-  { label: t("home.tools.spark.label"), desc: t("home.tools.spark.desc"), to: null, icon: "spark", enabled: false, modal: false, tag: t("home.tools.spark.tag") },
-  { label: t("home.tools.lips.label"), desc: t("home.tools.lips.desc"), to: null, icon: "lips", enabled: false, modal: false, tag: t("home.tools.lips.tag") },
+  { label: t("home.tools.plaza.label"), desc: t("home.tools.plaza.desc"), to: null, icon: "plaza", enabled: false, modal: false, tag: t("home.tools.plaza.tag"), tagKind: "soon" },
+  { label: t("home.tools.spark.label"), desc: t("home.tools.spark.desc"), to: null, icon: "spark", enabled: false, modal: false, tag: t("home.tools.spark.tag"), tagKind: "member" },
+  { label: t("home.tools.lips.label"), desc: t("home.tools.lips.desc"), to: null, icon: "lips", enabled: false, modal: false, tag: t("home.tools.lips.tag"), tagKind: "soon" },
   { label: t("home.tools.t2v.label"), desc: t("home.tools.t2v.desc"), to: null, icon: "t2v", enabled: false, modal: false },
   { label: t("home.tools.i2v.label"), desc: t("home.tools.i2v.desc"), to: null, icon: "i2v", enabled: false, modal: false },
   { label: t("home.tools.hd.label"), desc: t("home.tools.hd.desc"), to: null, icon: "hd", enabled: false, modal: false },
@@ -260,38 +260,38 @@ onUnmounted(() => {
     </section>
 
     <section v-if="sectionVisible('tools')" class="tool-row" :style="sectionStyle('tools')">
-      <div v-for="t in tools" :key="t.label" class="tool-cell">
+      <div v-for="tool in tools" :key="tool.label" class="tool-cell">
         <button
           type="button"
           class="tool-card"
-          :class="{ disabled: !t.enabled }"
-          @click="onToolClick(t)"
+          :class="{ disabled: !tool.enabled }"
+          @click="onToolClick(tool)"
         >
-          <span v-if="t.tag" class="corner-tag" :data-kind="t.tag">{{ t.tag }}</span>
+          <span v-if="tool.tag" class="corner-tag" :data-kind="tool.tagKind">{{ tool.tag }}</span>
           <span class="tool-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <template v-if="t.icon === 'script'">
+              <template v-if="tool.icon === 'script'">
                 <path d="M6 3.5h10.5A1.5 1.5 0 0 1 18 5v15.5H7.5A1.5 1.5 0 0 1 6 19Z" />
                 <path d="M9 7.5h6M9 11h6M9 14.5h3.5" />
               </template>
-              <template v-else-if="t.icon === 't2v'">
+              <template v-else-if="tool.icon === 't2v'">
                 <rect x="3" y="5" width="13" height="14" rx="2.5" />
                 <path d="m9.5 9 4 3-4 3ZM19 8.5v7M21.5 10v4" />
               </template>
-              <template v-else-if="t.icon === 'i2v'">
+              <template v-else-if="tool.icon === 'i2v'">
                 <rect x="3" y="5" width="18" height="14" rx="2.5" />
                 <circle cx="8.5" cy="10" r="1.5" />
                 <path d="m5 17 4.5-4 3 2.5L16 12l3 5" />
               </template>
-              <template v-else-if="t.icon === 'plaza'">
+              <template v-else-if="tool.icon === 'plaza'">
                 <path d="M4.5 6A1.5 1.5 0 0 1 6 4.5h12A1.5 1.5 0 0 1 19.5 6v9a1.5 1.5 0 0 1-1.5 1.5h-4l3 3M7 19.5l3-3h-4" />
                 <path d="M8 8h8M8 11h5" />
               </template>
-              <template v-else-if="t.icon === 'lips'">
+              <template v-else-if="tool.icon === 'lips'">
                 <path d="M4 12c2.5-1 3.5-3.5 8-3.5S17.5 11 20 12c-2.5 3-5 4.5-8 4.5S6.5 15 4 12Z" />
                 <path d="M4 12h16" />
               </template>
-              <template v-else-if="t.icon === 'spark'">
+              <template v-else-if="tool.icon === 'spark'">
                 <path d="M12 3.5c.5 3.8 2.2 5.5 6 6-3.8.5-5.5 2.2-6 6-.5-3.8-2.2-5.5-6-6 3.8-.5 5.5-2.2 6-6Z" />
                 <path d="M18.5 15.5c.3 1.9 1 2.6 3 3-2 .4-2.7 1.1-3 3-.3-1.9-1-2.6-3-3 2-.4 2.7-1.1 3-3Z" />
               </template>
@@ -302,7 +302,7 @@ onUnmounted(() => {
             </svg>
           </span>
         </button>
-        <p class="tool-label" :class="{ dim: !t.enabled }">{{ t.label }}</p>
+        <p class="tool-label" :class="{ dim: !tool.enabled }">{{ tool.label }}</p>
       </div>
     </section>
 
@@ -592,20 +592,15 @@ onUnmounted(() => {
   line-height: 1.6;
   white-space: nowrap;
 }
-.corner-tag[data-kind="即将上线"] {
+.corner-tag[data-kind="soon"] {
   background: #d3f36b;
   color: #1c2405;
   font-weight: 600;
 }
-.corner-tag[data-kind="一键出片"] {
+.corner-tag[data-kind="member"] {
   background: linear-gradient(90deg, #ff7a45, #ff4d6a);
   color: #fff;
   font-weight: 600;
-}
-.corner-tag[data-kind="敬请期待"] {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-2);
-  color: var(--text-3);
 }
 .tool-label {
   margin: 12px 0 0;
