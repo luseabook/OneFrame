@@ -2,7 +2,8 @@
 import type { FlowDto } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
-useHead({ title: "积分 · 一帧" });
+const { t, locale } = useI18n();
+useHead({ title: () => t("credits.metaTitle") });
 
 const api = useApi();
 const flows = ref<FlowDto[]>([]);
@@ -27,26 +28,34 @@ async function load(): Promise<void> {
     balance.value = me.credits.balance;
     frozen.value = me.credits.frozen;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    error.value = e instanceof Error ? e.message : t("credits.loadFailed");
   } finally {
     loading.value = false;
   }
 }
 
-const KIND_META: Record<string, { label: string; tone: "neutral" | "success" | "brand" | "warning" | "danger" }> = {
-  gift: { label: "赠送", tone: "success" },
-  recharge: { label: "充值", tone: "success" },
-  freeze: { label: "冻结", tone: "warning" },
-  settle: { label: "结算", tone: "neutral" },
-  unfreeze: { label: "解冻", tone: "brand" },
+const KIND_META: Record<string, { tone: "neutral" | "success" | "brand" | "warning" | "danger" }> = {
+  gift: { tone: "success" },
+  recharge: { tone: "success" },
+  freeze: { tone: "warning" },
+  settle: { tone: "neutral" },
+  unfreeze: { tone: "brand" },
   // 兼容旧口径（后端历史数据可能为 purchase）
-  purchase: { label: "充值", tone: "success" },
-  refund: { label: "退款", tone: "brand" },
-  invite: { label: "邀请", tone: "success" },
-  adjust: { label: "调整", tone: "neutral" },
+  purchase: { tone: "success" },
+  refund: { tone: "brand" },
+  invite: { tone: "success" },
+  adjust: { tone: "neutral" },
 };
 
-const kindLabel = (kind: string): string => KIND_META[kind]?.label ?? kind;
+/**
+ * 流水类型文案走 i18n（`credits.kinds.*`）。
+ * 兼容键 `purchase` 映射到 `recharge` 的文案——历史数据里两种都出现过，
+ * 直接 t(`credits.kinds.purchase`) 会渲染出 key 本身（i18n 缺 key 时的降级行为）。
+ */
+const kindLabel = (kind: string): string => {
+  const key = kind === "purchase" ? "recharge" : kind;
+  return t(`credits.kinds.${key}`);
+};
 const kindTone = (kind: string) => KIND_META[kind]?.tone ?? "neutral";
 
 onMounted(load);
@@ -56,25 +65,25 @@ onMounted(load);
   <div class="credits">
     <header class="head">
       <div>
-        <h1>积分</h1>
-        <p class="sub">创建任务时冻结，成功结算、失败/取消解冻；Alpha 期积分不过期。</p>
+        <h1>{{ t("credits.title") }}</h1>
+        <p class="sub">{{ t("credits.sub") }}</p>
       </div>
     </header>
 
     <!-- 余额概览 -->
     <section class="summary">
       <div class="stat">
-        <span class="label">可用积分</span>
+        <span class="label">{{ t("credits.available") }}</span>
         <b class="value">{{ balance ?? "-" }}</b>
       </div>
       <div class="divider" />
       <div class="stat">
-        <span class="label">冻结中</span>
+        <span class="label">{{ t("credits.frozen") }}</span>
         <b class="value frozen">{{ frozen ?? "-" }}</b>
       </div>
       <div class="divider" />
       <div class="stat">
-        <span class="label">累计流水</span>
+        <span class="label">{{ t("credits.totalFlow") }}</span>
         <b class="value">{{ total }}</b>
       </div>
     </section>
@@ -86,12 +95,12 @@ onMounted(load);
     <template v-else>
       <div v-if="flows.length" class="flow-table">
         <div class="flow-row flow-head">
-          <span class="c-kind">类型</span>
-          <span class="c-num">积分</span>
-          <span class="c-num">冻结</span>
-          <span class="c-num">余额</span>
-          <span class="c-memo">备注</span>
-          <span class="c-time">时间</span>
+          <span class="c-kind">{{ t("credits.colKind") }}</span>
+          <span class="c-num">{{ t("credits.colCredits") }}</span>
+          <span class="c-num">{{ t("credits.colFrozen") }}</span>
+          <span class="c-num">{{ t("credits.colBalance") }}</span>
+          <span class="c-memo">{{ t("credits.colMemo") }}</span>
+          <span class="c-time">{{ t("credits.colTime") }}</span>
         </div>
         <div v-for="flow in flows" :key="flow.id" class="flow-row">
           <span class="c-kind">
@@ -105,21 +114,21 @@ onMounted(load);
           </span>
           <span class="c-num mono">{{ flow.balance_after }}</span>
           <span class="c-memo muted">{{ flow.memo ?? "—" }}</span>
-          <span class="c-time muted">{{ new Date(flow.created_at).toLocaleString("zh-CN") }}</span>
+          <span class="c-time muted">{{ new Date(flow.created_at).toLocaleString(locale) }}</span>
         </div>
       </div>
 
       <EmptyState
         v-else
         icon="◉"
-        title="暂无积分流水"
-        description="注册赠送、任务冻结与结算记录都会出现在这里。"
+        :title="t('credits.emptyTitle')"
+        :description="t('credits.emptyDesc')"
       />
 
       <div v-if="total > pageSize" class="pager">
-        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">上一页</Button>
-        <span class="muted">第 {{ page }} 页 / 共 {{ total }} 条</span>
-        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">下一页</Button>
+        <Button variant="ghost" :disabled="page <= 1" @click="page -= 1; load()">{{ t("credits.prev") }}</Button>
+        <span class="muted">{{ t("credits.pager", { page, total }) }}</span>
+        <Button variant="ghost" :disabled="page * pageSize >= total" @click="page += 1; load()">{{ t("credits.next") }}</Button>
       </div>
     </template>
   </div>

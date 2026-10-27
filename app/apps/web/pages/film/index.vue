@@ -16,6 +16,7 @@ import type { FilmFuncWhitelistDto, FilmProjectRowDto, FilmRecentOpenDto } from 
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t, locale } = useI18n();
 const api = useApi();
 const toast = useToast();
 const activeSpace = useActiveSpaceId();
@@ -40,7 +41,7 @@ async function loadWhitelist() {
 async function load() {
   if (!spaceId.value) {
     loading.value = false;
-    errorMsg.value = "请先在「团队」里选择或创建一个团队空间（影视版按团队开通）";
+    errorMsg.value = t("film.needSpace");
     return;
   }
   loading.value = true;
@@ -55,7 +56,7 @@ async function load() {
     projects.value = list.list;
     recent.value = list.recent ?? [];
   } catch (e) {
-    errorMsg.value = (e as Error).message || "加载失败";
+    errorMsg.value = (e as Error).message || t("film.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -69,7 +70,7 @@ function generateProjectId(): string {
 async function createProject() {
   const name = newName.value.trim();
   if (name.length === 0) {
-    toast.error("请填项目名称");
+    toast.error(t("film.nameRequired"));
     return;
   }
   creating.value = true;
@@ -78,12 +79,12 @@ async function createProject() {
     // 第一张表用项目名 → 列表标题就是项目名；随后补齐预置表（幂等）
     await api.post(`/film/projects/${projectId}/task-tables`, { name });
     await api.post(`/film/projects/${projectId}/task-tables/ensure-presets`);
-    toast.success("项目已创建");
+    toast.success(t("film.created"));
     showCreate.value = false;
     newName.value = "";
     await load();
   } catch (e) {
-    toast.error((e as Error).message || "创建失败");
+    toast.error((e as Error).message || t("film.createFailed"));
   } finally {
     creating.value = false;
   }
@@ -92,7 +93,7 @@ async function createProject() {
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("zh-CN", { hour12: false });
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString(locale.value, { hour12: false });
 }
 
 onMounted(load);
@@ -102,41 +103,36 @@ onMounted(load);
   <div class="fl-page">
     <header class="fl-head">
       <div>
-        <h1 class="fl-title">影视版</h1>
-        <p class="fl-sub">任务表 · 审核版本链 · 画布协同（对照 ReelMate 影视版 film 域）</p>
+        <h1 class="fl-title">{{ t("film.title") }}</h1>
+        <p class="fl-sub">{{ t("film.sub") }}</p>
       </div>
       <div class="fl-head-actions">
-        <button type="button" class="fl-btn" :disabled="loading" @click="load">刷新</button>
+        <button type="button" class="fl-btn" :disabled="loading" @click="load">{{ t("film.refresh") }}</button>
         <button
           v-if="authorized"
           type="button"
           class="fl-btn fl-btn-primary"
           @click="showCreate = true"
         >
-          ＋ 新建项目
+          {{ t("film.newProject") }}
         </button>
       </div>
     </header>
 
     <p v-if="errorMsg" class="fl-alert">{{ errorMsg }}</p>
 
-    <div v-if="loading" class="fl-skeleton">加载中…</div>
+    <div v-if="loading" class="fl-skeleton">{{ t("film.loading") }}</div>
 
     <!-- 未开通：商务开通制引导（L0） -->
     <section v-else-if="authorized === false" class="fl-gate">
-      <h2 class="fl-gate-title">影视版尚未开通</h2>
-      <p class="fl-gate-text">
-        影视版是团队级功能（任务表 / 审核版本链 / 画布协同），需要商务开通后使用。
-        当前团队空间未开通，请联系商务或团队管理员开通。
-      </p>
-      <p class="fl-gate-hint">
-        已开通但仍看到此页？请确认右上角的当前空间是「团队空间」而不是个人空间。
-      </p>
+      <h2 class="fl-gate-title">{{ t("film.gateTitle") }}</h2>
+      <p class="fl-gate-text">{{ t("film.gateText") }}</p>
+      <p class="fl-gate-hint">{{ t("film.gateHint") }}</p>
     </section>
 
     <template v-else>
       <section v-if="recent.length > 0" class="fl-recent">
-        <h2 class="fl-section-title">最近打开</h2>
+        <h2 class="fl-section-title">{{ t("film.recent") }}</h2>
         <div class="fl-recent-list">
           <NuxtLink
             v-for="r in recent.slice(0, 5)"
@@ -144,27 +140,25 @@ onMounted(load);
             :to="`/film/${r.project_id}`"
             class="fl-recent-item"
           >
-            <span class="fl-recent-id">项目 {{ r.project_id.slice(-6) }}</span>
+            <span class="fl-recent-id">{{ t("film.recentItem", { id: r.project_id.slice(-6) }) }}</span>
             <span class="fl-recent-time">{{ fmtTime(r.opened_at) }}</span>
           </NuxtLink>
         </div>
       </section>
 
       <section class="fl-projects">
-        <h2 class="fl-section-title">全部项目</h2>
-        <p v-if="projects.length === 0" class="fl-empty">
-          还没有影视项目。点右上「新建项目」创建一个：会同时生成分镜任务表与资产需求表。
-        </p>
+        <h2 class="fl-section-title">{{ t("film.allProjects") }}</h2>
+        <p v-if="projects.length === 0" class="fl-empty">{{ t("film.empty") }}</p>
         <ul v-else class="fl-project-grid">
           <li v-for="p in projects" :key="p.project_id" class="fl-project-card">
             <NuxtLink :to="`/film/${p.project_id}`" class="fl-project-link">
               <h3 class="fl-project-name">{{ p.title }}</h3>
               <p class="fl-project-meta">
-                {{ p.table_count }} 张表 · {{ p.task_count }} 条任务
+                {{ t("film.cardMeta", { tables: p.table_count, tasks: p.task_count }) }}
               </p>
               <p class="fl-project-time">
-                更新 {{ fmtTime(p.updated_at) }}
-                <template v-if="p.last_opened_at"> · 打开 {{ fmtTime(p.last_opened_at) }}</template>
+                {{ t("film.updated", { time: fmtTime(p.updated_at) }) }}
+                <template v-if="p.last_opened_at"> · {{ t("film.opened", { time: fmtTime(p.last_opened_at) }) }}</template>
               </p>
             </NuxtLink>
           </li>
@@ -175,14 +169,14 @@ onMounted(load);
     <!-- 新建项目 -->
     <div v-if="showCreate" class="fl-modal-mask" @click.self="showCreate = false">
       <div class="fl-modal">
-        <h2 class="fl-modal-title">新建影视项目</h2>
-        <label class="fl-label" for="fl-project-name">项目名称</label>
-        <input id="fl-project-name" v-model="newName" class="fl-input" placeholder="例如：短剧《归途》第一季" />
-        <p class="fl-hint">创建后会同时补齐两张预置任务表（分镜任务表 / 资产需求表）。</p>
+        <h2 class="fl-modal-title">{{ t("film.createTitle") }}</h2>
+        <label class="fl-label" for="fl-project-name">{{ t("film.nameLabel") }}</label>
+        <input id="fl-project-name" v-model="newName" class="fl-input" :placeholder="t('film.namePlaceholder')" />
+        <p class="fl-hint">{{ t("film.createHint") }}</p>
         <div class="fl-modal-actions">
-          <button type="button" class="fl-btn" @click="showCreate = false">取消</button>
+          <button type="button" class="fl-btn" @click="showCreate = false">{{ t("common.cancel") }}</button>
           <button type="button" class="fl-btn fl-btn-primary" :disabled="creating" @click="createProject">
-            {{ creating ? "创建中…" : "创建" }}
+            {{ creating ? t("film.creating") : t("film.create") }}
           </button>
         </div>
       </div>

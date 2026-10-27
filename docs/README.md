@@ -123,6 +123,31 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v3.9 · 多语言第 8 批页面迁移（影视版/集市/积分） · 2026-10-27）
+
+**#16 多语言 92% → 93%**；全站 **97.3%** / 首发 **97.6%**。
+
+| 项 | 内容 |
+|---|---|
+| 新增 namespace | `film`（30 key）、`market`（26 key）、`credits`（18 key + 嵌套 `kinds.*` 9 个），各 5 语言（zh-CN / en / ja / pt-BR / es） |
+| 迁移页面 | [film/index.vue](app/apps/web/pages/film/index.vue)（影视版列表 + 新建弹窗）、[novel-market/index.vue](app/apps/web/pages/novel-market/index.vue)（集市筛选/卡片/分页）、[credits.vue](app/apps/web/pages/credits.vue)（余额概览 + 流水表 + 类型标签） |
+| 已迁移页面 | **13 / 64**（此前 10 页），语言包 key **460** |
+| 静态校验 | `node _acceptance/i18n-check.cjs` → 5 语言 key 一致、无空值、无中文残留（ja 用简体专用字表）、占位符一致、页面 key 齐全 ✅ |
+| 浏览器验收 | `node _acceptance/e2e-i18n-pages.cjs` → **15/15**（影视版/集市/积分 × 中英对照：无 key 残留、英文无中文残留、控制台清洁） |
+
+**迁移中修掉/规避的两个真实坑**：
+
+1. `novel-market/index.vue` 原本用 `v-for="t in config.tags"` 循环标签——与 `const { t } = useI18n()` **同名冲突**。
+   不改名的话模板里的 `t` 会指到标签对象，`{{ t.name }}` 直接渲染 `undefined`。已改名为 `tag`，并在 E2E 里加了
+   "标签按钮仍可渲染（数量/文案来自库）"这条回归断言（避免以后有人再撞）。
+2. `credits.vue` 的流水类型是 `KIND_META` 常量表里的中文——直接照搬会绕过 i18n。
+   已改为 `credits.kinds.*` 查表，并把后端历史值 `purchase` 映射到 `recharge` 的文案
+   （否则 `t("credits.kinds.purchase")` 会渲染出 key 本身）。
+
+**顺带修掉一处测试数据污染**：`e2e-i18n-pages.cjs` 一开始用 `悬疑-${Date.now()}` 这种每次不同的标签名，
+每跑一次就往 `market_tags` 多插两行（真实集市页面会多出脏标签）。已改为固定名 `E2E-悬疑`/`E2E-都市` +
+结束时删除，并清掉了历史累积行。
+
 ## 变更登记（v3.8 · 平台运营创作者审核队列 + SSR 500 修复 · 2026-10-27）
 
 **#10 活动/创作者 99% → 100%**；全站 **97.2%** / 首发 **97.6%**。

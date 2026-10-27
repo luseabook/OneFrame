@@ -14,6 +14,7 @@ import type { MarketConfigDto, MarketScriptListDto, MarketWorkDto } from "~/type
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t } = useI18n();
 const api = useApi();
 const toast = useToast();
 
@@ -47,7 +48,7 @@ async function load() {
     list.value = res.list;
     total.value = res.total;
   } catch (e) {
-    errorMsg.value = (e as Error).message || "集市加载失败";
+    errorMsg.value = (e as Error).message || t("market.loadFailed");
     list.value = [];
     total.value = 0;
   } finally {
@@ -97,9 +98,9 @@ async function copyShareLink(work: MarketWorkDto) {
   const url = `${window.location.origin}/novel-market/${work.id}`;
   try {
     await navigator.clipboard.writeText(url);
-    toast.success("详情链接已复制");
+    toast.success(t("market.copied"));
   } catch {
-    toast.error("复制失败，请手动复制地址栏链接");
+    toast.error(t("market.copyFailed"));
   }
 }
 
@@ -108,7 +109,7 @@ onMounted(async () => {
     await loadConfig();
     await load();
   } catch (e) {
-    errorMsg.value = (e as Error).message || "集市配置加载失败";
+    errorMsg.value = (e as Error).message || t("market.configFailed");
     loading.value = false;
   }
 });
@@ -118,14 +119,12 @@ onMounted(async () => {
   <div class="mk-page">
     <header class="mk-head">
       <div>
-        <h1 class="mk-title">剧本集市</h1>
-        <p class="mk-sub">
-          买断 / 预售 · 平台抽成 {{ commissionText() }}（运营未拍板，当前为初值） · 收益可提现
-        </p>
+        <h1 class="mk-title">{{ t("market.title") }}</h1>
+        <p class="mk-sub">{{ t("market.sub", { rate: commissionText() }) }}</p>
       </div>
       <div class="mk-head-actions">
-        <button type="button" class="mk-btn" :disabled="loading" @click="load">刷新</button>
-        <NuxtLink to="/novel-market/manage" class="mk-btn mk-btn-primary">上架我的作品</NuxtLink>
+        <button type="button" class="mk-btn" :disabled="loading" @click="load">{{ t("market.refresh") }}</button>
+        <NuxtLink to="/novel-market/manage" class="mk-btn mk-btn-primary">{{ t("market.publishMine") }}</NuxtLink>
       </div>
     </header>
 
@@ -134,44 +133,44 @@ onMounted(async () => {
         v-model="keyword"
         class="mk-input"
         type="search"
-        placeholder="搜索作品标题或简介"
+        :placeholder="t('market.searchPlaceholder')"
         @keyup.enter="applyFilters"
       >
       <select v-model="categoryId" class="mk-input mk-select" @change="applyFilters">
-        <option value="">全部分类</option>
+        <option value="">{{ t("market.allCategories") }}</option>
         <option v-for="c in config?.categories ?? []" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
-      <button type="button" class="mk-btn" @click="applyFilters">查询</button>
-      <button type="button" class="mk-btn mk-btn-ghost" @click="resetFilters">重置</button>
+      <button type="button" class="mk-btn" @click="applyFilters">{{ t("market.search") }}</button>
+      <button type="button" class="mk-btn mk-btn-ghost" @click="resetFilters">{{ t("market.reset") }}</button>
     </section>
 
     <section v-if="(config?.tags ?? []).length > 0" class="mk-tags">
-      <span class="mk-tags-label">标签</span>
+      <span class="mk-tags-label">{{ t("market.tags") }}</span>
       <button
-        v-for="t in config?.tags ?? []"
-        :key="t.id"
+        v-for="tag in config?.tags ?? []"
+        :key="tag.id"
         type="button"
         class="mk-tag"
-        :class="{ 'mk-tag-active': selectedTagIds.includes(t.id) }"
-        @click="toggleTag(t.id); applyFilters()"
+        :class="{ 'mk-tag-active': selectedTagIds.includes(tag.id) }"
+        @click="toggleTag(tag.id); applyFilters()"
       >
-        {{ t.name }}
+        {{ tag.name }}
       </button>
     </section>
 
     <!-- 加载态 -->
-    <p v-if="loading" class="mk-state">正在加载集市…</p>
+    <p v-if="loading" class="mk-state">{{ t("market.loading") }}</p>
 
     <!-- 错误态：给出可执行的下一步，不留白屏 -->
     <div v-else-if="errorMsg" class="mk-state mk-state-error">
       <p>{{ errorMsg }}</p>
-      <button type="button" class="mk-btn" @click="load">重试</button>
+      <button type="button" class="mk-btn" @click="load">{{ t("common.retry") }}</button>
     </div>
 
     <!-- 空态 -->
     <p v-else-if="list.length === 0" class="mk-state">
-      没有符合条件的作品。换个关键词，或
-      <NuxtLink to="/novel-market/manage" class="mk-link">上架你的第一部作品</NuxtLink>。
+      {{ t("market.emptyPrefix") }}
+      <NuxtLink to="/novel-market/manage" class="mk-link">{{ t("market.emptyCta") }}</NuxtLink>。
     </p>
 
     <ul v-else class="mk-grid">
@@ -185,26 +184,26 @@ onMounted(async () => {
             </span>
           </div>
           <h2 class="mk-card-title">{{ work.title }}</h2>
-          <p class="mk-card-summary">{{ work.summary || "作者没有写简介" }}</p>
+          <p class="mk-card-summary">{{ work.summary || t("market.noSummary") }}</p>
           <p class="mk-card-meta">
-            <span class="mk-price">{{ work.price_credits.toLocaleString() }} 积分</span>
+            <span class="mk-price">{{ t("market.priceCredits", { credits: work.price_credits.toLocaleString() }) }}</span>
             <span v-if="work.preorder_price_credits !== null" class="mk-presale">
-              定金 {{ work.preorder_price_credits.toLocaleString() }}
+              {{ t("market.deposit", { credits: work.preorder_price_credits.toLocaleString() }) }}
             </span>
-            <span class="mk-sales">已售 {{ work.sales_count }}</span>
+            <span class="mk-sales">{{ t("market.sold", { count: work.sales_count }) }}</span>
           </p>
           <p class="mk-card-author">
-            {{ work.author?.nickname || "匿名作者" }} · 作者实收 {{ creatorRevenue(work.price_credits).toLocaleString() }}
+            {{ work.author?.nickname || t("market.anonymous") }} · {{ t("market.authorRevenue", { credits: creatorRevenue(work.price_credits).toLocaleString() }) }}
           </p>
         </NuxtLink>
-        <button type="button" class="mk-copy" @click="copyShareLink(work)">复制链接</button>
+        <button type="button" class="mk-copy" @click="copyShareLink(work)">{{ t("market.copyLink") }}</button>
       </li>
     </ul>
 
     <footer v-if="!loading && !errorMsg && total > pageSize" class="mk-pager">
-      <button type="button" class="mk-btn" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
-      <span class="mk-pager-info">{{ page }} / {{ totalPages }}（共 {{ total }} 部）</span>
-      <button type="button" class="mk-btn" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button>
+      <button type="button" class="mk-btn" :disabled="page <= 1" @click="changePage(page - 1)">{{ t("market.prev") }}</button>
+      <span class="mk-pager-info">{{ t("market.pagerInfo", { page, pages: totalPages, total }) }}</span>
+      <button type="button" class="mk-btn" :disabled="page >= totalPages" @click="changePage(page + 1)">{{ t("market.next") }}</button>
     </footer>
   </div>
 </template>

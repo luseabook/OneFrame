@@ -1776,3 +1776,21 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 与用户域的 `reviewed_by`（→ `users`）分开——两个身份域混用一列会让另一条路径无法记录"谁审的"。
 
 **前端**：运营后台 `?tab=creatorAudits` 页签（搜索 + 通过/驳回/下架）。
+
+### 17.15 前端 i18n 页面覆盖（2026-10-27 第 8 批）
+
+> 这一节记录**前端**多语言覆盖口径（无端点变更）：语言由 `X-Lang` / cookie / `?lang=` / 路径前缀解析，
+> 文案来自 `apps/web/i18n/locales/*.json`（5 语言，namespace 划分见下）。
+
+| namespace | 覆盖页面/组件 | key 数 |
+|---|---|---:|
+| `common` / `nav` / `lang` / `sidebar` / `errors` | 壳层（布局、导航、错误页） | ~120 |
+| `auth` / `landing` / `pricing` / `settings` / `billing` | 登录、落地页、定价与订阅、设置 | ~150 |
+| `tools` / `tasks` / `works` / `share` | 工具箱、任务、全部项目、分享页 | ~120 |
+| `film`（新）/ `market`（新）/ `credits`（新） | 影视版列表、剧本集市、积分流水 | 74 |
+
+**已迁移页面 13 / 64**（第 8 批新增 film/index、novel-market/index、credits）。
+**未迁移**：novel / creator-center / admin / team / agent / create(19 卡) / canvas / reelflow / 合集详情等（记在进度文档 §5）。
+
+**校验口径**：`_acceptance/i18n-check.cjs`（静态：key 一致 / 无空值 / 外语包无中文残留 / 占位符一致 / 页面 key 齐全）
++ `_acceptance/e2e-i18n-pages.cjs`（浏览器：中英对照、无 key 残留、控制台清洁）。
