@@ -368,6 +368,9 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 | 证据 | 内容 |
 |---|---|
 | `_acceptance/smoke-round3.ps1` | 广告剧五段全链（create→卖点 5→brief 3→选定→剧本 483 字→编辑 496→分镜→资产→tips 6→stage 5/5）+ 视频转绘四段全链（切 3 集→20 镜→20 任务→绑定 20→stage done）+ `/watch` 非法 token 400102 |
+| `e2e-ad-drama.cjs` | 广告剧五段真实浏览器验收 **12/12**（上传→建项目→卖点→brief→剧本→编辑落库→分镜→资产→控制台） |
+| `e2e-video-redraw.cjs` | 视频转绘四段真实浏览器验收 **11/11**（切集→分镜 14→产出 14 资产→绑定 **14/14 镜**→控制台） |
+| `e2e-subject-template.cjs` | 主体模板 UI 真实浏览器验收 **8/8**（目录 4 模板→未选禁用→选中可用→应用成功提示→控制台） |
 | `_acceptance/i18n-check.cjs` | 312 key × 5 语言一致性 + 浏览器 30 组合（第 2 轮脚本，本轮沿用） |
 | `test/ad-drama.spec.ts` / `test/video-redraw.spec.ts` | 13 / 14 例（成功 / 403 / 参数 / 幂等 / 跨 space / 报价不足） |
 
