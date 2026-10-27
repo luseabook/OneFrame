@@ -30,6 +30,7 @@ import type { FilmFieldRow } from "./film.fields.service";
 import { FilmFieldsService } from "./film.fields.service";
 import { buildFilterCondition, buildSortExpression, isClearValue, isReadonlyType, normalizeCellValue } from "./film.fields";
 import { FilmRealtimeService } from "./film.realtime";
+import { FilmNotifyService } from "./film-notify.service";
 import { FilmReviewService } from "./film.review.service";
 
 /**
@@ -65,6 +66,7 @@ export class FilmTasksService {
     @Inject(FilmFieldsService) private readonly fields: FilmFieldsService,
     @Inject(FilmReviewService) private readonly review: FilmReviewService,
     @Inject(FilmRealtimeService) private readonly realtime: FilmRealtimeService,
+    @Inject(FilmNotifyService) private readonly notify: FilmNotifyService,
   ) {}
 
   // ── 视图映射 ────────────────────────────────────────────
@@ -910,7 +912,33 @@ export class FilmTasksService {
       payload: { task_id: String(params.task.id), user_ids: ids },
       originUserId: params.userId,
     });
-    return { ok: true, notified: ids.length, user_ids: ids, channel: event.channel, seq: event.seq };
+    /**
+     * 离线通知投递（模块 #8 收尾）：广播面只覆盖"在线"用户；这里再走一次可配置 webhook
+     * （企业微信/飞书/客户网关），未配置时 `delivery="stored"` —— 广播已发生，不假装推送成功。
+     * 投递失败**不阻塞**主流程（`delivery="failed"` 返回给调用方，由前端/运维决定是否告警）。
+     */
+    const delivery = await this.notify
+      .deliver({
+        type: "film.task.notified",
+        spaceId: String(params.table.spaceId),
+        projectId: String(params.table.projectId),
+        tableId: String(params.table.id),
+        payload: { task_id: String(params.task.id), user_ids: ids, channel: event.channel, seq: event.seq },
+      })
+      .catch((err: unknown) => ({
+        delivery: "failed" as const,
+        attempts: 0,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    return {
+      ok: true,
+      notified: ids.length,
+      user_ids: ids,
+      channel: event.channel,
+      seq: event.seq,
+      delivery: delivery.delivery,
+      delivery_attempts: delivery.attempts,
+    };
   }
 
   /** `points_ro` 的只读聚合（契约 A14）：结算链路未接时返回 null，不返回假 0 */

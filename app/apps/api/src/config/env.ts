@@ -141,6 +141,15 @@ const envSchema = z.object({
   MASTER_TTL_S: z.coerce.number().int().min(3600).default(2_592_000), // 30 天
 
   /**
+   * 影视版离线通知 webhook（第 4 轮）：为空 = 只走广播面，不投递（响应 `delivery:"stored"`）。
+   * 用途：把 `task.notified` 等事件推到企业微信/飞书机器人或客户自己的网关，不必接推送厂商。
+   * `FILM_NOTIFY_SECRET` 用于 HMAC-SHA256 签名（`x-of-signature: sha256=<hex>`），接收方可验来源。
+   * 与 OAuth 同口径：**服务内调用时读 process.env**（便于测试切态），此处仅登记可发现性。
+   */
+  FILM_NOTIFY_WEBHOOK_URL: z.string().optional(),
+  FILM_NOTIFY_SECRET: z.string().optional(),
+
+  /**
    * 首页未读长轮询挂起上限（毫秒）：默认 25s（低于常见反代 30s 读超时，
    * 避免网关先断、客户端拿到 502 而不是"空结果重连"）。测试/联调可调小到 300ms。
    */

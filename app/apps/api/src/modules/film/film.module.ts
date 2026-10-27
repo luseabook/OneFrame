@@ -5,6 +5,7 @@ import { FilmAccessService } from "./film.access";
 import { FilmCanvasService } from "./film.canvas.service";
 import { FilmController } from "./film.controller";
 import { FilmExportsService } from "./film.exports.service";
+import { FilmNotifyService } from "./film-notify.service";
 import { FilmFieldsService } from "./film.fields.service";
 import { FilmRealtimeService } from "./film.realtime";
 import { FilmReviewService } from "./film.review.service";
@@ -37,6 +38,7 @@ import { FilmWhitelistController } from "./film.whitelist.controller";
     FilmTasksService,
     FilmCanvasService,
     FilmExportsService,
+    FilmNotifyService,
   ],
   exports: [FilmAccessService, FilmRealtimeService, FilmTablesService, FilmTasksService],
 })
