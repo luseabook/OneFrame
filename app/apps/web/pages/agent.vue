@@ -24,6 +24,9 @@ import type { AgentRecommendCard, AgentSkill } from "~/types/api";
 
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 
+const { t } = useI18n();
+useHead({ title: () => t("agent.metaTitle") });
+
 const chat = useAgentChat();
 
 const composer = ref("");
@@ -41,18 +44,18 @@ const canSend = computed(
 );
 /** 输入区状态提示：优先级 结束 > 发送中 > 等回复 > 思考中 */
 const composerHint = computed(() => {
-  if (chat.ended.value) return "会话已结束，新建一个会话继续创作";
-  if (chat.sending.value) return "发送中…";
-  if (chat.modelStep.value === "thinking") return "Agent 正在思考…";
-  if (chat.modelStep.value === "writing") return "Agent 正在写…";
-  if (chat.awaitingReply.value) return "等待回复…";
+  if (chat.ended.value) return t("agent.hintEnded");
+  if (chat.sending.value) return t("agent.sending");
+  if (chat.modelStep.value === "thinking") return t("agent.hintThinking");
+  if (chat.modelStep.value === "writing") return t("agent.hintWriting");
+  if (chat.awaitingReply.value) return t("agent.awaiting");
   return "";
 });
 const channelLabel = computed(() => {
-  if (chat.streamState.value === "live") return "实时连接";
-  if (chat.streamState.value === "polling") return "降级轮询（3s）";
-  if (chat.streamState.value === "connecting") return "连接中…";
-  return "未连接";
+  if (chat.streamState.value === "live") return t("agent.channelLive");
+  if (chat.streamState.value === "polling") return t("agent.channelPolling");
+  if (chat.streamState.value === "connecting") return t("agent.channelConnecting");
+  return t("agent.channelOffline");
 });
 
 function scrollToBottom(): void {
@@ -92,12 +95,12 @@ async function newSession(): Promise<void> {
 }
 
 async function removeSession(sessionId: string, title: string): Promise<void> {
-  if (!window.confirm(`删除会话「${title || "新会话"}」？消息记录会一并隐藏。`)) return;
+  if (!window.confirm(t("agent.deleteConfirm", { title: title || t("agent.untitled") }))) return;
   await chat.removeSession(sessionId);
 }
 
 async function endSession(): Promise<void> {
-  if (!window.confirm("结束当前会话后不能再发言，确定结束？")) return;
+  if (!window.confirm(t("agent.endConfirm"))) return;
   await chat.endSession();
 }
 
@@ -154,14 +157,14 @@ function onVoiceText(text: string): void {
     <!-- ── 左：历史会话 ───────────────────────────── -->
     <aside class="ag-side">
       <div class="ag-side__head">
-        <span class="ag-side__title">创作会话</span>
+        <span class="ag-side__title">{{ t("agent.sideTitle") }}</span>
         <button class="btn btn--primary ag-new" type="button" :disabled="chat.creating.value" @click="newSession">
-          {{ chat.creating.value ? "创建中…" : "＋ 新会话" }}
+          {{ chat.creating.value ? t("agent.creating") : t("agent.newSession") }}
         </button>
       </div>
       <p v-if="chat.listError.value" class="ag-error">{{ chat.listError.value }}</p>
-      <p v-if="chat.sessionsLoading.value" class="ag-hint">加载中…</p>
-      <p v-else-if="chat.sessions.value.length === 0" class="ag-hint">还没有会话，点「新会话」开始。</p>
+      <p v-if="chat.sessionsLoading.value" class="ag-hint">{{ t("agent.loading") }}</p>
+      <p v-else-if="chat.sessions.value.length === 0" class="ag-hint">{{ t("agent.emptySessions") }}</p>
       <ul v-else class="ag-sessions">
         <li
           v-for="session in chat.sessions.value"
@@ -170,16 +173,16 @@ function onVoiceText(text: string): void {
           :class="{ 'ag-session--active': session.session_id === chat.activeSessionId.value }"
         >
           <button class="ag-session__main" type="button" @click="chat.selectSession(session.session_id)">
-            <span class="ag-session__title">{{ session.title || "新会话" }}</span>
-            <span class="ag-session__preview">{{ session.last_message_preview || "（还没有消息）" }}</span>
+            <span class="ag-session__title">{{ session.title || t("agent.untitled") }}</span>
+            <span class="ag-session__preview">{{ session.last_message_preview || t("agent.noPreview") }}</span>
             <span class="ag-session__meta">
-              {{ session.message_count }} 条 · {{ session.status === 1 ? "进行中" : session.status === 2 ? "已结束" : "已归档" }}
+              {{ t("agent.sessionMeta", { count: session.message_count, status: session.status === 1 ? t("agent.statusOngoing") : session.status === 2 ? t("agent.statusEnded") : t("agent.statusArchived") }) }}
             </span>
           </button>
           <button
             class="ag-session__del"
             type="button"
-            aria-label="删除会话"
+            :aria-label="t('agent.deleteSession')"
             @click="removeSession(session.session_id, session.title)"
           >
             ✕
@@ -191,7 +194,7 @@ function onVoiceText(text: string): void {
     <!-- ── 右：对话 ───────────────────────────────── -->
     <main class="ag-main">
       <header class="ag-head">
-        <h1 class="ag-head__title">{{ chat.activeSession.value?.title || "创作 Agent" }}</h1>
+        <h1 class="ag-head__title">{{ chat.activeSession.value?.title || t("agent.headDefault") }}</h1>
         <span class="ag-head__channel" :class="{ 'ag-head__channel--off': chat.degraded.value }">{{ channelLabel }}</span>
         <button
           v-if="chat.degraded.value"
@@ -199,7 +202,7 @@ function onVoiceText(text: string): void {
           type="button"
           @click="chat.retryRealtime()"
         >
-          重试实时连接
+          {{ t("agent.retryRealtime") }}
         </button>
         <button
           v-if="chat.activeSession.value && !chat.ended.value"
@@ -208,20 +211,17 @@ function onVoiceText(text: string): void {
           :disabled="chat.ending.value"
           @click="endSession"
         >
-          {{ chat.ending.value ? "结束中…" : "结束会话" }}
+          {{ chat.ending.value ? t("agent.ending") : t("agent.endSession") }}
         </button>
       </header>
 
       <div ref="scroller" class="ag-stream">
         <p v-if="chat.streamError.value" class="ag-error ag-error--inline">{{ chat.streamError.value }}</p>
 
-        <div v-if="chat.messagesLoading.value" class="ag-hint">消息加载中…</div>
+        <div v-if="chat.messagesLoading.value" class="ag-hint">{{ t("agent.messagesLoading") }}</div>
         <div v-else-if="isEmpty" class="ag-empty">
-          <p class="ag-empty__title">说一句你想做什么</p>
-          <p class="ag-empty__desc">
-            例如「一句话武侠短片：雨夜客栈，一人一剑」或「把这段小说改成剧本」。
-            也可以直接从下面的推荐卡或 Skill 卡开始。
-          </p>
+          <p class="ag-empty__title">{{ t("agent.emptyTitle") }}</p>
+          <p class="ag-empty__desc">{{ t("agent.emptyDesc") }}</p>
           <AgentRecommendCards class="ag-recommend" @pick="pickRecommend" />
         </div>
 
@@ -232,8 +232,8 @@ function onVoiceText(text: string): void {
             :message="message"
             :progress="message.task_id ? chat.taskProgress.value[message.task_id] ?? null : null"
           />
-          <p v-if="chat.modelStep.value === 'thinking'" class="ag-typing">Agent 正在思考…</p>
-          <p v-else-if="chat.awaitingReply.value" class="ag-typing">等待回复…</p>
+          <p v-if="chat.modelStep.value === 'thinking'" class="ag-typing">{{ t("agent.thinking") }}</p>
+          <p v-else-if="chat.awaitingReply.value" class="ag-typing">{{ t("agent.awaiting") }}</p>
         </template>
       </div>
 
@@ -241,25 +241,25 @@ function onVoiceText(text: string): void {
         <div v-if="pickedSkills.length > 0" class="ag-chips">
           <span v-for="skill in pickedSkills" :key="skill.skill_id" class="ag-chip">
             {{ skill.name }}
-            <button class="ag-chip__x" type="button" aria-label="取消选择" @click="dropSkill">✕</button>
+            <button class="ag-chip__x" type="button" :aria-label="t('agent.removeSkill')" @click="dropSkill">✕</button>
           </span>
         </div>
-        <div v-if="chat.ended.value" class="ag-ended">会话已结束，新建会话后可继续。</div>
+        <div v-if="chat.ended.value" class="ag-ended">{{ t("agent.endedHint") }}</div>
         <textarea
           ref="textarea"
           v-model="composer"
           class="ag-input"
           rows="3"
           :disabled="chat.ended.value || !chat.activeSessionId.value"
-          :placeholder="chat.activeSessionId.value ? '描述你的创作需求，Enter 发送 / Shift+Enter 换行' : '先在左侧新建会话'"
+          :placeholder="chat.activeSessionId.value ? t('agent.placeholderActive') : t('agent.placeholderInactive')"
           @keydown="onKeydown"
         />
         <div class="ag-actions">
-          <button class="btn btn--ghost ag-skill-trigger" type="button" @click="drawerOpen = true">Skill 卡</button>
+          <button class="btn btn--ghost ag-skill-trigger" type="button" @click="drawerOpen = true">{{ t("agent.skillTrigger") }}</button>
           <AgentVoiceRecorder :disabled="chat.ended.value || chat.sending.value" @text="onVoiceText" />
           <span class="ag-hint ag-hint--inline">{{ composerHint }}</span>
           <button class="btn btn--primary ag-send" type="button" :disabled="!canSend" @click="submit">
-            {{ chat.sending.value ? "发送中…" : "发送" }}
+            {{ chat.sending.value ? t("agent.sending") : t("agent.send") }}
           </button>
         </div>
         <p v-if="chat.lastSendError.value" class="ag-error">{{ chat.lastSendError.value }}</p>
