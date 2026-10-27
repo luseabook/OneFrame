@@ -15,9 +15,9 @@ import type { WatchPublicationDto, WatchViewResultDto } from "~/types/api";
  * - `transcode_failed`（status 4，转码失败）→ 说明 + 重试
  * reason 由后端写在错误消息末尾的 `（token）` 里（全局信封只下发 code+msg），这里按固定格式解析。
  *
- * i18n：语言由全局插件按 `?lang=` → cookie → 浏览器 协商（`plugins/i18n.ts`），
- * 本页用 `useI18n().locale` 取当前语言，文案用**页面内词典**（zh-CN/en）兜底；
- * 不新造 i18n 结构（任务要求），既有 key（`common.loading`/`share.backHome`）照用。
+ * i18n：语言由全局插件按 `?lang=` → cookie → 浏览器 协商（`plugins/i18n.ts`）。
+ * 原实现是本页自带 zh-CN/en 两份词典，其余 3 语言回落中文（ja/pt-BR/es 看到中文）；
+ * 第 38 批改为共享 `watchPage.*` 词条（5 语言齐全），标题也走 `watchPage.metaTitle*`。
  */
 
 definePageMeta({ ssr: false });
@@ -35,82 +35,6 @@ const copied = ref(false);
 const viewCount = ref(0);
 
 const token = computed(() => String(route.params.token ?? ""));
-
-/** 页面内文案词典（不新造 i18n 结构；缺语言回落中文） */
-type WatchTextKey =
-  | "loading"
-  | "transcoding"
-  | "transcodingHint"
-  | "offShelf"
-  | "offShelfHint"
-  | "notFound"
-  | "notFoundHint"
-  | "failed"
-  | "failedHint"
-  | "error"
-  | "retry"
-  | "backHome"
-  | "share"
-  | "copied"
-  | "copyFailed"
-  | "publishedAt"
-  | "views"
-  | "episode"
-  | "brand";
-
-const DICT: Record<string, Record<WatchTextKey, string>> = {
-  "zh-CN": {
-    loading: "加载中…",
-    transcoding: "视频正在转码",
-    transcodingHint: "刚发布的切片需要一点时间处理，稍等片刻再刷新本页。",
-    offShelf: "该视频已下架",
-    offShelfHint: "发布者已经下架了这个视频。如果你需要观看，请联系分享者重新发布。",
-    notFound: "链接无效或已失效",
-    notFoundHint: "请检查链接是否完整（token 一般 32 位），或向分享者索取新的链接。",
-    failed: "视频暂不可播放",
-    failedHint: "这条视频转码失败，发布者需要重新发布。",
-    error: "加载失败",
-    retry: "重试",
-    backHome: "返回首页",
-    share: "复制分享链接",
-    copied: "链接已复制",
-    copyFailed: "复制失败，请手动复制地址栏链接",
-    publishedAt: "发布于",
-    views: "次播放",
-    episode: "第 {no} 集",
-    brand: "由 一帧 AI 漫剧工作台 生成",
-  },
-  en: {
-    loading: "Loading…",
-    transcoding: "This video is still transcoding",
-    transcodingHint: "A freshly published clip needs a moment to process. Please refresh shortly.",
-    offShelf: "This video is no longer available",
-    offShelfHint: "The publisher took it down. Ask the publisher for a new link if you still need it.",
-    notFound: "Invalid or expired link",
-    notFoundHint: "Check that the link is complete (token is usually 32 characters) or request a new one.",
-    failed: "Video temporarily unavailable",
-    failedHint: "Transcoding failed for this video; the publisher needs to publish it again.",
-    error: "Failed to load",
-    retry: "Retry",
-    backHome: "Back to home",
-    share: "Copy share link",
-    copied: "Link copied",
-    copyFailed: "Copy failed — please copy the address bar manually",
-    publishedAt: "Published",
-    views: "views",
-    episode: "Episode {no}",
-    brand: "Generated with OneFrame AI studio",
-  },
-};
-
-const txt = computed(() => {
-  const dict = DICT[String(locale.value ?? "zh-CN")] ?? DICT["zh-CN"]!;
-  return (name: WatchTextKey, vars?: Record<string, string | number>): string => {
-    let out: string = dict[name];
-    if (vars) for (const [k, v] of Object.entries(vars)) out = out.replace(`{${k}}`, String(v));
-    return out;
-  };
-});
 
 /** 后端把 reason 写在 msg 末尾：`...（off_shelf）` */
 function reasonOf(message: string): string {
@@ -178,17 +102,22 @@ async function copyLink(): Promise<void> {
     setTimeout(() => (copied.value = false), 2000);
   } catch {
     // 非 HTTPS / 无剪贴板权限时退化成手动复制（不静默失败）
-    if (import.meta.client) window.prompt(txt.value("copyFailed"), url);
+    if (import.meta.client) window.prompt(t("watchPage.copyFailed"), url);
   }
 }
 
 onMounted(load);
-useHead({ title: () => (data.value?.title ? `${data.value.title} · 一帧` : "播放 · 一帧") });
+useHead({
+  title: () =>
+    data.value?.title
+      ? t("watchPage.metaTitleWith", { title: data.value.title })
+      : t("watchPage.metaTitle"),
+});
 </script>
 
 <template>
   <div class="watch">
-    <p v-if="state === 'loading'" class="w-state">{{ t("common.loading") }}</p>
+    <p v-if="state === 'loading'" class="w-state">{{ t("watchPage.loading") }}</p>
 
     <!-- 可播放 -->
     <template v-else-if="state === 'ready' && data">
@@ -205,73 +134,73 @@ useHead({ title: () => (data.value?.title ? `${data.value.title} · 一帧` : "�
       <section class="w-meta">
         <h1 class="w-title">{{ data.title }}</h1>
         <p class="w-sub">
-          <span v-if="data.episode_no">{{ txt("episode", { no: data.episode_no }) }}</span>
+          <span v-if="data.episode_no">{{ t("watchPage.episode", { no: data.episode_no }) }}</span>
           <span v-if="data.duration_ms" class="w-dot">·</span>
           <span v-if="data.duration_ms">{{ fmtDuration(data.duration_ms) }}</span>
           <span v-if="data.published_at" class="w-dot">·</span>
-          <span v-if="data.published_at">{{ txt("publishedAt") }} {{ fmtTime(data.published_at) }}</span>
+          <span v-if="data.published_at">{{ t("watchPage.publishedAt") }} {{ fmtTime(data.published_at) }}</span>
           <span class="w-dot">·</span>
-          <span>{{ viewCount }} {{ txt("views") }}</span>
+          <span>{{ viewCount }} {{ t("watchPage.views") }}</span>
         </p>
         <div class="w-actions">
           <button type="button" class="w-btn w-btn-primary" @click="copyLink">
-            {{ copied ? txt("copied") : txt("share") }}
+            {{ copied ? t("watchPage.copied") : t("watchPage.share") }}
           </button>
-          <a class="w-btn" href="/">{{ txt("backHome") }}</a>
+          <a class="w-btn" href="/">{{ t("watchPage.backHome") }}</a>
         </div>
-        <p class="w-brand">{{ txt("brand") }}</p>
+        <p class="w-brand">{{ t("watchPage.brand") }}</p>
       </section>
     </template>
 
     <!-- 转码中 -->
     <section v-else-if="state === 'transcoding'" class="w-panel">
       <div class="w-badge w-badge-wait">●</div>
-      <h1 class="w-panel-title">{{ txt("transcoding") }}</h1>
-      <p class="w-panel-text">{{ txt("transcodingHint") }}</p>
+      <h1 class="w-panel-title">{{ t("watchPage.transcoding") }}</h1>
+      <p class="w-panel-text">{{ t("watchPage.transcodingHint") }}</p>
       <div class="w-actions">
-        <button type="button" class="w-btn w-btn-primary" @click="load">{{ txt("retry") }}</button>
-        <a class="w-btn" href="/">{{ txt("backHome") }}</a>
+        <button type="button" class="w-btn w-btn-primary" @click="load">{{ t("watchPage.retry") }}</button>
+        <a class="w-btn" href="/">{{ t("watchPage.backHome") }}</a>
       </div>
     </section>
 
     <!-- 已下架 -->
     <section v-else-if="state === 'off_shelf'" class="w-panel">
       <div class="w-badge w-badge-off">⊘</div>
-      <h1 class="w-panel-title">{{ txt("offShelf") }}</h1>
-      <p class="w-panel-text">{{ txt("offShelfHint") }}</p>
+      <h1 class="w-panel-title">{{ t("watchPage.offShelf") }}</h1>
+      <p class="w-panel-text">{{ t("watchPage.offShelfHint") }}</p>
       <div class="w-actions">
-        <a class="w-btn w-btn-primary" href="/">{{ txt("backHome") }}</a>
+        <a class="w-btn w-btn-primary" href="/">{{ t("watchPage.backHome") }}</a>
       </div>
     </section>
 
     <!-- 转码失败 -->
     <section v-else-if="state === 'failed'" class="w-panel">
       <div class="w-badge w-badge-off">!</div>
-      <h1 class="w-panel-title">{{ txt("failed") }}</h1>
-      <p class="w-panel-text">{{ txt("failedHint") }}</p>
+      <h1 class="w-panel-title">{{ t("watchPage.failed") }}</h1>
+      <p class="w-panel-text">{{ t("watchPage.failedHint") }}</p>
       <div class="w-actions">
-        <button type="button" class="w-btn w-btn-primary" @click="load">{{ txt("retry") }}</button>
-        <a class="w-btn" href="/">{{ txt("backHome") }}</a>
+        <button type="button" class="w-btn w-btn-primary" @click="load">{{ t("watchPage.retry") }}</button>
+        <a class="w-btn" href="/">{{ t("watchPage.backHome") }}</a>
       </div>
     </section>
 
     <!-- 不存在 / 加载失败 -->
     <section v-else-if="state === 'not_found'" class="w-panel">
       <div class="w-badge w-badge-none">?</div>
-      <h1 class="w-panel-title">{{ txt("notFound") }}</h1>
-      <p class="w-panel-text">{{ txt("notFoundHint") }}</p>
+      <h1 class="w-panel-title">{{ t("watchPage.notFound") }}</h1>
+      <p class="w-panel-text">{{ t("watchPage.notFoundHint") }}</p>
       <div class="w-actions">
-        <a class="w-btn w-btn-primary" href="/">{{ txt("backHome") }}</a>
+        <a class="w-btn w-btn-primary" href="/">{{ t("watchPage.backHome") }}</a>
       </div>
     </section>
 
     <section v-else class="w-panel">
       <div class="w-badge w-badge-none">!</div>
-      <h1 class="w-panel-title">{{ txt("error") }}</h1>
+      <h1 class="w-panel-title">{{ t("watchPage.error") }}</h1>
       <p class="w-panel-text">{{ errorMsg }}</p>
       <div class="w-actions">
-        <button type="button" class="w-btn w-btn-primary" @click="load">{{ txt("retry") }}</button>
-        <a class="w-btn" href="/">{{ txt("backHome") }}</a>
+        <button type="button" class="w-btn w-btn-primary" @click="load">{{ t("watchPage.retry") }}</button>
+        <a class="w-btn" href="/">{{ t("watchPage.backHome") }}</a>
       </div>
     </section>
   </div>

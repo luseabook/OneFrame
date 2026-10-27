@@ -3226,5 +3226,28 @@
     "loggingIn": "登录中…",
     "loginBtn": "登录运营后台",
     "loginFootnote": "非生产环境默认 admin / admin12345；生产必须通过 ADMIN_USERNAME / ADMIN_PASSWORD 配置。"
+  },
+  "watchPage": {
+    "metaTitle": "播放 · 一帧",
+    "metaTitleWith": "{title} · 一帧",
+    "loading": "加载中…",
+    "transcoding": "视频正在转码",
+    "transcodingHint": "刚发布的切片需要一点时间处理，稍等片刻再刷新本页。",
+    "offShelf": "该视频已下架",
+    "offShelfHint": "发布者已经下架了这个视频。如果你需要观看，请联系分享者重新发布。",
+    "notFound": "链接无效或已失效",
+    "notFoundHint": "请检查链接是否完整（token 一般 32 位），或向分享者索取新的链接。",
+    "failed": "视频暂不可播放",
+    "failedHint": "这条视频转码失败，发布者需要重新发布。",
+    "error": "加载失败",
+    "retry": "重试",
+    "backHome": "返回首页",
+    "share": "复制分享链接",
+    "copied": "链接已复制",
+    "copyFailed": "复制失败，请手动复制地址栏链接",
+    "publishedAt": "发布于",
+    "views": "次播放",
+    "episode": "第 {no} 集",
+    "brand": "由 一帧 AI 漫剧工作台 生成"
   }
 }

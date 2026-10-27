@@ -3226,5 +3226,28 @@
     "loggingIn": "Signing in…",
     "loginBtn": "Sign in to the ops console",
     "loginFootnote": "Non-production defaults to admin / admin12345; production must configure ADMIN_USERNAME / ADMIN_PASSWORD."
+  },
+  "watchPage": {
+    "metaTitle": "Watch · OneFrame",
+    "metaTitleWith": "{title} · OneFrame",
+    "loading": "Loading…",
+    "transcoding": "This video is still transcoding",
+    "transcodingHint": "A freshly published clip needs a moment to process. Please refresh shortly.",
+    "offShelf": "This video is no longer available",
+    "offShelfHint": "The publisher took it down. Ask the publisher for a new link if you still need it.",
+    "notFound": "Invalid or expired link",
+    "notFoundHint": "Check that the link is complete (token is usually 32 characters) or request a new one.",
+    "failed": "Video temporarily unavailable",
+    "failedHint": "Transcoding failed for this video; the publisher needs to publish it again.",
+    "error": "Failed to load",
+    "retry": "Retry",
+    "backHome": "Back to home",
+    "share": "Copy share link",
+    "copied": "Link copied",
+    "copyFailed": "Copy failed — please copy the address bar manually",
+    "publishedAt": "Published",
+    "views": "views",
+    "episode": "Episode {no}",
+    "brand": "Generated with OneFrame AI studio"
   }
 }

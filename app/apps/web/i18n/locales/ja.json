@@ -3226,5 +3226,28 @@
     "loggingIn": "ログイン中…",
     "loginBtn": "運営コンソールにログイン",
     "loginFootnote": "非本番は既定 admin / admin12345。本番では ADMIN_USERNAME / ADMIN_PASSWORD の設定が必須です。"
+  },
+  "watchPage": {
+    "metaTitle": "再生 · OneFrame",
+    "metaTitleWith": "{title} · OneFrame",
+    "loading": "読み込み中…",
+    "transcoding": "動画を変換中です",
+    "transcodingHint": "公開直後のクリップは処理に少し時間がかかります。少し待ってから再読み込みしてください。",
+    "offShelf": "この動画は非公開になりました",
+    "offShelfHint": "公開者がこの動画を非公開にしました。視聴が必要な場合は共有者に再公開を依頼してください。",
+    "notFound": "リンクが無効か期限切れです",
+    "notFoundHint": "リンクが完全か確認してください（token は通常 32 文字）。共有者に新しいリンクを依頼することもできます。",
+    "failed": "動画は一時的に再生できません",
+    "failedHint": "この動画の変換に失敗しました。公開者が再公開する必要があります。",
+    "error": "読み込みに失敗しました",
+    "retry": "再試行",
+    "backHome": "ホームへ戻る",
+    "share": "共有リンクをコピー",
+    "copied": "リンクをコピーしました",
+    "copyFailed": "コピーに失敗しました。アドレスバーの URL を手動でコピーしてください",
+    "publishedAt": "公開日",
+    "views": "回再生",
+    "episode": "第{no}話",
+    "brand": "OneFrame AI スタジオで生成"
   }
 }

@@ -3226,5 +3226,28 @@
     "loggingIn": "Entrando…",
     "loginBtn": "Entrar no console de operação",
     "loginFootnote": "Fora de produção o padrão é admin / admin12345; em produção é obrigatório configurar ADMIN_USERNAME / ADMIN_PASSWORD."
+  },
+  "watchPage": {
+    "metaTitle": "Assistir · OneFrame",
+    "metaTitleWith": "{title} · OneFrame",
+    "loading": "Carregando…",
+    "transcoding": "O vídeo ainda está sendo transcodificado",
+    "transcodingHint": "Um clipe recém-publicado leva um momento para processar. Atualize em instantes.",
+    "offShelf": "Este vídeo não está mais disponível",
+    "offShelfHint": "O publicador removeu este vídeo. Peça um novo link a quem compartilhou, se ainda precisar.",
+    "notFound": "Link inválido ou expirado",
+    "notFoundHint": "Verifique se o link está completo (o token costuma ter 32 caracteres) ou peça um novo.",
+    "failed": "Vídeo temporariamente indisponível",
+    "failedHint": "A transcodificação falhou; o publicador precisa publicar novamente.",
+    "error": "Falha ao carregar",
+    "retry": "Tentar novamente",
+    "backHome": "Voltar ao início",
+    "share": "Copiar link de compartilhamento",
+    "copied": "Link copiado",
+    "copyFailed": "Falha ao copiar — copie a barra de endereços manualmente",
+    "publishedAt": "Publicado em",
+    "views": "visualizações",
+    "episode": "Episódio {no}",
+    "brand": "Gerado com o estúdio de IA OneFrame"
   }
 }
