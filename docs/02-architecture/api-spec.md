@@ -1704,3 +1704,19 @@ Redis 只承担去重闸（见 `publish.service.ts` 注释）。
 
 **验证**：`_acceptance/smoke-image-chain.ps1`（真实提交→worker→产物→现签→下载 PNG 1174B/64×64/可解码）；
 `apps/worker/src/executor.spec.ts` 新增 2 例断言 PNG magic 与 placeholder 标记。
+
+### 17.11 主体 IP/风格模板（模块 #17，2026-10-27 第 5 轮）
+
+> **竞品证据不足**：`_parts/d-model-task.md:152` 只列出能力名，主体库侧模板的字段与生效方式**未取证**。
+> 本条是**自建口径**，契约与文案都按此标注，不声称已对齐竞品。
+
+| 端点 | 语义 |
+|---|---|
+| `GET /subjects/templates` | 返回 4 个预置模板 `{key,name,description,prompt_prefix,negative_prompt}` + `semantics` 说明。**必须声明在 `@Get(":id")` 之前**，否则 `templates` 会被当成 id。 |
+| `POST /subjects/:id/apply-template` `{template_key}` | 只落 `subjects.template_key`，**不改写 `subjects.desc`**；返回 `{template_key, desc, prompt_template, negative_prompt, semantics}`。未知模板 → `400101`（`details.supported` 只进日志，信封不下发）。 |
+
+**生成侧**：`GET /subjects` 的 `template_key` 过滤已存在；生成注入走
+`asset-gates.injectImagesWithTemplates(spaceId, prompt, assets)` —— 对已定稿资产的关联主体取模板前缀，
+追加到 `prompt_with_images` 末尾（主体描述 → `[[@imgN]]` → 风格前缀），同一前缀不重复追加。
+
+**未做**：前端主体卡片上的"应用模板"下拉（API 已可用；本轮页面未接，登记在 §5 缺口）。
