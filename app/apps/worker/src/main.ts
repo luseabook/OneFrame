@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { Worker } from "bullmq";
 import pino from "pino";
 import { createDb } from "@app/db";
+import { probeFfmpeg } from "@app/shared";
 import { assertWorkerEnv } from "./env-guard";
 import {
   auditLedger,
@@ -145,6 +146,24 @@ const timelineExportDeps = {
   aiLabel,
   log: (obj: Record<string, unknown>, msg: string) => log.info(obj, msg),
 };
+
+/**
+ * 启动时记录媒体能力（`ffmpeg`）。
+ *
+ * 为什么放在启动日志里：`ffmpeg` 决定"真裁剪/显式水印"能不能做，是**部署环境属性**。
+ * 以前这类能力只体现在代码分支里，运维不知道这台机器到底走了哪条路；
+ * 现在启动即打印，且失败原因是可读的（缺二进制 / 权限 / 超时）。
+ * 探测结果同时经 `GET /v1/meta/capabilities` 对外透出（公开只读，不含敏感信息）。
+ */
+async function logMediaCapability(): Promise<void> {
+  const ffmpeg = await probeFfmpeg(process.env.FFMPEG_PATH);
+  if (ffmpeg.available) {
+    log.info({ ffmpeg: ffmpeg.version, path: ffmpeg.path }, "media capability: ffmpeg available (real trim/watermark)");
+  } else {
+    log.warn({ path: ffmpeg.path, reason: ffmpeg.reason }, "media capability: ffmpeg unavailable (degraded to copy)");
+  }
+}
+void logMediaCapability();
 
 // ── 定时维护（deployment.md §7）──
 // 各任务频率不同，因此拆成多个独立定时器，而不是塞进一个 6h 的大任务里。

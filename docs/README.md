@@ -123,6 +123,36 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v7.7 · 第 48 批：ffmpeg 改为运行时能力探测（E 类自助解锁）· 2026-10-29）
+
+### 问题：能力被"写死"成假设
+
+`ffmpeg` 是**部署环境决定**的能力，不是产品开关。但过去的代码里是"假设没有"——
+于是环境装了 ffmpeg，也要**改代码**才能用上（#20 的"真 ffmpeg 裁剪"就卡在这），
+运维也无法判断"这台机器到底走了哪条路（真裁剪 vs 复制降级）"。
+
+### 改法：探测 + 透出 + 诚实降级
+
+| 层 | 改动 |
+|---|---|
+| shared | 新增 [`media-capability.ts`](app/packages/shared/src/media-capability.ts)：`probeFfmpeg()` —— 5s 超时、**失败不抛异常**（探测失败是正常结果）、ENOENT/权限/超时分别给可读 `reason`、进程内 **5min 缓存**且支持 `force` 重探 |
+| api | 新增公开只读 **`GET /v1/meta/capabilities`**：只透出 `available / path / version / reason / checked_at`，**不泄露**密钥与内部地址 |
+| worker | 启动即探测并打日志：可用 → `info` 带版本；不可用 → `warn` 带可读原因 |
+
+### 意外收获：本机其实装了 ffmpeg 8.1.1
+
+接口返回 `{"available":true,"version":"8.1.1-full_build-www.gyan.dev"}`——
+**此前一直按"没有 ffmpeg"降级**，这正说明"探测"比"假设"可靠。
+于是 E 类从"需要部署环境配合"变成"已自助解锁"：剩下的只是把裁剪接到发布链（下一批）。
+
+### 测试
+
+- shared [`media-capability.spec.ts`](app/packages/shared/src/media-capability.spec.ts) **5 例**：版本解析容错（含发行版后缀/非 ffmpeg 文本）、存在但非 ffmpeg、ENOENT「未找到」、缓存与 `force`、默认 PATH 不抛错
+- api [`meta-capabilities.spec.ts`](app/apps/api/test/meta-capabilities.spec.ts) **2 例**：公开可读且结构稳定（可用必有版本、不可用必有原因）、**不泄露敏感字段**
+
+**验证**：shared **14 → 19**、api **824 → 826**、worker 37、db 26；全量 **1,164 例**；gate 全绿（12/12）。
+**进度**：全站 **201.00/206 = 97.6%**，剩余 **5.00**（本批是能力可视化，模块分不变；但 #20 最后一项从"需环境"变成"可实现"）。
+
 ## 变更登记（v7.6 · 第 47 批：首页板块配置浏览器验收 9/9 + 修两个真问题 · 2026-10-29）
 
 ### 起因

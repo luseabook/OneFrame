@@ -13,6 +13,7 @@ import { BillingModule } from "./modules/billing/billing.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
 import { ModelsModule } from "./modules/models/models.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
+import { MetaModule } from "./modules/meta/meta.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { ScriptModule } from "./modules/script/script.module";
 import { SubjectsModule } from "./modules/subjects/subjects.module";
@@ -50,6 +51,7 @@ import { StorageModule } from "./storage/storage.module";
     QueueModule,
     StorageModule,
     ModerationModule,
+    MetaModule,
     AdminModule,
     AssetsModule,
     AuthModule,

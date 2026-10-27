@@ -8,3 +8,4 @@ export * from "./schemas/project";
 export * from "./schemas/pipeline";
 export * from "./schemas/novel";
 export * from "./schemas/film";
+export * from "./media-capability";
