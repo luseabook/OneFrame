@@ -5125,3 +5125,72 @@ Content-Type: application/json
 | `prompt_blocked` 无列、需竞品字段证据 | B 0.08 的一半 | **已实现**（DTO + 判据 + 输出 + 断言） |
 
 两项合计 0.08 从 #17 的缺口里清掉：**#17 99% → 100%**。
+
+## 17.56 跨层一致性审计：5 条链路的契约级事实（第 99 批）
+
+本批**不新增/不修改任何端点**（778 不变）。这一节把 5 条链路的**跨层约定**写成契约级事实，
+避免以后各层各自演化出不一致（第 97 批的 #23 就是「报价算对了、下单没用上」）。
+
+### 56.1 权限：`GET /cam/permissions` 的 `enforced` 是**声明**，必须与真实拦截一致
+
+`ENFORCED_PERMISSIONS` 5 条，逐条核实**真的**在对应 controller 方法体里调了
+`requirePermission(..., <同码>)`：
+
+| 码 | 端点 | 已核实 |
+| --- | --- | --- |
+| `team.edit` | `PATCH /v1/cam/team/info` | ✅ |
+| `team.permission` | `PUT /v1/cam/roles/:role_id/permissions` | ✅ |
+| `member.remove` | `DELETE /v1/cam/team/member/:user_id` | ✅ |
+| `member.edit` | `PATCH /v1/cam/team/member/:user_id` | ✅ |
+| `member.points` | `POST /v1/cam/team/points-allocation` | ✅ |
+
+**契约**：`GET /cam/permissions` 返回的 `enforced[].code` 必须**同时**满足
+(a) 在 `PERMISSION_CATALOG` 里存在（否则前端矩阵无处显示）、(b) 对应端点真的拦。
+加新拦截时**三处必须同步**：声明表加行 + controller 调 `requirePermission` + spec 加越权用例。
+
+> 已知小瑕疵（不影响拦截）：`POST /cam/team/member/batch`（`member.create`）、
+> `POST /cam/team/batch-points-allocation`（`member.points`）**调了 requirePermission 但未登记**，
+> 所以前端矩阵上这两条没有「生效中」标记。属展示层，已登记待修。
+
+### 56.2 金额：算价与冻结必须同源，结算**不重算**
+
+这是 #23 的同族约定。当前 4 条生成链全部满足：
+
+| 链路 | 算价 | 冻结 | 结算 |
+| --- | --- | --- | --- |
+| `POST /generations` | `credits.price()` | `freezeCredits(cost: priced.credits)` | worker 用 `fresh.creditsFrozen` |
+| `POST …/storyboards/generate-videos` | `credits.price()` | `freezeCredits(cost: candidate.cost)` | 同上 |
+| ad-drama 各动作 | `priced.credits` | 同值 | `settleCredits(cost: priced.credits)` |
+| `POST /tasks/:id/regenerate` 等 | `priced.credits` | 同值 | 同上 |
+
+**契约**：`tasks.credits_frozen` 是**冻结时的价格快照**；结算（`settleCredits`）读它，
+**不重新调用 `credits.price()`** —— 否则运营改价目表会让历史任务的价格漂移。
+
+### 56.3 席位：只有团队域校验 `max_seats`
+
+`insert(spaceMembers)` 真实写入 4 处：
+
+| 位置 | 是否校验席位 | 理由 |
+| --- | --- | --- |
+| `team.createTeam` | ✅ | 建团队时按 `max_seats` 设上限 |
+| `team.addMembers` | ✅ | 逐个校验，超出部分**逐条拒绝**而非整批失败 |
+| `auth.login` × 2 | 不校验 | owner 建**个人空间**时自插入，不占团队席位 |
+
+### 56.4 分享：token 的范围由 share 行决定，**不接受任何额外入参**
+
+| 端点 | 范围限定 |
+| --- | --- |
+| `GET /share/:token` | 查询同时带 `tasks.id = share.task_id` **且** `tasks.space_id = share.space_id` |
+| `GET /share/:token/stream` | 只推该 share 绑定 task 的 `status/progress`，不推产物 key / 积分 / space / user |
+| `POST /share/:token/batch-download` | **不接受 `task_ids` 入参** —— 范围只由 share 行决定 |
+
+**契约**：分享 token 是**最小授权凭据**，任何"顺手多读一点"的入参都是越权风险，
+故 `batch-download` 刻意不收 `task_ids`（虽然后者更灵活）。
+
+### 56.5 i18n：5 个语言包的 key 集必须完全一致
+
+实测：页面/组件引用 **3094** 个 key，语言包定义 **3217** 个 key × 5 语言，**缺失 0**、
+5 个包 key 集完全一致。
+
+**契约**：新增页面文案必须同步 5 个语言包（`zh-CN` / `en` / `ja` / `es` / `pt-BR`）；
+只加一个包会让 `t()` 回落成 key 字符串（用户可见的裸 key）。
