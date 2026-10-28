@@ -1,5 +1,5 @@
 // 错误码分段（api-spec §1）。段规划：400 参数 / 401 鉴权 / 403 权限 / 429 频控
-// 7457 计费 / 7458 内容安全 / 7459 供应商 / 7460 冲突
+// 7457 计费 / 7458 内容安全 / 7459 供应商 / 7460 冲突 / 7470 知识库（第 60 批）
 // 注意：完整码表以 docs/02-architecture/api-spec.md §1 为唯一权威，本文件保持同步。
 export const ErrorCode = {
   OK: 0,
@@ -37,6 +37,11 @@ export const ErrorCode = {
   NODE_LOCKED: 746003, // Ph3 画布；对应 RE CLI exit 10
   STREAM_CURSOR_EXPIRED: 746004, // SSE 续传游标失效，客户端须全量重建后重连
   AGENT_TURN_IN_FLIGHT: 746005, // 同会话已有在途轮次（仅在显式 ?wait=1 时返回）
+
+  // 7470xx：知识库（第 60 批）。码值取自竞品前端 bundle 原文：
+  // `return Number(r.code)===747007?!0:\`${r.message||""} ${r.msg||""}\`.toLowerCase().includes("knowledge name already exists")`
+  // —— 竞品对"知识库模板重名"既有专用码，又保留文案兜底，说明该码在服务端就是这一语义。
+  KNOWLEDGE_NAME_EXISTS: 747007,
 
   INTERNAL: 500000,
 } as const;

@@ -218,9 +218,10 @@ describe("knowledge e2e", () => {
     expect(renamed.code).toBe(0);
 
     // 同父下同名 → 拒绝（否则前端树里两行一样的名字，用户无法区分）
+    // 第 60 批：错误码改为竞品同款 747007 + 竞品原文文案（竞品前端就是靠这个码识别重名的）
     const dup = await inject("POST", "/knowledge/dirs", { name: "剧集总库" }, u.token, u.spaceId);
-    expect(dup.code).toBe(400101);
-    expect(dup.msg).toContain("same name");
+    expect(dup.code).toBe(747007);
+    expect(dup.msg).toBe("knowledge name already exists");
 
     // 成环：把 root 挂到自己的子目录下
     const cycle = await inject("POST", `/knowledge/dirs/${root.id}/move`, { parent_id: child.id }, u.token, u.spaceId);
@@ -789,5 +790,166 @@ describe("knowledge e2e", () => {
       u.spaceId,
     );
     expect(missingDir.code).toBe(400102);
+  });
+
+  // ── 第 60 批：模板场景（scene）维度 ──────────────────────────────────
+  // 竞品证据：dir/list 的 query 是 ["scene","parent_ukd_id"]、tag/list 是 ["scene","query"]、
+  // asset/search 是 ["scene","query","scopes","ukd_id","page","page_size","order"] ——
+  // 目录树、标签、资产三层都按场景隔离，不是单一的"类型"字段。
+
+  it("场景隔离：同名目录/同名标签可在不同场景各存一份，dirs/tags 按 scene 过滤", async () => {
+    const u = await loginNewUser("66");
+
+    // 同一 space 下「风格」与「题材」各建一个同名目录：不冲突
+    const styleDir = await inject("POST", "/knowledge/dirs", { name: "复古", scene: 1 }, u.token, u.spaceId);
+    expect(styleDir.code).toBe(0);
+    expect((styleDir.data as { dir: { scene: number } }).dir.scene).toBe(1);
+    const genreDir = await inject("POST", "/knowledge/dirs", { name: "复古", scene: 2 }, u.token, u.spaceId);
+    expect(genreDir.code).toBe(0);
+
+    // 同场景再建同名 → 竞品同款 747007
+    const dup = await inject("POST", "/knowledge/dirs", { name: "复古", scene: 1 }, u.token, u.spaceId);
+    expect(dup.code).toBe(747007);
+
+    // 带 scene 只看本场景那棵树；不带 scene 兼容旧调用方（两棵都在）
+    const styleTree = await inject("GET", "/knowledge/dirs?scene=1", undefined, u.token, u.spaceId);
+    expect((styleTree.data as { count: number }).count).toBe(1);
+    expect((styleTree.data as { list: { scene: number }[] }).list[0]!.scene).toBe(1);
+    const genreTree = await inject("GET", "/knowledge/dirs?scene=2", undefined, u.token, u.spaceId);
+    expect((genreTree.data as { count: number }).count).toBe(1);
+    const allTree = await inject("GET", "/knowledge/dirs", undefined, u.token, u.spaceId);
+    expect((allTree.data as { count: number }).count).toBe(2);
+
+    // 子目录跟随父目录场景（不传 scene 也落到父场景）
+    const child = await inject(
+      "POST",
+      "/knowledge/dirs",
+      { name: "子目录", parent_id: (styleDir.data as { dir: { id: string } }).dir.id },
+      u.token,
+      u.spaceId,
+    );
+    expect((child.data as { dir: { scene: number } }).dir.scene).toBe(1);
+
+    // 标签同理：跨场景允许同名，各自拿到不同的行
+    const t1 = await inject("POST", "/knowledge/tags", { name: "复古", scene: 1 }, u.token, u.spaceId);
+    const t2 = await inject("POST", "/knowledge/tags", { name: "复古", scene: 2 }, u.token, u.spaceId);
+    expect(t1.code).toBe(0);
+    expect(t2.code).toBe(0);
+    expect((t1.data as { tag: { id: string } }).tag.id).not.toBe((t2.data as { tag: { id: string } }).tag.id);
+    const styleTags = await inject("GET", "/knowledge/tags?scene=1", undefined, u.token, u.spaceId);
+    expect((styleTags.data as { count: number }).count).toBe(1);
+    const allTags = await inject("GET", "/knowledge/tags", undefined, u.token, u.spaceId);
+    expect((allTags.data as { count: number }).count).toBe(2);
+
+    // 非法场景值 → 400101（不是静默查空）
+    const bad = await inject("GET", "/knowledge/dirs?scene=8", undefined, u.token, u.spaceId);
+    expect(bad.code).toBe(400101);
+  });
+
+  it("按场景的字段规则：名称上限/正文必填与上限逐类不同（竞品每类一份规则对象）", async () => {
+    const u = await loginNewUser("67");
+
+    // scene=1 风格：name ≤ 10、content（竞品 prompt_template）必填、上限 2000
+    const tooLong = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "一二三四五六七八九十一", scene: 1, content: "霓虹" },
+      u.token,
+      u.spaceId,
+    );
+    expect(tooLong.code).toBe(400101);
+    expect(tooLong.msg).toContain("at most 10");
+    const noPrompt = await inject("POST", "/knowledge/assets", { title: "风格A", scene: 1 }, u.token, u.spaceId);
+    expect(noPrompt.code).toBe(400101);
+    expect(noPrompt.msg).toContain("content is required");
+    const ok = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "风格A", scene: 1, content: "赛博朋克霓虹" },
+      u.token,
+      u.spaceId,
+    );
+    expect(ok.code).toBe(0);
+    expect((ok.data as { asset: { scene_slug: string } }).asset.scene_slug).toBe("style");
+
+    // scene=2 题材：无 prompt 列，只建名字即可
+    const genre = await inject("POST", "/knowledge/assets", { title: "悬疑", scene: 2 }, u.token, u.spaceId);
+    expect(genre.code).toBe(0);
+
+    // scene=14 音色：content 上限只有 50
+    const voiceTooLong = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "音色A", scene: 14, content: "x".repeat(51) },
+      u.token,
+      u.spaceId,
+    );
+    expect(voiceTooLong.code).toBe(400101);
+    expect(voiceTooLong.msg).toContain("at most 50");
+
+    // scene=20 音频模版：不要求 content，name 上限 50
+    const audio = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "音频A", scene: 20 },
+      u.token,
+      u.spaceId,
+    );
+    expect(audio.code).toBe(0);
+    const audioDto = (audio.data as { asset: { scene_prompt_column: boolean; scene_name_max_length: number } }).asset;
+    expect(audioDto.scene_prompt_column).toBe(false);
+    expect(audioDto.scene_name_max_length).toBe(50);
+
+    // scene=8 不在竞品枚举里（值不连续）→ 400101
+    const badScene = await inject("POST", "/knowledge/assets", { title: "x", scene: 8 }, u.token, u.spaceId);
+    expect(badScene.code).toBe(400101);
+    expect(badScene.msg).toContain("unknown knowledge scene");
+  });
+
+  it("条目场景必须与所在目录一致；列表/搜索/平铺按 scene 过滤，概览给出按场景计数", async () => {
+    const u = await loginNewUser("68");
+    const styleDir = await inject("POST", "/knowledge/dirs", { name: "风格目录", scene: 1 }, u.token, u.spaceId);
+    const styleDirId = (styleDir.data as { dir: { id: string } }).dir.id;
+
+    const okAsset = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "风格条目", scene: 1, content: "p", dir_id: styleDirId },
+      u.token,
+      u.spaceId,
+    );
+    expect(okAsset.code).toBe(0);
+
+    // 跨场景塞进风格目录 → 400101（否则"风格"tab 里混进音色条目）
+    const mismatch = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "音色条目", scene: 14, content: "tone", dir_id: styleDirId },
+      u.token,
+      u.spaceId,
+    );
+    expect(mismatch.code).toBe(400101);
+    expect(mismatch.msg).toContain("different scene");
+
+    // 未分类条目（scene=0）
+    await inject("POST", "/knowledge/assets", { title: "散条目" }, u.token, u.spaceId);
+
+    expect((await inject("GET", "/knowledge/assets?scene=1", undefined, u.token, u.spaceId)).data).toMatchObject({
+      total: 1,
+    });
+    expect((await inject("GET", "/knowledge/assets?scene=0", undefined, u.token, u.spaceId)).data).toMatchObject({
+      total: 1,
+    });
+    expect(
+      (await inject("GET", "/knowledge/assets/search?scene=1&keyword=风格", undefined, u.token, u.spaceId)).data,
+    ).toMatchObject({ total: 1 });
+    expect((await inject("GET", "/knowledge/list?scene=14", undefined, u.token, u.spaceId)).data).toMatchObject({
+      total: 0,
+    });
+
+    const info = await inject("GET", "/knowledge/info", undefined, u.token, u.spaceId);
+    const byScene = (info.data as { asset_by_scene: Record<string, number> }).asset_by_scene;
+    expect(byScene["1"]).toBe(1);
+    expect(byScene["0"]).toBe(1);
   });
 });

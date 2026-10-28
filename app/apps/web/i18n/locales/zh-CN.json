@@ -1825,7 +1825,26 @@
     "basePurgeConfirm": "这会连同 {dirs} 个目录和 {assets} 条资产一起删除（不可恢复）。确定？",
     "basePurged": "知识库与内容已清空",
     "baseDeleteFailed": "删除知识库失败",
-    "loadFailed": "知识库加载失败"
+    "loadFailed": "知识库加载失败",
+    "scene": {
+      "filterLabel": "按类型筛选",
+      "all": "全部",
+      "style": "风格",
+      "genre": "题材",
+      "composition": "分镜构图",
+      "videoEffect": "视频特效",
+      "aiStoryboard": "AI 拆分镜",
+      "storyboardT2i": "剧本拆分镜（图生视频）",
+      "seeDance2": "SeeDance2",
+      "screenplayNovel": "编剧知识库",
+      "storyboardRef": "剧本拆分镜（参考生视频）",
+      "voice": "音色模版",
+      "scenePrompt": "分镜提示词",
+      "camera": "运镜",
+      "palette": "色调",
+      "expression": "表情",
+      "audioLibrary": "音频模版"
+    }
   },
   "workDetail": {
     "metaTitle": "作品详情 · 一帧",

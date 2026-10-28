@@ -1676,6 +1676,8 @@ export interface MarketCreatorParseDto {
 
 export interface KnowledgeDirNodeDto {
   id: string;
+  /** 模板场景（第 60 批，竞品 KNOWLEDGE_SCENE 枚举值；0=未分类/历史数据） */
+  scene: number;
   parent_id: string | null;
   name: string;
   sort: number;
@@ -1697,6 +1699,8 @@ export interface KnowledgeDirTreeDto {
 
 export interface KnowledgeTagDto {
   id: string;
+  /** 模板场景：标签按场景隔离，同名标签可在不同场景各存一份 */
+  scene: number;
   name: string;
   asset_count: number;
   in_use: boolean;
@@ -1713,6 +1717,15 @@ export interface KnowledgeResourceRefDto {
 
 export interface KnowledgeAssetDto {
   id: string;
+  /** 模板场景（0=未分类）。对应竞品 `scene` 字段 */
+  scene: number;
+  /** 场景业务串（style/theme/…，竞品 `0zWWdXb_.js` 的 `m` 表）；未分类为空串 */
+  scene_slug: string;
+  /** 以下四个来自竞品「每类一份字段规则对象」（`_` 表），前端据此决定表单校验与是否显示 prompt 列 */
+  scene_name_max_length: number;
+  scene_prompt_required: boolean;
+  scene_prompt_max_length: number;
+  scene_prompt_column: boolean;
   dir_id: string | null;
   dir_name: string | null;
   asset_id: string | null;
@@ -1765,6 +1778,8 @@ export interface KnowledgeInfoDto {
   asset_count: number;
   tag_count: number;
   asset_by_source_type: { text: number; asset_reference: number; link: number };
+  /** 按模板场景的条目数，key 为 scene 值字符串（"0"=未分类） */
+  asset_by_scene: Record<string, number>;
   max_dir_depth: number;
   unclassified_assets: number;
 }

@@ -52,6 +52,56 @@ const editingBase = ref(false);
 const baseForm = reactive({ name: "", description: "", cover_uri: "", note: "" });
 const savingBase = ref(false);
 
+/**
+ * 第 60 批：模板场景（scene）。竞品知识库**按场景分 tab**（`0zWWdXb_.js` 的 `o` 数组，
+ * 8 个 `phase1:!0` tab），而且每类场景有**自己的字段规则**（名称上限、prompt 是否必填）——
+ * 所以切 tab 不只是加个过滤条件，新建表单的校验也要跟着变。规则不在前端重复维护一份，
+ * 由后端随条目下发 `scene_name_max_length` / `scene_prompt_required` 等字段。
+ *
+ * `0` = 全部（与竞品 "全部" tab 对齐）；不传 `scene` 时后端返回全部，保持旧调用方兼容。
+ */
+const activeScene = ref(0);
+
+/**
+ * tab 顺序照竞品 `o` 数组：全部 → 音色 → 音频 → 风格 → 题材 → 分镜提示词 →
+ * 编剧知识库 → AI 拆分镜 → 剧本拆分镜(参考) → 剧本拆分镜(图生) → 其余三类。
+ * 竞品 tab 用的 key 是 scene 数值，这里存数值 + i18n key，文案在 computed 里求值。
+ */
+const SCENE_TABS: { scene: number; key: string }[] = [
+  { scene: 0, key: "knowledge.scene.all" },
+  { scene: 1, key: "knowledge.scene.style" },
+  { scene: 2, key: "knowledge.scene.genre" },
+  { scene: 3, key: "knowledge.scene.composition" },
+  { scene: 4, key: "knowledge.scene.videoEffect" },
+  { scene: 5, key: "knowledge.scene.aiStoryboard" },
+  { scene: 6, key: "knowledge.scene.storyboardT2i" },
+  { scene: 7, key: "knowledge.scene.seeDance2" },
+  { scene: 9, key: "knowledge.scene.screenplayNovel" },
+  { scene: 11, key: "knowledge.scene.storyboardRef" },
+  { scene: 14, key: "knowledge.scene.voice" },
+  { scene: 15, key: "knowledge.scene.scenePrompt" },
+  { scene: 16, key: "knowledge.scene.camera" },
+  { scene: 17, key: "knowledge.scene.palette" },
+  { scene: 18, key: "knowledge.scene.expression" },
+  { scene: 20, key: "knowledge.scene.audioLibrary" },
+];
+
+// 常量数组不能直接存 t(...) 的结果：那样切语言不会重算（第 55 批踩过），必须在 computed 里求值。
+// 这里存的是**完整 key**而不是 `knowledge.scene.${k}` 拼接 —— i18n-check.cjs 只认字面量 key，
+// 模板字符串会被当成一个字面量 "..." 而误报缺键（本批踩过）。
+const sceneTabs = computed(() => SCENE_TABS.map((item) => ({ scene: item.scene, label: t(item.key) })));
+
+const sceneAssetCount = computed(() => info.value?.asset_by_scene ?? {});
+
+function switchScene(scene: number) {
+  if (activeScene.value === scene) return;
+  activeScene.value = scene;
+  // 换场景等于换一棵目录树：必须清掉旧选中，否则会拿 A 场景的目录 id 去查 B 场景的条目
+  selectedDirId.value = "";
+  page.value = 1;
+  void load();
+}
+
 const selectedDirId = ref("");
 const includeChildren = ref(true);
 const keyword = ref("");
@@ -70,13 +120,15 @@ const selectedIds = ref<string[]>([]);
 const movingDirId = ref("");
 
 async function loadDirs() {
-  const res = await api.get<KnowledgeDirTreeDto>("/knowledge/dirs");
+  const sceneQs = activeScene.value ? `?scene=${activeScene.value}` : "";
+  const res = await api.get<KnowledgeDirTreeDto>(`/knowledge/dirs${sceneQs}`);
   tree.value = res.tree;
   flatDirs.value = res.list;
 }
 
 async function loadTags() {
-  const res = await api.get<{ list: KnowledgeTagDto[] }>("/knowledge/tags");
+  const sceneQs = activeScene.value ? `?scene=${activeScene.value}` : "";
+  const res = await api.get<{ list: KnowledgeTagDto[] }>(`/knowledge/tags${sceneQs}`);
   tags.value = res.list;
 }
 
@@ -95,6 +147,8 @@ async function loadAssets() {
     if (includeChildren.value) params.set("include_children", "true");
   }
   if (filterTag.value) params.set("tags", filterTag.value);
+  // 第 60 批：场景过滤对列表/搜索都生效（竞品 asset/search 的 query 第一个就是 scene）
+  if (activeScene.value) params.set("scene", String(activeScene.value));
 
   // 有关键词就走搜索端点（跨目录），否则走目录列表端点 —— 与竞品两个端点同口径
   const path = keyword.value.trim()
@@ -288,6 +342,8 @@ async function createAsset() {
       ...(assetForm.content.trim() ? { content: assetForm.content.trim() } : {}),
       ...(selectedDirId.value ? { dir_id: selectedDirId.value } : {}),
       ...(assetForm.tagIds.length > 0 ? { tags: tagNamesOf(assetForm.tagIds) } : {}),
+      // 第 60 批：带上当前场景，否则在某个 tab 里新建会落到"未分类"
+      ...(activeScene.value ? { scene: activeScene.value } : {}),
     });
     toast.success(t("knowledge.assetCreated"));
     assetForm.title = "";
@@ -460,6 +516,23 @@ onMounted(load);
         <button type="button" class="kb-btn" :disabled="loading" @click="load">{{ t("knowledge.refresh") }}</button>
       </div>
     </header>
+
+    <!-- 第 60 批：模板场景切换（竞品知识库的 tab 条；计数来自 info.asset_by_scene，不额外发请求） -->
+    <nav class="kb-scenes" :aria-label="t('knowledge.scene.filterLabel')">
+      <button
+        v-for="tab in sceneTabs"
+        :key="tab.scene"
+        type="button"
+        class="kb-scene"
+        :class="{ 'kb-scene-on': activeScene === tab.scene }"
+        @click="switchScene(tab.scene)"
+      >
+        {{ tab.label }}
+        <span v-if="tab.scene > 0 && (sceneAssetCount[String(tab.scene)] ?? 0) > 0" class="kb-scene-count">
+          {{ sceneAssetCount[String(tab.scene)] }}
+        </span>
+      </button>
+    </nav>
 
     <p v-if="loading" class="kb-state">{{ t("knowledge.loading") }}</p>
     <div v-else-if="errorMsg" class="kb-state kb-state-error">
@@ -785,6 +858,49 @@ onMounted(load);
   font-size: 20px;
   color: var(--text-1);
 }
+.kb-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-1);
+  overflow-x: auto;
+}
+
+.kb-scene {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2xl);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.kb-scene:hover {
+  background: var(--bg-surface);
+  color: var(--text-1);
+}
+
+.kb-scene-on {
+  border-color: var(--border-1);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.kb-scene-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-muted, rgba(0, 0, 0, 0.06));
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .kb-sub {
   margin: var(--space-1) 0 0;
   font-size: 13px;

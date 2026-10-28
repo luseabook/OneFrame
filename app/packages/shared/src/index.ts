@@ -13,3 +13,5 @@ export * from "./media-capability";
 // 必须共用同一份实现，否则两条路径的时长/状态语义会漂移。
 export * from "./ffmpeg-trim";
 export * from "./publish-transcode";
+// 第 60 批：知识库「模板场景」维度（竞品前端 bundle 取证，值不连续、业务串与枚举名不同名）
+export * from "./knowledge-scene";

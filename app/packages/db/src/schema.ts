@@ -2340,6 +2340,12 @@ export const knowledgeBases = pgTable(
  *
  * `parent_id` 不加自引用外键：目录树深度由服务层校验（最多 5 层），
  * 数据库加自引用 FK 会让「删父目录」必须先递归删子目录（竞品是软删）。
+ *
+ * 第 60 批：三张表都加 `scene`（知识库模板场景，见 `@app/shared` 的 `KNOWLEDGE_SCENE`）。
+ * 依据是竞品 `GET /user_knowledge/dir/list` 的 query 是 `["scene","parent_ukd_id"]`、
+ * `GET /user_knowledge/tag/list` 是 `["scene","query"]` —— 目录树与标签都是**按场景隔离**的，
+ * 不是同一棵全局树；`scene=0` 只是兼容本批之前的历史数据（竞品没有 0）。
+ * 三张表同时加而不是只加在资产上，是因为只加资产会让"风格"目录下混进音色标签。
  */
 export const knowledgeDirs = pgTable(
   "knowledge_dirs",
@@ -2348,6 +2354,8 @@ export const knowledgeDirs = pgTable(
     spaceId: bigint("space_id", { mode: "bigint" })
       .notNull()
       .references(() => spaces.id),
+    /** 模板场景（竞品枚举值）；0 = 未分类（仅历史数据） */
+    scene: smallint("scene").notNull().default(0),
     parentId: bigint("parent_id", { mode: "bigint" }),
     name: text("name").notNull(),
     sort: integer("sort").notNull().default(0),
@@ -2355,7 +2363,10 @@ export const knowledgeDirs = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("idx_knowledge_dirs_space").on(t.spaceId, t.parentId, t.sort)],
+  (t) => [
+    index("idx_knowledge_dirs_space").on(t.spaceId, t.parentId, t.sort),
+    index("idx_knowledge_dirs_scene").on(t.spaceId, t.scene, t.parentId, t.sort),
+  ],
 );
 
 export const knowledgeTags = pgTable(
@@ -2365,10 +2376,14 @@ export const knowledgeTags = pgTable(
     spaceId: bigint("space_id", { mode: "bigint" })
       .notNull()
       .references(() => spaces.id),
+    /** 模板场景（竞品枚举值）；0 = 未分类（仅历史数据） */
+    scene: smallint("scene").notNull().default(0),
     name: text("name").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("uq_knowledge_tags").on(t.spaceId, t.name)],
+  // 唯一性从 (space, name) 改为 (space, scene, name)：不同场景允许同名标签
+  // （"复古"既可以是一个风格标签、也可以是一个题材标签，竞品按场景隔离 tag/list）。
+  (t) => [uniqueIndex("uq_knowledge_tags").on(t.spaceId, t.scene, t.name)],
 );
 
 export const knowledgeAssets = pgTable(
@@ -2379,9 +2394,12 @@ export const knowledgeAssets = pgTable(
       .notNull()
       .references(() => spaces.id),
     dirId: bigint("dir_id", { mode: "bigint" }).references(() => knowledgeDirs.id),
+    /** 模板场景（竞品枚举值）；0 = 未分类（仅本批之前的历史数据） */
+    scene: smallint("scene").notNull().default(0),
     /** 指向资产库条目（可空：知识库也支持纯文本条目，如「设定集」「世界观」） */
     assetId: bigint("asset_id", { mode: "bigint" }).references(() => assets.id),
     title: text("title").notNull(),
+    /** 对应竞品 `prompt_template`；每类场景的必填与上限不同（见 shared 的 KNOWLEDGE_SCENE_RULES） */
     content: text("content"),
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     /** 1 文本 / 2 资产引用 / 3 链接 */
@@ -2393,6 +2411,7 @@ export const knowledgeAssets = pgTable(
   },
   (t) => [
     index("idx_knowledge_assets_space").on(t.spaceId, t.dirId, t.createdAt.desc()),
+    index("idx_knowledge_assets_scene").on(t.spaceId, t.scene, t.createdAt.desc()),
     index("idx_knowledge_assets_tags").using("gin", t.tags),
   ],
 );

@@ -1825,7 +1825,26 @@
     "basePurgeConfirm": "{dirs} 個のディレクトリと {assets} 件のアセットも削除されます（元に戻せません）。よろしいですか？",
     "basePurged": "ナレッジベースと中身を削除しました",
     "baseDeleteFailed": "ナレッジベースの削除に失敗しました",
-    "loadFailed": "知識ベースの読み込みに失敗しました"
+    "loadFailed": "知識ベースの読み込みに失敗しました",
+    "scene": {
+      "filterLabel": "タイプで絞り込む",
+      "all": "すべて",
+      "style": "スタイル",
+      "genre": "ジャンル",
+      "composition": "カット構成",
+      "videoEffect": "動画エフェクト",
+      "aiStoryboard": "AI 絵コンテ分割",
+      "storyboardT2i": "台本から絵コンテ（画像から動画）",
+      "seeDance2": "SeeDance2",
+      "screenplayNovel": "脚本ナレッジ",
+      "storyboardRef": "台本から絵コンテ（参照から動画）",
+      "voice": "ボイステンプレート",
+      "scenePrompt": "カットプロンプト",
+      "camera": "カメラワーク",
+      "palette": "カラーパレット",
+      "expression": "表情",
+      "audioLibrary": "音声テンプレート"
+    }
   },
   "workDetail": {
     "metaTitle": "作品詳細 · OneFrame",

@@ -2063,3 +2063,133 @@ CREATE UNIQUE INDEX uq_knowledge_bases_space
 导航组件串（`route:"TeamKnowledgeBase"`、`titleKey:"menu.knowledgeBase"`），**无任何响应体**。
 故 `name` / `description` / `cover_uri` / `note` 不能写成"已对齐竞品 schema"。该项在进度表中标「待取证」，
 对应 #18 得分 **99%**（非 100%），剩余 0.03 权重等竞品响应体。
+
+> ⚠️ **第 60 批更新**：上面这句「无任何响应体」是当时的取证结论，已被推翻 —— 竞品把 Vite 产物留在了本机
+> `rea-reelmate/scripts*/files/origins/<hash>/assets/` 下，从中可取到端点配置对象与知识库枚举/字段规则。
+> 详见 **§17.19**。`knowledge_bases` 的字段名（`name`/`description`/`cover_uri`/`note`）**仍是我方口径**，
+> 竞品那四条实体端点的请求体形状（`requestDataJsonSchema` 为空对象）依然没有字段级证据。
+
+### 17.19 知识库「模板场景（scene）」维度：迁移 0038 与读接口的 `scene` 参数（第 60 批）
+
+#### 19.1 为什么现在才发现（取证方法更正）
+
+第 40 批起，知识库/画布/Agent 几处都记的是「竞品只给路由清单、无响应体证据」。第 60 批复核后确认
+**是取证方法不到位**：竞品的 Vite 产物完整留在本机两个目录里（同 origin hash
+`2bdb9ddf0f70fcf8b6132b5151e837cc859b269e34db5a79cba8d0134474e75e`）：
+
+- `rea-reelmate/scripts/files/origins/<hash>/assets/` —— 133 个 js
+- `rea-reelmate/scripts-canvas/files/origins/<hash>/assets/` —— 473 个 js（更全）
+
+其中两份对本批决定性：
+
+| 文件 | 大小 | 内容 |
+|---|---:|---|
+| `core-lib-CKH7gQsw.js` | 1.1 MB | 全部端点的配置对象：`{path, method, paramNames, queryNames, requestDataOptional, requestBodyType, responseBodyType}`。`requestDataJsonSchema` / `responseDataJsonSchema` 均为空对象 → **只有形状，没有字段级 schema** |
+| `0zWWdXb_.js` | 6 KB | 知识库枚举（`scene` / `status` / `origin`）、每类场景的字段规则、10 条 tab 定义（含真实表头列名） |
+
+#### 19.2 端点形状（本批直接依据）
+
+| 竞品端点 | method | `queryNames` |
+|---|---|---|
+| `/web/v1/df/user_knowledge/dir/list` | GET | `["scene","parent_ukd_id"]` |
+| `/web/v1/df/user_knowledge/tag/list` | GET | `["scene","query"]` |
+| `/web/v1/df/user_knowledge/asset/search` | GET | `["scene","query","scopes","ukd_id","page","page_size","order"]` |
+
+`scene` 是三个读接口的**第一个参数** → 竞品知识库按场景分树、分标签。我方三表原先都无 `scene` 列。
+
+其余 25 条端点的 `paramNames` 也一并确认（例如 `PUT dir/:ukd_id/name`、`POST dir/:ukd_id/asset/import`、
+`PUT dir/:ukd_id/asset/:uk_id/name`、`POST tag/{tag_id}/delete`）。结论：**竞品不用 `PATCH`/`DELETE` 动词**
+（改名一律 `PUT`、删除与批量一律 `POST`），我方用 `PATCH`/`DELETE`，属"方法口径不同"，
+是可选补的兼容入口，**不构成缺口**（语义一一对应，本批不动端点）。
+
+#### 19.3 枚举原文（照抄，值不连续）
+
+```js
+// 0zWWdXb_.js —— scene 枚举（缺 8/10/12/13/19，不是笔误）
+Style=1, Genre=2, Composition=3, VideoEffect=4, AIStoryboard=5, StoryboardT2i=6, SeeDance2=7,
+ScreenplayNovel=9, StoryboardRef=11, Voice=14, ScenePrompt=15, Camera=16, Palette=17,
+Expression=18, AudioLibrary=20
+// status
+Enabled=1, Disabled=2
+// origin
+Official=1, Team=2
+// scene → 业务串（**枚举名与串不同名，四处**：Genre→theme、Voice→tone、
+//                                     ScreenplayNovel→novel_to_script、Composition→storyboard）
+{1:"style",2:"theme",3:"storyboard",4:"video_effect",5:"ai_storyboard",6:"storyboard_t2i",
+ 7:"seedance2",9:"novel_to_script",11:"storyboard_ref",14:"tone",15:"storyboard_prompt",
+ 16:"camera",17:"palette",18:"expression",20:"audio_library"}
+```
+
+**我方选择：值照抄不连续编号。** 重排成 1..15 更整齐，但会让同一个 scene 在两边是不同数字，
+将来对日志/埋点/竞品接口都多一层翻译。
+
+#### 19.4 每类场景的字段规则（`KNOWLEDGE_SCENE_RULES`）
+
+| scene | 名称上限 | prompt 必填 | prompt 上限 | 封面必填 | 有 prompt 列 | 首期 |
+|---:|---:|:---:|---:|:---:|:---:|:---:|
+| 0 未分类（我方兼容值） | 200 | — | — | — | ✓ | — |
+| 1 风格 | 10 | ✓ | 2000 | — | ✓ | ✓ |
+| 2 题材 | 10 | — | — | — | — | ✓ |
+| 3 分镜构图 | 10 | ✓ | 200 | ✓ | ✓ | ✓ |
+| 4 视频特效 | 10 | ✓ | 200 | ✓ | ✓ | ✓ |
+| 5 AI 拆分镜 | 50 | ✓ | 20000 | — | ✓ | ✓ |
+| 6 剧本拆分镜（图生视频） | 20 | ✓ | 5000 | — | ✓ | — |
+| 7 SeeDance2 | 50 | — | — | — | ✓ | — |
+| 9 编剧知识库 | 50 | — | 5000 | — | ✓ | ✓ |
+| 11 剧本拆分镜（参考生视频） | 20 | ✓ | 5000 | — | ✓ | — |
+| 14 音色模版 | 10 | ✓ | 50 | — | ✓ | ✓ |
+| 15 分镜提示词 | 50 | ✓ | 500 | — | ✓ | ✓ |
+| 16 / 17 / 18 运镜 / 色调 / 表情 | 50 | — | — | — | ✓ | — |
+| 20 音频模版 | 50 | — | — | — | **—** | ✓ |
+
+竞品 tab 的表头列（`columns`）：默认 `["name","prompt","status","updater","updated_at","actions"]`，
+**音色/音频类没有 `prompt` 列**（`["name","status","updater","updated_at","actions"]`）—— 这一点也照抄。
+
+#### 19.5 端点变更（无新增端点，只加参数与字段）
+
+所有改动都是**向后兼容的可选参数**，旧调用方（不带 `scene`）行为不变：
+
+| 端点 | 变更 |
+|---|---|
+| `GET /v1/knowledge/dirs` | 新 query `scene?`；返回节点多 `scene` |
+| `GET /v1/knowledge/tags` | 新 query `scene?`；返回项多 `scene` |
+| `GET /v1/knowledge/assets` | 新 query `scene?` |
+| `GET /v1/knowledge/assets/search` | 新 query `scene?` |
+| `GET /v1/knowledge/list` | 新 query `scene?` |
+| `GET /v1/knowledge/info` | 新字段 `asset_by_scene: Record<string, number>`（key 为 scene 值字符串） |
+| `POST /v1/knowledge/dirs` | body 新 `scene?`（有 `parent_id` 时**以父目录场景为准**） |
+| `POST /v1/knowledge/tags` | body 新 `scene?` |
+| `POST /v1/knowledge/assets` | body 新 `scene?`（按场景校验名称/prompt） |
+| `PATCH /v1/knowledge/assets/:id` | body 新 `scene?` |
+| 资产 DTO | 新增 `scene` / `scene_slug` / `scene_name_max_length` / `scene_prompt_required` / `scene_prompt_max_length` / `scene_prompt_column` |
+
+**规则只维护在 `@app/shared` 一份**，随条目下发，前端不抄第二份规则表。
+
+#### 19.6 校验与错误码
+
+| 情况 | 返回 |
+|---|---|
+| `scene` 不在枚举里（如 `8`） | `400101` + `{field:"scene"}`，msg `unknown knowledge scene`（**不是静默查空**） |
+| 同父同场景同名目录 / 同场景同名标签 | **`747007`** + `knowledge name already exists`（竞品同款码，见 `B9INZ4se.js`：`Number(r.code)===747007` + 文案兜底） |
+| 条目的 `scene` 与其 `dir_id` 所属场景不同 | `400101`，msg `dir belongs to a different scene` |
+| 名称/prompt 超出该场景规则 | `400101` + `{field, scene}`，msg 由规则生成（如 `name must be at most 10 characters for this scene`） |
+
+> 为什么改错误码：竞品前端**靠 `747007` 判重名**（不是靠文案）。我方原来抛 `400101`，
+> 会让"与竞品对齐"这件事在错误分支上露馅。
+
+#### 19.7 测试
+
+`apps/api/test/knowledge.spec.ts` **18 → 21 例**，新增 3 例：
+① 场景隔离（同名目录/同名标签在不同场景各存一份、tree/tags 按 scene 过滤、子目录跟随父场景、非法场景值 400101）；
+② 每类字段规则（风格 name ≤10 且 content 必填、音色 content ≤50、音频模版不要 content、`scene=8` 400101）；
+③ 条目跨场景挂目录被拒 + `assets`/`assets/search`/`list` 三处过滤 + `info.asset_by_scene` 计数。
+
+#### 19.8 诚实边界
+
+- `scene` 数值、业务串、每类规则、tab 表头列名：**竞品原文，可对齐**。
+- `SeeDance2` / `Camera` / `Palette` / `Expression` 四类**竞品没有文案**（只有 8 个 `phase1` tab 有 i18nKey），
+  我方中文译名是自拟的，标「待考证」。
+- 条目级字段 `cover_file`（竞品是**逗号分隔多值**，取首图为封面）、`image_files`、`origin_cover_file`
+  （竞品还有拼错的历史别名 `orgin_cover_file` 并存）、`status`、`sp_type`、`res_type`、`meta_data`、
+  `user_knowledge_info_items`（对应 `list` 的 `show_user_knowledge_info_list` 参数）——**证据已有但本批未落库**，
+  属扩展能力，故 #18 只到 **99.5%**。

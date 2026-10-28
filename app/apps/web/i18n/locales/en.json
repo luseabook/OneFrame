@@ -1825,7 +1825,26 @@
     "basePurgeConfirm": "This also deletes {dirs} directories and {assets} assets (irreversible). Are you sure?",
     "basePurged": "Knowledge base and contents purged",
     "baseDeleteFailed": "Failed to delete knowledge base",
-    "loadFailed": "Failed to load the knowledge base"
+    "loadFailed": "Failed to load the knowledge base",
+    "scene": {
+      "filterLabel": "Filter by type",
+      "all": "All",
+      "style": "Style",
+      "genre": "Genre",
+      "composition": "Shot composition",
+      "videoEffect": "Video effect",
+      "aiStoryboard": "AI storyboard",
+      "storyboardT2i": "Script to storyboard (image-to-video)",
+      "seeDance2": "SeeDance2",
+      "screenplayNovel": "Screenplay knowledge",
+      "storyboardRef": "Script to storyboard (reference-to-video)",
+      "voice": "Voice templates",
+      "scenePrompt": "Shot prompts",
+      "camera": "Camera moves",
+      "palette": "Color palettes",
+      "expression": "Expressions",
+      "audioLibrary": "Audio templates"
+    }
   },
   "workDetail": {
     "metaTitle": "Work details · OneFrame",

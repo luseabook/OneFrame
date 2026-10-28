@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { and, arrayContains, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { assets, knowledgeAssets, knowledgeBases, knowledgeDirs, knowledgeTags, users } from "@app/db";
 import type { Tx } from "@app/db";
-import { AppError, ErrorCode, newId } from "@app/shared";
+import { AppError, ErrorCode, isKnowledgeScene, KNOWLEDGE_SCENE_SLUG, knowledgeSceneRule, newId, validateKnowledgeSceneFields } from "@app/shared";
 import { db } from "../../db/database";
 import type { AuthContext } from "../../common/auth.types";
 
@@ -47,16 +47,24 @@ export class KnowledgeService {
   // 一、目录树
   // ══════════════════════════════════════════════════════════
 
-  /** 目录树（rt:755 `GET /dir/list`）：返回扁平列表 + 带 children 的树两份视图 */
-  async dirTree(auth: AuthContext) {
+  /**
+   * 目录树（rt:755 `GET /dir/list`）：返回扁平列表 + 带 children 的树两份视图。
+   *
+   * 第 60 批：accepts `?scene=`（竞品该端点的 query 就是 `["scene","parent_ukd_id"]`）。
+   * 不传就返回**全部场景**的目录 —— 这是为了不破坏本批之前的调用方；
+   * 前端 tab 一定要传，否则"音色"tab 里会看到风格目录。
+   */
+  async dirTree(auth: AuthContext, query: { scene?: number } = {}) {
     const spaceId = BigInt(auth.spaceId);
-    const rows = await this.dirRows(spaceId);
+    const scene = this.normalizeScene(query.scene);
+    const rows = await this.dirRows(spaceId, undefined, scene);
     /** 每个目录的直属资产数：一次 group by 拿完，避免前端逐节点请求 */
-    const counts = await this.assetCountByDir(spaceId);
+    const counts = await this.assetCountByDir(spaceId, scene);
     // asset_count 必须在**建树之前**写进节点：树是从同一批节点 clone 出来的，
     // 事后再 map 一遍只会改到扁平列表，树里的节点依旧没有这个字段（页面上会一律显示 0）。
     const nodes = rows.map((r) => ({
       id: String(r.id),
+      scene: r.scene,
       parent_id: r.parentId ? String(r.parentId) : null,
       name: r.name,
       sort: r.sort,
@@ -93,8 +101,11 @@ export class KnowledgeService {
     };
   }
 
-  /** 建目录（rt:741 `POST /dir`）：深度 ≤ 5，父子必须同 space */
-  async createDir(auth: AuthContext, input: { name: string; parent_id?: string; sort?: number }) {
+  /** 建目录（rt:741 `POST /dir`）：深度 ≤ 5，父子必须同 space；场景从父目录继承 */
+  async createDir(
+    auth: AuthContext,
+    input: { name: string; parent_id?: string; sort?: number; scene?: number },
+  ) {
     const spaceId = BigInt(auth.spaceId);
     const name = input.name.trim();
     if (name.length === 0) {
@@ -102,9 +113,12 @@ export class KnowledgeService {
     }
     return db.transaction(async (tx) => {
       let depth = 1;
+      // 场景以父目录为准：子目录跳到别的场景会让"风格/音色"两棵树混在一起
+      let scene = this.normalizeScene(input.scene) ?? 0;
       if (input.parent_id) {
         const parent = await this.requireDir(tx, spaceId, input.parent_id);
         depth = (await this.depthOf(tx, spaceId, String(parent.id))) + 1;
+        scene = parent.scene;
       }
       if (depth > KNOWLEDGE_MAX_DIR_DEPTH) {
         throw new AppError(
@@ -113,12 +127,13 @@ export class KnowledgeService {
           { field: "parent_id", depth },
         );
       }
-      await this.assertDirNameFree(tx, spaceId, input.parent_id ?? null, name);
+      await this.assertDirNameFree(tx, spaceId, input.parent_id ?? null, name, scene);
       const [row] = await tx
         .insert(knowledgeDirs)
         .values({
           id: newId(),
           spaceId,
+          scene,
           parentId: input.parent_id ? BigInt(input.parent_id) : null,
           name,
           sort: input.sort ?? 0,
@@ -142,6 +157,7 @@ export class KnowledgeService {
         spaceId,
         dir.parentId ? String(dir.parentId) : null,
         name,
+        dir.scene,
         String(dir.id),
       );
       const [row] = await tx
@@ -186,7 +202,8 @@ export class KnowledgeService {
         );
       }
       if (targetParentId) {
-        await this.assertDirNameFree(tx, spaceId, targetParentId, dir.name, String(dir.id));
+        // 移动不跨场景：换场景等于换一棵树，语义上应"重新建一条"而不是偷偷搬走
+        await this.assertDirNameFree(tx, spaceId, targetParentId, dir.name, dir.scene, String(dir.id));
       }
       const [row] = await tx
         .update(knowledgeDirs)
@@ -240,19 +257,28 @@ export class KnowledgeService {
   // 二、标签
   // ══════════════════════════════════════════════════════════
 
-  /** 标签列表（rt:762 `GET /tag/list`）：带使用计数 */
-  async listTags(auth: AuthContext) {
+  /**
+   * 标签列表（rt:762 `GET /tag/list`）：带使用计数。
+   *
+   * 第 60 批：竞品该端点 query 是 `["scene","query"]` —— 标签按场景隔离，
+   * 所以 `?scene=` 同时过滤登记表与使用计数（否则"风格"tab 的计数会把音色资产的用量算进来）。
+   */
+  async listTags(auth: AuthContext, query: { scene?: number } = {}) {
     const spaceId = BigInt(auth.spaceId);
+    const scene = this.normalizeScene(query.scene);
+    const conds = [eq(knowledgeTags.spaceId, spaceId)];
+    if (scene !== undefined) conds.push(eq(knowledgeTags.scene, scene));
     const rows = await db
       .select()
       .from(knowledgeTags)
-      .where(eq(knowledgeTags.spaceId, spaceId))
+      .where(and(...conds))
       .orderBy(asc(knowledgeTags.name));
-    const counts = await this.tagCounts(spaceId);
+    const counts = await this.tagCounts(spaceId, scene);
     return {
       list: rows.map((t) => ({
         id: String(t.id),
         name: t.name,
+        scene: t.scene,
         asset_count: counts.get(t.name) ?? 0,
         /** 是否已被资产使用：为 false 的是"僵尸标签"，运营可放心清理 */
         in_use: (counts.get(t.name) ?? 0) > 0,
@@ -262,27 +288,30 @@ export class KnowledgeService {
     };
   }
 
-  /** 建标签（rt:761 `POST /tag`） */
-  async createTag(auth: AuthContext, input: { name: string }) {
+  /** 建标签（rt:761 `POST /tag`）：场景内唯一 */
+  async createTag(auth: AuthContext, input: { name: string; scene?: number }) {
     const spaceId = BigInt(auth.spaceId);
     const name = input.name.trim();
+    const scene = this.normalizeScene(input.scene) ?? 0;
     if (name.length === 0) {
       throw new AppError(ErrorCode.INVALID_PARAM, "tag name must not be empty", { field: "name" });
     }
     const [row] = await db
       .insert(knowledgeTags)
-      .values({ id: newId(), spaceId, name })
-      .onConflictDoNothing({ target: [knowledgeTags.spaceId, knowledgeTags.name] })
+      .values({ id: newId(), spaceId, scene, name })
+      .onConflictDoNothing({ target: [knowledgeTags.spaceId, knowledgeTags.scene, knowledgeTags.name] })
       .returning();
     if (!row) {
-      // 同名已存在：幂等返回（前端"回车即建标签"重复触发不该报错）
+      // 同场景同名已存在：幂等返回（前端"回车即建标签"重复触发不该报错）
       const [existing] = await db
         .select()
         .from(knowledgeTags)
-        .where(and(eq(knowledgeTags.spaceId, spaceId), eq(knowledgeTags.name, name)));
-      return { tag: { id: String(existing!.id), name: existing!.name }, idempotent: true };
+        .where(
+          and(eq(knowledgeTags.spaceId, spaceId), eq(knowledgeTags.scene, scene), eq(knowledgeTags.name, name)),
+        );
+      return { tag: { id: String(existing!.id), name: existing!.name, scene: existing!.scene }, idempotent: true };
     }
-    return { tag: { id: String(row.id), name: row.name }, idempotent: false };
+    return { tag: { id: String(row.id), name: row.name, scene: row.scene }, idempotent: false };
   }
 
   /**
@@ -304,7 +333,13 @@ export class KnowledgeService {
       const [conflict] = await tx
         .select({ id: knowledgeTags.id })
         .from(knowledgeTags)
-        .where(and(eq(knowledgeTags.spaceId, spaceId), eq(knowledgeTags.name, name)));
+        .where(
+          and(
+            eq(knowledgeTags.spaceId, spaceId),
+            eq(knowledgeTags.scene, tag.scene),
+            eq(knowledgeTags.name, name),
+          ),
+        );
       if (conflict) {
         throw new AppError(ErrorCode.INVALID_PARAM, "tag name already exists", { field: "name" });
       }
@@ -322,12 +357,13 @@ export class KnowledgeService {
         .where(
           and(
             eq(knowledgeAssets.spaceId, spaceId),
+            eq(knowledgeAssets.scene, tag.scene),
             isNull(knowledgeAssets.deletedAt),
             sql`${tag.name} = any(${knowledgeAssets.tags})`,
           ),
         )
         .returning({ id: knowledgeAssets.id });
-      return { tag: { id: String(row!.id), name: row!.name }, renamed_assets: updated.length };
+      return { tag: { id: String(row!.id), name: row!.name, scene: row!.scene }, renamed_assets: updated.length };
     });
   }
 
@@ -346,6 +382,7 @@ export class KnowledgeService {
         .where(
           and(
             eq(knowledgeAssets.spaceId, spaceId),
+            eq(knowledgeAssets.scene, tag.scene),
             isNull(knowledgeAssets.deletedAt),
             sql`${tag.name} = any(${knowledgeAssets.tags})`,
           ),
@@ -365,7 +402,7 @@ export class KnowledgeService {
   // 三、资产
   // ══════════════════════════════════════════════════════════
 
-  /** 资产列表（rt:746 `GET /dir/:ukd_id/asset/list`）：按目录过滤（含/不含子目录）、分页 */
+  /** 资产列表（rt:746 `GET /dir/:ukd_id/asset/list`）：按目录过滤（含/不含子目录）、分页；可叠加场景 */
   async listAssets(
     auth: AuthContext,
     query: {
@@ -373,6 +410,7 @@ export class KnowledgeService {
       include_children?: boolean;
       tags?: string[];
       source_type?: number;
+      scene?: number;
       page?: number;
       page_size?: number;
     },
@@ -392,6 +430,9 @@ export class KnowledgeService {
       }
     }
     if (query.source_type !== undefined) conds.push(eq(knowledgeAssets.sourceType, query.source_type));
+    // 第 60 批：竞品 `asset/search` 的 query 里 scene 是必填维度，缺失就分不出"风格/音色"
+    const listScene = this.normalizeScene(query.scene);
+    if (listScene !== undefined) conds.push(eq(knowledgeAssets.scene, listScene));
     if (query.tags && query.tags.length > 0) {
       // 标签"且"语义，与集市筛选同口径
       conds.push(arrayContains(knowledgeAssets.tags, query.tags));
@@ -429,6 +470,7 @@ export class KnowledgeService {
       tags?: string[];
       dir_id?: string;
       source_type?: number;
+      scene?: number;
       page?: number;
       page_size?: number;
     },
@@ -443,6 +485,8 @@ export class KnowledgeService {
     }
     if (query.tags && query.tags.length > 0) conds.push(arrayContains(knowledgeAssets.tags, query.tags));
     if (query.source_type !== undefined) conds.push(eq(knowledgeAssets.sourceType, query.source_type));
+    const searchScene = this.normalizeScene(query.scene);
+    if (searchScene !== undefined) conds.push(eq(knowledgeAssets.scene, searchScene));
     if (query.dir_id) {
       const dir = await this.requireDir(db, spaceId, query.dir_id);
       const all = await this.dirRows(spaceId);
@@ -484,7 +528,14 @@ export class KnowledgeService {
     return { asset: this.toAssetDto(row, dir?.name ?? null, author?.nickname ?? null, refs.get(String(row.id))) };
   }
 
-  /** 新建知识条目（rt:745 `POST /dir/:ukd_id/asset/import`）—— 纯文本/链接条目 */
+  /**
+   * 新建知识条目（rt:745 `POST /dir/:ukd_id/asset/import`）—— 纯文本/链接条目。
+   *
+   * 第 60 批：加 `scene`（模板场景）与**按场景的字段规则校验**。
+   * 竞品每条知识库记录就是"某类模板"（风格/音色/提示词…），每类的 name 上限、
+   * prompt 是否必填与上限都不同（见 `KNOWLEDGE_SCENE_RULES`），
+   * 所以 `title`/`content` 的合法性依赖 scene，不能只靠 zod 的固定上限。
+   */
   async createAsset(
     auth: AuthContext,
     input: {
@@ -492,14 +543,21 @@ export class KnowledgeService {
       content?: string;
       dir_id?: string;
       tags?: string[];
+      /** 模板场景（竞品枚举值）；不传 = 0 未分类 */
+      scene?: number;
       /** 1 文本 / 3 链接（2 资产引用走 import-from-asset，不从这里建） */
       source_type?: number;
     },
   ) {
     const spaceId = BigInt(auth.spaceId);
     const title = input.title.trim();
+    const scene = this.normalizeScene(input.scene) ?? 0;
     if (title.length === 0) {
       throw new AppError(ErrorCode.INVALID_PARAM, "title must not be empty", { field: "title" });
+    }
+    const sceneError = validateKnowledgeSceneFields(scene, { title, content: input.content ?? null });
+    if (sceneError) {
+      throw new AppError(ErrorCode.INVALID_PARAM, sceneError.message, { field: sceneError.field, scene });
     }
     const sourceType = input.source_type ?? 1;
     if (sourceType === 2) {
@@ -515,13 +573,24 @@ export class KnowledgeService {
     if (sourceType === 3 && (!input.content || input.content.trim() === "")) {
       throw new AppError(ErrorCode.INVALID_PARAM, "link entry requires content (the URL)", { field: "content" });
     }
-    const tags = await this.validateTags(BigInt(auth.spaceId), input.tags ?? []);
-    if (input.dir_id) await this.requireDir(db, spaceId, input.dir_id);
+    const tags = await this.validateTags(BigInt(auth.spaceId), input.tags ?? [], scene);
+    if (input.dir_id) {
+      const dir = await this.requireDir(db, spaceId, input.dir_id);
+      // 目录与条目的场景必须一致，否则"风格"目录里会出现音色条目，tab 一筛就消失
+      if (dir.scene !== scene) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "dir belongs to a different scene", {
+          field: "dir_id",
+          dir_scene: dir.scene,
+          scene,
+        });
+      }
+    }
     const [row] = await db
       .insert(knowledgeAssets)
       .values({
         id: newId(),
         spaceId,
+        scene,
         dirId: input.dir_id ? BigInt(input.dir_id) : null,
         title,
         content: input.content ?? null,
@@ -537,17 +606,34 @@ export class KnowledgeService {
   async patchAsset(
     auth: AuthContext,
     assetId: string,
-    input: { title?: string; content?: string; dir_id?: string | null; tags?: string[] },
+    input: { title?: string; content?: string; dir_id?: string | null; tags?: string[]; scene?: number },
   ) {
     const spaceId = BigInt(auth.spaceId);
     const existing = await this.requireAsset(db, spaceId, assetId);
-    if (input.dir_id) await this.requireDir(db, spaceId, input.dir_id);
-    const tags = input.tags === undefined ? existing.tags : await this.validateTags(spaceId, input.tags);
+    const scene = input.scene === undefined ? existing.scene : (this.normalizeScene(input.scene) ?? existing.scene);
+    const nextTitle = input.title !== undefined ? input.title.trim() : existing.title;
+    const nextContent = input.content !== undefined ? input.content : existing.content;
+    const sceneError = validateKnowledgeSceneFields(scene, { title: nextTitle, content: nextContent });
+    if (sceneError) {
+      throw new AppError(ErrorCode.INVALID_PARAM, sceneError.message, { field: sceneError.field, scene });
+    }
+    if (input.dir_id) {
+      const dir = await this.requireDir(db, spaceId, input.dir_id);
+      if (dir.scene !== scene) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "dir belongs to a different scene", {
+          field: "dir_id",
+          dir_scene: dir.scene,
+          scene,
+        });
+      }
+    }
+    const tags = input.tags === undefined ? existing.tags : await this.validateTags(spaceId, input.tags, scene);
     const [row] = await db
       .update(knowledgeAssets)
       .set({
-        title: input.title !== undefined ? input.title.trim() : existing.title,
-        content: input.content !== undefined ? input.content : existing.content,
+        title: nextTitle,
+        content: nextContent,
+        scene,
         dirId: input.dir_id === undefined ? existing.dirId : input.dir_id ? BigInt(input.dir_id) : null,
         tags,
         updatedAt: new Date(),
@@ -815,6 +901,14 @@ export class KnowledgeService {
       .from(knowledgeTags)
       .where(eq(knowledgeTags.spaceId, spaceId));
     const byDir = await this.assetCountByDir(spaceId);
+    // 第 60 批：按场景分布（竞品 tab 上会显示每类有多少条，前端不必为每个 tab 各请求一次 list）
+    const sceneRows = await db
+      .select({ scene: knowledgeAssets.scene, count: sql<number>`count(*)::int` })
+      .from(knowledgeAssets)
+      .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)))
+      .groupBy(knowledgeAssets.scene);
+    const assetByScene: Record<string, number> = {};
+    for (const row of sceneRows) assetByScene[String(row.scene)] = row.count;
     // 老空间（第 6 批就上线的）没有库行，这里懒初始化一行，否则页面拿不到名称
     const baseRow = await this.ensureBase(spaceId, BigInt(auth.userId));
     return {
@@ -828,30 +922,39 @@ export class KnowledgeService {
         asset_reference: assetAgg?.ref ?? 0,
         link: assetAgg?.link ?? 0,
       },
+      /** 按模板场景的条目数，key 为 scene 值字符串（"0"=未分类） */
+      asset_by_scene: assetByScene,
       max_dir_depth: KNOWLEDGE_MAX_DIR_DEPTH,
       unclassified_assets: byDir.get("__root__") ?? 0,
     };
   }
 
-  /** 平铺列表（rt:759 `GET /list`）：跨目录一次拉全，供"最近更新/全局搜索"用 */
-  async flatList(auth: AuthContext, query: { page?: number; page_size?: number; sort?: "created" | "updated" }) {
+  /** 平铺列表（rt:759 `GET /list`）：跨目录一次拉全，供"最近更新/全局搜索"用；可叠加场景 */
+  async flatList(
+    auth: AuthContext,
+    query: { page?: number; page_size?: number; sort?: "created" | "updated"; scene?: number },
+  ) {
     const spaceId = BigInt(auth.spaceId);
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.page_size ?? 20));
     const order = query.sort === "created" ? desc(knowledgeAssets.createdAt) : desc(knowledgeAssets.updatedAt);
+    const conds = [eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)];
+    const scene = this.normalizeScene(query.scene);
+    if (scene !== undefined) conds.push(eq(knowledgeAssets.scene, scene));
+    const where = and(...conds);
     const rows = await db
       .select({ asset: knowledgeAssets, dirName: knowledgeDirs.name, authorName: users.nickname })
       .from(knowledgeAssets)
       .leftJoin(knowledgeDirs, eq(knowledgeDirs.id, knowledgeAssets.dirId))
       .leftJoin(users, eq(users.id, knowledgeAssets.createdBy))
-      .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)))
+      .where(where)
       .orderBy(order)
       .limit(pageSize)
       .offset((page - 1) * pageSize);
     const [countRow] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(knowledgeAssets)
-      .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)));
+      .where(where);
     const refs = await this.resolveAssetRefs(rows.map((r) => r.asset));
     return {
       list: rows.map((r) => this.toAssetDto(r.asset, r.dirName, r.authorName, refs.get(String(r.asset.id)))),
@@ -1094,13 +1197,24 @@ export class KnowledgeService {
   // 八、内部工具
   // ══════════════════════════════════════════════════════════
 
-  private async dirRows(spaceId: bigint, tx?: Tx): Promise<DirRow[]> {
+  private async dirRows(spaceId: bigint, tx?: Tx, scene?: number): Promise<DirRow[]> {
     const runner = tx ?? db;
+    const conds = [eq(knowledgeDirs.spaceId, spaceId), isNull(knowledgeDirs.deletedAt)];
+    if (scene !== undefined) conds.push(eq(knowledgeDirs.scene, scene));
     return runner
       .select()
       .from(knowledgeDirs)
-      .where(and(eq(knowledgeDirs.spaceId, spaceId), isNull(knowledgeDirs.deletedAt)))
+      .where(and(...conds))
       .orderBy(asc(knowledgeDirs.sort), asc(knowledgeDirs.id));
+  }
+
+  /** 场景入参归一：缺省 → undefined（=不按场景过滤），非法值 → 400101 */
+  private normalizeScene(scene: number | undefined): number | undefined {
+    if (scene === undefined || scene === null) return undefined;
+    if (!isKnowledgeScene(scene)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "unknown knowledge scene", { field: "scene" });
+    }
+    return scene;
   }
 
   private async requireDir(runner: Tx | typeof db, spaceId: bigint, dirId: string): Promise<DirRow> {
@@ -1170,12 +1284,20 @@ export class KnowledgeService {
     return walk(rootId);
   }
 
-  /** 同父目录下不允许同名（否则前端树里两个一样的名字，用户无法区分） */
+  /**
+   * 同场景 + 同父目录下不允许同名（否则前端树里两个一样的名字，用户无法区分）。
+   *
+   * 第 60 批：错误码改 `KNOWLEDGE_NAME_EXISTS(747007)`，文案对齐竞品原文
+   * `"knowledge name already exists"`（竞品前端就是靠这个码 + 这句文案识别重名的，
+   * 换成 400101 会让按竞品写的客户端拿不到可判定的分支）。
+   * 同名判定加 `scene` 维度：不同场景的两棵目录树互不干扰。
+   */
   private async assertDirNameFree(
     tx: Tx,
     spaceId: bigint,
     parentId: string | null,
     name: string,
+    scene: number,
     excludeId?: string,
   ) {
     const parentCond = parentId ? eq(knowledgeDirs.parentId, BigInt(parentId)) : isNull(knowledgeDirs.parentId);
@@ -1186,13 +1308,14 @@ export class KnowledgeService {
         and(
           eq(knowledgeDirs.spaceId, spaceId),
           eq(knowledgeDirs.name, name),
+          eq(knowledgeDirs.scene, scene),
           isNull(knowledgeDirs.deletedAt),
           parentCond,
         ),
       );
     const clash = rows.find((r) => String(r.id) !== excludeId);
     if (clash) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "a directory with the same name already exists here", {
+      throw new AppError(ErrorCode.KNOWLEDGE_NAME_EXISTS, "knowledge name already exists", {
         field: "name",
       });
     }
@@ -1220,13 +1343,16 @@ export class KnowledgeService {
    * 自动建会让错别字变成永久标签（"人设" vs "人设图"），且无法清理。
    * 前端交互是"输入框下拉选择已有标签 + 先去标签页建新标签"。
    */
-  private async validateTags(spaceId: bigint, tags: string[]): Promise<string[]> {
+  private async validateTags(spaceId: bigint, tags: string[], scene?: number): Promise<string[]> {
     const names = [...new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0))];
     if (names.length === 0) return [];
+    const conds = [eq(knowledgeTags.spaceId, spaceId), inArray(knowledgeTags.name, names)];
+    // 标签按场景隔离后，别的场景的同名标签不算"本场景已知标签"
+    if (scene !== undefined) conds.push(eq(knowledgeTags.scene, scene));
     const rows = await db
       .select({ name: knowledgeTags.name })
       .from(knowledgeTags)
-      .where(and(eq(knowledgeTags.spaceId, spaceId), inArray(knowledgeTags.name, names)));
+      .where(and(...conds));
     const known = new Set(rows.map((r) => r.name));
     const unknown = names.filter((n) => !known.has(n));
     if (unknown.length > 0) {
@@ -1311,11 +1437,13 @@ export class KnowledgeService {
       );
   }
 
-  private async assetCountByDir(spaceId: bigint): Promise<Map<string, number>> {
+  private async assetCountByDir(spaceId: bigint, scene?: number): Promise<Map<string, number>> {
+    const conds = [eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)];
+    if (scene !== undefined) conds.push(eq(knowledgeAssets.scene, scene));
     const rows = await db
       .select({ dirId: knowledgeAssets.dirId, count: sql<number>`count(*)::int` })
       .from(knowledgeAssets)
-      .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)))
+      .where(and(...conds))
       .groupBy(knowledgeAssets.dirId);
     const map = new Map<string, number>();
     for (const row of rows) {
@@ -1324,11 +1452,13 @@ export class KnowledgeService {
     return map;
   }
 
-  private async tagCounts(spaceId: bigint): Promise<Map<string, number>> {
+  private async tagCounts(spaceId: bigint, scene?: number): Promise<Map<string, number>> {
+    const conds = [eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)];
+    if (scene !== undefined) conds.push(eq(knowledgeAssets.scene, scene));
     const rows = await db
       .select({ tags: knowledgeAssets.tags })
       .from(knowledgeAssets)
-      .where(and(eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)));
+      .where(and(...conds));
     const counts = new Map<string, number>();
     for (const row of rows) {
       for (const tag of row.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -1367,6 +1497,7 @@ export class KnowledgeService {
   private toDirDto(row: DirRow) {
     return {
       id: String(row.id),
+      scene: row.scene,
       parent_id: row.parentId ? String(row.parentId) : null,
       name: row.name,
       sort: row.sort,
@@ -1381,8 +1512,17 @@ export class KnowledgeService {
     authorName?: string | null,
     ref?: { id: string; kind: string; uri: string; preview_uri: string | null; name: string },
   ) {
+    const rule = knowledgeSceneRule(row.scene);
     return {
       id: String(row.id),
+      /** 模板场景（竞品枚举值，见 shared 的 KNOWLEDGE_SCENE） */
+      scene: row.scene,
+      scene_slug: row.scene === 0 ? "" : (KNOWLEDGE_SCENE_SLUG[row.scene] ?? ""),
+      /** 该场景的字段规则，前端据此决定是否必填/显示哪些列（竞品也是每类不同的表头） */
+      scene_name_max_length: rule.nameMaxLength,
+      scene_prompt_required: rule.promptRequired,
+      scene_prompt_max_length: rule.promptMaxLength,
+      scene_prompt_column: rule.promptColumn,
       dir_id: row.dirId ? String(row.dirId) : null,
       dir_name: dirName ?? null,
       asset_id: row.assetId ? String(row.assetId) : null,

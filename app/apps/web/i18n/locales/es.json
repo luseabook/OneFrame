@@ -1825,7 +1825,26 @@
     "basePurgeConfirm": "Esto también elimina {dirs} carpetas y {assets} activos (irreversible). ¿Seguro?",
     "basePurged": "Base y contenido vaciados",
     "baseDeleteFailed": "Error al eliminar la base de conocimiento",
-    "loadFailed": "No se pudo cargar la base de conocimiento"
+    "loadFailed": "No se pudo cargar la base de conocimiento",
+    "scene": {
+      "filterLabel": "Filtrar por tipo",
+      "all": "Todos",
+      "style": "Estilo",
+      "genre": "Género",
+      "composition": "Composición de plano",
+      "videoEffect": "Efecto de vídeo",
+      "aiStoryboard": "Storyboard por IA",
+      "storyboardT2i": "Guion a storyboard (imagen a vídeo)",
+      "seeDance2": "SeeDance2",
+      "screenplayNovel": "Base de guion",
+      "storyboardRef": "Guion a storyboard (referencia a vídeo)",
+      "voice": "Plantillas de voz",
+      "scenePrompt": "Prompts de plano",
+      "camera": "Movimientos de cámara",
+      "palette": "Paletas de color",
+      "expression": "Expresiones",
+      "audioLibrary": "Plantillas de audio"
+    }
   },
   "workDetail": {
     "metaTitle": "Detalles de la obra · OneFrame",

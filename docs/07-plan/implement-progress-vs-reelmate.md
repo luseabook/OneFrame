@@ -1,6 +1,6 @@
 # OneFrame × ReelMate 实现进度对照（以竞品为标准）
 
-> 评估对象：工作区 `E:\wanxing`（38 个迁移 / 112 张表 / **699 端点 / 52 controller** / 64 页面 / 1,232 用例）
+> 评估对象：工作区 `E:\wanxing`（39 个迁移 / 112 张表 / **699 端点 / 52 controller** / 64 页面 / 1,235 用例）
 > 评估时间：… · 19:10（v2.4）· 19:40（v2.5）· 20:10（v2.6）· 20:40（v2.7）· 21:10（v2.8）· 21:40（v2.9）· 22:10（v3.0）· 22:40（v3.1）· 23:20（v3.2）· 23:55（v3.3）· 00:35（v3.4）· 01:10（v3.5）· 01:45（v3.6）· 02:20（v3.7）· 02:55（v3.8）· 03:30（v3.9）· 04:05（v4.0）· 04:40（v4.1）· 05:15（v4.2）· 05:55（v4.3）· 06:45（v4.4）· 07:20（v4.5）· 08:05（v4.6）· 08:45（v4.7）· 09:20（v4.8）· 09:55（v4.9）· 10:35（v5.0）· 11:10（v5.1）· 12:00（v5.2）· 12:40（v5.3）· 13:25（v5.4）· 14:10（v5.5）· 15:00（v5.6）· 15:45（v5.7）· 16:25（v5.8）· 17:05（v5.9）· 17:55（v6.0）· 18:40（v6.1）· 19:30（v6.2）· 20:15（v6.3）· 20:55（v6.4）· 21:40（v6.5）· 22:20（v6.6）· 22:55（v6.7 缺口复核）· 23:45（v6.8）· 00:30（v6.9）· 01:15（v7.0）· 02:00（v7.1）· 02:45（v7.2）· 03:30（v7.3）· 04:35（v7.4）· **2026-10-29 04:50 重算（v7.5）** · 05:20（v7.6）· 06:05（v7.7）
 > 竞品基准：万兴剧厂 ReelMate（`www.reelmate.cn`），功能地图见 [reelmate-feature-map.md](../01-product/reelmate-feature-map.md)，分域附录见 [_parts/](../01-product/_parts/)
 > 本文用途：**排期与投入优先级的事实基线**。不是验收报告，不含主观评价。
@@ -9,30 +9,25 @@
 
 ## 0. 一句话结论
 
-**以竞品为基准，OneFrame 全站实现进度 ≈ 97.9%（201.63/206，剩余 4.37；v1.0 基线 35.4%）；首发口径 ≈ 97.8%（130.12/133，基线 54.4%）。**
+**以竞品为基准，OneFrame 全站实现进度 ≈ 97.9%（201.64/206，剩余 4.36；v1.0 基线 35.4%）；首发口径 ≈ 97.8%（130.12/133，基线 54.4%）。**
 
-最近一批（第 59 批）做的是**把一条被误判成"产品定义不做"的缺口改判为实现**：#18 团队知识库一直缺
-`create`/`update`/`info/update`/`delete` 四条"知识库实体"端点，此前文档写的理由是"竞品支持多库、我方一 space 一库，
-所以不做"。第 59 批复核竞品路由发现这个理由**站不住**：这四条端点**都没有路径 id 参数**（同一批端点里目录端点带
-`dir/:ukd_id`、资产端点带 `asset/{uk_id}`），路由形状本身就是"一 team 一库"的证据——既然只有一个库，动作自然不需要
-目标 id。所以缺的不是"产品定义"，而是**我方连这一个库的元数据都没落库**。本批补了 `knowledge_bases` 表（迁移 0037）
-+ 5 条端点（4 条对齐竞品 + 我方自加的 `GET /knowledge/base`）+ 页头实体编辑，#18 92% → 99%，**+0.21 权重**。
-剩余 **4.37** 权重里已无「从零开发」，全部是外部输入与取证：
+最近一批（第 60 批）做的是**第一次真正挖到竞品前端字段级证据后补一个功能维度**：此前每轮都写「竞品无响应体证据」，其实竞品把 Vite 产物留在了 `rea-reelmate/scripts*` 下（133 + 473 个 js）。本批从中拿到两段原文：① `core-lib-CKH7gQsw.js` 里**每个端点**都有 `{path, method, paramNames, queryNames}` 配置对象；② `0zWWdXb_.js` 里是知识库的**全部枚举与每类字段规则**（16 个 `scene` 值、状态 `Enabled/Disabled`、来源 `Official/Team`、每类场景各自的名称上限与 prompt 必填/上限）。据此发现一条真缺口：**竞品知识库是按「模板场景」分树的**（`dir/list` 的 query 是 `["scene","parent_ukd_id"]`、`tag/list` 是 `["scene","query"]`、`asset/search` 第一个参数就是 `scene`），一个场景一棵目录树、一套标签，而我方三层表**都没有 scene 列**——「风格库」和「音色库」的目录会混在同一棵树里。本批给三张表补 `scene`（迁移 0038，标签唯一索引改为 `(space_id, scene, name)`）+ 每类字段规则 + 读接口过滤 + tab 条 + 竞品同款重名错误码 `747007`，#18 99% → 99.5%，**+0.015 权重**。
+剩余 **4.36** 权重里已无「从零开发」，全部是外部输入与取证：
 
 | 拆分 | 模块 | 权重 | 进度 | v2.1 | v2.0 | v1.0 | 含义 |
 |---|---:|---:|---:|---:|---:|---:|---|
 | **核心创作闭环** | 18 | 110 | **97.4%** | 92.4% | 83.6% | 51.3% | 只剩"外部 Key / 取证"级别 |
-| **生态与规模化** | 10 | 96 | **98.4%** | 84.1% | 45.8% | 19.3% | 创作者中心 5 页齐 + 影视版达 100% |
-| **全站** | 28 | 206 | **97.9%** | 88.5% | 66.0% | 36.4% | 见 §3.4（逐轮重算至 **201.63/206**，剩余 4.37） |
+| **生态与规模化** | 10 | 96 | **98.5%** | 84.1% | 45.8% | 19.3% | 创作者中心 5 页齐 + 影视版达 100% |
+| **全站** | 28 | 206 | **97.9%** | 88.5% | 66.0% | 36.4% | 见 §3.4（逐轮重算至 **201.64/206**，剩余 4.36） |
 | **首发口径**（剔除 8 个非阻塞模块） | 20 | 133 | **97.8%** | 93.0% | 83.0% | 55.9% | 「Beta 可对外收钱出片」已达 97.8%（**130.12/133**） |
 
 **五个必须说清的事实：**
 
-1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、12 个 97–99.9%、7 个 92–95%、1 个 <92%**（#5 全部项目 90%，差画布封面与跨域投影字段的竞品取证）；最低的 3 个模块（#5 90 / #9 92 / #12 92 / #25 92）全部卡在"竞品没给字段"或"外部资质"。
-2. **剩余 4.37 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、MCP（竞品无证据）、真实渠道联调、升级补差价下单、知识库实体字段名取证。**没有一块是"从零开发"**。
-3. **核心与生态两条线都已过 97%**：核心创作闭环 97.4%、生态与规模化 98.4%。首发口径（剔除 8 个非阻塞模块）97.8%，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 4.37 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
+1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、12 个 97–99.9%、6 个 92–95%、1 个 <92%**（#5 全部项目 90%，差画布封面与跨域投影字段的竞品取证）；最低的 3 个模块（#5 90 / #9 92 / #12 92 / #25 92）全部卡在"竞品没给字段"或"外部资质"。
+2. **剩余 4.36 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、MCP（竞品无证据）、真实渠道联调、升级补差价下单、知识库条目级字段（竞品有证据但属扩展能力）。**没有一块是"从零开发"**。
+3. **核心与生态两条线都已过 97%**：核心创作闭环 97.4%、生态与规模化 98.5%。首发口径（剔除 8 个非阻塞模块）97.8%，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 4.36 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
 4. **每一轮的进度都有可复跑的证据**：`_acceptance/verify-round.ps1`（12 个任务全绿）+ 8 套真实浏览器 E2E（导演台/广告剧 12 项/转绘 11 项/创作者/分享/模板 UI/运营审核）+ 各类 smoke 脚本，命令与结论都登记在 §8。
-5. **本轮（第 59 批）做了什么**：① 新增 `knowledge_bases` 表（迁移 0037，`uq_knowledge_bases_space` 是**偏唯一**索引：`where deleted_at is null`，软删后可重建；**不能写 `onConflictDoNothing({target: spaceId})`**——PostgreSQL 在偏索引上推不出冲突目标会直接 `42P10`，必须用不带 target 的写法，这条是 psql 实测出来的）；② 5 条端点：`GET /knowledge/base`（我方自加：页头只要名称，不该为它拉 4 条 count 聚合）+ `POST /knowledge/base`（幂等，已存在返回 `created:false`）+ `POST /knowledge/base/update`（只改名）+ `POST /knowledge/base/info/update`（简介/封面/提示，"传了才改"，避免改名时误清简介）+ `POST /knowledge/base/delete`（默认只软删库行、目录与资产原地保留，`purge:true` 才级联清；标签走**物理删**，否则重建后建同名标签会撞 `uq_knowledge_tags`）；③ `GET /knowledge/info` 直接带 `base` 实体块，删掉原「我方为一 space 一库」的 `note` 文案；④ 页头改成实体编辑（名称/简介/封面/提示 + 改名，删库与清空两个不可逆动作在确认框里写清影响量）；⑤ 新增 4 例（懒初始化与幂等 / 改名与改概览互不清空 / 删库默认保留内容 vs `purge` 级联 / 跨 space 隔离 403101）。**字段名（`name`/`description`/`cover_uri`/`note`）是我方口径**——竞品只有路由清单、无任何响应体，按红线标「待取证」，不写成"已对齐"。
+5. **本轮（第 60 批）做了什么**：① 挖到竞品前端 bundle 里的**端点配置对象**与**知识库枚举/字段规则**原文（此前各轮都判「竞品无响应体证据」，是**取证方法不到位**，不是竞品没给）；② 三张表补 `scene` 列（迁移 0038），标签唯一索引从 `(space_id,name)` 改为 `(space_id, scene, name)`——同名标签可以在不同场景各存一份，这是竞品 `tag/list?scene=` 的必然推论；③ 新增 `@app/shared` 的 `knowledge-scene.ts`：16 值枚举 + 业务串 + `KNOWLEDGE_SCENE_RULES`（每类场景的名称上限/prompt 必填与上限/封面必填/是否有 prompt 列/是否首期）+ 10 条 tab 定义，**逐字照抄竞品 `_` 与 `o` 两个常量**；④ 读接口补 `scene` 过滤（`GET dirs`/`tags`/`assets`/`assets/search`/`list`）+ 写接口按场景校验（子目录跟随父场景、条目不得跨场景挂目录）+ `info` 增 `asset_by_scene` 计数；⑤ 重名错误码改为竞品同款 `747007` + 竞品原文文案 `knowledge name already exists`（竞品前端就是靠这个码识别重名，我方原来用 `400101` 会让「与竞品对齐」这件事在错误分支上露馅）；⑥ 前端加场景 tab 条 + 建条目时带当前场景 + 17 个 i18n key × 5 语言。**边界**：`scene` 数值与业务串是竞品原文（可对齐），但 `SeeDance2`/`Camera`/`Palette`/`Expression` 四类竞品没有对应文案，我方译名标「待考证」；条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 证据已有但**本批未落库**，所以 #18 只给到 99.5% 而不是 100%。
 
 ---
 
@@ -75,7 +70,7 @@
 | 页面路由 | 102（可比 93） | **64** | 61%（full）/ 69%（含 partial） | 29 |
 | API 端点 | 821 路径常量 | **699**（52 个 controller） | 85% | 236 |
 | 后端域 | 12 个服务前缀 | **30 个模块目录** | — | 14 |
-| 数据表 | 未知 | **112 张**（迁移 0000–0037） | — | 49 |
+| 数据表 | 未知 | **112 张**（迁移 0000–0038） | — | 49 |
 | 模型目录 | 46 条 / 8 生成端点 | **46 条 seed + 15 条内部能力行**（目录 100%） | 100% | 10 条占位 |
 | 单点工具 | 22（17 有路由 + 5 报告点名） | **19 张卡 / 19 个落地页** | 100% | 18 卡 / 8 落地 |
 | CLI/MCP | 38 命令组 | **196 命令 / 37 组**（118 可用 + 78 骨架；MCP 待取证） | 75% | 0 |
@@ -201,7 +196,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | # | 模块 | 竞品端点 | 权重 | 完成 | 加权得分 | 我方现状 | 主要缺口 |
 |---:|---|---:|---:|---:|---:|---|---|
 | 17 | **资产/主体** | 91 | L(8) | **99%** | 7.92 | 18 端点（主体库 7 + 抽取 6 + 匹配 5）+ 一致性三闸门 + `/assets` 三 tab；29 例 | **集级 resources 已不再是投影**（第 53 批纠正）：`episode_resources` 表（**迁移 0031**）是一等公民——一次 `match-resources`/`save-resource-matches` 写入即本集权威快照，读路径直接命中；仅在「历史项目从未写过快照」时回落分镜绑定（`asset-match.service.ts:632` 注释即此口径）。快照与分镜绑定的分工是刻意的：快照=本集应有哪些资产（含未定稿占位），绑定=本镜实际注入哪些参考图（只绑已定稿）。剩余：`prompt_blocked` 无列（需竞品字段证据）、`prompt_inject_mode=replace` 语义需产品确认、模板渲染为自建口径 |
-| 18 | 团队知识库 | 34 | M(3) | **99%** | 2.97 | **34 端点**（竞品 29 条全对 + 我方 5 条实体）+ `/knowledge` 目录树/标签/资产/双向导入/批量 + **页头知识库实体**（名称/简介/封面/提示 + 改名 + 删库/清空）；**18 例** | 只剩实体字段名竞品无响应体证据（见 §5 第 11 行） |
+| 18 | 团队知识库 | 34 | M(3) | **99.5%** | 2.985 | **34 端点**（竞品 29 条全对 + 我方 5 条实体）+ `/knowledge` 目录树/标签/资产/双向导入/批量 + **页头知识库实体** + **模板场景维度**（16 值枚举、每类字段规则、tab 过滤、重名 `747007`）；**21 例** | 只剩条目级字段未落库：竞品 `cover_file`/`image_files`/`status`(Official/Team)/`sp_type`/`res_type`/`meta_data`（证据已有，见 §5 第 11 行） |
 | 19 | 3D 导演台 | 9 | M(3) | **99%** | 2.97 | **9 端点**（场景快照 CRUD/复制/姿态预设/心跳）+ `Director3D.vue` 接线（自动保存/冲突条/预设/缩略图）+ 项目页入口；**16 例**（含 3 例验收口径测试）+ 13 项浏览器 E2E | 真实双人协同（只验单浏览器+Redis 造第二人）。**像素级验收已改为「结构等价 + 关键对象计数」**（第 53 批）：像素比对对显卡驱动/DPR 敏感、跨机必 flaky；`director.spec.ts` 的 `shapeOf()` 折出类型/键集/数组长度/数值有限性指纹，断言同形快照指纹一致 + 立场/机位数一致 + 复制场景逐层等价，并用「多一个机位必须被检出」反证断言非恒真 |
 | 20 | ReelFlow 剪辑 | 23 | L(8) | **99%** | 7.92 | timeline 5 端点 + **publish/切片（`timeline_publications` 状态机 + shareToken）** + publications 列表/下架 + **clip 资产绑定（快照语义）**；`/reelflow/edit/[id]` 发布与片段资产面板；**36 例**（shared 状态机 7 + worker 消费 11 + api 18） | ~~真 ffmpeg 裁剪~~ **已实现**：`ffmpeg-trim` 用 `-ss/-to` 解码后裁 + 重编码（不用 `-c copy`，避免按关键帧对齐把尾巴带进来），落 `transcode_mode=ffmpeg`；不可用时**降级为复制并留 `transcode_reason`**（绝不「悄悄复制却说裁过」）。实测 5s→2s 精确到 2.000000。~~切片转码异步下沉 worker~~ **第 57 批已实现**：状态机抽到 `@app/shared runPublishTranscode`（**API 内联与 worker 队列共用一份**，三条不变量：终态不覆盖 / 降级留痕 / 失败不抛），`PUBLISH_TRANSCODE_MODE=worker` 时 API 只入队 `publish.transcode`、worker 消费并重投（**修掉真缺陷**：原 `void this.transcode()` 在 API 重启时会把停在 1/2 态的记录丢给看门狗判失败且**不重跑** → 转码永久失败）；默认 `inline` 保 dev/test 不必起常驻 worker，入队失败**回落内联**。**第 58 批修掉下沉自己引入的回归**：看门狗原按"超时即失败"把这些仍在 Redis 排队的记录判成终态（随后 job 投出即 `skipped`，下沉收益被全额抵消），现改为三分类（**在队列 → 跳过 / 不在队列但源还在 → 重投 / 都失败才判 4**）+ `resolvePublicationSourceKey` 反查源 key 重投 + `markTranscoding` **抢占式条件更新**（第 4 条不变量「单执行者」，防两执行者并行转同一片源覆盖 shareToken）。剩余仅竞品口径类（切片的业务语义 ReelMate 未公开字段证据，待取证） |
 | 21 | 数据看板 | 13 | M(3) | **100%** | 3.00 | 13 端点 + `/team/dashboard` + 6 例 | 仅 `project-data/query` 筛选参数待取证；深链接/硬刷新下的活动空间恢复已修（见 §9 v3.7） |
@@ -218,21 +213,21 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 分组 | 模块 | 权重 | 已完成 | 进度 |
 |---|---:|---:|---:|---:|
 | 核心创作闭环 | 18 | 110 | 107.12 | **97.4%** |
-| 生态与规模化 | 10 | 96 | 94.50 | **98.4%** |
-| **全站** | **28** | **206** | **201.63** | **97.9%** |
+| 生态与规模化 | 10 | 96 | 94.52 | **98.5%** |
+| **全站** | **28** | **206** | **201.64** | **97.9%** |
 | （参考）首发口径：剔除 8 个非阻塞模块 | 20 | 133 | 130.12 | **97.8%** |
 
 > **核心组 18 个**（权重 110）：#1 首页 · #2 小说改编链 · #3 剧集分镜 · #4 Agent · #5 全部项目 · #6 工具箱 · #11 无限画布 · #15 后处理 · #17 资产主体 · #19 3D 导演 · #20 ReelFlow · #22 账号 · #23 计费 · #24 任务 · #25 内容安全 · #26 分享 · #27 运营后台 · #28 架构 → 已完成 **107.12**
 > **生态组 10 个**（权重 96）：#7 团队 · #8 影视版 · #9 CLI/MCP · #10 活动创作者 · #12 剧本广场 · #13 广告剧 · #14 视频转绘 · #16 多语言 · #18 团队知识库 · #21 数据看板 → 已完成 **94.50**
 > **首发口径剔除的 8 个非阻塞模块**（权重 73）：影视版 · CLI/MCP · 活动创作者 · 剧本广场 · 多语言 · 广告剧 · 视频转绘 · 团队知识库。团队（#7）与数据看板（#21）保留在首发口径内。
-> **剩余总权重**：206 − 201.63 = **4.37**（**没有整块未做**；单块最大是 Agent 1.00、CLI/MCP 0.64、集市 0.64、工具箱 0.60，其余都是 0.03~0.30 的取证/接 Key/口径）。
+> **剩余总权重**：206 − 201.64 = **4.36**（**没有整块未做**；单块最大是 Agent 1.00、CLI/MCP 0.64、集市 0.64、工具箱 0.60，其余都是 0.03~0.30 的取证/接 Key/口径）。
 
 分布形态：
 
 | 完成度区间 | 模块数 | 模块 |
 |---|---:|---|
 | 100% | **9** | #1 首页 · #7 团队 · #8 影视版 · #10 活动/创作者 · #21 数据看板 · #24 任务系统 · #26 分享 · #27 运营后台 · #28 架构 |
-| 99–99.9% | **8** | #11 画布 99 · #15 后处理 99 · #16 多语言 99.9 · #17 资产 99 · #18 知识库 99 · #19 3D 99 · #20 ReelFlow 99 · #23 计费 99.5 |
+| 99–99.9% | **8** | #11 画布 99 · #15 后处理 99 · #16 多语言 99.9 · #17 资产 99 · #18 知识库 99.5 · #19 3D 99 · #20 ReelFlow 99 · #23 计费 99.5 |
 | 97–98% | **4** | #2 小说 98 · #6 工具箱 97 · #13 广告剧 97 · #14 转绘 97 |
 | 95% | **3** | #3 剧集分镜 95 · #4 Agent 95 · #22 账号 95 |
 | 92% | **3** | #9 CLI/MCP 92 · #12 集市 92 · #25 内容安全 92 |
@@ -297,8 +292,8 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ## 5. 缺口清单（按剩余加权工作量排序）
 
-剩余总权重 **4.37**（2.1%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径"。
-下表按**模块实际扣分**逐项列出（数字由各模块行 `权重 ×(1−完成度)` 直接得出，合计恰为 4.37）：
+剩余总权重 **4.36**（2.1%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径"。
+下表按**模块实际扣分**逐项列出（数字由各模块行 `权重 ×(1−完成度)` 直接得出，合计恰为 4.36）：
 
 | 排名 | 模块 | 权重 | 剩余 | 具体缺什么 | 卡在谁 |
 |---:|---|---:|---:|---|---|
@@ -314,8 +309,8 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 10 | **剧集分镜（#3）** | 3 | **0.15** | `quality-check` 评分口径自建（竞品只给路由、无字段证据） | 竞品证据 |
 | 11 | **资产/主体（#17）** | 8 | **0.08** | `prompt_inject_mode=replace` 语义；`prompt_blocked` 需竞品字段 | 产品口径 + 证据 |
 | 12 | **ReelFlow（#20）** | 8 | **0.08** | ~~切片转码异步下沉 worker~~（**第 57 批已做**，见 §9 v8.0）；只剩切片业务语义的竞品字段证据 | 竞品证据 |
-| 13 | **后处理 / 3D / 计费 / 多语言 / 知识库** | 3+3+3+8+3 | **0.11** | 后处理真实 Key（0.03）、3D 真实双人（0.03）、计费补差价只报价（0.01）、多语言法务 2 页（0.01）、知识库实体字段名无竞品响应体证据（0.03） | 商务 + 产品 + 法务 + 竞品证据 |
-| | **合计** | **206** | **4.37** | | |
+| 13 | **后处理 / 3D / 计费 / 多语言 / 知识库** | 3+3+3+8+3 | **0.10** | 后处理真实 Key（0.03）、3D 真实双人（0.03）、计费补差价只报价（0.01）、多语言法务 2 页（0.01）、知识库条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 未落库（0.015，证据已有见 §9 v8.3） | 商务 + 产品 + 法务 |
+| | **合计** | **206** | **4.36** | | |
 
 ### 5.1 逐批把"整块"清零的过程
 
@@ -332,16 +327,17 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 第 57 批（v8.0） | 97.7% | **97.8%** | **切片转码下沉 worker**（状态机抽 `@app/shared` 共用 + `PUBLISH_TRANSCODE_MODE`；修掉"API 重启丢转码"的真缺陷）→ #20 97%→99% |
 | 第 58 批（v8.1） | 97.8% | **97.8%** | **修第 57 批自己引入的回归**（看门狗误杀队列中任务 → 三分类判定 + 重投；`markTranscoding` 改抢占式；api/worker 守卫对齐）。**不加分**：修的是自己造的回归，不是原有扣分口径 |
 | 第 59 批（v8.2） | 97.8% | **97.9%** | **#18 知识库实体落地**（推翻"竞品多库所以不做"的旧判：4 条端点无 id 参数 → 一 team 一库；补 `knowledge_bases` 迁移 0037 + 5 端点 + 页头实体编辑）→ #18 92%→99% |
+| 第 60 批（v8.3） | 97.9% | **97.9%** | **#18 补「模板场景」维度**（竞品 `0zWWdXb_.js` 原文：16 值 scene + 每类字段规则 + 10 条 tab；`dir/list`/`tag/list`/`asset/search` 都以 scene 为首要维度）→ 三表补列（迁移 0038）+ 读接口过滤 + 重名码 `747007`；#18 99%→**99.5%**（+0.015，剩条目级字段未落库） |
 
 ### 5.2 排序修正建议
 
-剩下 4.37 里，**代码侧还能独立推进的不足 0.10**（3D 真实双人需选型、计费补差价需口径、法务 2 页需法务）；
-其余 **≈4.28 卡在外部依赖或竞品未取证**。
+剩下 4.36 里，**代码侧还能独立推进的不足 0.10**（3D 真实双人需选型、计费补差价需口径、法务 2 页需法务）；
+其余 **≈4.27 卡在外部依赖或竞品未取证**。
 
 → 从第 46 批起已进入**外部依赖清单**阶段（见 §5.3）：需要产品/商务/法务一起提供东西，否则进度会长期停在 97.9%。
 代码侧仍可独立推进的收尾项只剩：① §5.4 里你一句话能拍的口径（按口径实现即得分）；② 竞品取证到位后的对齐。
 
-### 5.3 外部依赖清单（剩余 4.37 到底卡在谁手上）
+### 5.3 外部依赖清单（剩余 4.36 到底卡在谁手上）
 
 > 这张表的用途：把"没做完"拆成"谁在什么时候能给什么"。每一行都写清**解锁条件**与**解锁后的权重**。
 
@@ -351,13 +347,13 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 2 | **CLI/MCP**：MCP server 0 行 | 0.64 | **竞品证据缺位**：ReelMate 未公开 MCP 工具清单（工具名/入参/scope），自造接口会变成"我们自己发明的协议" | 产品/商务：竞品 MCP 文档、客户端配置截图或调用抓包（任一即可） | 0.64 → 全清（1–2 轮） |
 | 3 | **剧本广场**：真实打款 | 0.64 | 商户资质：分账/代付需主体资质与支付通道签约 | 商务/财务：支付通道 + 分账权限 | 0.64 → 全清 |
 | 4 | **工具箱**：真实供应商 Key | 0.60 | 无凭据：`ADAPTER_MODE=mock` 下所有生成走占位字节 | 商务：至少 1 家真实供应商 Key + 额度预算 | 0.60 → 全清 |
-| 5 | **多模块"最后一项"** | **1.48** | 多数需**产品定义或凭据**：全部项目画布封面/画布元信息取证（0.30）、广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库实体字段名取证（0.03）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07） | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
+| 5 | **多模块"最后一项"** | **1.47** | 多数需**产品定义或凭据**：全部项目画布封面/画布元信息取证（0.30）、广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库条目级字段未落库（0.015）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07） | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
 | 6 | **多语言法务页** | 0.01 | privacy/terms 按原则不机翻，需法务复核文案；韩语是否上线（产品决策） | 法务 / 产品 | 0.01 |
-| | **合计** | **4.37** | | | |
+| | **合计** | **4.36** | | | |
 
-**结论**：4.37 中约 **0.09 可由我在 2 轮内独立清掉**（保守口径：只算已被扣分确证的 #17 `replace` 0.08 + #23 补差价下单 0.01），
+**结论**：4.36 中约 **0.09 可由我在 2 轮内独立清掉**（保守口径：只算已被扣分确证的 #17 `replace` 0.08 + #23 补差价下单 0.01），
 若把 §5.4 另外两条（#12 买断许可在集市 0.64 里的份额 0.10、#16 韩语 0.02）也算上，上限约 **0.26**；
-其余 **≈4.11～4.28 必须由外部输入**（账号/资质/证据/产品定义）。**代码侧已到天花板，97.9% → 100% 的最后一公里是"输入问题"而不是"实现问题"**。
+其余 **≈4.10～4.27 必须由外部输入**（账号/资质/证据/产品定义）。**代码侧已到天花板，97.9% → 100% 的最后一公里是"输入问题"而不是"实现问题"**。
 
 ### 5.4 B 类「一句话确认单」（合计约 0.26 权重）
 
@@ -390,7 +386,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ### 6.1 「35%」不等于「做完了 35% 的工作量」
 
-> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（97.9%，剩余 4.37）。
+> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（97.9%，剩余 4.36）。
 
 剩余 131.0 权重（64%）的构成：
 
@@ -536,6 +532,7 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 
 | 日期 | 版本 | 变更 | 基线 HEAD |
 |---|---|---|---|
+| 2026-10-28 | **v8.3** | **#18 团队知识库补「模板场景（scene）」维度 —— 第一次从竞品前端 bundle 拿到字段级证据（第 60 批）**：此前每一轮都写「竞品只给路由清单、无响应体证据」，本批证明**是取证方法不到位**：竞品把 Vite 产物完整留在 `rea-reelmate/scripts*/files/origins/<hash>/assets/`（两个目录分别 133 / 473 个 js）。从 `core-lib-CKH7gQsw.js`（1.1 MB）取到**每个端点**的 `{path, method, paramNames, queryNames, requestDataOptional}` 配置对象（`requestDataJsonSchema` 为空对象，所以只有形状没有字段级 schema）；从 `0zWWdXb_.js`（6 KB）取到知识库**全部枚举与每类字段规则**原文，含 16 值 `scene`（`Style=1/Genre=2/Composition=3/VideoEffect=4/AIStoryboard=5/StoryboardT2i=6/SeeDance2=7/ScreenplayNovel=9/StoryboardRef=11/Voice=14/ScenePrompt=15/Camera=16/Palette=17/Expression=18/AudioLibrary=20`，**值不连续**）、业务串映射（`Genre→theme`、`Voice→tone`、`ScreenplayNovel→novel_to_script`、`Composition→storyboard` 四处**枚举名与串不同名**）、每类 `{name.maxLength, prompt_template.maxLength/required, cover_file.required}` 与 10 条 tab（含真实表头列，音色/音频类**没有 prompt 列**）。**据此发现真缺口**：竞品 `dir/list` 的 query 是 `["scene","parent_ukd_id"]`、`tag/list` 是 `["scene","query"]`、`asset/search` 第一个参数就是 `scene` → 知识库按场景分树分标签，而我方三张表都没有 scene 列，「风格库」与「音色库」的目录混在同一棵树上。**做了什么**：① 迁移 **0038**（`smiling_inertia`）：`knowledge_dirs`/`knowledge_tags`/`knowledge_assets` 各加 `scene smallint not null default 0`；标签唯一索引 `uq_knowledge_tags` 从 `(space_id,name)` 改为 `(space_id, scene, name)`（同名标签可在不同场景各存一份）；补 `idx_knowledge_dirs_scene`、`idx_knowledge_assets_scene`；迁移总数 38→**39**。② 新增 `packages/shared/src/knowledge-scene.ts`：`KNOWLEDGE_SCENE` 常量、`KNOWLEDGE_SCENE_SLUG`、`knowledgeSceneBySlug`、`KNOWLEDGE_SCENE_RULES`（`{nameMaxLength, promptRequired, promptMaxLength, coverRequired, promptColumn, phase1}`）、`KNOWLEDGE_SCENE_TABS`（10 条，columns 与竞品表头逐字一致）、`validateKnowledgeSceneFields()`（返回 `{field,message}`，文案由规则生成）。③ 错误码新增 **`ErrorCode.KNOWLEDGE_NAME_EXISTS = 747007`** + 竞品原文文案 `knowledge name already exists`（依据 `B9INZ4se.js`：竞品前端就是 `Number(r.code)===747007` 判重名，外加文案兜底；我方原先用 `400101`，会让错误分支与竞品不一致）。④ 服务层：`dirTree`/`listTags`/`listAssets`/`searchAssets`/`flatList`/`info` 全部支持 `scene` 过滤（`normalizeScene` 统一校验，非法值 `400101 + field:"scene"` 而不是静默查空）；`createDir` 子目录跟随父场景；`createAsset`/`patchAsset` 按场景校验名称与 prompt，且**不允许跨场景挂目录**；`renameTag`/`deleteTag` 只改同场景条目；`info` 增 `asset_by_scene` 计数。⑤ DTO 随条目下发 `scene`/`scene_slug`/`scene_name_max_length`/`scene_prompt_required`/`scene_prompt_max_length`/`scene_prompt_column` —— **规则只维护在 `@app/shared` 一份**，前端不抄第二份。⑥ 前端：`/knowledge` 加场景 tab 条（16 个 tab、带条数角标，条数来自 `info.asset_by_scene` 不额外请求），切 tab 清目录选中并重载，新建条目带当前场景；i18n 新增 `knowledge.scene.*` 17 key × 5 语言。**验证**：`apps/api/test/knowledge.spec.ts` 18→**21 例**（场景隔离与同名共存 / 每类字段规则与非法场景值 / 条目跨场景被拒与三处读接口过滤 + 按场景计数），api typecheck/lint 干净，web typecheck 干净、i18n-check 通过（5 语言 key 一致）、web build 通过。**数字**：`scoreboard.py` → **201.64/206 = 97.9%**（剩余 **4.36**），核心 107.12（97.4%）、生态 94.52（98.5%）、首发 130.12（97.8%）；#18 `99% → 99.5%`（+0.015，**只上调半格**：条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 证据已有但本批未落库，不当成已对齐）。**边界**：`SeeDance2`/`Camera`/`Palette`/`Expression` 四类竞品没有文案证据，我方译名标「待考证」；`scene` 的**业务串**照抄竞品，但"我方 scene 值必须与竞品完全一致"这一点只在读接口形状上被证实，落库语义仍按我方口径。基线 `3593c2c`。 |
 | 2026-10-28 | **v8.2** | **#18 团队知识库：把一条"产品定义不做"改判为实现（第 59 批）**：本文件此前把竞品 4 条端点（`create`:739 / `delete`:740 / `update`:765 / `info/update`:758）记为"知识库实体 CRUD，我方一 space 一库所以不做"。第 59 批复核竞品路由后**推翻这个理由**：这 4 条**都没有路径 id 参数**——同一批 29 条端点里，目录端点带 `dir/:ukd_id`、资产端点带 `asset/{uk_id}`、单条资产删除带 `dir/{ukd_id}/asset/{uk_id}/delete`，唯独这 4 条什么都不带。路由形状本身即证据：**只有一个库，动作自然不需要目标 id**。所以缺的不是"产品定义"，是**我方连这一个库的元数据都没落库**——`knowledge_dirs/assets/tags` 三张表都在，就是没有承载 name/description 的那一层。做法：① 迁移 **0037** 新增 `knowledge_bases`（`id`/`space_id`/`name` 默认「团队知识库」/`description`/`cover_uri`/`note`/`created_by`/`deleted_at`/时间戳），索引 `uq_knowledge_bases_space` 是**偏唯一**（`where deleted_at is null`）——一空间一活库但软删后可重建，硬唯一索引会让"删了再建"直接撞键；**踩坑**：`onConflictDoNothing({ target: knowledgeBases.spaceId })` 在偏索引上必抛 `42P10 there is no unique or exclusion constraint matching the ON CONFLICT specification`（psql 实测 `insert … on conflict (space_id) do nothing` 同样报错），必须用不带 target 的 `.onConflictDoNothing()`。② 5 条端点：`GET /knowledge/base`（**我方自加**：页头只要名称，不该为它拉 info 的 4 条 count 聚合）+ `POST /knowledge/base`（幂等，已存在返回 `created:false` 且不覆盖现有名称）+ `POST /knowledge/base/update`（**只改名**）+ `POST /knowledge/base/info/update`（简介/封面/提示，"传了才改"）+ `POST /knowledge/base/delete`（默认只软删库行、目录与资产**原地保留**；`purge:true` 才级联，且标签走**物理删**——`uq_knowledge_tags(space_id,name)` 是硬唯一索引，软删会让重建后建同名标签撞键）。改名与改简介**刻意分成两个端点**：页头就地改名是高频小动作，若与简介共用一条 patch 端点，"只改名字却把没传的简介清空"是迟早的事故。③ `GET /knowledge/info` 返回值直接带 `base` 实体块（省一次请求），并删掉原「我方为一 space 一库…」那句已过时的 `note`。`GET` 也要能写：老空间已有目录/资产数据，没有库行时 GET 报 404 会让页面白屏，故 `ensureBase()` 采懒初始化。④ 前端页头从"死标题 + 统计"改成实体编辑（未编辑态显示库名与编辑按钮，编辑态四行窄表单，不做弹窗——改名是高频小事）；删库/清空两个不可逆动作的确认框**写清影响量**（`{dirs}` 个目录、`{assets}` 条资产）。⑤ i18n 新增 `knowledge.*` **20 key × 5 语言**（78 → 98）。⑥ 新增 **4 例**：GET 懒初始化且 POST 幂等 / 改名与改概览互不清空 / 删库默认保留内容 vs `purge` 级联 / 跨 space 隔离 403101。**诚实边界**：字段名（`name`/`description`/`cover_uri`/`note`）是我方口径——竞品只有路由清单、**无任何响应体**，故标「待取证」，不写成"已对齐"。#18 **92% → 99%**（2.76 → 2.97，**没给满**：字段名与竞品真实 schema 未取证）。全站 **201.42 → 201.63/206 = 97.9%**、剩余 **4.58 → 4.37**；生态组 **94.29 → 94.50（98.4%）**；首发口径不变 **130.12/133 = 97.8%**（#18 属被剔除的 8 个非阻塞模块）。规模：迁移 **37 → 38**、表 **111 → 112**、端点 **688 → 699**、controller **51 → 52**；测试总量 **1,228 → 1,232**（api 863 → **867**，+4） | `789b4e1` |
 | 2026-10-28 | **v8.1** | **修第 57 批自己引入的回归：看门狗误杀队列中任务 + 无条件 markTranscoding（第 58 批，不加分）**：这批**没有消除任何原有扣分口径**，修的是上一批改动带来的两个真 bug，所以全站仍 **201.42/206 = 97.8%**、剩余 **4.58**（模块分一个没动）。bug 链：① 第 57 批把转码下沉到 `publish.transcode` 后，看门狗 `reviveStuckPublications` 仍是"超时即失败"口径 —— worker 停机 20min（任务都在 Redis 里正常排队）→ 重启时 `schedule("publications-watchdog", …, runOnStart=true)` 让看门狗**先**跑 → 这些记录 `status=1` 且 `updated_at` 超 15min，被逐条 `.update(status=4, error.code="transcode_stalled")` → 随后 BullMQ 把 job 投出，`runPublishTranscode` 撞上 `PUB_TERMINAL_STATUSES=[3,4,5]` 直接 `skipped` → **下沉换来的"重启可重投"被全额抵消**，且文案还让用户"在剪辑台重新发布"（等于让用户自己再造一条记录）；② `markTranscoding` 在 api（`publish.service.ts` `transcodeDeps()`）与 worker（`apps/worker/src/publish-transcode.ts`）两侧都是**无条件** `.set({status:2,…}).where(eq(id))`，两个执行者并发转同一片源时后写者覆盖先写者的中间态。修法：① 判定改**三分类**——**还在队列里（wait/waiting/delayed/active/paused）→ 跳过**（排队久≠坏了，worker 停机积压本就是队列正常状态）、**不在队列但源还在 → 重新入队**（新增 `resolvePublicationSourceKey(db, publicationId)` 顺 `slice.source_export_id` → `timeline_exports.file_uri` 反查；jobId 用 `publish-transcode-retry-<id>-<ts>` 带时间戳，避开 BullMQ 对同名 job 的去重）、**都失败才判 4** 并按有无重投能力拆两种文案（`转码超时且无法自动重试（源成片可能已被清理）` / `转码未在预期时间内完成（服务可能重启）`）；② 探针改成**整批一次**取集合 `RevivePublicationHooks.pendingInQueue(): Promise<ReadonlySet<string>>`（逐条查队列在最坏情形是 200×数百 job，会把 2min 的维护任务拖成分钟级），且**探针抛错时整轮放弃判定**（Redis 抖动时把正在跑的转码判失败，用户会看到"重发"而原任务其实在跑）；③ `markTranscoding` 改为**抢占式条件更新**并返回 `boolean`：`or(eq(status,1), and(eq(status,2), lt(updatedAt, staleCutoff)))` + `.returning()`，抢不到即 `skipped`（reason `publication already claimed by another transcoder`）——**不能只认 status=1**，否则 worker 崩溃后 BullMQ 重投的 job 面对停在 2 的孤儿记录会永远放弃它，故引入 `PUB_TRANSCODE_STALE_MINUTES=15` 做"接管已死执行者"；④ api 侧 `transcodeDeps()` 与 worker 侧**逐字对齐**（此前 `markReady`/`markFailed` 的 `inArray([QUEUED,TRANSCODING])` 守卫只有 worker 有，内联路径缺）；⑤ 状态机契约补第 4 条不变量「**单执行者**」（原三条：终态不覆盖 / 降级留痕 / 失败不抛）。新增 **12 例**：shared 1（没抢到转码权 → `skipped`，且不读源、不写产物）+ worker 看门狗 4（仍在队列 → `revived=0` 且 status 保持 2 / 不在队列且 requeue 成功 → status **保持 2** 且 `updated_at` 推到当前 / requeue 返回 false → status=4 且 error 含 `transcode_stalled` 与「无法自动重试」/ 探针抛错 → 整轮放弃 `revived=0`）+ worker 抢占与反查 7（两个并发 job → 结果集恰为 `["ready","skipped"]` 且 skipped 的 reason 含 `claimed`、源只被读一次 / `status=2` 且 `updated_at` 1 小时前 → 能救回 ready / `status=2` 但 `updated_at` 很新 → `skipped` 且 status 仍 2 / 反查正常 / slice 无 `source_export_id` → null / `file_uri` 为空 → null / 记录不存在或 id 非法 → null 不抛）。测试总量 **1,216 → 1,228**（worker 41 → 52、shared 25 → 26，其余不变）；`verify-round.ps1` **12/12 全绿**（api 76 文件 863 例）。**诚实说明**：不加分是因为这批的代码不落在任何模块的扣分项上——#20 的 0.08 仍只剩"切片业务语义竞品字段证据"，不因修 bug 而消失 | `2f1122e` |
 | 2026-10-28 | **v8.0** | **#20 切片转码异步下沉 worker（第 57 批）**：修的是一个**真会毁数据**的缺陷——原先 `publish.service.ts` 用 `void this.transcode(...)` 在 API 进程里 fire-and-forget，只有 API 活着才转；**API 在转码中途重启**（发布 OOM、发版、单机 dev 重启）时，停在 `status=1/2` 的记录会被看门狗 `reviveStuckPublications`（15min）判为失败且**不重跑**，转码永久失败且用户每次看到"转码失败"重发也救不回来。下沉后任务在 Redis 里，worker 重启自动重投。具体做法：① 状态机抽到 `packages/shared/src/publish-transcode.ts`，`runPublishTranscode(deps, {publicationId, spaceId, sourceKey})` 是唯一实现，**API 内联与 worker 队列共用**——两处各写一遍必然漂移，会出现"队列里成功、内联路径失败"这种只在生产复现的问题；三条不变量写进函数契约：**终态不覆盖**（`PUB_TERMINAL_STATUSES=[3,4,5]` 直接 skipped，防重投把已发布记录打回）、**降级留痕**（`transcode_mode` + `transcode_reason`，绝不"悄悄复制却说裁过"）、**失败不抛**（落 `status=4` + `error{code:VENDOR_ERROR}`，worker 不因一条坏任务反复重试）；② `trimVideoBuffer` 从 `apps/api/src/modules/script/ffmpeg-trim.ts` 整体迁入 `packages/shared/src/ffmpeg-trim.ts`，api 侧留 `export { trimVideoBuffer, type TrimResult } from "@app/shared"` 薄壳，既有 import 与 4 例 spec 一行不改；③ API 新增 `PUBLISH_TRANSCODE_MODE: enum(["inline","worker"]).default("inline")`：`worker` 模式只入队 `publish.transcode`（jobId `publish-transcode-<id>`，同 id 天然去重），**入队失败回落内联**，否则记录永远停在 status=1；默认 `inline` 保 dev/test 不必起常驻 worker；④ worker 侧 `markReady`/`markFailed` 全部带 `inArray(status, [QUEUED, TRANSCODING])` 条件更新，防多实例消费同一 job 的竞态；`runPublishTranscodeJob` **不抛异常**、返回 outcome 打日志（`msg="publish transcode finished"` + `result` + `publication_id`）。新增 **10 例**：shared 状态机 6（成功/裁剪失败降级 copy 带 reason/终态 skipped/记录不存在 skipped/源为空落失败不抛/putFile 抛错落失败）+ worker 真 DB 消费 4（**真** LocalStorage + 真库：源缺失 → status=4 且 error.message 含 "publication transcode failed" 且不抛 / 已 READY 重投 → skipped 且 fileUri+shareToken+publishedAt 全不变 / 记录不存在 → skipped / 正常路径 → 产物落 `u/<space>/publications/<id>.mp4`、status=3、shareToken 非空、storage.read 读回 >0 字节）。api 回归 18 例全绿（证明默认 inline 行为与改造前完全一致）。#20 **97% → 99%**（7.76 → 7.92，**没给满**：真实转码质量/供应商依赖仍在外部）；全站 **201.26 → 201.42/206 = 97.8%**、剩余 **4.74 → 4.58**；测试总量按 7 个包实测重列为 **1,216**（api 863 / adapters 164 / cli 91 / worker 41 / db 26 / shared 25 / storage 6）——**顺带纠正一个长期口径错误**：文件头此前写 1,195，但把它列出的各包数字相加实为 1,210，说明 1,195 是某一轮的累计快照而没有随各包增长重算；本批起改为"7 包实测相加"，不再累加。 | `54efe42` |

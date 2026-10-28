@@ -123,6 +123,121 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+## 变更登记（v6.14 · 第 60 批：#18 知识库补「模板场景」维度 —— 第一次从竞品前端 bundle 拿到字段级证据 · 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 **v8.3**（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：201.63 → **201.64/206 = 97.9%**，剩余 4.37 → **4.36**；#18 `99% → 99.5%`（**只上调半格**，理由见末节）。
+
+### 1. 这次承认一个方法错误：证据一直都在
+
+此前从第 40 批起，每一轮在知识库/画布/Agent 这几处都写「竞品只给路由清单、没有响应体/字段证据，所以标待取证」。
+第 60 批复核发现**是取证方法不到位**：竞品把 Vite 产物完整留在了本机——
+
+```
+rea-reelmate/scripts/files/origins/<hash>/assets/         133 个 js
+rea-reelmate/scripts-canvas/files/origins/<hash>/assets/  473 个 js   ← 更全，知识库枚举只在这里
+（<hash> = 2bdb9ddf0f70fcf8b6132b5151e837cc859b269e34db5a79cba8d0134474e75e）
+```
+
+两段原文直接改变了结论：
+
+| 文件 | 大小 | 拿到了什么 |
+|---|---:|---|
+| `core-lib-CKH7gQsw.js` | 1.1 MB | **每个端点**的配置对象 `{path, method:Method.XXX, paramNames, queryNames, requestDataOptional, requestBodyType, responseBodyType}`。`requestDataJsonSchema` 是空对象 → 只有形状、没有字段级 schema |
+| `0zWWdXb_.js` | 6 KB | 知识库**全部枚举 + 每类字段规则 + 10 条 tab 定义**（含真实表头列名） |
+
+顺带产出了两份可复跑的取证产物（`_acceptance/` 被 gitignore，不进提交）：
+`dump_competitor_endpoints.py` → `competitor_endpoints.tsv`（**904 条唯一端点**，METHOD/PATH/PARAMS/QUERY/OPTIONAL/FN），
+以及 `our_endpoints.tsv` + `compare_endpoints.py`（我方 76 个 controller 的 **699 端点**）。
+⚠️ 注意：按路径字符串比对的 `both=63 / only_comp=757 / only_ours=530` **说明不了覆盖率**——我方路径命名体系与竞品完全不同
+（我方 `/knowledge/dirs` vs 竞品 `/user_knowledge/dir/list`）。**这个数字不能用来写"缺口 757 条"**，那会是虚报。
+
+### 2. 由此发现的真缺口：竞品知识库是按「场景」分树的
+
+`core-lib-CKH7gQsw.js` 里三个读接口的 `queryNames` 原文：
+
+| 端点 | method | queryNames |
+|---|---|---|
+| `/web/v1/df/user_knowledge/dir/list` | GET | `["scene","parent_ukd_id"]` |
+| `/web/v1/df/user_knowledge/tag/list` | GET | `["scene","query"]` |
+| `/web/v1/df/user_knowledge/asset/search` | GET | `["scene","query","scopes","ukd_id","page","page_size","order"]` |
+
+`scene` 是**第一个参数**，贯穿目录树、标签、资产三层 → 一个场景一棵目录树、一套标签。
+而我方三张表（`knowledge_dirs`/`knowledge_tags`/`knowledge_assets`）**都没有 scene 列**：
+「风格库」和「音色库」的目录会混在同一棵树里，标签也是全局一份（`uq_knowledge_tags(space_id,name)`）。
+这不是"少一个筛选条件"，是**库的组织方式不同**。
+
+### 3. 做了什么
+
+1. **迁移 0038**（`smiling_inertia`）：三表各加 `scene smallint not null default 0`；
+   标签唯一索引 `uq_knowledge_tags` 从 `(space_id, name)` 改为 **`(space_id, scene, name)`**；
+   补 `idx_knowledge_dirs_scene`、`idx_knowledge_assets_scene`。迁移总数 38 → **39**。
+2. **`packages/shared/src/knowledge-scene.ts`（新增）**：16 值 `KNOWLEDGE_SCENE` 枚举、业务串映射、
+   `KNOWLEDGE_SCENE_RULES`（每类场景的名称上限/prompt 必填与上限/封面必填/是否有 prompt 列/是否首期）、
+   `KNOWLEDGE_SCENE_TABS`（10 条，`columns` 与竞品表头**逐字一致**）、`validateKnowledgeSceneFields()`。
+3. **错误码 `ErrorCode.KNOWLEDGE_NAME_EXISTS = 747007`** + 竞品原文文案 `knowledge name already exists`。
+4. **服务层**：`dirTree`/`listTags`/`listAssets`/`searchAssets`/`flatList`/`info` 全部支持 `scene`；
+   `createDir` 子目录跟随父场景；`createAsset`/`patchAsset` 按场景校验且**不允许跨场景挂目录**；
+   `renameTag`/`deleteTag` 只改同场景条目；`info` 增 `asset_by_scene`。
+5. **`/knowledge` 页面**：加场景 tab 条（16 个 tab + 条数角标，条数来自 `info.asset_by_scene`、不额外请求），
+   切 tab 清目录选中并重载，新建条目带当前场景；i18n 新增 `knowledge.scene.*` 17 key × 5 语言。
+
+关键代码（规则只维护一份，前端不抄第二份 —— 规则随条目下发）：
+
+```
+// apps/api/src/modules/knowledge/knowledge.service.ts（toAssetDto）
+const rule = knowledgeSceneRule(row.scene);
+return {
+  scene: row.scene,
+  scene_slug: row.scene === 0 ? "" : (KNOWLEDGE_SCENE_SLUG[row.scene] ?? ""),
+  scene_name_max_length: rule.nameMaxLength,
+  scene_prompt_required: rule.promptRequired,
+  scene_prompt_max_length: rule.promptMaxLength,
+  scene_prompt_column: rule.promptColumn,
+  …
+};
+```
+
+### 4. 三个不显然的决定
+
+1. **枚举值照抄「不连续」的竞品编号**：竞品是 `1/2/3/4/5/6/7/9/11/14/15/16/17/18/20`（缺 8/10/12/13/19）。
+   我本可以重排成 1..15 更"整齐"，但那样会让**同一个 scene 在两边是不同数字**，将来对日志、对埋点、
+   对竞品接口都要多一层翻译。宁可留洞。
+2. **枚举名与业务串不同名，四处都要照抄**：`Genre→theme`、`Voice→tone`、`ScreenplayNovel→novel_to_script`、
+   `Composition→storyboard`。抄错就会与竞品的筛选口径不一致，而这类错**测试抓不到**（都是合法字符串）。
+3. **规则不放前端**：前端本来可以自己维护一份"哪些场景要 prompt"，但那就成了第二份真相。
+   现在由 `toAssetDto` 下发 `scene_prompt_column` 等四个字段，前端只读不判断。
+   代价是 DTO 变大一点，收益是改规则只改一个文件。
+
+### 5. 验证
+
+| 层 | 结果 |
+|---|---|
+| `apps/api/test/knowledge.spec.ts` | **18 → 21 例**：场景隔离与同名共存 / 每类字段规则与非法场景值 / 条目跨场景被拒 + 三处读接口过滤 + 按场景计数 |
+| `pnpm --filter @app/api typecheck` + `lint` | 干净 |
+| `pnpm --filter @app/web typecheck` | 干净 |
+| `node _acceptance/i18n-check.cjs` | 通过（5 语言 key 一致、无中文残留、占位符一致、页面 key 齐全） |
+| `pnpm --filter @app/web build` | 通过 |
+| `python _acceptance/scoreboard.py` | 201.64/206 = **97.9%**，剩余 **4.36**（核心 107.12 / 生态 94.52 / 首发 130.12） |
+
+**踩坑两处**（都已修）：
+① `t(\`knowledge.scene.${k}\`)` 这种模板字符串 key 会被 `i18n-check.cjs` 当成字面量 `"..."` 从而误报缺键 ——
+改成常量数组里存**完整 key**、`computed` 里 `t(item.key)`；
+② 改 `assertDirNameFree` 签名后调用点漏改（`moveDir` 仍传旧参数位）导致 `TS2345`，两次 typecheck 才干净。
+
+### 6. 诚实边界（为什么只给 99.5%）
+
+- **有证据、可对齐的**：`scene` 数值与业务串、每类字段规则、tab 表头列名、错误码 `747007`、`dir/list·tag/list·asset/search` 的 query 形状。
+- **没有证据、标「待考证」的**：`SeeDance2` / `Camera` / `Palette` / `Expression` 四类**竞品没有对应文案**
+  （8 个 `phase1` tab 才有 i18nKey），我方中文译名是自拟的。
+- **有证据但本批没落库的**：条目级字段 `cover_file`（竞品是**逗号分隔多值**，取首图当封面）、`image_files`、
+  `origin_cover_file`（竞品还有个拼错的历史别名 `orgin_cover_file` 并存）、`status`(Enabled=1/Disabled=2)、
+  `sp_type` / `res_type` / `meta_data`、`user_knowledge_info_items`（一个条目挂多条知识，对应 `list` 的
+  `show_user_knowledge_info_list` 参数）。
+  → 这些是**扩展能力**，不属于"和竞品对齐"的必需项，所以 #18 只从 99% 到 **99.5%**，不写成"已对齐"。
+
+---
+
 ## 变更登记（v6.13 · 第 59 批：#18 知识库实体 —— 把"产品定义不做"改判为实现 · 2026-10-28）
 
 > 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) **§9 v8.2**（同一批；本文件与主台账各有一套编号，勿混）。

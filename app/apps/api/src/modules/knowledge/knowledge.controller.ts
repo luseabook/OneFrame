@@ -45,6 +45,16 @@ const pageQuery = z.object({
   page_size: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+/**
+ * 模板场景过滤（第 60 批）。合法值校验在 service 里做（`normalizeScene`），
+ * 因为非法值要返回 `400101 + field:"scene"`，而 zod 的 enum 报错形状与其它参数不一致。
+ * 这里只做类型收敛，避免 `?scene=abc` 变成 NaN 后静默查出空列表。
+ */
+const sceneQuery = z.object({ scene: z.coerce.number().int().optional() });
+
+/** 目录树只收 scene（竞品该端点 query 为 scene + parent_ukd_id，后者由树结构自身表达） */
+const dirQuery = sceneQuery;
+
 /** 标签既可 `?tags=a&tags=b` 也可 `?tags=a,b`（前端两种都常见） */
 const tagsQuery = z
   .union([z.string(), z.array(z.string())])
@@ -59,6 +69,8 @@ const dirCreateBody = z.object({
   name: z.string().trim().min(1).max(60),
   parent_id: z.string().min(1).max(32).optional(),
   sort: z.number().int().min(0).max(9999).optional(),
+  /** 模板场景（第 60 批）；有 parent_id 时以父目录场景为准 */
+  scene: z.number().int().optional(),
 });
 
 const dirPatchBody = z.object({
@@ -71,13 +83,20 @@ const dirMoveBody = z.object({
   sort: z.number().int().min(0).max(9999).optional(),
 });
 
-const tagBody = z.object({ name: z.string().trim().min(1).max(40) });
+const tagBody = z.object({
+  name: z.string().trim().min(1).max(40),
+  /** 模板场景（第 60 批）：标签按场景隔离，同名标签可在不同场景各存一份 */
+  scene: z.number().int().optional(),
+});
 
 const assetCreateBody = z.object({
   title: z.string().trim().min(1).max(200),
   content: z.string().max(200_000).optional(),
   dir_id: z.string().min(1).max(32).optional(),
   tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+  /** 模板场景（第 60 批）。注意每类场景对 title/content 的上限与必填不同，
+   *  这里给的是**绝对上限**，按场景收窄在 service 的 `validateKnowledgeSceneFields` 里做。 */
+  scene: z.number().int().optional(),
   /** 1 文本 / 3 链接；2 资产引用必须走 import-from-asset */
   source_type: z.union([z.literal(1), z.literal(3)]).optional(),
 });
@@ -87,6 +106,7 @@ const assetPatchBody = z.object({
   content: z.string().max(200_000).optional(),
   dir_id: z.string().min(1).max(32).nullable().optional(),
   tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+  scene: z.number().int().optional(),
 });
 
 const assetTagsBody = z.object({ tags: z.array(z.string().min(1).max(40)).max(20) });
@@ -146,8 +166,8 @@ export class KnowledgeController {
 
   /** 1. 目录树（rt:755） */
   @Get("dirs")
-  dirs(@Req() req: AuthedRequest) {
-    return this.knowledge.dirTree(requireAuth(req));
+  dirs(@Req() req: AuthedRequest, @Query() query: unknown) {
+    return this.knowledge.dirTree(requireAuth(req), parseOrThrow(dirQuery, query ?? {}));
   }
 
   /** 2. 建目录（rt:741）：深度 ≤ 5 */
@@ -178,8 +198,8 @@ export class KnowledgeController {
 
   /** 6. 标签列表（rt:762） */
   @Get("tags")
-  tags(@Req() req: AuthedRequest) {
-    return this.knowledge.listTags(requireAuth(req));
+  tags(@Req() req: AuthedRequest, @Query() query: unknown) {
+    return this.knowledge.listTags(requireAuth(req), parseOrThrow(sceneQuery, query ?? {}));
   }
 
   /** 7. 建标签（rt:761）：同名幂等 */
@@ -217,6 +237,7 @@ export class KnowledgeController {
         include_children: z.coerce.boolean().optional(),
         tags: tagsQuery,
         source_type: z.coerce.number().int().min(1).max(3).optional(),
+        scene: sceneQuery.shape.scene,
       }),
       query ?? {},
     );
@@ -232,6 +253,7 @@ export class KnowledgeController {
         tags: tagsQuery,
         dir_id: z.string().min(1).max(32).optional(),
         source_type: z.coerce.number().int().min(1).max(3).optional(),
+        scene: sceneQuery.shape.scene,
       }),
       query ?? {},
     );
@@ -374,7 +396,10 @@ export class KnowledgeController {
   list(@Req() req: AuthedRequest, @Query() query: unknown) {
     return this.knowledge.flatList(
       requireAuth(req),
-      parseOrThrow(pageQuery.extend({ sort: z.enum(["created", "updated"]).optional() }), query ?? {}),
+      parseOrThrow(
+        pageQuery.extend({ sort: z.enum(["created", "updated"]).optional(), scene: sceneQuery.shape.scene }),
+        query ?? {},
+      ),
     );
   }
 
