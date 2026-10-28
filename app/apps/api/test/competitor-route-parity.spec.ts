@@ -10,9 +10,9 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的四组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7，
- * 来自 `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
- * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
+ * 本文件把竞品的五组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 /
+ * kds 13，共 133 条，来自 `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，
+ * 归一化去参数名），然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
  *   2. 在 `DEVIATIONS` 里显式登记了「我方等价形状 + 理由」→ 覆盖（且被登记的形状
  *      必须真的存在于我方路由表，改名改路径会让本测试红，避免白名单变垃圾场）；
@@ -23,8 +23,8 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：四组共 120 条竞品操作。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #8 / #10 两行的「逐条对照」说法。
+ * 数字口径：五组共 133 条竞品操作。改这些数组就得同步改
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #8 / #10 / #21 三行的「逐条对照」说法。
  */
 
 const API_SRC = join(__dirname, "..", "src");
@@ -167,6 +167,30 @@ const CAMPAIGN_SHAPES = [
 ];
 
 /**
+ * 数据看板：竞品 `/web/v1/kds/da/*` 13 条（5 GET + 8 POST）
+ *
+ * 第 81 批审计出来的形状缺口：这 8 条在 `core-lib-CKH7gQsw.js` 里都是
+ * `method: Method.POST` + `requestBodyType: json`，而我方原先只有 GET + query。
+ * 对按竞品形状写的客户端来说，POST 打到只有 GET 的路径上是 404 —— 这是真实缺陷，
+ * 不是风格差异，所以按竞品形状补了 POST 别名（GET 保留，两者共用同一段逻辑）。
+ */
+const KDS_SHAPES = [
+  "GET /web/v1/kds/da/team/:team_id/basic-info",
+  "GET /web/v1/kds/da/team/:team_id/point-consume-rank",
+  "GET /web/v1/kds/da/team/:team_id/project-data/basic-info",
+  "GET /web/v1/kds/da/team/member/:op_user_id/point-consume-detail",
+  "GET /web/v1/kds/da/team/member/:op_user_id/point-quota-detail",
+  "POST /web/v1/kds/da/canvas/total-point-consume",
+  "POST /web/v1/kds/da/team/:team_id/member-participate-detail",
+  "POST /web/v1/kds/da/team/:team_id/point-manage-flow",
+  "POST /web/v1/kds/da/team/:team_id/project-data/export",
+  "POST /web/v1/kds/da/team/:team_id/project-data/query",
+  "POST /web/v1/kds/da/team/:team_id/project-member-point-detail",
+  "POST /web/v1/kds/da/team/:team_id/query",
+  "POST /web/v1/kds/da/team/:team_id/query/export",
+];
+
+/**
  * 显式登记的形状偏离：竞品形状 → 我方等价形状（同 METHOD 同路径，归一化后）。
  *
  * 只允许登记「能力已经在、只是形状不同」的偏离。能力缺失必须补代码，不能登记到这张表里
@@ -209,6 +233,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   crc: CRC_SHAPES.length,
   op: OP_SHAPES.length,
   campaign: CAMPAIGN_SHAPES.length,
+  kds: KDS_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -289,13 +314,24 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("POST /crc/user/info")).toBe(true);
     expect(ROUTES.has("GET /op/beta-questionnaire")).toBe(true);
     expect(ROUTES.has("GET /campaigns/{}/signup")).toBe(true);
+    // 第 81 批：数据看板的同名 GET/POST 双形状（竞品 POST，我方补别名后两者都在）
+    expect(ROUTES.has("GET /kds/da/team/{}/query")).toBe(true);
+    expect(ROUTES.has("POST /kds/da/team/{}/query")).toBe(true);
   });
 
-  it("竞品四组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7）", () => {
-    expect(EXPECTED_COUNTS).toEqual({ film: 48, crc: 30, op: 35, campaign: 7 });
-    expect(FILM_SHAPES.length + CRC_SHAPES.length + OP_SHAPES.length + CAMPAIGN_SHAPES.length).toBe(120);
+  it("竞品五组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13）", () => {
+    expect(EXPECTED_COUNTS).toEqual({ film: 48, crc: 30, op: 35, campaign: 7, kds: 13 });
+    expect(
+      FILM_SHAPES.length + CRC_SHAPES.length + OP_SHAPES.length + CAMPAIGN_SHAPES.length + KDS_SHAPES.length,
+    ).toBe(133);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
-    for (const [name, shapes] of Object.entries({ film: FILM_SHAPES, crc: CRC_SHAPES, op: OP_SHAPES, campaign: CAMPAIGN_SHAPES })) {
+    for (const [name, shapes] of Object.entries({
+      film: FILM_SHAPES,
+      crc: CRC_SHAPES,
+      op: OP_SHAPES,
+      campaign: CAMPAIGN_SHAPES,
+      kds: KDS_SHAPES,
+    })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
     }
@@ -325,9 +361,15 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  it("#21 数据看板：13 条全部覆盖（5 GET + 8 POST 别名，0 缺口、0 偏离）", () => {
+    expect(KDS_SHAPES.length).toBe(13);
+    expect(missing(KDS_SHAPES)).toEqual([]);
+    expect(KDS_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)))).toEqual([]);
+  });
+
   it("偏离登记表没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
-      [...FILM_SHAPES, ...CRC_SHAPES, ...OP_SHAPES, ...CAMPAIGN_SHAPES].map(shapeOf),
+      [...FILM_SHAPES, ...CRC_SHAPES, ...OP_SHAPES, ...CAMPAIGN_SHAPES, ...KDS_SHAPES].map(shapeOf),
     );
     const dead = Object.keys(DEVIATIONS).filter((shape) => !all.has(shape));
     expect(dead).toEqual([]);

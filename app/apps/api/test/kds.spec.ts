@@ -371,4 +371,72 @@ describe("kds/dashboard e2e", () => {
     expect(csv.headers["content-disposition"]).toContain("project-data.csv");
     expect(csv.body).toContain("剧集ID");
   });
+
+  // ── 第 81 批：竞品形状（POST 别名） ──────────────────────
+  it("竞品形状：8 条 POST 别名与 GET 返回同一份数据；导出 POST 仍返回 text/csv", async () => {
+    const owner = await loginNewUser("92");
+    const u = await loginNewUser("93");
+    const { teamSpaceId, teamId } = await createTeam(owner.userId, "别名团队");
+    await addMember(teamSpaceId, u.userId, "animator", 300);
+    await seedConsume({ spaceId: teamSpaceId, userId: u.userId, credits: 9 });
+
+    // 1) 同一份数据：GET / POST 成对比对（竞品 `requestDataJsonSchema: {}`，
+    //    意味着 can 发空对象；我方别名与主路径共用同一段逻辑）
+    const pairs = [
+      "/kds/da/canvas/total-point-consume",
+      `/kds/da/team/${teamSpaceId}/member-participate-detail`,
+      `/kds/da/team/${teamSpaceId}/point-manage-flow`,
+      `/kds/da/team/${teamSpaceId}/project-data/query`,
+    ];
+    for (const url of pairs) {
+      const viaGet = await inject("GET", url, undefined, owner.token, teamSpaceId);
+      expect(viaGet.code, `GET ${url}`).toBe(0);
+      const viaPost = await inject("POST", url, {}, owner.token, teamSpaceId);
+      // POST 走 Nest 默认 201（与仓内其它 POST 一致），契约以信封 code 为准
+      expect(viaPost.code, `POST ${url}`).toBe(0);
+      expect(viaPost.data, `POST ${url} 与 GET 应同形`).toEqual(viaGet.data);
+    }
+
+    const queryGet = await inject("GET", `/kds/da/team/${teamSpaceId}/query`, undefined, owner.token, teamSpaceId);
+    const queryPost = await inject("POST", `/kds/da/team/${teamSpaceId}/query`, {}, owner.token, teamSpaceId);
+    expect(queryPost.data).toEqual(queryGet.data);
+
+    // 2) POST 别名走同一份 zod 校验（不是「随便收」）：非法 datetime 仍 400101
+    const bad = await inject(
+      "POST",
+      `/kds/da/team/${teamSpaceId}/query`,
+      { from: "not-a-timestamp" },
+      owner.token,
+      teamSpaceId,
+    );
+    expect(bad.code).toBe(400101);
+    // 仓内统一把 zod 的 issue.message 透出（不含字段路径），这里断言到「校验确实跑了」
+    expect(bad.msg.toLowerCase()).toContain("datetime");
+
+    // 3) 导出两条 POST 都返回 CSV（竞品 responseBodyType=raw，body 不参与判定）
+    const exports: Array<[string, string]> = [
+      [`/v1/kds/da/team/${teamId}/query/export`, "team-point-consume.csv"],
+      [`/v1/kds/da/team/${teamId}/project-data/export`, "project-data.csv"],
+    ];
+    for (const [path, filename] of exports) {
+      const res = await app.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          authorization: `Bearer ${owner.token}`,
+          "x-space-id": teamSpaceId,
+          "content-type": "application/json",
+        },
+        payload: JSON.stringify({}),
+      });
+      expect(res.statusCode, path).toBe(200);
+      expect(res.headers["content-type"], path).toContain("text/csv");
+      expect(res.headers["content-disposition"], path).toContain(filename);
+      expect(res.body.startsWith("\uFEFF"), `${path} 应带 BOM`).toBe(true);
+    }
+
+    // 4) 别名同样受空间校验：路径 team_id 与 token 空间不一致 → 403101
+    const mismatch = await inject("POST", `/kds/da/team/999999999/query`, {}, owner.token, owner.spaceId);
+    expect(mismatch.code).toBe(403101);
+  });
 });

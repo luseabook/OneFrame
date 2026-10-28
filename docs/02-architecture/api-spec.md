@@ -3773,3 +3773,82 @@ data: {"id":"<frame_id>","type":"<type>","seq":<n>,"payload":{...}}
 2. 偏离表里 campaign 的 7 条是「已登记」而非「已对齐」，是否补单数别名属 ADR-009 的 API 风格决策；
 3. 测试内联 120 条竞品形状，是**快照式守卫**：保证不比昨天差，不保证和今天的竞品一致；竞品更新后需重跑抽取脚本刷新常量；
 4. 本批未改任何既有路径的行为（别名为纯新增），旧调用方零影响。
+
+
+---
+
+## 17.38 数据看板的 8 条 POST 别名：同名路径的两种调用形状（第 81 批）
+
+### 38.1 为什么「条数一样」不等于「对得上」
+
+`/v1/kds/da/*` 一直有 13 条路由，竞品 `/web/v1/kds/da/*` 也是 13 条。第 81 批逐条对的时候才发现：
+**13 条里 8 条竞品要的是 `POST`（JSON body），我方只给了 `GET`（query）**。
+按竞品形状写的客户端发 `POST /kds/da/team/:id/query`，打到只有 `GET` 的路径上是 **404** —— Nest 的路由匹配含方法，
+这不是「参数没传对」的软失败，看板页会直接白屏。
+
+竞品证据（`core-lib-CKH7gQsw.js`，逐字）：
+
+```js
+{
+  path: "/web/v1/kds/da/canvas/total-point-consume",
+  method: Method.POST,
+  requestBodyType: RequestBodyType.json,
+  responseBodyType: ResponseBodyType.json,
+  paramNames: [],
+  queryNames: [],
+  requestDataOptional: !1,
+  requestDataJsonSchema: {},
+  responseDataJsonSchema: {},
+  requestFunctionName: "ApiKdsDaCanvasTotalPointConsumePOST",
+}
+```
+
+三条要点：`method: POST` + `requestDataOptional: !1`（必须发 body）、`requestDataJsonSchema: {}`（**body 形状无证据**）、
+两条导出的 `responseBodyType: ResponseBodyType.raw`（返回文件，不是信封）。
+
+### 38.2 别名清单与入参映射
+
+| 竞品形状 | 我方新增 | 输入 | 输出 |
+|---|---|---|---|
+| `POST /kds/da/canvas/total-point-consume` | `@Post("canvas/total-point-consume")` | body → `rangeQuery`（`from`/`to`） | 同 GET |
+| `POST /kds/da/team/:team_id/member-participate-detail` | `@Post("team/:team_id/member-participate-detail")` | body → `rangePageQuery` | 同 GET |
+| `POST /kds/da/team/:team_id/point-manage-flow` | `@Post("team/:team_id/point-manage-flow")` | body → `pageQuery` | 同 GET |
+| `POST /kds/da/team/:team_id/project-data/query` | `@Post("team/:team_id/project-data/query")` | body → `pageQuery` | 同 GET |
+| `POST /kds/da/team/:team_id/project-member-point-detail` | `@Post("team/:team_id/project-member-point-detail")` | body → `{episode_id}` | 同 GET |
+| `POST /kds/da/team/:team_id/query` | `@Post("team/:team_id/query")` | body → `rangeQuery` | 同 GET |
+| `POST /kds/da/team/:team_id/query/export` | `@Post("team/:team_id/query/export")` | **不解析 body** | `text/csv`（带 BOM） |
+| `POST /kds/da/team/:team_id/project-data/export` | `@Post("team/:team_id/project-data/export")` | **不解析 body** | `text/csv`（带 BOM） |
+
+GET 全部保留（既有客户端不受影响）；同名 GET/POST 的差异只在输入来源，**实现共用**（`private *Impl(req, teamId, input)`）。
+
+### 38.3 三条契约决定
+
+1. **导出一律 `200`，不是 `201`。** Nest 对 `@Post` 默认回 201，会让「下载一份已有 CSV」看起来像「创建了一个资源」。
+   `sendCsv` 里显式 `reply.code(200)`。
+2. **导出别名不校验 body。** 竞品 `requestDataJsonSchema: {}`，没有字段证据；真实客户端很可能发 `{}`。
+   去校验一个没人能证明的形状，只会在合法调用上抛出 400101。
+3. **body 与 query 同构。** 非导出别名把 body 直接喂给 GET 用的那套 zod（`rangeQuery`/`pageQuery`/`rangePageQuery`），
+   非法输入依旧 **400101**。这不是「POST 就宽松」。
+
+### 38.4 与守卫测试的关系
+
+`apps/api/test/competitor-route-parity.spec.ts` 新增 `KDS_SHAPES`（13 条：5 GET + 8 POST）→ 五组共 **133 条**，
+并断言 #21「0 缺口、0 偏离」，另加两条锚点（`GET /kds/da/team/{}/query` 与 `POST /kds/da/team/{}/query` 都必须存在）。
+反向验证：把 `@Post("team/:team_id/query")` 改名成 `-BROKEN` → 2 例红并打印 `POST /kds/da/team/{}/query`。
+
+### 38.5 测试
+
+`apps/api/test/kds.spec.ts` 新增 1 例（原 6 例 → 7 例）：
+
+1. 五组 GET / POST **返回同一份数据**（逐一 `toEqual`；POST 走 Nest 默认 201，契约以信封 `code` 为准）；
+2. `POST team/{}/query` 带非法 `from` → **400101**（校验共用）；
+3. 两条导出 POST 都返回 `text/csv`、正确 `content-disposition`、body 以 BOM 开头；
+4. `team_id` 与活动空间不一致 → **403101**（别名同样受空间校验）。
+
+### 38.6 诚实边界
+
+1. 只补**方法形状**；body 字段语义是「与 query 同构」的自定口径，竞品没有字段证据；
+2. `project-data/query` 的**筛选参数依旧待取证**（竞品只给路由与 `queryNames: []`）；
+3. 其余满分模块（#1 首页、#24 任务、#26 分享、#27 运营后台、#28 架构）尚未审计；
+4. 守卫是**快照式**：竞品新增第 14 条 kds 路由时，需要人手动加进 `KDS_SHAPES`；
+5. 本批**不改分**（#21 记 100%），价值在「那个 100% 现在可复跑、且客户端形状真能通」。

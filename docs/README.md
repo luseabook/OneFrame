@@ -127,6 +127,129 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.35 · 第 81 批：审计「满分」模块 #21 数据看板 —— 13 条竞品路由里 8 条调的是 POST · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 79、80 批把 #7 团队、#8 影视版、#10 活动/创作者三块 XL(20) 的「100%」都用竞品路由逐条对过了。
+第 81 批继续查剩下的满分模块，先挑 **#21 数据看板**（`M(3)`，13 个端点）。问题很朴素：
+
+> 我方 `kds.controller.ts` 有 13 条路由，竞品 `/web/v1/kds/da/*` 也有 13 条 —— 条数一样，是不是就等价？
+
+不是。条数一样只说明**资源覆盖一样**，不说明**调用形状一样**。逐条对下来：
+
+| 竞品形状 | 我方原状 | 判定 |
+|---|---|---|
+| `GET /kds/da/team/:team_id/basic-info` | `GET` 同路径 | ✅ |
+| `GET /kds/da/team/:team_id/point-consume-rank` | `GET` 同路径 | ✅ |
+| `GET /kds/da/team/:team_id/project-data/basic-info` | `GET` 同路径 | ✅ |
+| `GET /kds/da/team/member/:op_user_id/point-consume-detail` | `GET` 同路径 | ✅ |
+| `GET /kds/da/team/member/:op_user_id/point-quota-detail` | `GET` 同路径 | ✅ |
+| `POST /kds/da/canvas/total-point-consume` | 只有 `GET` | ❌ 方法缺口 |
+| `POST /kds/da/team/:team_id/member-participate-detail` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/point-manage-flow` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/project-data/query` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/project-data/export` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/project-member-point-detail` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/query` | 只有 `GET` | ❌ |
+| `POST /kds/da/team/:team_id/query/export` | 只有 `GET` | ❌ |
+
+**8 条「竞品 POST / 我方 GET」。** 对按竞品形状写的客户端来说，`POST` 打到只有 `GET` 的路径上是 **404**
+（Nest 的路由匹配含方法），不是「参数没传对」那种软失败 —— 看板页会直接白屏。
+
+### 二、证据（为什么这不是风格差异）
+
+竞品这 8 条在 `core-lib-CKH7gQsw.js` 里是逐字这样写的：
+
+```js
+ApiKdsDaCanvasTotalPointConsumePostRequestConfig = {
+  path: "/web/v1/kds/da/canvas/total-point-consume",
+  method: Method.POST,
+  requestHeaders: {},
+  requestBodyType: RequestBodyType.json,
+  responseBodyType: ResponseBodyType.json,
+  paramNames: [],
+  queryNames: [],
+  requestDataOptional: !1,
+  requestDataJsonSchema: {},
+  responseDataJsonSchema: {},
+  requestFunctionName: "ApiKdsDaCanvasTotalPointConsumePOST",
+}
+```
+
+三个细节决定了改法：
+
+1. `method: Method.POST` + `requestDataOptional: !1` —— **必须发 POST，且必须带 body**；
+2. `requestDataJsonSchema: {}` —— 形状**没有证据**，只能按「与 query 同构」自定（这一点写进 api-spec §17.38 的边界）；
+3. 两条导出的 `responseBodyType: ResponseBodyType.raw` —— 返回的是**文件**，不是 JSON 信封，所以别名**不解析 body**。
+
+### 三、改了什么（8 条别名，GET 全部保留）
+
+| 别名 | 实现方式 |
+|---|---|
+| `POST canvas/total-point-consume` | body → `rangeQuery` → 同一个 service |
+| `POST team/:team_id/member-participate-detail` | body → `rangePageQuery` |
+| `POST team/:team_id/point-manage-flow` | body → `pageQuery` |
+| `POST team/:team_id/project-data/query` | 抽出 `private projectDataQueryImpl(req, teamId, input)`，GET/POST 共用 |
+| `POST team/:team_id/project-member-point-detail` | 抽出 `private projectMemberPointImpl(...)`，共用 |
+| `POST team/:team_id/query` | 抽出 `private teamQueryImpl(...)`，共用 |
+| `POST team/:team_id/query/export` | `@Res()` + `sendCsv`，**不解析 body** |
+| `POST team/:team_id/project-data/export` | 同上 |
+
+三个不显然的决定：
+
+1. **不复制实现**。三条同名 GET/POST 的差异只在「输入从哪儿来」（`@Query()` 还是 `@Body()`），
+   所以把查询体抽成 private 方法，两边都调它 —— 复制一遍 zod 与查询，下一次改字段就会漂移。
+2. **`sendCsv` 里加 `reply.code(200)`**。Nest 对 `@Post` 默认回 **201**，导出会变成
+   「201 Created + 一个 CSV」——同一个文件看起来像被「创建」了。导出永远是「取一份文件」。
+3. **导出别名不解析 body**。竞品 body 形状无证据，且返回是 raw 文件；如果我去校验一个没人能证明的形状，
+   只会在真实客户端传空 `{}` 时把导出打成 400101。
+
+### 四、守卫：把「13 条」也钉进测试
+
+`apps/api/test/competitor-route-parity.spec.ts` 原来内联四组 120 条（film 48 / crc 30 / op 35 / campaign 7），
+本批新增 `KDS_SHAPES`（13 条）→ **五组 133 条**，并新增两条断言：
+
+- `#21 数据看板：13 条全部覆盖（5 GET + 8 POST 别名，0 缺口、0 偏离）`；
+- 首例里加两个锚点：`GET /kds/da/team/{}/query` 与 `POST /kds/da/team/{}/query` **都必须存在**（同路径双方法）。
+
+反向验证：把 `@Post("team/:team_id/query")` 改名成 `team/:team_id/query-BROKEN` →
+**2 例立刻红**并打印 `expected [ 'POST /kds/da/team/{}/query' ] to deeply equal []`；restore 后 8/8 绿。
+
+### 五、功能用例（别名不能只是「路由存在」）
+
+`apps/api/test/kds.spec.ts` 新增 1 例，验证四件事：
+
+1. **GET 与 POST 返回同一份数据**：`canvas/total-point-consume`、`member-participate-detail`、
+   `point-manage-flow`、`project-data/query`、`team query` 五组逐一 `toEqual`（POST 走 Nest 默认 201，契约以信封 `code` 为准）；
+2. **校验共用**：`POST team/{}/query` 带 `{from:"not-a-timestamp"}` → 仍是 **400101**（不是「POST 就不校验」）；
+3. **导出**：两条 POST 都返回 `content-type: text/csv`、`content-disposition` 指向正确文件名、body 以 BOM 开头；
+4. **空间校验**：`team_id` 与 token 活动空间不一致 → 仍 **403101**。
+
+### 六、验证与数字
+
+| 项 | 结果 |
+|---|---|
+| `pnpm --filter @app/api typecheck` | 干净 |
+| `npx eslint src`（api） | 退出 0 |
+| `test/competitor-route-parity.spec.ts` | **8 passed**（原 7） |
+| `test/kds.spec.ts` | **7 passed**（原 6） |
+| api 全量 | **84 文件 933 例**（原 931） |
+| 门禁 12 项 | **12/12 全绿**（api 真跑 163.97s） |
+| 端点 | 728 → **736**（+8 别名） |
+| 用例总数 | 1,332 → **1,334** |
+| 分数 | **202.44 / 98.3% / 剩余 3.56 不变** |
+
+### 七、诚实边界
+
+1. **只补方法形状**，body 字段语义仍是「与 query 同构」的自定口径 —— 竞品 `requestDataJsonSchema` 是 `{}`，没有字段证据；
+2. `project-data/query` 的**筛选参数依旧待取证**（竞品只给路由，没有 query/body 的名字）；
+3. **本批不加分**：#21 本来就记 100%，这批的价值是「那个 100% 现在带守卫、且客户端形状真的能通」；
+4. 剩下的满分模块（#1 首页、#24 任务、#26 分享、#27 运营后台、#28 架构）**尚未审计**；
+5. 守卫仍是**快照式**：竞品新增第 14 条 kds 路由时，得有人手动把它加进 `KDS_SHAPES`，测试不会自己去拉。
+
+---
+
 ## 变更登记（v6.34 · 第 80 批：把「100%」用 120 条竞品路由逐条对过，并固化成测试 · 2026-10-28）
 
 ### 一、这批要回答的问题
