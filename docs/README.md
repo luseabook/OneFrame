@@ -126,6 +126,82 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.21 · 第 67 批：把前端路由门禁的覆盖面补满 —— 408 → 544 条、未解析 0 · 2026-10-28）
+
+> 批次台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 的 **v9.0**（同一批，编号体系不同，勿混）。
+>
+> **这批不加分**：`202.45/206 = 98.3%`、剩余 `3.55` 全部不变。它修的是**门禁本身**的覆盖漏洞——
+> 上一批刚建立的守卫有个盲区，盲区里正好是路径最容易拼错的那一类代码。
+
+### 一、上一批的守卫漏了什么
+
+第 66 批的 `apps/api/test/web-api-contract.spec.ts` 只解析「首参就是字符串/模板字面量」的调用：
+
+```ts
+// 能抓到（第 66 批的真缺陷就在这里）
+await api.get("/team/groups");
+
+// 抓不到 —— 整片跳过
+const base = (canvasId: string) => `/canvas/canvases/${encodeURIComponent(canvasId)}`;
+await api.get(base(canvasId));
+await api.post(`${base(canvasId)}/commit`, payload);
+```
+
+`useCanvasApi.ts` / `useAgentChat.ts` / `useCanvasAgent.ts` 这些 composable 全是这种写法。
+**风险最高的一类（把模块前缀写错、把资源名写错）反而在门禁之外**——第 66 批能抓到 `works.vue`，
+是因为那条路径恰好写成了字面量，属于运气，不是方法成立。
+
+### 二、补了哪四类解析
+
+| 形态 | 例子 | 处理 |
+|---|---|---|
+| helper 调用 | `api.get(base(canvasId))` | 取 `base` 声明处的模板字面量（或普通字符串）作前缀 |
+| helper 前缀模板 | ``api.post(`${base(id)}/commit`)`` | `expandHelperPrefix()` 展开 `${helper(...)}` 再接尾巴 |
+| 局部变量 | `const path = mode === "mine" ? "/crc/activity/list" : "/crc/activity/public"; api.post(path, …)` | 取该变量**同一语句内**所有以 `/` 开头的字面量（三元两分支都进） |
+| 兜底表达式 | `api.post(x?.y ?? "/agent/stt/transcribe", …)` | 取表达式片段内的字面量 |
+
+关键的两个坑（都是我自己先踩出来的）：
+
+1. **局部变量切片必须在 `;` 处截断**。最初取声明后 400 字符，会把**下一条调用**的字面量算进来，
+   于是 `api.post(path, …)` 被错配成 `POST /crc/assets/me` ——这个误报差点被当成真缺陷去改代码。
+2. **helper 的返回值可能是普通字符串而不是模板字面量**：`const base = () => "/agent/sessions"`。
+   只认模板字面量会让 `useAgentChat.ts` 的 8 条调用继续落在盲区里。
+
+### 三、门禁本身加了两条防退步断言
+
+- 静态可解析调用数 **> 500**（原 > 300）：如果哪天解析器失效，先在这里红，而不是"少扫一点也绿"。
+- 未解析数 **≤ `UNRESOLVED_MAX`(0)** 且每一条都必须落在 `UNRESOLVED_ALLOWLIST`（当前为空）里：
+  将来真出现「首参前缀来自运行时数据」的调用，必须显式登记并写明原因，不能悄悄扩大盲区。
+
+### 四、反向验证（证明守卫真的会红）
+
+把 `apps/web/composables/useCanvasApi.ts` 里的 `/canvas/canvases` 改成 `canvasBROKEN`：
+
+```
+× 所有静态可解析路径都能在后端路由表里找到
+GET /canvas/canvasBROKEN/{} ← composables\useCanvasApi.ts:34
+PATCH /canvas/canvasBROKEN/{} ← composables\useCanvasApi.ts:38
+DELETE /canvas/canvasBROKEN/{} ← composables\useCanvasApi.ts:40
+POST /canvas/canvasBROKEN/{}/commit ← composables\useCanvasApi.ts:55
+GET /canvas/canvasBROKEN/{}/snapshots ← composables\useCanvasApi.ts:58
+```
+
+6 例中 2 例立刻红，改回即绿。
+
+### 五、数字与边界
+
+| 项 | 第 66 批 | 第 67 批 |
+|---|---:|---:|
+| 后端路由 | 701 | **702** |
+| web 可静态解析调用 | 408 | **544**（+136） |
+| 未解析（被跳过/白名单） | 133 处跳过 + 4 处白名单 | **0** |
+| api 用例 | 881 | **883** |
+| 总用例 | 1,254 | **1,256** |
+| 全站进度 | 202.45 / 98.3% | **202.45 / 98.3%（不变）** |
+
+诚实边界：这道门禁只保证「路径形状能对上」，**不校验 query / body 语义**，也**不校验方法语义**
+（`POST /x` 与 `GET /x` 各算各的，不会互相顶替）。它拦的是「把路径写错」，拦不住「把参数写错」。
+
 ## 变更登记（v6.20 · 第 66 批：前端把分组接口写成了 `/team/groups`，而 `catch` 把 404 吞成「没有分组」 · 2026-10-28）
 
 > 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) §9 **v8.9**（同一批；本文件与主台账各有一套编号，勿混）。**这批不加分**：修的是第 63 批已计分功能的实现缺陷，不是新增能力。

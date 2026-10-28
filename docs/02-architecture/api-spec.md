@@ -2757,3 +2757,46 @@ GET /v1/canvas/templates → 200 {"code":401101,...}
 - 只覆盖静态可解析的 408 处；133 处变量拼接前缀不覆盖（`useCanvasApi.ts` 占 48 处，`NovelOriginalChain.vue` 28 处，`pages/novel/[id].vue` 23 处）。
 - 只校验"路径形状存在"，不校验 query 名、body 字段、HTTP 语义。
 - 与 §17.24（CLI↔后端）互补：**同一个后端路由表，两个调用方各有一条守卫**；两边共用"按 `@Controller` 切段 + 占位符归一 + 通配匹配"这套规则，改规则时两边都要改。
+
+### 25.6 第 67 批：把 helper / 变量前缀也纳入这道契约（408 → 544 条，未解析 0）
+
+**问题**：25.4 的守卫只解析「首参就是字面量」的调用。`apps/web/composables/useCanvasApi.ts`
+这类 composable 的写法是
+
+```ts
+const base = (canvasId: string) => `/canvas/canvases/${encodeURIComponent(canvasId)}`;
+await api.get(base(canvasId));                    // 首参是 helper 调用
+await api.post(`${base(canvasId)}/commit`, body); // 首参以 ${helper(...)} 开头
+```
+
+第 66 批把这类整片跳过（当时统计为 133 处），而**模块前缀写错**恰恰最容易发生在这一层。
+第 67 批把解析补满，新增断言「调用数 > 500」「未解析 = 0 且必须落在白名单」。
+
+**四类解析与实现位置**（`apps/api/test/web-api-contract.spec.ts`）：
+
+| 首参形态 | 处理函数 | 说明 |
+|---|---|---|
+| `base(canvasId)` | `IDENT_CALL_RE` + `helperTemplate()` | helper 声明处的模板字面量 / 普通字符串前缀 + `)` 之后的尾巴 |
+| `` `${base(id)}/commit` `` | `expandHelperPrefix()` | 展开 `${helper(...)}` 后接剩余部分 |
+| `path`（局部变量） | `literalCandidates()`（同一语句内） | 覆盖 `cond ? "/a" : "/b"`、`x ?? "/c"` |
+| 表达式 | `literalCandidates()`（片段内） | 兜底，如 `x?.p ?? "/agent/stt/transcribe"` |
+
+**两个必须记住的坑**：
+
+1. 局部变量切片**必须在 `;` 处截断**。取固定长度会把下一条调用的字面量算进来，
+   把 `api.post(path, …)` 错配成 `POST /crc/assets/me` ——这个误报会让人去改正确代码。
+2. helper 返回值可能是**普通字符串**（`const base = () => "/agent/sessions"`），
+   只认模板字面量会让 `useAgentChat.ts` 的 8 条调用继续落在盲区。
+
+**断言**：路由数 > 600（防解析失败）；静态调用数 > 500（防正则失效）；未解析数 ≤ `UNRESOLVED_MAX`(0)
+且必须命中 `UNRESOLVED_ALLOWLIST`（当前为空）；所有可解析路径都能在路由表命中；三条回归锚点
+（`GET /cam/team/groups` 在、`POST /redeem-code/redeem` 在、`GET /team/groups` 不在）；
+`/canvas/canvases/{}` 开头的调用 > 20 条且 `useCanvasApi.ts` 在案（证明 helper 前缀真的被解析了）。
+
+**反向验证**：把 `useCanvasApi.ts` 的 `/canvas/canvases` 改成 `canvasBROKEN` → 6 例中 2 例立刻红，
+逐条打印错配调用（`GET /canvas/canvasBROKEN/{} ← composables\useCanvasApi.ts:34` 等），改回即绿。
+
+**口径变化**：web 可静态解析调用 408 → **544**；未解析 133 + 4 → **0**；api 用例 881 → **883**。
+后端路由、端点数、迁移数、模块得分均未变（本批是门禁强化，不改应用代码）。
+
+**边界**：只校验路径形状，不校验 query / body 语义，也不校验方法语义（`POST /x` 与 `GET /x` 各算各的）。
