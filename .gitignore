@@ -73,6 +73,10 @@ _acceptance/*
 !_acceptance/canvas-acceptance.ps1
 !_acceptance/e2e-canvas-editor.cjs
 !_acceptance/canvas-probe.cjs
+# 导演台多用户协同验收：单浏览器 + 造心跳证明不了「两个真账号在同一场景里协同」，
+# 这条链路上压着成员加入、活动空间切换（X-Space-Id）、双向心跳、乐观锁冲突与覆盖，
+# 只能在两个隔离浏览器上下文里跑。脚本入库，结果写进 _acceptance/_team/report-director.md。
+!_acceptance/e2e-director-collab.cjs
 
 # 本地依赖运行时数据（PG/Redis 数据目录，66MB+，绝不入库）
 .localstack/

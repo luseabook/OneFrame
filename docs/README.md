@@ -127,6 +127,88 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.30 · 第 76 批：#19 3D 导演台「真实双人协同」—— 两个真浏览器，不是 Redis 里的一行心跳 · 2026-10-28）
+
+### 一、缺口长什么样
+
+第 74 批核账把 #19 的 0.03 判成 **I（内部可做、只是没排期）**，缺口栏原文：
+
+> 真实双人协同（只验单浏览器+Redis 造第二人）
+
+换言之：**产品能力是有的、接口是有的、前端是有的**，但"两个人在同一个场景里同时编辑"这件事，
+从来没在真浏览器里跑过一遍。这种缺口最容易被误当成"已完成"，因为所有单项测试都是绿的。
+
+### 二、为什么「单浏览器 + Redis 造第二人」不算
+
+既有 `_acceptance/e2e-director.cjs`（17 项断言，已入库）确实验了冲突与协作者，但手法是：
+
+| 要验的东西 | 旧脚本怎么造 | 造得出来的部分 | 造不出来的部分 |
+|---|---|---|---|
+| 版本冲突 | 用 API 直接把服务端推到 v2，再在同一个页面保存 | 前端拿到 746002 后弹冲突条、两个按钮可用 | 真实两个人的两个页面是否都处于"同一个场景" |
+| 谁在线 | 用 Redis 写一条别人的心跳 | 心跳接口的读取与过滤逻辑 | 心跳是否真的由另一个**登录用户**发出、成员关系与活动空间是否成立 |
+
+两次都是"我造了服务端状态，再看前端反应"，**没有人真的以第二个人身份在线**。
+最可能坏的地方恰好被绕过了：成员有没有真的加进空间、第二个人有没有真的切到同一个空间、
+两个页面看到的是不是同一条场景。
+
+### 三、这条链路上真正可能坏的五件事
+
+1. **成员加入**：`POST /cam/team/member/batch`（`apps/api/src/modules/team/team.service.ts:247`）
+   —— 按手机号查 `identities.phoneHash`，未注册返回 `phone not registered`；已在空间返回 `already a member`。
+2. **活动空间切换**：服务端 `apps/api/src/common/auth.guard.ts:63-94` 用请求头 `X-Space-Id` 校验
+   `space_members.status=1` 且空间未停用，不合法 403 `not_member`/`space_disabled`；
+   前端 `apps/web/composables/useActiveSpace.ts` 把活动空间存 `localStorage["active_space_id"]`，
+   由 `apps/web/plugins/active-space.client.ts` 启动时同步进 `useState`。
+   —— 这两半只要有一半不生效，第二个人看到的就是"项目不存在"。
+3. **双向心跳**：`director:hb:<sceneId>` 一个场景一个 Redis HASH（field = user_id，TTL 60s+1），
+   响应给 `last_seen_ms`（距今毫秒，客户端不必处理时钟偏差）；**A 看见 B、B 看见 A 都要成立**。
+4. **乐观锁**：`PUT /director/scenes/:id` 版本不符 → `746002`，msg `scene version conflict: current=N`。
+5. **覆盖后的版本**：前端 `overwriteConflict()` 先 `GET` 取服务端版本、把本地 version 改成服务端值再保存
+   —— 所以"覆盖服务端"之后服务端版本是 **v+1（v3）**，不是 v2。这条是时序细节，写错就会误判成 bug。
+
+### 四、两个真问题（都是我脚本写错，不是产品缺陷）
+
+| # | 现象 | 真相 | 教训 |
+|---|---|---|---|
+| 1 | `GET /v1/auth/me` 返回 `404 {"code":400102,"msg":"Cannot GET /v1/auth/me"}`，且 `me()` 无 auth 时返回 `null` → 「登录成功但拿不到 user/space」 | 端点是 **`GET /v1/me`**（`AuthController` 是 `@Controller()`，无 `auth/` 前缀，`auth.controller.ts:120`） | 客户端/脚本要拿"我是谁"，别按模块名猜路径；已写进 api-spec §17.33 的契约表 |
+| 2 | A 先开导演台、B 后开，A 的协作者浮层一直是空的 | `syncFromServer()` 里 `heartbeat()` 在 `loadLatest()` **之后**，而 `heartbeat()` 开头是 `if (!sceneId.value) return;` —— **首次打开时场景还不存在**，心跳安静返回 | "打开即心跳"只在**场景已存在**时成立；E2E 必须让 A **关闭再打开**（触发新一跳心跳），不能等 30s 定时器 |
+
+### 五、验证
+
+新增 `_acceptance/e2e-director-collab.cjs`（已入 `.gitignore` 白名单，是仓库产物）：两个真账号、
+两个隔离 `browser.newContext()`，**23 项断言全绿**。
+
+| 段 | 验的东西 | 断言数 |
+|---|---|---:|
+| S1 | 两个账号、两个隔离上下文、`/v1/me` 的 user/space 两两不同 | 2 |
+| S2 | A 建项目 + 拉 B 进空间；**反证** B 不带 `X-Space-Id` 读不到该项目（400102）；B 前端写 `localStorage` 后能打开同一项目页 | 5 |
+| S3 | A 打开导演台保存 → UI「已保存 v1」，API 交叉核对 `version=1` 且 payload 形状正确 | 4 |
+| S4 | B 读到 v1；A 重开后 UI 出现「👥 1 人在编辑」+「用户XXXX（Ns 前）」；**双向** API 心跳互见 | 5 |
+| S5 | B 推到 v2；A 用旧版本保存 → 冲突条提示 v2；点「覆盖服务端」→「已保存 v3」、冲突条消失、API `version=3` | 6 |
+| S6 | 两个页面控制台无未预期错误 | 1 |
+
+运行方式（栈 = api:3002 / web:3003）：
+
+```powershell
+pwsh _acceptance/start-wanxing-stack.ps1
+node _acceptance/e2e-director-collab.cjs
+```
+
+产物：`_acceptance/director-collab-e2e/result.json` + 4 张截图（A 存 v1 / A 看见 B / A 撞冲突 / A 覆盖为 v3）。
+`_acceptance/_team/report-director.md` 追加 §6 记录本次补做。
+
+### 六、诚实边界
+
+- **本轮不动任何产品源码**（无迁移、无端点变化、无前端改动）——补的是"证明"，不是"能力"。
+  因此门禁 12/12 全绿、且 12 个任务全部命中缓存是正确的（`Cached: 12 cached, 12 total`）。
+- 分数会动（#19 99% → 100%、全站 202.47 → 202.50，剩余 3.50），原因不是"又写了一个功能"，
+  而是**第 74 批已判定"代码侧不缺、缺的是证明"的那一格被证明掉了**。
+- 3D 视觉仍不做像素级比对（验收口径是"结构等价 + 关键对象计数"，第 53 批已定并保留）；
+  骨骼/位姿的真实动画观感不在自动断言范围内。
+- 脚本依赖 `_acceptance/node_modules/playwright-core`（未进任何 `package.json`）与固定 Chromium 路径，
+  属于本地验收工具链；换机器需先装这两样才能复跑。
+
+
 ## 变更登记（v6.29 · 第 75 批：#18 知识库「条目级字段」—— 证据是竞品自己的 payload builder · 2026-10-28）
 
 > 上一批（第 74 批）核账之后，代码侧「不需要任何外部输入、只是没排期」的只剩 **0.085**：#18 知识库条目级字段 0.015、#19 双浏览器 E2E 0.03、#3 真 ffmpeg 切片 0.02、#9 agent REPL/SSE 0.02。

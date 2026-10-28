@@ -168,7 +168,7 @@ npx eslint src/modules/director test/director.spec.ts  ✓ 0 error / 0 warning
 1. **`pages/projects/[id].vue` 我改了三处**（任务书允许"最小改动"，但该页本轮无 owner、随时可能被他人改）。若发生冲突：保留 `Director3D.vue` + `components/director/*` 即可，挂载点等价替换为任何 `<Director3D :open :project-id />`；三处锚点在 §1.2 写明。
 2. **服务端不解析 payload**：只校验"对象 + ≤512KB"。这意味着 payload 里塞非法字段（例如 `fov:"abc"`）也能存进去，由前端 `applySceneSnapshot` 做防御式清洗（读到非数字回落默认）。这是刻意选择（编辑器演进不该发后端版），代价是"坏快照"不会被服务端拒绝。
 3. **姿态预设 payload 形状与 schema 注释不一致**：列注释写 `{bones,camera}`，实际存 `{positions,cameras,activeCamIndex}`——当前编辑器没有骨骼概念（位姿是 `pose` 枚举）。若后续接骨骼，只改前端映射，后端不用动。
-4. **协作只验到"单浏览器 + Redis 造第二人"**：真实双浏览器同时拖同一场景没有做（需要两个登录态并行）。已验：自己不计入、别人的心跳能列出昵称/秒数、超时清 field、心跳不写库。
+4. **协作原先只验到"单浏览器 + Redis 造第二人"**（本条是历史记录，已在**第 76 批**由真实双浏览器补做，见 §6）：当时验的是自己不计入、别人的心跳能列出昵称/秒数、超时清 field、心跳不写库；缺的是两个真账号、两个隔离浏览器上下文、同一空间同一场景下的整条链路。
 5. **删除没有 UI 入口**：`DELETE` 端点有 spec 覆盖（软删后不可读），但导演台面板没放"删除场景"按钮（避免误删；个人/团队场景的删除确认交互待产品定）。
 6. **WebGL 渲染本身未在 E2E 断言**：headless Chromium 的 three.js 画布不做像素比对，E2E 只验"遮罩打开 + 保存/重开/冲突链路"与控制台清洁；3D 场景视觉效果需人工验收。
 7. **缩略图上传路径只在 spec 里走"签名读"**：E2E 未点「定格截图」（会触发浏览器下载，headless 下无意义），`/assets/upload` → `thumbnail_uri` → 签名列表已由 spec 覆盖。
@@ -181,3 +181,52 @@ npx eslint src/modules/director test/director.spec.ts  ✓ 0 error / 0 warning
 2. **api-spec 同步**（`docs/**` 不在我权限）：新增 `/v1/director/*` 9 条路由、payload 上限 512KB、746002 的 `current=N` 响应约定、心跳响应结构（`ttl_s` / `collaborators[].last_seen_ms`）。
 3. **进度文档**：模块 #19 从 45% → 可用；"删除 UI / 真实双人协同 / 骨骼位姿"记为剩余缺口。
 4. 运行环境提醒：本轮期间 `team.service.ts` / `script.quality-check.service.ts` 等他人文件曾在途（一度导致 `AppModule` 无法初始化、`pnpm --filter @app/api lint` 红）；我交付时的状态：typecheck 全绿、spec 全绿、我的文件 lint 0。
+
+---
+
+## 6. 多用户协同 E2E（第 76 批补做，`_acceptance/e2e-director-collab.cjs`）
+
+§4 第 4 条当时的缺口是：冲突与在线状态都是**单浏览器 + 服务端造数据**验的（API 把版本推到 v2、
+直接往 Redis 写一条"第二人"心跳）。这能证明乐观锁和心跳接口各自能跑，但证明不了
+「两个真账号、两个隔离上下文、同一空间同一场景」时它真的工作 —— 那条链路上还压着
+成员加入、活动空间切换（`X-Space-Id`）、双向心跳、以及覆盖冲突之后版本号真的 +1。
+
+### 6.1 跑了什么（23 项，两个 Chromium 上下文并行）
+
+| 段 | 断言 | 关键点 |
+|---|---|---|
+| S1 | 1.1 / 1.2 | 两个隔离 `browser.newContext()` 各自 UI 登录；`/v1/me` 拿到的 user_id 与 space_id 两两不同 |
+| S2 | 2.1–2.5 | A 建项目 → `POST /cam/team/member/batch` 把 B 加进 A 的空间 → B 带 `x-space-id` 能读该项目（**并反证不带该头读不到**，证明真的走了切空间）→ B 浏览器写 `localStorage.active_space_id` 后能打开同一项目页 |
+| S3 | 3.1–3.4 | A 打开导演台 → 保存 → 状态条 `已保存 v1` → API 核对 `version=1` 且 payload 形状正确 |
+| S4 | 4.1–4.5 | B 打开同一场景读到 **v1** → A 关闭再打开 → A 的 UI 出现 `👥 1 人在编辑`、浮层写 `用户XXXX（Ns 前）` → **双向** API 交叉核对（A 的心跳里是 B、B 的心跳里是 A） |
+| S5 | 5.1–5.6 | B 保存推到 v2 → A 用旧版本保存 → 冲突条 `场景已被他人更新到 v2` → 点「覆盖服务端」→ `已保存 v3` 且 API `version=3` |
+| S6 | 6.1 | 两个页面控制台无未预期错误 |
+
+运行方式（栈 `api:3002 / web:3003`）：
+
+```powershell
+pwsh _acceptance/start-wanxing-stack.ps1
+node _acceptance/e2e-director-collab.cjs
+```
+
+产物：`_acceptance/director-collab-e2e/result.json`（23/23）+ 4 张截图
+（`01-a-saved-v1.png` / `02-a-sees-b.png` / `03-a-conflict.png` / `04-a-overwrote-v3.png`）。
+
+### 6.2 写这条脚本时踩到的两个真问题（都改了脚本，不是产品 bug）
+
+1. **`/auth/me` 不存在**：`AuthController` 是 `@Controller()` 无前缀、方法上写全路径，
+   所以是 `GET /v1/me`（`auth.controller.ts:120`）。按名字猜 `/v1/auth/me` 会拿到
+   `404 {"code":400102,"msg":"Cannot GET /v1/auth/me"}`，而 `me()` 在无 auth 时返回 `null`，
+   于是脚本里表现为"登录成功了但拿不到 user/space"。
+2. **A 第一次打开导演台时不会写心跳**：`syncFromServer()` 里 `heartbeat()` 在
+   `loadLatest()` 之后调用（`Director3D.vue:393-403`），而 `persistence.heartbeat()` 开头
+   `if (!sceneId.value) return;`（`useDirectorPersistence.ts:268-276`）。首次打开时场景还不存在
+   → sceneId 为空 → 安静返回。所以"两个人在线互见"必须排在 **A 保存 v1 之后、A 再打开一次**
+   （或等 30s 定时器）。第一版脚本把 B 的心跳断言放在 A 重开之前，拿到 `collaborators: []`。
+   这不是产品缺陷（首次打开确实没有场景可上报），是验收顺序错了。
+
+### 6.3 结论
+
+模块 #19 原先记的缺口「真实双人协同只验了单浏览器 + Redis 造第二人」**已消失**：现在有两个
+真实账号、两套隔离浏览器上下文、同一空间同一场景下的在线互见与冲突覆盖的完整链路证据。
+未变的部分：3D 视觉效果仍不做像素比对（§4 第 6 条），骨骼位姿仍未接（§4 第 3 条）。

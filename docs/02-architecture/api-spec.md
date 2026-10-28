@@ -3362,3 +3362,76 @@ DTO 多给一个 `cover_is_fallback: boolean`（= 没人工封面但兜底出了
 - `image_asset_ids` 的元素**没有外键**：删资产后会留死 id（读时签名失败 → 退占位图）。要彻底干净得建关联表，代价是每次增删都要维护顺序；本批按竞品原始形状（有序 id 数组）走。
 - `?sp_type=1,2` 是**我方方言**（竞品用数组参数），两种写法都支持，但「多值语义」本身是我方推断。
 - 本批只清掉 I 类 0.085 里的 0.015；剩余 0.07（#19 双浏览器 E2E / #3 真 ffmpeg 切片 / #9 agent REPL 与 SSE）仍未排期。
+
+## 17.33 多用户协同的客户端契约：活动空间、心跳与「覆盖服务端」（第 76 批）
+
+本节记录**两个真人同时编辑同一个导演台场景**所依赖的契约。这些规则此前只存在于代码里，
+第 76 批用真浏览器跑通整链后才写进契约文档 —— 因为它们是"第二个人能不能进来"的全部前提。
+
+### 33.1 「我是谁、我在哪个空间」
+
+| 端点 | 用途 | 备注 |
+|---|---|---|
+| `GET /v1/me` | 取当前 `user` / `space` / `credits` | **没有 `auth/` 前缀**（`AuthController` 为 `@Controller()`）；无 token 时返回 `null` 而非 401 |
+| `POST /v1/auth/refresh` | 用 httpOnly cookie 换新的 `access_token` | 登录后取 token 的推荐方式（脚本/客户端均适用） |
+
+`access_token` 里烤着登录时的空间 id；要访问**别人的空间的资源**，必须让请求带
+`X-Space-Id: <space_id>` 头。
+
+### 33.2 `X-Space-Id` 的校验规则（`common/auth.guard.ts:63-94`）
+
+| 条件 | 结果 |
+|---|---|
+| 头缺省 | 用 token 里的空间 |
+| 头存在且该用户是成员（`space_members.status=1`）且空间未停用 | 通过，后续查询以该 space 为作用域 |
+| 头存在但用户不是成员 | **403 `not_member`** |
+| 头存在但空间已停用 | **403 `space_disabled`** |
+
+前端侧对应 `apps/web/composables/useActiveSpace.ts`：活动空间同时存在 `useState("active-space-id")`
+与 `localStorage["active_space_id"]`，`setActiveSpaceId()` 两处同写；`apps/web/plugins/active-space.client.ts`
+在客户端启动时把 localStorage 同步回 state（SSR 下不会重跑 initializer，所以必须有这个 plugin）。
+**E2E 复现"第二个人切到别人空间"就是写 localStorage 后 reload**，不需要额外接口。
+
+### 33.3 心跳：一个场景一个 HASH
+
+```
+key   director:hb:<scene_id>          # 一个场景一个 HASH
+field user_id                          # 谁
+value { at: <epoch_ms> }               # 最后一次心跳
+ttl   60s（HEARTBEAT_TTL_S） + 1      # 整 hash 一起过期
+```
+
+`POST /director/heartbeat { scene_id }`：hset 自己 → hgetall → **返回除自己以外**的在线者：
+
+```json
+{ "collaborators": [ { "user_id": "…", "nickname": "用户0282", "last_seen_ms": 1834 } ] }
+```
+
+- `last_seen_ms` 是**距今毫秒**而不是绝对时间戳 —— 客户端不必处理时钟偏差。
+- 读取时按 `at` 过滤超 TTL 的残留 field 并顺手 `hdel`。
+- 不用 `SCAN` 的理由写在 `director.service.ts` 注释里：keyspace 到万级时首轮 `COUNT=100` 可能全空。
+
+**时序坑（第 76 批实测）**：`Director3D.vue` 的 `syncFromServer()` 是
+`loadPresets() → loadLatest() → heartbeat()`，而 `heartbeat()` 开头 `if (!sceneId.value) return;`。
+所以**第一次打开（场景还不存在）不会发心跳**；要看到协作者，需要场景已存在后再触发一次
+（关闭重开、或等 30s 定时器 `SYNC_INTERVAL_MS`）。
+
+### 33.4 乐观锁与「覆盖服务端」
+
+| 动作 | 服务端行为 |
+|---|---|
+| `PUT /director/scenes/:id` 且 `version` 与库里一致 | 保存成功，`version + 1` |
+| `version` 不一致 | **746002**，msg `scene version conflict: current=<N>`，`details` 带 `field/expected/current` |
+| 同版本并发（update 影响 0 行） | 同样 746002，msg `scene version conflict: concurrent update` |
+| 前端点「覆盖服务端」 | `overwriteConflict()` 先 `GET` 取服务端当前 version → 把本地 version 置为该值 → 保存 → **服务端变 v+1** |
+
+最后一行是 E2E 的判据：A 在 v1 的页面上撞了 B 的 v2，点「覆盖服务端」之后服务端是 **v3**，不是 v2。
+`SceneDto` 的 `payload` 形状（`camPos` 等）在第 76 批断言里做了存在性核对，但**字段完整清单**仍以
+`director.service.ts` 为准，本节不重复抄写。
+
+### 33.5 验证与边界
+
+- `_acceptance/e2e-director-collab.cjs`：23 项断言，覆盖成员加入 → 切空间 → 双向心跳 → 冲突 → 覆盖。
+- 本轮**不改任何服务端/前端代码**；本节是把既存行为写成契约，不是新增契约。
+- 未覆盖：第三人及以上的并发、断线重连后的心跳补发、跨设备（不同 UA）的渲染差异、
+  以及"两个人在不同节拍上同时保存"的高并发时序。
