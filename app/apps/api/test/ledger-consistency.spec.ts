@@ -256,4 +256,30 @@ describe("台账内部一致性（第 103 批守卫）", () => {
     expect(statedTotal, "§5 合计行缺失").not.toBeNull();
     expect(Math.abs(statedTotal! - remain), `§5 合计行 ${statedTotal} 应≈${remain}`).toBeLessThanOrEqual(0.011);
   });
+
+  /**
+   * 第 104 批新增：**三分类（E/B/I）合计必须等于剩余权重**。
+   *
+   * 这是第 103 批守卫**查不到**的一类漂移：分数变了、分类合计没跟着变。
+   * 本批就撞到了 —— 第 97 批（#23 做掉 0.015）、第 98 批（#17 核清 0.08）、
+   * 第 102 批（#4 的 0.20 从 B 改 E）之后，§5.3/§5.5 仍写着
+   * 「E = 2.45、B = 0.975」（合计 3.425，与剩余 3.33 差 0.095）。
+   *
+   * 「分类对不对」测试管不了（那要人读代码），但「分类加起来等不等于剩余」管得了。
+   */
+  it("三分类合计（E+B+I）必须等于剩余权重，且多处表述必须一致", () => {
+    const triples = [...md.matchAll(/E = ([\d.]+)、B = ([\d.]+)、I = ([\d.]+)/g)];
+    expect(triples.length, "台账里应至少两处写明 E/B/I 三分类合计").toBeGreaterThanOrEqual(2);
+
+    const remain = Math.round(sumRemain * 100) / 100;
+    for (const m of triples) {
+      const [, e, b, i] = m.map(Number) as unknown as [number, number, number, number];
+      const sum = Math.round((e + b + i) * 100) / 100;
+      expect(sum, `「E=${e} B=${b} I=${i}」合计 ${sum} 应等于剩余 ${remain}`).toBe(remain);
+    }
+
+    // 多处表述必须彼此一致（不允许 §5.3 与 §5.5 各说一套）
+    const uniq = new Set(triples.map((m) => `${m[1]}/${m[2]}/${m[3]}`));
+    expect([...uniq].length, `三分类合计在多处不一致：${[...uniq].join(" vs ")}`).toBe(1);
+  });
 });
