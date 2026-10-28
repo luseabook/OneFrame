@@ -5064,3 +5064,64 @@ Content-Type: application/json
   实付 = 报价 `payable_cents`」「无生效订阅时不折抵（全额）」「同档续费不折抵」。
 - 反向验证：`_r97_break.py break|restore` 把折抵改回全额 → **1 红且报错正是 `19900 vs 16000`**；
   restore 后 9 绿。
+
+## 17.55 字段级证据的查找范围，与两个被误记为缺口的字段（第 98 批 · #17）
+
+本批**没有新增或修改任何端点契约**（端点 778 不变）。这一节记录两条**契约级事实**
+和一条**取证方法上的教训** —— 后者直接影响以后怎么判断"我方缺不缺某个字段"。
+
+### 55.1 `prompt_blocked`：已实现，但按端点表搜会搜不到
+
+`GET /v1/projects/:pid/episodes/:eid/storyboard-assets`（资产匹配条目列表）**已经**返回：
+
+```json
+{
+  "prompt": "…",
+  "has_prompt": true,
+  "prompt_status": 3,
+  "prompt_generating": false,
+  "prompt_blocked": true,
+  "file_id": "1089…",
+  "ref_image_uri": "…"
+}
+```
+
+语义（`asset-match.service.ts:452-453`）：
+
+| 字段 | 判据 | 用途 |
+| --- | --- | --- |
+| `prompt_generating` | `prompt_status === 1` | 生成中，不参与「智能补充」候选 |
+| `prompt_blocked` | `prompt_status === 3` | 被内容安全拦截，**不重复尝试**同一批被拦内容 |
+
+智能补充的候选条件是**同时**满足：类型是角色/场景/道具、有 `resource_id`、`status=3`、
+`name` 非空、`prompt` 为空、`prompt_generating` 不为真、`prompt_blocked` 不为真。
+
+> ⚠️ **取证教训（本批踩到）**：`competitor_endpoints.tsv` 里搜 `prompt_blocked` 是 **0 次**。
+> 但它的竞品证据是**字段级**的 —— 写在 `docs/01-product/_parts/d-pipeline.md:268` 与竞品抓包
+> 分析 `_storyboard-asset-match.md:9` 里，**端点表只覆盖 METHOD + path + query，不含响应体字段**。
+>
+> **「端点表里没有」≠「竞品没有这个字段」。** 判断字段缺口时必须同时查：TSV 的 `QUERY` 列
+> **和**产品文档里的字段级抓包结论。
+
+### 55.2 `prompt_inject_mode=replace`：整段替换，风格前缀不受影响
+
+`POST /v1/projects/:pid/episodes/:eid/storyboards/generate` 接受
+`prompt_inject_mode: "append" | "replace"`（默认 `append`）：
+
+| 取值 | 行为 |
+| --- | --- |
+| `append`（默认） | 原 prompt 不改写；标记版 `prompt_with_images` 只作**附加字段**下发 |
+| `replace` | 把「资产名 → `[[@imgN]]`」标记后的文本**整段**当 prompt |
+| 其他值 | `400101` |
+
+**风格前缀不会因为 `replace` 而失效**：前缀由 `injectImagesWithTemplates` 在标记文本**末尾追加**
+（带重复检测），与 `replace` 是两条独立的处理链。所以「replace 会覆盖风格前缀」这个担心不成立。
+
+### 55.3 本批结论
+
+| 条目 | 台账原记 | 实际 |
+| --- | --- | --- |
+| `prompt_inject_mode=replace` 语义需产品确认 | B 0.08 的一半 | **已实现**（实现 + 枚举 + 3 项断言） |
+| `prompt_blocked` 无列、需竞品字段证据 | B 0.08 的一半 | **已实现**（DTO + 判据 + 输出 + 断言） |
+
+两项合计 0.08 从 #17 的缺口里清掉：**#17 99% → 100%**。
