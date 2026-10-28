@@ -10,8 +10,8 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十三组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
- * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64，共 311 条，来自
+ * 本文件把竞品的十四组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114，共 425 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -24,9 +24,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十三组共 311 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十四组共 425 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #6 / #8 / #10 / #12 / #21 / #22 / #24 / #26 / #27 十一行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十二行的
  * 「逐条对照」说法。
  *
  * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
@@ -812,6 +812,246 @@ const AI_IN_SCOPE_GAPS = [
   "POST /web/v1/ai/timbre/collect",
 ];
 
+// ── #11 无限画布（第 87 批）────────────────────────────────────────────
+// 竞品 `/web/v1/df/canvas/*` 共 114 个 METHOD+path（另有 film 绑定、kds 积分两条在各自组里）。
+// 逐条对完的结构是：10 条同形（film 的画布绑定）、100 条结构性偏离、
+// 4 条能力缺口（clip / crop / group-recover / tpls 元素批量建）。台账据此把 #11 的剩余
+// 从 0.20（E 类「无响应体证据」）改成 0.10（B 类四条小能力），分数 99% → 99.5%。
+const CANVAS_PREFIX_REASON = "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）";
+const CANVAS_SHAPES = [
+  "DELETE /df/canvas/agent-skills/{}",
+  "DELETE /df/canvas/agent-skills/{}/favorite",
+  "DELETE /df/canvas/templates/personal/{}",
+  "DELETE /df/canvas/{}/chat/sessions/{}",
+  "DELETE /df/canvas/{}/comment-nodes/{}",
+  "DELETE /df/canvas/{}/comment-nodes/{}/comments/{}",
+  "DELETE /df/canvas/{}/edges/{}",
+  "DELETE /df/canvas/{}/groups/{}",
+  "DELETE /df/canvas/{}/nodes/{}",
+  "DELETE /df/canvas/{}/pin-groups/members",
+  "DELETE /df/canvas/{}/pin-groups/{}/members",
+  "DELETE /df/canvas/{}/pinned-node",
+  "DELETE /df/canvas/{}/pinned-timelines",
+  "DELETE /df/canvas/{}/pinned-timelines/{}",
+  "DELETE /film/projects/{}/canvases/{}",
+  "DELETE /film/projects/{}/task-tables/{}/tasks/{}/canvas-bindings",
+  "GET /df/anu/canvas/{}/canvas-info",
+  "GET /df/canvas-tpls",
+  "GET /df/canvas-tpls/{}",
+  "GET /df/canvas/agent-recommend-cards",
+  "GET /df/canvas/agent-skills/details",
+  "GET /df/canvas/agent-skills/favorites",
+  "GET /df/canvas/agent-skills/mine",
+  "GET /df/canvas/agent-skills/plaza",
+  "GET /df/canvas/node/batch-download/list",
+  "GET /df/canvas/templates/personal",
+  "GET /df/canvas/templates/{}",
+  "GET /df/canvas/{}",
+  "GET /df/canvas/{}/chat/sessions",
+  "GET /df/canvas/{}/chat/sessions/{}/messages",
+  "GET /df/canvas/{}/chat/sessions/{}/stream",
+  "GET /df/canvas/{}/chat/writing-outputs",
+  "GET /df/canvas/{}/comment-nodes",
+  "GET /df/canvas/{}/comment-nodes/{}",
+  "GET /df/canvas/{}/groups/{}/templates",
+  "GET /df/canvas/{}/materials",
+  "GET /df/canvas/{}/nodes-asset",
+  "GET /df/canvas/{}/nodes/{}",
+  "GET /df/canvas/{}/nodes/{}/lock",
+  "GET /df/canvas/{}/nodes/{}/video-parse/{}",
+  "GET /df/canvas/{}/pin-groups",
+  "GET /df/canvas/{}/pinned-node",
+  "GET /df/canvas/{}/pinned-timelines",
+  "GET /film/projects/{}/canvases/visible",
+  "GET /film/projects/{}/canvases/{}/task-bindings",
+  "GET /film/projects/{}/canvases/{}/task-panel",
+  "GET /film/projects/{}/task-tables/{}/tasks/{}/canvas-bindings",
+  "PATCH /df/canvas/{}/chat/sessions/{}",
+  "POST /df/anu/canvas/{}/batch-download",
+  "POST /df/anu/canvas/{}/batch-file-thumb",
+  "POST /df/anu/canvas/{}/batch-nodes-details",
+  "POST /df/canvas",
+  "POST /df/canvas/agent-skills",
+  "POST /df/canvas/agent-skills/{}/favorite",
+  "POST /df/canvas/batch-nodes",
+  "POST /df/canvas/groups",
+  "POST /df/canvas/node/batch-download",
+  "POST /df/canvas/node/batch-download/url",
+  "POST /df/canvas/nodes",
+  "POST /df/canvas/templates/{}/sync-team",
+  "POST /df/canvas/{}/batch-del-edges",
+  "POST /df/canvas/{}/batch-del-nodes",
+  "POST /df/canvas/{}/batch-edges",
+  "POST /df/canvas/{}/batch-edit-nodes",
+  "POST /df/canvas/{}/batch-node-tasks",
+  "POST /df/canvas/{}/chat/sessions",
+  "POST /df/canvas/{}/chat/sessions/{}/messages",
+  "POST /df/canvas/{}/chat/sessions/{}/messages/{}/node-binding",
+  "POST /df/canvas/{}/chat/sessions/{}/messages/{}/reaction",
+  "POST /df/canvas/{}/chat/sessions/{}/read",
+  "POST /df/canvas/{}/chat/sessions/{}/tasks/{}/cancel",
+  "POST /df/canvas/{}/chat/sessions/{}/tasks/{}/feedback",
+  "POST /df/canvas/{}/chat/sessions/{}/tasks/{}/interrupt",
+  "POST /df/canvas/{}/clip",
+  "POST /df/canvas/{}/comment-nodes",
+  "POST /df/canvas/{}/comment-nodes/{}/comments",
+  "POST /df/canvas/{}/comment-nodes/{}/resolve",
+  "POST /df/canvas/{}/crop",
+  "POST /df/canvas/{}/edges",
+  "POST /df/canvas/{}/group-recover",
+  "POST /df/canvas/{}/groups/{}/templates",
+  "POST /df/canvas/{}/heartbeat",
+  "POST /df/canvas/{}/materials",
+  "POST /df/canvas/{}/materials/batch-delete",
+  "POST /df/canvas/{}/nodes-recover",
+  "POST /df/canvas/{}/nodes/{}/asset-extraction",
+  "POST /df/canvas/{}/nodes/{}/lock",
+  "POST /df/canvas/{}/nodes/{}/renew",
+  "POST /df/canvas/{}/nodes/{}/script-optimization",
+  "POST /df/canvas/{}/nodes/{}/storyboard-asset-match",
+  "POST /df/canvas/{}/nodes/{}/storyboard-asset-match/cancel",
+  "POST /df/canvas/{}/nodes/{}/storyboard-asset-rematch",
+  "POST /df/canvas/{}/nodes/{}/storyboard-parse",
+  "POST /df/canvas/{}/nodes/{}/table/confirm-sheet",
+  "POST /df/canvas/{}/nodes/{}/table/import",
+  "POST /df/canvas/{}/nodes/{}/unlock",
+  "POST /df/canvas/{}/nodes/{}/video-parse",
+  "POST /df/canvas/{}/pinned-timelines",
+  "POST /df/canvas/{}/tpls",
+  "POST /df/canvas/{}/tpls/{}/elements/batch-create",
+  "POST /df/canvas/{}/upload-file",
+  "POST /film/projects/{}/canvases/{}/submit-result",
+  "POST /film/projects/{}/task-tables/{}/tasks/{}/canvas-bindings",
+  "POST /kds/da/canvas/total-point-consume",
+  "PUT /df/canvas/agent-skills",
+  "PUT /df/canvas/{}",
+  "PUT /df/canvas/{}/comment-nodes/{}",
+  "PUT /df/canvas/{}/comment-nodes/{}/comments/{}",
+  "PUT /df/canvas/{}/groups/{}/templates/{}",
+  "PUT /df/canvas/{}/nodes/{}",
+  "PUT /df/canvas/{}/nodes/{}/pin-groups",
+  "PUT /df/canvas/{}/pin-groups/{}",
+  "PUT /df/canvas/{}/pinned-node",
+  "PUT /film/projects/{}/task-tables/{}/tasks/{}/canvas-bindings",
+];
+
+const CANVAS_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  ["DELETE /df/canvas/agent-skills/{}", "DELETE /agent-skills/{}", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["DELETE /df/canvas/agent-skills/{}/favorite", "POST /agent-skills/{}/favorite", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["DELETE /df/canvas/templates/personal/{}", "DELETE /canvas/templates/personal/{}", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["DELETE /df/canvas/{}/chat/sessions/{}", "DELETE /canvas/canvases/{}/chat/sessions/{}", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["DELETE /df/canvas/{}/comment-nodes/{}", "DELETE /canvas/canvases/{}/comment-nodes/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["DELETE /df/canvas/{}/comment-nodes/{}/comments/{}", "DELETE /canvas/canvases/{}/comment-nodes/{}/comments/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["DELETE /df/canvas/{}/edges/{}", "DELETE /canvas/canvases/{}/edges/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["DELETE /df/canvas/{}/groups/{}", "DELETE /canvas/canvases/{}/groups/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["DELETE /df/canvas/{}/nodes/{}", "DELETE /canvas/canvases/{}/nodes/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["DELETE /df/canvas/{}/pin-groups/members", "DELETE /canvas/canvases/{}/pin-groups/{}/members", "固定组一律按「槽位」寻址（/pin-groups/:slot），竞品按 group_id 或裸 members 寻址"],
+  ["DELETE /df/canvas/{}/pin-groups/{}/members", "DELETE /canvas/canvases/{}/pin-groups/{}/members", "固定组一律按「槽位」寻址（/pin-groups/:slot），竞品按 group_id 或裸 members 寻址"],
+  ["DELETE /df/canvas/{}/pinned-node", "DELETE /canvas/canvases/{}/pinned-node", "画布详情（GET /canvas/canvases/:id）里带 pinned_node_id，不需要单独的查询路由"],
+  ["DELETE /df/canvas/{}/pinned-timelines", "DELETE /canvas/canvases/{}/pin-groups/{}", "竞品的 pinned-timelines 就是我们的 pin-groups：7 个槽位、成员整体替换、与 canvas_nodes.group_ids 同事务双写"],
+  ["DELETE /df/canvas/{}/pinned-timelines/{}", "PUT /canvas/canvases/{}/nodes/{}/pin-groups", "竞品的 pinned-timelines 就是我们的 pin-groups：7 个槽位、成员整体替换、与 canvas_nodes.group_ids 同事务双写"],
+  ["GET /df/anu/canvas/{}/canvas-info", "GET /canvas/canvases/{}", "竞品 anu 前缀是它 Agent 新 UI 的辅助端点，对应能力在我方 canvas 既有端点里"],
+  ["GET /df/canvas-tpls", "GET /canvas/templates", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["GET /df/canvas-tpls/{}", "GET /canvas/templates/{}", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["GET /df/canvas/agent-recommend-cards", "GET /agent-recommend-cards", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/agent-skills/details", "GET /agent-skills/details", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["GET /df/canvas/agent-skills/favorites", "GET /agent-skills/favorites", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["GET /df/canvas/agent-skills/mine", "GET /agent-skills/mine", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["GET /df/canvas/agent-skills/plaza", "GET /agent-skills/plaza", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["GET /df/canvas/node/batch-download/list", "GET /canvas/canvases/{}/download-lists", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["GET /df/canvas/templates/personal", "GET /canvas/templates/personal", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["GET /df/canvas/templates/{}", "GET /canvas/templates/{}", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["GET /df/canvas/{}", "GET /canvas/canvases/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/{}/chat/sessions", "GET /canvas/canvases/{}/chat/sessions", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["GET /df/canvas/{}/chat/sessions/{}/messages", "GET /canvas/canvases/{}/chat/sessions/{}/messages", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["GET /df/canvas/{}/chat/sessions/{}/stream", "GET /canvas/chat/sessions/{}/stream", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["GET /df/canvas/{}/chat/writing-outputs", "GET /canvas/canvases/{}/chat/writing-outputs", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["GET /df/canvas/{}/comment-nodes", "GET /canvas/canvases/{}/comment-nodes", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/{}/comment-nodes/{}", "GET /canvas/canvases/{}/comment-nodes/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/{}/groups/{}/templates", "GET /canvas/canvases/{}/group-templates", "组模板在我方是画布级的 /group-templates（可按 group_id 过滤），竞品嵌在 /groups/:group_id/templates 下"],
+  ["GET /df/canvas/{}/materials", "GET /canvas/canvases/{}/materials", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/{}/nodes-asset", "GET /canvas/canvases/{}/nodes", "资产面板 = GET nodes?node_type=image（同一份节点列表按类型过滤）"],
+  ["GET /df/canvas/{}/nodes/{}", "GET /canvas/canvases/{}/nodes/{}", "上一批（第 87 批）按竞品形状补的别名：GET nodes/:node_id、GET nodes/:node_id/lock、DELETE pinned-node"],
+  ["GET /df/canvas/{}/nodes/{}/lock", "GET /canvas/canvases/{}/nodes/{}/lock", "上一批（第 87 批）按竞品形状补的别名：GET nodes/:node_id、GET nodes/:node_id/lock、DELETE pinned-node"],
+  ["GET /df/canvas/{}/nodes/{}/video-parse/{}", "GET /canvas/canvases/{}/nodes/{}/video-parse/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["GET /df/canvas/{}/pin-groups", "GET /canvas/canvases/{}/pin-groups", "固定组一律按「槽位」寻址（/pin-groups/:slot），竞品按 group_id 或裸 members 寻址"],
+  ["GET /df/canvas/{}/pinned-node", "GET /canvas/canvases/{}", "画布详情（GET /canvas/canvases/:id）里带 pinned_node_id，不需要单独的查询路由"],
+  ["GET /df/canvas/{}/pinned-timelines", "GET /canvas/canvases/{}/pin-groups", "竞品的 pinned-timelines 就是我们的 pin-groups：7 个槽位、成员整体替换、与 canvas_nodes.group_ids 同事务双写"],
+  ["PATCH /df/canvas/{}/chat/sessions/{}", "PATCH /canvas/canvases/{}/chat/sessions/{}", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/anu/canvas/{}/batch-download", "POST /canvas/canvases/{}/nodes/batch-download", "竞品 anu 前缀是它 Agent 新 UI 的辅助端点，对应能力在我方 canvas 既有端点里"],
+  ["POST /df/anu/canvas/{}/batch-file-thumb", "GET /canvas/canvases/{}/nodes", "竞品 anu 前缀是它 Agent 新 UI 的辅助端点，对应能力在我方 canvas 既有端点里"],
+  ["POST /df/anu/canvas/{}/batch-nodes-details", "GET /canvas/canvases/{}/nodes", "竞品 anu 前缀是它 Agent 新 UI 的辅助端点，对应能力在我方 canvas 既有端点里"],
+  ["POST /df/canvas", "POST /canvas/canvases", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/agent-skills", "POST /agent-skills", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["POST /df/canvas/agent-skills/{}/favorite", "POST /agent-skills/{}/favorite", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["POST /df/canvas/batch-nodes", "POST /canvas/canvases/{}/nodes/batch", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/groups", "POST /canvas/canvases/{}/groups", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/node/batch-download", "POST /canvas/canvases/{}/nodes/batch-download", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/node/batch-download/url", "POST /canvas/canvases/{}/download-lists/{}/url", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/nodes", "POST /canvas/canvases/{}/nodes", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/templates/{}/sync-team", "POST /canvas/templates/{}/sync-team", "整画布模板库在我方 /canvas/templates*（tpl_scope / tpl_type 表达官方·团队·个人）"],
+  ["POST /df/canvas/{}/batch-del-edges", "POST /canvas/canvases/{}/edges/batch-delete", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/batch-del-nodes", "POST /canvas/canvases/{}/nodes/batch-delete", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/batch-edges", "POST /canvas/canvases/{}/edges/batch", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/batch-edit-nodes", "POST /canvas/canvases/{}/nodes/batch-edit", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/batch-node-tasks", "POST /canvas/canvases/{}/batch-node-tasks", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/chat/sessions", "POST /canvas/canvases/{}/chat/sessions", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/messages", "POST /canvas/canvases/{}/chat/sessions/{}/messages", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/messages/{}/node-binding", "POST /canvas/chat/sessions/{}/messages/{}/node-binding", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/messages/{}/reaction", "POST /canvas/chat/sessions/{}/messages/{}/reaction", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/read", "POST /canvas/chat/sessions/{}/read", "会话辅助操作在我方是 /canvas/chat/*（会话 id 全局唯一，不再重复带 canvas_id）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/tasks/{}/cancel", "POST /tasks/{}/cancel", "画布会话里的任务操作复用任务域的 /tasks/:id/{cancel,feedback}（同一个 task 行，不另造一套）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/tasks/{}/feedback", "POST /tasks/{}/feedback", "画布会话里的任务操作复用任务域的 /tasks/:id/{cancel,feedback}（同一个 task 行，不另造一套）"],
+  ["POST /df/canvas/{}/chat/sessions/{}/tasks/{}/interrupt", "POST /tasks/{}/cancel", "画布会话里的任务操作复用任务域的 /tasks/:id/{cancel,feedback}（同一个 task 行，不另造一套）"],
+  ["POST /df/canvas/{}/comment-nodes", "POST /canvas/canvases/{}/comment-nodes", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/comment-nodes/{}/comments", "POST /canvas/canvases/{}/comment-nodes/{}/comments", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/comment-nodes/{}/resolve", "POST /canvas/canvases/{}/comment-nodes/{}/resolve", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/edges", "POST /canvas/canvases/{}/edges", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/groups/{}/templates", "POST /canvas/canvases/{}/groups/{}/templates", "组模板在我方是画布级的 /group-templates（可按 group_id 过滤），竞品嵌在 /groups/:group_id/templates 下"],
+  ["POST /df/canvas/{}/heartbeat", "POST /canvas/canvases/{}/heartbeat", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/materials", "POST /canvas/canvases/{}/materials", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/materials/batch-delete", "POST /canvas/canvases/{}/materials/batch-delete", "批量操作命名不同（竞品 batch-del-nodes ↔ 我方 nodes/batch-delete 等），行为一致"],
+  ["POST /df/canvas/{}/nodes-recover", "POST /canvas/canvases/{}/nodes-recover", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/asset-extraction", "POST /canvas/canvases/{}/nodes/{}/asset-extraction", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/lock", "POST /canvas/canvases/{}/nodes/{}/lock", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/renew", "POST /canvas/canvases/{}/nodes/{}/renew", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/script-optimization", "POST /canvas/canvases/{}/nodes/{}/script-optimization", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/storyboard-asset-match", "POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/storyboard-asset-match/cancel", "POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match/cancel", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/storyboard-asset-rematch", "POST /canvas/canvases/{}/nodes/{}/storyboard-asset-rematch", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/storyboard-parse", "POST /canvas/canvases/{}/nodes/{}/storyboard-parse", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/table/confirm-sheet", "POST /canvas/canvases/{}/nodes/{}/table/confirm-sheet", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/table/import", "POST /canvas/canvases/{}/nodes/{}/table/import", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/unlock", "POST /canvas/canvases/{}/nodes/{}/unlock", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/nodes/{}/video-parse", "POST /canvas/canvases/{}/nodes/{}/video-parse", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/pinned-timelines", "PUT /canvas/canvases/{}/pin-groups/{}", "竞品的 pinned-timelines 就是我们的 pin-groups：7 个槽位、成员整体替换、与 canvas_nodes.group_ids 同事务双写"],
+  ["POST /df/canvas/{}/tpls", "POST /canvas/canvases/{}/tpls", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["POST /df/canvas/{}/upload-file", "POST /canvas/canvases/{}/upload-file", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["PUT /df/canvas/agent-skills", "PUT /agent-skills", "Skill 卡市场在我方 /agent-skills*（第 64 批已按竞品 9 条形状逐条对过）"],
+  ["PUT /df/canvas/{}", "PATCH /canvas/canvases/{}", "更新一律用 PATCH（部分更新），竞品用 PUT"],
+  ["PUT /df/canvas/{}/comment-nodes/{}", "PUT /canvas/canvases/{}/comment-nodes/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["PUT /df/canvas/{}/comment-nodes/{}/comments/{}", "PUT /canvas/canvases/{}/comment-nodes/{}/comments/{}", "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）"],
+  ["PUT /df/canvas/{}/groups/{}/templates/{}", "PUT /canvas/canvases/{}/group-templates/{}", "组模板在我方是画布级的 /group-templates（可按 group_id 过滤），竞品嵌在 /groups/:group_id/templates 下"],
+  ["PUT /df/canvas/{}/nodes/{}", "PATCH /canvas/canvases/{}/nodes/{}", "更新一律用 PATCH（部分更新），竞品用 PUT"],
+  ["PUT /df/canvas/{}/nodes/{}/pin-groups", "PUT /canvas/canvases/{}/nodes/{}/pin-groups", "固定组一律按「槽位」寻址（/pin-groups/:slot），竞品按 group_id 或裸 members 寻址"],
+  ["PUT /df/canvas/{}/pin-groups/{}", "PUT /canvas/canvases/{}/pin-groups/{}", "固定组一律按「槽位」寻址（/pin-groups/:slot），竞品按 group_id 或裸 members 寻址"],
+  ["PUT /df/canvas/{}/pinned-node", "PUT /canvas/canvases/{}/pinned-node", "画布详情（GET /canvas/canvases/:id）里带 pinned_node_id，不需要单独的查询路由"],
+];
+
+// 4 条真正缺失的能力：都不硬造接口（造假接口比缺接口更坏），但要逐条记账。
+const CANVAS_WAIVED: Record<string, string> = {
+  "POST /df/canvas/{}/clip": "B 类：画布内「切一段视频」是编辑动作，我方由 generation 的 video_slicing 工具承接，画布上没有独立剪辑模型",
+  "POST /df/canvas/{}/crop": "B 类：画布内裁剪同理，我方没有 image/video crop 的独立模型（只有工具侧的重绘/扩图）",
+  "POST /df/canvas/{}/group-recover": "B 类：分组是硬删（canvas_groups 有 status 列但删除走 db.delete），没有回收站语义；硬造 recover 只会返回永远空的结果",
+  "POST /df/canvas/{}/tpls/{}/elements/batch-create": "B 类：整画布模板的元素存在 canvas_templates.payload(jsonb) 里，没有元素表可批量插；竞品这条两个 schema 都是 {}",
+};
+
+for (const [shape, ours, reason] of CANVAS_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(CANVAS_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
 
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
@@ -827,6 +1067,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   agent: AGENT_SHAPES.length,
   account: ACCOUNT_SHAPES.length,
   ai: AI_SHAPES.length,
+  canvas: CANVAS_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -948,9 +1189,16 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("GET /subjects/templates")).toBe(true);
     expect(ROUTES.has("POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match")).toBe(true);
     expect(ROUTES.has("POST /projects/{}/episodes/{}/timeline/publish")).toBe(true);
+    // 第 87 批：画布按竞品形状补的三条（单节点 / 单节点锁 / 取消钉住）
+    expect(ROUTES.has("GET /canvas/canvases/{}/nodes/{}")).toBe(true);
+    expect(ROUTES.has("GET /canvas/canvases/{}/nodes/{}/lock")).toBe(true);
+    expect(ROUTES.has("DELETE /canvas/canvases/{}/pinned-node")).toBe(true);
+    // 固定组是 pinned-timelines 的等价物（7 槽位、整体替换）
+    expect(ROUTES.has("GET /canvas/canvases/{}/pin-groups")).toBe(true);
+    expect(ROUTES.has("PUT /canvas/canvases/{}/pin-groups/{}")).toBe(true);
   });
 
-  it("竞品十三组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64）", () => {
+  it("竞品十四组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -965,6 +1213,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       agent: 12,
       account: 28,
       ai: 64,
+      canvas: 114,
     });
     expect(
       FILM_SHAPES.length +
@@ -979,8 +1228,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         NOVEL_MARKET_SHAPES.length +
         AGENT_SHAPES.length +
         ACCOUNT_SHAPES.length +
-        AI_SHAPES.length,
-    ).toBe(311);
+        AI_SHAPES.length +
+        CANVAS_SHAPES.length,
+    ).toBe(425);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -996,6 +1246,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       agent: AGENT_SHAPES,
       account: ACCOUNT_SHAPES,
       ai: AI_SHAPES,
+      canvas: CANVAS_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -1186,6 +1437,43 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  it("#11 无限画布：114 条里 11 条同形 + 99 条结构性偏离 + 4 条能力缺口（B 类）", () => {
+    expect(CANVAS_SHAPES.length).toBe(114);
+    expect(missing(CANVAS_SHAPES)).toEqual([]);
+    const exact = CANVAS_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = CANVAS_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = CANVAS_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    expect(exact.length).toBe(10);
+    expect(deviated.length).toBe(100);
+    expect(waived.length).toBe(4);
+    expect(exact.length + deviated.length + waived.length).toBe(CANVAS_SHAPES.length);
+    // 同形的 10 条 = film 的 9 条画布绑定 + 数据看板的 canvas 积分（都是同名形状，不需要别名）
+    expect(exact.filter((raw) => raw.includes("/film/"))).toHaveLength(9);
+    expect(exact).toContain("POST /kds/da/canvas/total-point-consume");
+    // 推荐卡在竞品挂在 df/canvas 前缀下，我方是 /agent-recommend-cards（登记为偏离）
+    expect(DEVIATIONS["GET /df/canvas/agent-recommend-cards"]!.ours).toBe("GET /agent-recommend-cards");
+    // 第 87 批按竞品形状补的三条必须真的存在（否则对应的三条偏离会报「ours 不存在」）
+    for (const shape of [
+      "GET /canvas/canvases/{}/nodes/{}",
+      "GET /canvas/canvases/{}/nodes/{}/lock",
+      "DELETE /canvas/canvases/{}/pinned-node",
+    ]) {
+      expect(ROUTES.has(shape), `batch 87 alias missing: ${shape}`).toBe(true);
+    }
+    // 四条缺口必须写「B 类」——它们是台账把 #11 从 99% 降到 99.5% 的唯一理由
+    for (const raw of waived) {
+      expect(WAIVED[shapeOf(raw)]!.startsWith("B 类"), `canvas gap must be honest: ${raw}`).toBe(true);
+    }
+    expect(waived).toEqual(
+      expect.arrayContaining([
+        "POST /df/canvas/{}/clip",
+        "POST /df/canvas/{}/crop",
+        "POST /df/canvas/{}/group-recover",
+        "POST /df/canvas/{}/tpls/{}/elements/batch-create",
+      ]),
+    );
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -1202,6 +1490,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...AGENT_SHAPES,
         ...ACCOUNT_SHAPES,
         ...AI_SHAPES,
+        ...CANVAS_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
@@ -1211,7 +1500,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
     const waiverScope = new Set(
-      [...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES, ...AI_SHAPES].map(shapeOf),
+      [...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES, ...AI_SHAPES, ...CANVAS_SHAPES].map(shapeOf),
     );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);
   });

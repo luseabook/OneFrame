@@ -643,6 +643,39 @@ export class CanvasService {
     return { list: rows.map(this.toNodeDto) };
   }
 
+  /**
+   * 单个节点（竞品 `GET /df/canvas/:canvas_id/nodes/:node_id`）。
+   *
+   * 为什么需要它：客户端"按 id 取一个节点"是最常见的刷新路径（生成完回填、
+   * 分享链接打开、任务回调后重绘单个卡片）。只给列表接口的话，调用方要么拉全画布
+   * 再自己筛，要么在节点上百的画布上多传几十 KB。这里复用 `mustGetNode`，
+   * 归属校验与软删判定和列表同口径。
+   */
+  async nodeDetail(spaceId: string, canvasId: string, nodeId: string) {
+    const canvas = await this.mustGetCanvas(spaceId, canvasId);
+    const node = await this.mustGetNode(canvas.id, nodeId);
+    return { node: this.toNodeDto(node) };
+  }
+
+  /**
+   * 节点锁状态（竞品 `GET /df/canvas/:canvas_id/nodes/:node_id/lock`）。
+   *
+   * 锁不落库（§7 决策），只在 Redis 里带 30s TTL；所以"查锁"必须回 Redis 读，
+   * 不能从 `canvas_nodes` 猜。`heartbeat` 返回的是整画布的锁列表，
+   * 单个节点这一条是给"打开某张卡片前先确认没人正在改"用的。
+   */
+  async nodeLock(spaceId: string, canvasId: string, nodeId: string) {
+    const canvas = await this.mustGetCanvas(spaceId, canvasId);
+    const node = await this.mustGetNode(canvas.id, nodeId);
+    const holder = await this.redis.get(this.lockKey(canvas.id, String(node.id)));
+    return {
+      node_id: String(node.id),
+      locked: !!holder,
+      locked_by: holder ?? null,
+      ttl_s: holder ? LOCK_TTL_S : 0,
+    };
+  }
+
   // ── 连线 ────────────────────────────────────────────────
   async createEdge(
     spaceId: string,

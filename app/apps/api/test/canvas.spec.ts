@@ -361,6 +361,64 @@ describe("canvas e2e", () => {
   });
 
   /**
+   * 第 87 批：按竞品形状补的三条画布端点（审计 #11 时发现只有"列表/整图"没有"单点"）。
+   *
+   * 竞品的形状是 `GET /df/canvas/:id/nodes/:node_id`、`GET .../nodes/:node_id/lock`、
+   * `DELETE .../pinned-node`；我方此前只有 `GET nodes`（列表）、`POST lock`、
+   * `PUT pinned-node`，按竞品写的客户端这三条都会 404/405。
+   */
+  it("竞品形状：单节点读取 / 单节点锁状态 / DELETE 取消钉住", async () => {
+    const c = await inject("POST", "/canvas/canvases", { title: "单节点形状" });
+    const canvasId = c.data.id as string;
+    const n = await inject("POST", `/canvas/canvases/${canvasId}/nodes`, {
+      node_type: "image",
+      name: "封面图",
+      x: 12,
+      y: 34,
+    });
+    const nodeId = n.data.id as string;
+
+    // 1) 单节点：返回同一个节点（不是列表），字段与列表项同构
+    const one = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}`);
+    expect(one.code).toBe(0);
+    expect(one.data.node.id).toBe(nodeId);
+    expect(one.data.node.node_type).toBe("image");
+    expect(one.data.node.name).toBe("封面图");
+    expect(Array.isArray(one.data.node)).toBe(false);
+
+    // 2) 锁状态：没人持锁时 locked=false；他人持锁后能看到 locked_by
+    const lock0 = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}/lock`);
+    expect(lock0.code).toBe(0);
+    expect(lock0.data).toMatchObject({ node_id: nodeId, locked: false, locked_by: null, ttl_s: 0 });
+    // 同一账号持锁 → locked=true 且 locked_by 是自己的 user id（30s TTL）
+    const held = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${nodeId}/lock`, {});
+    expect(held.code).toBe(0);
+    const lock1 = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}/lock`);
+    expect(lock1.data.locked).toBe(true);
+    expect(lock1.data.locked_by).toMatch(/^\d+$/);
+    expect(lock1.data.ttl_s).toBeGreaterThan(0);
+    // 解锁后回到 false
+    await inject("POST", `/canvas/canvases/${canvasId}/nodes/${nodeId}/unlock`, {});
+    const lock2 = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}/lock`);
+    expect(lock2.data.locked).toBe(false);
+
+    // 3) DELETE 取消钉住：等价于 PUT {node_id:null}，但不需要 body
+    await inject("PUT", `/canvas/canvases/${canvasId}/pinned-node`, { node_id: nodeId });
+    const cleared = await inject("DELETE", `/canvas/canvases/${canvasId}/pinned-node`);
+    expect(cleared.code).toBe(0);
+    expect(cleared.data.pinned_node_id).toBeNull();
+    const detail = await inject("GET", `/canvas/canvases/${canvasId}`);
+    expect(detail.data.canvas.pinned_node_id).toBeNull();
+
+    // 跨 space 不可见（不泄漏存在性：404 而非 403）；非法节点 id → 400101
+    const foreign = await inject("GET", `/canvas/canvases/${canvasId}/nodes/${nodeId}`, undefined, otherToken);
+    expect(foreign.code).not.toBe(0);
+    expect(foreign.status).toBeLessThan(500);
+    const bad = await inject("GET", `/canvas/canvases/${canvasId}/nodes/abc`);
+    expect(bad.code).toBe(400101);
+  });
+
+  /**
    * 回归：整图提交必须接受"本地临时 id"。
    *
    * 背景（真实踩坑）：画布编辑器是"本地加节点 → 整图提交"，

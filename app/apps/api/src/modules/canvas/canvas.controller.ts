@@ -280,6 +280,38 @@ export class CanvasController {
     return this.canvas.nodesByType(c.spaceId, canvasId, nodeType);
   }
 
+  /**
+   * 单个节点（第 87 批：竞品 `GET /df/canvas/:canvas_id/nodes/:node_id`）。
+   *
+   * 与列表接口同一套归属校验；单独一条是为了"任务回调后只重绘一张卡片"这类
+   * 常见刷新路径不必拉整画布。
+   */
+  @Get("canvases/:canvas_id/nodes/:node_id")
+  async node(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+  ) {
+    const c = this.ctx(req);
+    return this.canvas.nodeDetail(c.spaceId, canvasId, nodeId);
+  }
+
+  /**
+   * 节点锁状态（第 87 批：竞品 `GET /df/canvas/:canvas_id/nodes/:node_id/lock`）。
+   *
+   * 锁只在 Redis（30s TTL），所以这条读的是缓存而不是库：`locked_by` 是持锁的
+   * user_id，`ttl_s` 供前端决定还要不要等。
+   */
+  @Get("canvases/:canvas_id/nodes/:node_id/lock")
+  async nodeLock(
+    @Req() req: AuthedRequest,
+    @Param("canvas_id") canvasId: string,
+    @Param("node_id") nodeId: string,
+  ) {
+    const c = this.ctx(req);
+    return this.canvas.nodeLock(c.spaceId, canvasId, nodeId);
+  }
+
   // ── 连线 ────────────────────────────────────────────────
   @Post("canvases/:canvas_id/edges")
   async createEdge(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string, @Body() body: unknown) {
@@ -354,5 +386,18 @@ export class CanvasController {
   async pinNode(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string, @Body() body: unknown) {
     const c = this.ctx(req);
     return this.canvas.setPinnedNode(c.spaceId, canvasId, parseOrThrow(pinBody, body));
+  }
+
+  /**
+   * 取消钉住（第 87 批：竞品是 `DELETE /df/canvas/:canvas_id/pinned-node`）。
+   *
+   * 语义与 `PUT {"node_id": null}` 完全一致（`setPinnedNode` 里 `null` 就是清除），
+   * 但竞品的调用形状是 DELETE 且**没有 body**，只给 PUT 的话按竞品写的客户端会 405/404。
+   * 两条路都保留：PUT 带 body 适合"切换钉住对象"，DELETE 适合"取消钉住"。
+   */
+  @Delete("canvases/:canvas_id/pinned-node")
+  async unpinNode(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string) {
+    const c = this.ctx(req);
+    return this.canvas.setPinnedNode(c.spaceId, canvasId, { node_id: null });
   }
 }

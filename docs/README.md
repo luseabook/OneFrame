@@ -127,6 +127,80 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.41 · 第 87 批：审计 #11 无限画布 —— 台账那句「4 个具名能力无证据」大半是记账错误 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 86 批收尾时留下的清单是：#11 无限画布（XL(20)，0.20）的缺口栏写着「4 个具名能力（`pinned-timelines` 4 条、`group execute`、`group template-get`、`material batch-add`）都无竞品响应体证据 → 不实现」。
+
+这句话有**两处可疑**：
+
+1. 它把「没有响应体证据」当成了「不实现」的理由——但第 79–86 批反复确认过：**响应体证据缺失不等于能力缺失**，真正该判的是「这个能力我们要不要」；
+2. 它是一句**结论**，而不是一条可复核的账——谁也说不清 `group execute` 具体是哪条路由。
+
+所以这批的任务：拿竞品端点表逐条对，把这句话拆成可复核的行。
+
+### 二、竞品 114 条 canvas 形状怎么归属
+
+竞品 `/canvas` 家族在 905 行端点表里共 **114 条** METHOD+path。逐条对完的结构：
+
+| 分类 | 条数 | 说明 |
+|---|---:|---|
+| 同形 | **10** | film 的画布绑定 9 条（`canvases/visible`、`canvas-bindings` 的 GET/POST/DELETE/PUT、`task-bindings`、`task-panel`、`submit-result`）+ 看板的 `canvas/total-point-consume` |
+| 结构性偏离 | **100** | 竞品把画布 id 挂在域根（`/web/v1/df/canvas/:canvas_id/...`），我方是集合式（`/canvas/canvases/:canvas_id/...`）；另有命名、方法（`PUT`↔`PATCH`）、任务操作位置（`/tasks/*`）、会话辅助（`/canvas/chat/*` 不带 canvas_id）等 |
+| 真能力缺口 | **4** | 见下一节 |
+
+**这一步不能自动化**：用字符串 diff 会得到 104 条「未匹配」，其中 100 条是前缀/命名差异——第 65 批那次 canvas 比对（`_r65_canvas_cmp.py`）之所以被登记为「不可用」，就是同一个原因。
+
+### 三、那句缺口栏：两条不存在、两条是等价物
+
+| 台账原话 | 复核结果 |
+|---|---|
+| `group execute`（整组节点一起提交生成） | **竞品端点表里根本不存在**。`grep execute` 在 905 行里 0 命中 |
+| `material batch-add`（一次加多个素材） | **也不存在**。`batch-add` 只有 `df/storyboard/:id/info/batch-add` 与 `df/user_knowledge/dir/asset/batch-add-tags`，都与画布素材无关 |
+| `pinned-timelines` ×4（GET/POST/DELETE 单条/DELETE 全部） | **等价于我方的 pin-groups**（7 槽位、成员整体替换、与 `canvas_nodes.group_ids` 同事务双写）——是命名与粒度的差异，不是能力缺口 |
+| `group template-get`（单个组模板详情） | **等价于我方的画布级 `GET /group-templates`**（可按 `group_id` 过滤） |
+
+所以台账那 0.20 里，**没有一条真的对应「竞品有、我方没有」的具名能力**——除了下面这四条小能力。
+
+### 四、真正的 4 条缺口（B 类，仍不实现）
+
+| 竞品形状 | 我方为什么没有 |
+|---|---|
+| `POST /df/canvas/{}/clip`（画布内切视频） | 剪辑是编辑动作，我方由 generation 的 `video_slicing` 承接；没有「画布内剪辑片段」这个实体 |
+| `POST /df/canvas/{}/crop`（画布内裁剪） | 同上，没有 crop 实体 |
+| `POST /df/canvas/{}/group-recover`（组回收站） | `deleteGroup` 是硬删（`db.delete`），`canvas_groups` 有 `status` 列但没有软删语义——造一个 recover 只会永远返回空 |
+| `POST /df/canvas/{}/tpls/{}/elements/batch-create`（模板元素批量建） | 整画布模板元素存在 `canvas_templates.payload` jsonb 里，**没有元素表**可批量插；竞品两个 schema 都是 `{}` |
+
+四条**都要先建数据模型**，属于「产品一句话决定建不建」，所以判 **B 类**，不是 E 类（外部输入）。这也是本批把 #11 的 0.20 从 E 改判 B 的依据。
+
+### 五、顺手补的 3 条客户端形状（不是别名）
+
+审计时发现三处「我方只有列表/整体，没有单点」：
+
+| 竞品 | 我方之前 | 本批补 |
+|---|---|---|
+| `GET /df/canvas/{}/nodes/{node_id}` | 只有 `GET …/nodes`（列表） | `GET /canvas/canvases/:canvas_id/nodes/:node_id` |
+| `GET /df/canvas/{}/nodes/{node_id}/lock` | 只有 `POST …/lock` 与 `/unlock` | `GET …/nodes/:node_id/lock`（**必须回 Redis 读**：锁只在 Redis 的 `lockKey` 里，`heartbeat` 只返回整画布锁列表） |
+| `DELETE /df/canvas/{}/pinned-node` | 只有 `PUT …/pinned-node`（body 传 `node_id: null`） | `DELETE …/pinned-node`（无 body，等价语义） |
+
+按竞品形状写的客户端此前会 404/405。三条都不是「别名」，是**同一个能力缺了一种调用形状**。
+
+### 六、守卫与验证
+
+- 守卫从 **311 → 425 条**（十四组）：`CANVAS_SHAPES`(114) + `CANVAS_PAIRS`(100，逐条登记 ours 与理由) + `CANVAS_WAIVED`(4，理由必须以 `B 类：` 开头——含糊写「暂未实现」会红)。
+- 两个解析坑被记录进脚本：① 只正则 `@Controller("x")` 会漏掉 `@Controller()`（空前缀）的 30+ 条路由；② `DEVIATIONS` 的键必须过 `shapeOf()` 归一化，否则 `{tag_id}` 与 `:tag_id` 对不上。
+- 反向验证：把三条新端点改名成 `-BROKEN` → 守卫 2 例红 + 功能测试 1 例红（`expected 400102 to be +0`）；还原后全绿。
+- 数字：api **954 例**（85 文件，+1 功能 +1 守卫）、控制器 52、**端点 748 → 751**、迁移 46、用例总数 **1,355**；门禁 **12/12 全绿**；`scoreboard.py` 复核 **202.52 / 206 = 98.3%**、剩余 **3.48**、核心 **107.67（97.9%）**、首发 **130.57（98.2%）**、E **2.57** + B **0.915**。
+
+### 七、诚实边界
+
+1. 守卫只比 METHOD + path，**不比 query/body 语义**——114 条里没有一条验证过字段。
+2. 4 条小能力仍是「不实现」，只是把理由从「无证据」改成「无模型」——改的是**记账**，不是能力。
+3 . `pinned-timelines` 判成偏离的依据是「pin-groups 是同一件事」，这需要人读代码，测试锁不住。
+4. 画布那 97 项 E2E 是逐条核过的既有资产，本批没有新增 E2E（补的是 1 例契约测试）。
+5. 这批**提高了**一个模块的分数（99 → 99.5）——这是第 79 批以来第一次上调，理由不是「又做了东西」，而是**旧缺口栏把等价物和不存在的能力写成了缺口**。
+
 ## 变更登记（v6.40 · 第 86 批：审计 #6 工具箱 —— 竞品 64 条 `/ai/*` 里，5 条「该有但没有」 · 2026-10-28）
 
 ### 一、这批在回答什么问题

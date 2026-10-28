@@ -4226,3 +4226,37 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 - 12 条范围外是产品范围判断；产品若决定做，需重开缺口。
 - 5 条 B 类确实会 404；本文档的意义是让调用方知道「这不是忘了，是没模型」。
 - 音色三条竞品查询合并成 `GET /models`，query 名不同（`lang_code`/`platform_id`/`only_collected` → 客户端过滤）。
+
+### 17.44 画布域的三个单点形状：单节点、锁状态、取消钉住（第 87 批）
+
+#### 44.1 为什么进 API 文档
+
+竞品画布是 `/web/v1/df/canvas/:canvas_id/...`（id 挂域根），我方是 `/canvas/canvases/:canvas_id/...`（集合式）。路径前缀不同是 ADR-009 允许的命名偏离，**但「客户端按竞品形状拼出来的请求，我方有没有对应的调用形状」是必须逐条核的**——第 87 批对 114 条竞品画布形状做了这条核，发现三处「我方只有列表/整体，没有单点」，按竞品形状写的客户端会 404/405。
+
+#### 44.2 三个端点
+
+| 方法 | 路径 | 请求 | 响应（信封内 data） |
+|---|---|---|---|
+| GET | `/canvas/canvases/:canvas_id/nodes/:node_id` | — | `{ node: { id, node_type, name, x, y, params, status, task_id, … } }`（与列表项同构，**不是数组**） |
+| GET | `/canvas/canvases/:canvas_id/nodes/:node_id/lock` | — | `{ node_id, locked, locked_by, ttl_s }`（无人持锁时 `locked:false`、`locked_by:null`、`ttl_s:0`） |
+| DELETE | `/canvas/canvases/:canvas_id/pinned-node` | — | `{ ok: true, pinned_node_id: null }`（等价于 `PUT` 传 `node_id:null`，但不需要 body） |
+
+#### 44.3 三条契约约束
+
+1. **锁状态必须回 Redis 读**：节点锁只存在于 Redis（`lockKey`，`LOCK_TTL_S = 30`），`heartbeat` 返回的是整画布锁列表快照；`GET …/lock` 直接查 Redis，所以能反映「别人 12 秒前持的锁」。
+2. **单节点读取与列表同权**：两者都走 `mustGetNode`（归属 space + 未软删），越权一律 404 而非 403——不泄漏「这个 id 存在但你看不到」。
+3. **`DELETE pinned-node` 不新增语义**：它就是 `setPinnedNode(spaceId, canvasId, { node_id: null })`，与 `PUT` 共用实现；之所以要这条，是因为竞品用 DELETE 且无 body。
+
+#### 44.4 与「别名」的区别
+
+这三条**不是别名**（第 81 批 kds 那种「同路径、另一个方法」）。它们是：同一个能力，客户端有两种自然调用形状（单点 vs 列表、查锁 vs 试锁、清钉 vs 置钉）。判据：**如果只有一种形状能做这件事，就补；如果两种形状语义不同，就登记偏离。**
+
+#### 44.5 守卫
+
+`apps/api/test/competitor-route-parity.spec.ts` 的 `CANVAS_SHAPES`(114)：10 同形 + 100 结构性偏离（`CANVAS_PAIRS` 逐条给 ours 与理由）+ 4 条 `B 类` 豁免（`CANVAS_WAIVED`）。总数 311 → **425 条**。
+
+#### 44.6 边界
+
+- 只比 METHOD + path，不比 query/body 语义。
+- 4 条豁免（画布内剪辑/裁剪、组回收站、模板元素批量建）是「要先建模型」的产品口径，不是外部依赖。
+- 竞品那 4 条的两个 schema 都是 `{}`，我们没有字段可照抄——这既是「不实现」的理由，也是「以后实现时形状自定」的前提。
