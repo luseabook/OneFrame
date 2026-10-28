@@ -126,6 +126,82 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.20 · 第 66 批：前端把分组接口写成了 `/team/groups`，而 `catch` 把 404 吞成「没有分组」 · 2026-10-28）
+
+> 批次台账见 [implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) §9 **v8.9**（同一批；本文件与主台账各有一套编号，勿混）。**这批不加分**：修的是第 63 批已计分功能的实现缺陷，不是新增能力。
+
+### 一、用户会看到什么差别
+
+- **之前**：作品页（`/works`）顶部的「分组」筛选下拉**从来不出现**；每张工坊卡片也不会显示所属分组。团队明明建过分组，页面上就是没有。
+- **现在**：进页面就会拉团队分组，下拉可选「全部 / 未分组 / 具体组」，卡片上显示「分组：运营一组」，还能在卡片上就地换组。
+
+### 二、缺陷本体
+
+```ts
+// apps/web/pages/works.vue（第 63 批写的）
+const data = await api.get<...>("/team/groups");
+//                                   ^^^^^^^^^^^^ 后端没有这条路由
+```
+
+后端的分组接口在 `TeamController` 上，而它的 `@Controller("cam")` —— 真实路径是 **`/cam/team/groups`**：
+
+```ts
+@Controller("cam")
+export class TeamController {
+  @Get("team/groups")
+  async groups(@Req() req: AuthedRequest) { ... }
+}
+```
+
+同一份代码库里，`apps/web/pages/team/index.vue:202` 写的就是 `"/cam/team/groups"` ——**只有作品页写错了**。
+
+### 三、为什么活了一整批（四道关全都没拦住）
+
+| 关卡 | 为什么没拦住 |
+| --- | --- |
+| TypeScript | 路径是字符串，类型系统不参与 |
+| ESLint | 不校验 URL 与后端契约 |
+| 构建（`nuxt build`） | 静态构建不请求后端 |
+| 总闸 `verify-round.ps1` | 12 项里没有「前端路径 ↔ 后端路由」这一项；E2E 只测 i18n 与页面内容 smoke，不断言业务数据 |
+| 页面自身 | `loadGroups()` 的 `catch` 把异常吞成 `groups.value = []` ——**404 的表现是「没有分组」，不是报错** |
+
+这就是它和第 65 批那 36 条 CLI 死链的同一个根因：**没有契约守卫，就没人会发现**。
+
+### 四、同一批修掉的两个「审计自身」错误
+
+这两个坑比缺陷本身更值得记，因为它们会制造**假缺陷**：
+
+1. **一个 `*.controller.ts` 里可以有两个 `@Controller` 类**（`admin` / `agent-stt` / `novel-variant` / `op` / `task-share` 共 5 个文件如此）。只取第一个会把第二个控制器的路由错挂到前一个的 base 上：`RedeemCodeController`（`@Controller("redeem-code")`，就在 `op.controller.ts` 下半部分）因此被算成 `/op/redeem-code/redeem`，于是 `apps/web/pages/invite.vue` 里的 `/redeem-code/redeem` 被误报成缺陷——**它其实是对的**，我差点去「修」一段正确的代码。
+2. **首参正则必须锚定在动词之后**。写成搜索式（不带 `^`）时，遇到 `api.post(path, {...})`（首参是变量）会向后跳过、把**下一条**调用的字面量错配给上一条动词——实测把 `api.get("/crc/assets/me?status=3")` 报成了 `POST /crc/assets/me`。
+
+### 五、守卫：`apps/api/test/web-api-contract.spec.ts`（4 例）
+
+| 用例 | 断言 |
+| --- | --- |
+| 后端路由量 | `> 600`（防解析失败导致集合为空时假绿） |
+| web 调用量 | `> 300`（防正则失效导致"0 处可比"时假绿） |
+| 全量匹配 | 408 处可静态解析的 `api.<verb>(<字面量>)` 全部能在后端路由表里找到（两侧占位符互为通配：web 的 `${kind}` 是 `"buy" \| "preorder"` 这种字面量联合，静态拿不到值） |
+| 回归锚点 | `GET /cam/team/groups` 在路由表里、`GET /team/groups` 不在 |
+
+**反向验证**（证明不是假绿）：`_acceptance/_r66_flip.py break` 把 `works.vue` 的路径改回缺陷值 → 测试立刻红并打印 `GET /team/groups ← pages\works.vue:105 raw=/team/groups`；`restore` 后复绿。
+
+同时把第 65 批 `apps/cli/test/registry-routes.spec.ts` 的 `backendRoutes()` 也改成逐段解析全部控制器（同一处缺陷），复跑 CLI 审计：`backend routes: 701 / ready-with-http: 109 / missing: 0`。
+
+### 六、验证与数字
+
+- `npx vitest run test/web-api-contract.spec.ts` → **4/4 绿**；反向验证红→绿各一次
+- cli `npx vitest run` → 14 文件 **99 例**绿；api 全量 → 77 文件 **881 例**（原 877，+4）
+- `pnpm --filter @app/{api,web} typecheck` 干净；`web lint` 0 errors / 28 warnings（既有）；`pnpm --filter @app/web build` Σ 7.23 MB
+- 总闸 `pwsh _acceptance\verify-round.ps1` → **12/12 全绿**
+- 规模：端点 702 / 迁移 42 / 表 112 / cli 197（38 组）；web `.vue` 54,678 行；用例 1,250 → **1,254**
+- 评分：全站 **202.45/206 = 98.3%**、剩余 **3.55**、核心 107.53（97.8%）、生态 94.92（98.9%）、首发 130.53（98.1%）——**不变**
+
+### 七、诚实边界
+
+- 只覆盖**静态可解析**的调用（408 处）。另有 **133 处**首参是变量或拼接前缀（集中在 `useCanvasApi.ts` 的 `canvasBase()` 这类 composable），静态无法解析，**故意不扫**——扫了只会制造假红。这类要靠"路径构造函数只有一个出口"的写法约束，不是靠正则。
+- 守卫保证的是「路径形状对得上」，**不校验 query 名与 body 语义**（那需要后端 schema 反射或契约文件）。
+- 本批只抓到 1 条真缺陷，但这不等于"前端只有 1 个问题"：结论的边界是"**在 408 处可静态解析的调用里只有 1 处路径不存在**"。
+
 ## 变更登记（v6.19 · 第 65 批：审计出 36 条「宣称可用的 CLI 命令」实际全 404，并补上跨包守卫 · 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.8（同一批；本文件与主台账各有一套编号，勿混）。

@@ -43,18 +43,31 @@ function normalize(path: string, method: string): string {
   return `${method.toUpperCase()} ${collapsed}`;
 }
 
+/**
+ * 一个 `*.controller.ts` 里可以有**多个** `@Controller` 类（admin / agent-stt /
+ * novel-variant / op / task-share 五个文件如此）。最早一版只取第一个 `@Controller`
+ * 之后到文件尾的 `@Get/@Post`，会把第二个控制器的方法错挂到第一个的前缀上：
+ * `RedeemCodeController`（`@Controller("redeem-code")`，在 op.controller.ts 下半部分）
+ * 的路由就被算成 `/op/redeem-code/redeem`，于是"web 调 `/redeem-code/redeem` 是缺陷"
+ * 这种误报出现过一次（第 66 批）。所以这里按 `@Controller` 出现位置切段逐段收集。
+ */
 function backendRoutes(): Set<string> {
   const routes = new Set<string>();
+  const controllerRe = /@Controller\(\s*(?:"([^"]*)"\s*)?\)/g;
+  const methodRe = /@(Get|Post|Put|Patch|Delete)\(\s*(?:"([^"]*)")?\s*\)/g;
   for (const file of walkControllers(API_SRC)) {
     const text = readFileSync(file, "utf8");
-    const ctrl = /@Controller\(\s*(?:"([^"]*)"\s*)?\)/.exec(text);
-    if (!ctrl) continue;
-    const base = ctrl[1] ?? "";
-    const rest = text.slice(ctrl.index + ctrl[0].length);
-    for (const m of rest.matchAll(/@(Get|Post|Put|Patch|Delete)\(\s*(?:"([^"]*)")?\s*\)/g)) {
-      const sub = m[2] ?? "";
-      const path = sub ? `/${base}/${sub}` : `/${base}`;
-      routes.add(normalize(path, m[1]));
+    const marks = [...text.matchAll(controllerRe)];
+    for (let i = 0; i < marks.length; i += 1) {
+      const mark = marks[i]!;
+      const base = mark[1] ?? "";
+      const from = (mark.index ?? 0) + mark[0].length;
+      const to = i + 1 < marks.length ? (marks[i + 1]!.index ?? text.length) : text.length;
+      for (const m of text.slice(from, to).matchAll(methodRe)) {
+        const sub = m[2] ?? "";
+        const path = sub ? `/${base}/${sub}` : `/${base}`;
+        routes.add(normalize(path, m[1]!));
+      }
     }
   }
   return routes;

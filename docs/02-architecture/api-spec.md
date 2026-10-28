@@ -2714,3 +2714,46 @@ GET /v1/canvas/templates → 200 {"code":401101,...}
 - 守卫只保证**路径形状**一致；query 参数名（如 `group_id`/`owner_type`）、body 字段、权限语义仍需逐批对照竞品 bundle 与集成测试；
 - 这批是**可用性修复**不是新能力：CLI 仍有 57 条 `skeleton` 命令卡在后端未落地的端点，因此 #9 只从 96% → **97%**（+0.08）；
 - 同类风险点：任何"人工写死 URL 字符串 + 人工判断 ready"的地方（例如 `apps/web` 的手写 `$fetch` 路径）都可能出现同样的漂移，本批未做全站扫描。
+
+### 17.25 前端 API 路径与后端路由的契约（第 66 批）
+
+#### 25.1 为什么前端也需要一条"路由契约"测试
+
+`/works` 页的分组下拉从来没出现过。原因不是 UI：`apps/web/pages/works.vue` 调的是 `GET /team/groups`，而后端的分组接口挂在 `TeamController`（`@Controller("cam")`）下，真实路径是 `/cam/team/groups`。404 被 `loadGroups()` 的 `catch` 吞成 `groups.value = []`，页面表现成"没有分组"，于是类型检查、lint、构建、总闸 12 项、页面 smoke 全部通过。
+
+这与 §17.24 的 CLI 死链是同一类缺陷：**调用方的路径字符串没有和路由定义发生过一次机械比对**。
+
+#### 25.2 审计方法与结果
+
+| 项 | 做法 | 结果 |
+| --- | --- | --- |
+| 后端路由表 | 递归读 `apps/api/src/**/*.controller.ts`，**按 `@Controller` 出现位置切段**逐段收集方法装饰器 | 701 条 |
+| 前端调用 | 扫 `apps/web/**/*.{ts,vue}` 的 `api.<verb>(<首参>)`，首参只接受以 `/` 开头的字符串/模板字面量 | 408 条可解析 |
+| 比对 | 两侧 `:id` / `{id}` / `${...}` 归一成 `{}` 并互为通配（web 的 `${kind}` 常是 `"buy" \| "preorder"` 这种字面量联合） | **1 条不匹配** |
+| 未覆盖 | 首参是变量或拼接前缀（如 `canvasBase()`） | 133 处，故意不扫 |
+
+唯一的不匹配就是 25.1 的 `works.vue`。修复：路径改 `/cam/team/groups`，并在注释里写清"`catch` 会把 404 静默吞成没有分组"这一机制，避免下一个人再复制这种写法。
+
+#### 25.3 审计脚本自身的两个错误（差点制造假缺陷）
+
+1. **一个 controller 文件可以有多个 `@Controller` 类**。`admin` / `agent-stt` / `novel-variant` / `op` / `task-share` 五个文件如此。只解析第一个会把后续控制器的方法错挂到第一个的 base 上 —— `RedeemCodeController`（`@Controller("redeem-code")`，位于 `op.controller.ts` 下半部分）因此被算成 `/op/redeem-code/redeem`，导致 `apps/web/pages/invite.vue` 里正确的 `/redeem-code/redeem` 被误报。
+2. **首参正则必须锚定在动词之后**。搜索式正则在 `api.post(path, {...})`（首参是变量）时会向后跳过，把下一条调用的字面量错配给上一条动词，实测把 `api.get("/crc/assets/me?status=3")` 报成 `POST /crc/assets/me`。
+
+两处修正后结果才可信：`408 → 1 条真缺陷`。
+
+#### 25.4 守卫：`apps/api/test/web-api-contract.spec.ts`
+
+| 用例 | 断言 | 防的是 |
+| --- | --- | --- |
+| 后端路由量 | `> 600` | 解析失败 → 空集合 → 全量匹配假绿 |
+| web 调用量 | `> 300` | 正则失效 → 0 处可比 → 假绿 |
+| 全量匹配 | 408 条全部命中后端路由（占位符互为通配） | 本类缺陷复发 |
+| 回归锚点 | `GET /cam/team/groups` 存在、`GET /team/groups` 不存在 | 有人把路径改回去 |
+
+反向验证：把 `works.vue` 改回缺陷值 → 立刻红并打印 `GET /team/groups ← pages\works.vue:105 raw=/team/groups`；改回即绿。
+
+#### 25.5 覆盖边界
+
+- 只覆盖静态可解析的 408 处；133 处变量拼接前缀不覆盖（`useCanvasApi.ts` 占 48 处，`NovelOriginalChain.vue` 28 处，`pages/novel/[id].vue` 23 处）。
+- 只校验"路径形状存在"，不校验 query 名、body 字段、HTTP 语义。
+- 与 §17.24（CLI↔后端）互补：**同一个后端路由表，两个调用方各有一条守卫**；两边共用"按 `@Controller` 切段 + 占位符归一 + 通配匹配"这套规则，改规则时两边都要改。

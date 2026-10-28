@@ -93,10 +93,16 @@ async function load(): Promise<void> {
   }
 }
 
-/** 拉团队分组列表（停用的组不参与下拉：后端也会拒收停用组） */
+/**
+ * 拉团队分组列表（停用的组不参与下拉：后端也会拒收停用组）。
+ *
+ * 路径必须是 `/cam/team/groups`：`TeamController` 的 `@Controller("cam")` + `@Get("team/groups")`。
+ * 第 63 批写成了 `/team/groups`，而这里的 `catch` 会把 404 静默吞成"没有分组"，
+ * 于是分组下拉从未出现过——第 66 批的 web↔后端路由审计才发现（已在 §17.25 记录）。
+ */
 async function loadGroups(): Promise<void> {
   try {
-    const data = await api.get<{ list: Array<{ id: string; name: string; status: number }> }>("/team/groups");
+    const data = await api.get<{ list: Array<{ id: string; name: string; status: number }> }>("/cam/team/groups");
     groups.value = (data.list ?? []).filter((g) => Number(g.status) === 1);
   } catch {
     // 分组列表是增强功能：拿不到时作品页照常可用，只是不显示下拉
