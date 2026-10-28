@@ -2275,9 +2275,13 @@ export const extractionDrafts = pgTable(
 
 // ── Agent Skill 卡（第 4 批）：可收藏、可复用的提示词/工作流模板 ──────────
 /**
- * 竞品证据：`rt:378-385`（`agent-skills` 8 端点：list/mine/plaza/favorites/favorite/
- * details/create/delete），实测 33 张卡。我方存「提示词模板 + 配置」，
- * 卡片只读表；运行记录落 tasks/agent_sessions，不在这张表里堆历史。
+ * 竞品证据：`rt:378-385` + `_acceptance/competitor_endpoints.tsv`（`agent-skills`
+ * **9 条**：plaza/favorites/mine/details/favorite POST+DELETE/create/update(PUT)/delete），
+ * 实测 33 张卡。我方存「提示词模板 + 配置」，卡片只读表；运行记录落
+ * tasks/agent_sessions，不在这张表里堆历史。
+ *
+ * 第 64 批补两列：`name_en`（竞品一等字段，前端按它精确查重 + 识别斜杠指令）与
+ * `is_home_recommend`（竞品 plaza 的筛选项），见各列注释。
  */
 export const agentSkills = pgTable(
   "agent_skills",
@@ -2287,6 +2291,15 @@ export const agentSkills = pgTable(
     spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
     ownerUserId: bigint("owner_user_id", { mode: "bigint" }).references(() => users.id),
     name: text("name").notNull(),
+    /**
+     * 英文名 / 斜杠指令名（第 64 批）。
+     *
+     * 竞品证据：`out_probe64.txt` 里 `name_en` 是一等字段而不是 JSON 里的附属值——
+     * `we.name_en?.trim()===t.trim()`（按英文名查重）、`lookupPlazaSkillByNameEn(...)`、
+     * `Vr.addSkillRef({skill_id,name,name_en,owner_type})`。我方原先只把它塞在
+     * `config.slug` 里，既不能建索引也不能在 SQL 层查重，故提列。
+     */
+    nameEn: text("name_en").notNull().default(""),
     summary: text("summary").notNull().default(""),
     coverUri: text("cover_uri"),
     category: text("category").notNull().default("general"),
@@ -2295,6 +2308,12 @@ export const agentSkills = pgTable(
     config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
     /** 1 私有 / 2 广场可见（广场卡才能被收藏与复用） */
     visibility: smallint("visibility").notNull().default(1),
+    /**
+     * 首页推荐位（第 64 批）。竞品 plaza 的 query 里有 `is_home_recommend`
+     * （`competitor_endpoints.tsv`），说明推荐位是服务端可筛的字段，不是我方
+     * 前端硬编码顺序。
+     */
+    isHomeRecommend: boolean("is_home_recommend").notNull().default(false),
     useCount: integer("use_count").notNull().default(0),
     favoriteCount: integer("favorite_count").notNull().default(0),
     /** 1 正常 / 2 下架（运营处置；删除走 deleted_at 软删，保留被引用关系） */
@@ -2306,6 +2325,7 @@ export const agentSkills = pgTable(
   (t) => [
     index("idx_agent_skills_plaza").on(t.visibility, t.useCount.desc()),
     index("idx_agent_skills_owner").on(t.ownerUserId, t.createdAt.desc()),
+    index("idx_agent_skills_home").on(t.isHomeRecommend, t.useCount.desc()),
   ],
 );
 

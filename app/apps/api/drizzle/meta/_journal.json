@@ -288,6 +288,13 @@
       "when": 1793148816268,
       "tag": "0040_stiff_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793149977401,
+      "tag": "0041_lyrical_darkhawk",
+      "breakpoints": true
     }
   ]
 }

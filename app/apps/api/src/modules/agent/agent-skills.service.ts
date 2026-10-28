@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { agentSkillFavorites, agentSkills } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
@@ -36,7 +36,7 @@ import {
 export interface AgentSkillDto {
   skill_id: string;
   name: string;
-  /** 斜杠指令名（`config.slug`），前端据此把输入框首词识别成技能 */
+  /** 斜杠指令名（`name_en` 列，老数据回落 `config.slug`），前端据此把输入框首词识别成技能 */
   name_en: string;
   summary: string;
   cover_uri: string | null;
@@ -50,6 +50,14 @@ export interface AgentSkillDto {
   status: number;
   is_favorite: boolean;
   is_mine: boolean;
+  /**
+   * 1 平台卡 / 2 团队卡（第 64 批对齐竞品 `owner_type`）。
+   * 竞品证据：`d.owner_type===1||d.owner_type===2` 且平台卡引用固定写
+   * `owner_type:1`（`Vr.addSkillRef({...,owner_type:1})`），团队卡透传卡上的值。
+   */
+  owner_type: 1 | 2;
+  /** 首页推荐位（竞品 plaza 的 `is_home_recommend` 筛选项） */
+  is_home_recommend: boolean;
   owner_user_id: string | null;
   space_id: string | null;
   created_at: string;
@@ -62,6 +70,14 @@ export interface SkillListQuery {
   category?: string;
   /** 关键词：命中标题 / 摘要 / 斜杠指令名 / 预置 prompt */
   q?: string;
+  /** 竞品 `name`：只按名称/英文名精确语义收敛（与 `q` 全文检索区分） */
+  name?: string;
+  /** 竞品 `is_home_recommend`：只在首页推荐位里筛 */
+  is_home_recommend?: boolean;
+  /** 竞品 `mine` 的 `status`：1 正常 / 2 下架（缺省只看正常） */
+  status?: number;
+  /** 竞品 `details` 的 `owner_type`：1 平台卡 / 2 团队卡 */
+  owner_type?: number;
 }
 
 export interface SkillPage {
@@ -73,6 +89,20 @@ export interface SkillPage {
 
 export interface CreateSkillInput {
   name: string;
+  /** 斜杠指令名（竞品一等字段 `name_en`）；省略则不参与查重 */
+  name_en?: string;
+  summary?: string;
+  category?: string;
+  prompt_template?: string;
+  config?: Record<string, unknown>;
+  visibility?: 1 | 2;
+  cover_uri?: string | null;
+}
+
+export interface UpdateSkillInput {
+  skill_id: string;
+  name?: string;
+  name_en?: string;
   summary?: string;
   category?: string;
   prompt_template?: string;
@@ -124,6 +154,8 @@ export class AgentSkillsService {
             spaceId: null,
             ownerUserId: null,
             name: entry.name,
+            // 斜杠指令名同时写进列与 config（列给 SQL 查重/筛选，config 兼容老前端读法）
+            nameEn: entry.slug,
             summary: entry.summary,
             coverUri: null,
             category: entry.category,
@@ -168,7 +200,19 @@ export class AgentSkillsService {
   /** 我的：本 space 自建卡（团队内共享；`is_mine` 标出创建人是否是自己） */
   async mine(spaceId: string, userId: string, query: SkillListQuery): Promise<SkillPage> {
     await this.ensureCatalog();
-    return this.page(spaceId, userId, and(this.alive(), eq(agentSkills.spaceId, BigInt(spaceId))), query);
+    // 竞品 mine 带 `status`（1 正常 / 2 下架）：运营下架的卡要能在"我的"里被看见并恢复，
+    // 所以这里不能用 `alive()`（它把 status=1 写死）。
+    const status = query.status ?? 1;
+    return this.page(
+      spaceId,
+      userId,
+      and(
+        isNull(agentSkills.deletedAt),
+        eq(agentSkills.spaceId, BigInt(spaceId)),
+        eq(agentSkills.status, status),
+      ),
+      query,
+    );
   }
 
   /**
@@ -237,6 +281,26 @@ export class AgentSkillsService {
         )!,
       );
     }
+    /**
+     * 竞品 `plaza` 的 `name`：与 `q` 分开。`q` 是全文（命中 summary/prompt），
+     * `name` 只按显示名 / 英文名收敛——竞品就是靠 `name_en` 精确查重
+     * （`we.name_en?.trim()===t.trim()`），如果也走全文，前端"按名字找卡"会
+     * 把 prompt 里偶然提到该词的卡一起返回。
+     */
+    const nameOnly = query.name?.trim();
+    if (nameOnly) {
+      const like = `%${nameOnly}%`;
+      conds.push(or(ilike(agentSkills.name, like), ilike(agentSkills.nameEn, like))!);
+    }
+    if (query.is_home_recommend !== undefined) {
+      conds.push(eq(agentSkills.isHomeRecommend, query.is_home_recommend));
+    }
+    if (query.owner_type !== undefined) {
+      if (query.owner_type !== 1 && query.owner_type !== 2) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "owner_type must be 1 or 2", { field: "owner_type" });
+      }
+      conds.push(query.owner_type === 1 ? isNull(agentSkills.spaceId) : isNotNull(agentSkills.spaceId));
+    }
     const filter = and(...conds);
 
     const rows = await db
@@ -269,9 +333,19 @@ export class AgentSkillsService {
   }
 
   // ── 详情 ────────────────────────────────────────────────
-  async detail(spaceId: string, userId: string, skillId: string): Promise<AgentSkillDto> {
+  /**
+   * 卡片详情。`ownerType` 来自竞品 `details` 的 `owner_type`：带了就按卡类型收敛，
+   * 类型不符一律 `NOT_FOUND`（与"不可见"同一处理，避免用 owner_type 探测
+   * 某个 id 是平台卡还是团队卡）。
+   */
+  async detail(
+    spaceId: string,
+    userId: string,
+    skillId: string,
+    ownerType?: number,
+  ): Promise<AgentSkillDto> {
     await this.ensureCatalog();
-    const row = await this.findAccessible(spaceId, skillId);
+    const row = await this.findAccessible(spaceId, skillId, ownerType);
     const [fav] = await db
       .select({ id: agentSkillFavorites.id })
       .from(agentSkillFavorites)
@@ -289,28 +363,33 @@ export class AgentSkillsService {
    * 可访问 = 公开卡 或 本 space 的卡。
    * 不可见一律 `NOT_FOUND`（不泄漏"这个 id 存在但不属于你"）。
    */
-  private async findAccessible(spaceId: string, skillId: string) {
+  private async findAccessible(spaceId: string, skillId: string, ownerType?: number) {
     let id: bigint;
     try {
       id = BigInt(skillId);
     } catch {
       throw new AppError(ErrorCode.INVALID_PARAM, "invalid skill_id", { field: "skill_id" });
     }
+    const conds = [
+      eq(agentSkills.id, id),
+      isNull(agentSkills.deletedAt),
+      or(eq(agentSkills.visibility, 2), eq(agentSkills.spaceId, BigInt(spaceId)))!,
+    ];
+    if (ownerType !== undefined) {
+      if (ownerType !== 1 && ownerType !== 2) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "owner_type must be 1 or 2", { field: "owner_type" });
+      }
+      conds.push(ownerType === 1 ? isNull(agentSkills.spaceId) : isNotNull(agentSkills.spaceId));
+    }
     const [row] = await db
       .select()
       .from(agentSkills)
-      .where(
-        and(
-          eq(agentSkills.id, id),
-          isNull(agentSkills.deletedAt),
-          or(eq(agentSkills.visibility, 2), eq(agentSkills.spaceId, BigInt(spaceId))),
-        ),
-      );
+      .where(and(...conds));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: skillId });
     return row;
   }
 
-  // ── 创建 / 删除 ──────────────────────────────────────────
+  // ── 创建 / 更新 / 删除 ───────────────────────────────────
   async create(spaceId: string, userId: string, input: CreateSkillInput): Promise<AgentSkillDto> {
     await this.ensureCatalog();
     const name = input.name.trim();
@@ -319,6 +398,12 @@ export class AgentSkillsService {
     if (!SKILL_CATEGORY_KEYS.includes(category)) {
       throw new AppError(ErrorCode.INVALID_PARAM, "unknown category", { field: "category" });
     }
+    const nameEn = this.normalizeNameEn(input.name_en);
+    if (nameEn) {
+      // 竞品按 name_en 查重（`we.name_en?.trim()===t.trim()`）：同名斜杠指令会让
+      // 输入框首词无法确定该用哪张卡，必须在这里挡住。
+      await this.assertNameEnFree(BigInt(spaceId), nameEn, null);
+    }
     const [row] = await db
       .insert(agentSkills)
       .values({
@@ -326,12 +411,14 @@ export class AgentSkillsService {
         spaceId: BigInt(spaceId),
         ownerUserId: BigInt(userId),
         name,
+        nameEn,
         summary: input.summary?.trim() ?? "",
         coverUri: input.cover_uri ?? null,
         category,
         promptTemplate: input.prompt_template ?? "",
         config: {
           ...(input.config ?? {}),
+          ...(nameEn ? { name_en: nameEn, slug: nameEn, slash: `/${nameEn}` } : {}),
           category_label: categoryLabel(category),
           tag: categoryTag(category),
         },
@@ -341,6 +428,126 @@ export class AgentSkillsService {
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "skill create failed");
     return this.toDto(row, false, spaceId, userId);
+  }
+
+  /**
+   * 更新卡片（第 64 批，对齐竞品 `PUT /df/canvas/agent-skills`）。
+   *
+   * 竞品这个端点的 `paramNames`/`queryNames` 都是空数组 —— 目标卡只能来自 body，
+   * 所以入参用 `skill_id`。权限口径与删除一致：平台卡是运营资产不可改，团队卡
+   * 只有创建人能改（别人改我的卡等于篡改我的提示词）。
+   */
+  async update(spaceId: string, userId: string, input: UpdateSkillInput): Promise<AgentSkillDto> {
+    await this.ensureCatalog();
+    const row = await this.requireOwned(spaceId, userId, input.skill_id);
+    const patch: Partial<typeof agentSkills.$inferInsert> = { updatedAt: new Date() };
+    const nextConfig: Record<string, unknown> = { ...((row.config ?? {}) as Record<string, unknown>) };
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new AppError(ErrorCode.INVALID_PARAM, "name is required", { field: "name" });
+      patch.name = name;
+    }
+    if (input.name_en !== undefined) {
+      const nameEn = this.normalizeNameEn(input.name_en);
+      if (nameEn) await this.assertNameEnFree(row.spaceId!, nameEn, row.id);
+      patch.nameEn = nameEn;
+      // config 里的三个派生态一起改，否则老前端读 config.slug 会看到旧指令名
+      if (nameEn) {
+        nextConfig.name_en = nameEn;
+        nextConfig.slug = nameEn;
+        nextConfig.slash = `/${nameEn}`;
+      } else {
+        delete nextConfig.name_en;
+        delete nextConfig.slug;
+        delete nextConfig.slash;
+      }
+    }
+    if (input.category !== undefined) {
+      if (!SKILL_CATEGORY_KEYS.includes(input.category)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "unknown category", { field: "category" });
+      }
+      patch.category = input.category;
+      nextConfig.category_label = categoryLabel(input.category);
+      nextConfig.tag = categoryTag(input.category);
+    }
+    if (input.summary !== undefined) patch.summary = input.summary.trim();
+    if (input.prompt_template !== undefined) patch.promptTemplate = input.prompt_template;
+    if (input.visibility !== undefined) patch.visibility = input.visibility;
+    if (input.cover_uri !== undefined) patch.coverUri = input.cover_uri;
+    if (input.config !== undefined) {
+      patch.config = { ...nextConfig, ...input.config };
+    } else if (input.name_en !== undefined || input.category !== undefined) {
+      patch.config = nextConfig;
+    }
+
+    const [after] = await db
+      .update(agentSkills)
+      .set(patch)
+      .where(and(eq(agentSkills.id, row.id), isNull(agentSkills.deletedAt)))
+      .returning();
+    if (!after) throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: input.skill_id });
+
+    const [fav] = await db
+      .select({ id: agentSkillFavorites.id })
+      .from(agentSkillFavorites)
+      .where(
+        and(
+          eq(agentSkillFavorites.skillId, row.id),
+          eq(agentSkillFavorites.userId, BigInt(userId)),
+          eq(agentSkillFavorites.spaceId, BigInt(spaceId)),
+        ),
+      );
+    return this.toDto(after, fav !== undefined, spaceId, userId);
+  }
+
+  /** 斜杠指令名归一：小写 + 去空白（竞品比较时也 `.trim()`） */
+  private normalizeNameEn(raw?: string | null): string {
+    return (raw ?? "").trim().toLowerCase();
+  }
+
+  /** 同空间内 `name_en` 不可重复；`excludeId` 用于更新时排除自己 */
+  private async assertNameEnFree(spaceId: bigint, nameEn: string, excludeId: bigint | null): Promise<void> {
+    const conds = [
+      isNull(agentSkills.deletedAt),
+      eq(agentSkills.spaceId, spaceId),
+      eq(agentSkills.nameEn, nameEn),
+    ];
+    if (excludeId !== null) conds.push(ne(agentSkills.id, excludeId));
+    const [hit] = await db
+      .select({ id: agentSkills.id })
+      .from(agentSkills)
+      .where(and(...conds));
+    if (hit) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "name_en already exists in this space", {
+        field: "name_en",
+      });
+    }
+  }
+
+  /** 改/删共用的归属校验：平台卡 403，非本空间 400102，非创建人 403 */
+  private async requireOwned(spaceId: string, userId: string, skillId: string) {
+    let id: bigint;
+    try {
+      id = BigInt(skillId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid skill_id", { field: "skill_id" });
+    }
+    const [row] = await db
+      .select()
+      .from(agentSkills)
+      .where(and(eq(agentSkills.id, id), isNull(agentSkills.deletedAt)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: skillId });
+    if (row.spaceId === null) {
+      throw new AppError(ErrorCode.FORBIDDEN, "platform skill cannot be edited", { reason: "platform_skill" });
+    }
+    if (String(row.spaceId) !== spaceId) {
+      throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: skillId });
+    }
+    if (row.ownerUserId === null || String(row.ownerUserId) !== userId) {
+      throw new AppError(ErrorCode.FORBIDDEN, "only the creator can edit this skill", { reason: "not_owner" });
+    }
+    return row;
   }
 
   /**
@@ -460,7 +667,10 @@ export class AgentSkillsService {
     userId: string,
   ): AgentSkillDto {
     const config = (row.config ?? {}) as Record<string, unknown>;
-    const slug = typeof config.slug === "string" ? config.slug : "";
+    // 列优先、config 回落：迁移 0041 已把老数据的 config.slug 回填进列，
+    // 但运维手改 config 的场景仍要能读到（两边不一致时列是权威）。
+    const slug =
+      row.nameEn || (typeof config.slug === "string" ? config.slug : "") || "";
     return {
       skill_id: String(row.id),
       name: row.name,
@@ -477,6 +687,8 @@ export class AgentSkillsService {
       status: row.status,
       is_favorite: isFavorite,
       is_mine: row.ownerUserId !== null && String(row.ownerUserId) === userId && String(row.spaceId) === spaceId,
+      owner_type: row.spaceId === null ? 1 : 2,
+      is_home_recommend: row.isHomeRecommend,
       owner_user_id: row.ownerUserId === null ? null : String(row.ownerUserId),
       space_id: row.spaceId === null ? null : String(row.spaceId),
       created_at: row.createdAt.toISOString(),

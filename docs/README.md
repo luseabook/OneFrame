@@ -126,6 +126,112 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.18 · 第 64 批：#4 Agent 的 Skill 市场按竞品 9 条形状补齐，顺手纠正一条挂了 60 批的错误归因 · 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.7（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：202.17 → **202.37/206 = 98.2%**，剩余 3.83 → **3.63**（#4 95% → 96%，+0.20）。
+
+### 一、缺口栏写错了一个前提
+
+`implement-progress-vs-reelmate.md` 里 #4 Agent 的缺口，从第 4 批起就写成两句：「真实 ASR 凭据」+「**平台 Skill 档位与竞品对齐需竞品清单**」。
+
+第二句把一半分数挂在"还没拿到的清单"上。这批先去确认清单到底存不存在——`_acceptance/competitor_endpoints.tsv`（从 `core-lib-CKH7gQsw.js` 的 934 个端点配置对象去重导出，**904 条唯一端点**）里，`canvas/agent-skills` 一共 **9 条**，而且**每条都带查询参数名**：
+
+```
+GET    /web/v1/df/canvas/agent-skills/plaza      query=["category","name","page","page_size","is_home_recommend"]
+GET    /web/v1/df/canvas/agent-skills/favorites  query=["page","page_size"]
+GET    /web/v1/df/canvas/agent-skills/mine       query=["status","page","page_size"]
+GET    /web/v1/df/canvas/agent-skills/details    query=["skill_id","owner_type"]
+POST   /web/v1/df/canvas/agent-skills
+PUT    /web/v1/df/canvas/agent-skills            ← paramNames / queryNames 全空
+DELETE /web/v1/df/canvas/agent-skills/:skill_id  params=["skill_id"]
+POST   /web/v1/df/canvas/agent-skills/:skill_id/favorite   params=["skill_id"]
+DELETE /web/v1/df/canvas/agent-skills/:skill_id/favorite   params=["skill_id"]
+```
+
+**清单一直在，只是没人去取。** 我方此前 9 条端点形状对得上，缺的是参数与字段：
+
+| 缺口 | 竞品证据 | 后果 |
+|---|---|---|
+| 没有更新端点 | `PUT /canvas/agent-skills`（params/query 全空 ⇒ 目标卡只能从 body 带） | 卡片改名只能"删了重建"，收藏数会归零 |
+| 四个筛选参数未接 | `plaza`:`name`/`is_home_recommend`、`mine`:`status`、`details`:`owner_type` | 前端按名字查、按推荐位筛、看下架卡，全都做不到 |
+| DTO 缺 `name_en`/`owner_type`/`is_home_recommend` | `we.name_en?.trim()===t.trim()`；`d.owner_type===1\|\|d.owner_type===2` | 前端要靠猜 |
+
+### 二、`name_en` 不是包装，是真缺陷
+
+竞品把英文名当**一等字段**用：
+
+```js
+// 精确查重（不是模糊匹配）
+we.name_en?.trim() === t.trim()
+lookupPlazaSkillByNameEn(...)
+Vr.addSkillRef({ skill_id, name, name_en, owner_type })
+```
+
+我方只把它塞在 `config.slug` 这个 JSON 里。`config` 是 jsonb，写进去就：
+
+- **不能建索引**——按英文名查要全表扫 `config->>'slug'`；
+- **不能在 SQL 层查重**——两张卡的斜杠指令名撞车时，只能靠**前端第一次匹配到谁**，谁先谁生效；
+- **不能在列表里稳定排序/筛选**。
+
+所以迁移 `0041_lyrical_darkhawk.sql` 把它提成列，并且**手工追加了第 4 条回填**（前 3 条是 `drizzle-kit generate` 生成的，回填是我加的）：
+
+```sql
+ALTER TABLE "agent_skills" ADD COLUMN "name_en" text DEFAULT '' NOT NULL;
+ALTER TABLE "agent_skills" ADD COLUMN "is_home_recommend" boolean DEFAULT false NOT NULL;
+CREATE INDEX "idx_agent_skills_home" ON "agent_skills" USING btree ("is_home_recommend","use_count" DESC NULLS LAST);
+-- 手工追加：只加列不回填，等于把已有的斜杠指令名留在 JSON 里继续飘
+UPDATE "agent_skills" SET "name_en" = COALESCE("config"->>'slug', '') WHERE "name_en" = '';
+```
+
+实测：33 张平台卡，`with_name_en = 33`（全部有值）。迁移 41 → **42**。
+
+### 三、四个不显然的决定
+
+| 决定 | 内容 | 为什么 |
+|---|---|---|
+| 改 `name_en` 要同步三个派生态 | 列 + `config.name_en` + `config.slug` + `config.slash` 一起改 | 老前端还在读 `config`；只改列会让新旧两处指令名分裂 |
+| `name` ≠ `q` | `name` → `or(ilike(name), ilike(nameEn))`；`q` → 全文（含 prompt） | 全文会把 prompt 里偶然提到该词的卡一起返回，按名字查的用户会以为筛错了 |
+| `is_home_recommend=0` 是「排除」，不是「全部」 | 三元：不传=不过滤、`1`=只推荐位、`0`=排除推荐位 | 与 `status` 的语义保持一致；把 `0` 当"全部"是最常见的参数误读 |
+| `mine?status` 不能写死 1 | `mine` 用 `eq(status, query.status ?? 1)`，去掉 `alive()` | 运营下架的卡要能在「我的」里被看见并恢复，写死就永远捞不回来 |
+| `owner_type` 只做收敛、不做探测 | 类型不符一律 400102 | 否则调用方可拿它反查某个 id 是平台卡还是团队卡 |
+
+### 四、`PUT` 的权限矩阵
+
+新增 `PUT /agent-skills`（`updateSchema = createSchema.partial().extend({ skill_id })`），校验顺序是**先归属、再权限、后字段**：
+
+| 场景 | 结果 |
+|---|---|
+| 平台卡（`space_id is null`）| `403101 platform skill cannot be edited`，reason `platform_skill` |
+| 别的空间 | `400102` |
+| 本空间但不是创建人 | `403101 only the creator can edit this skill` |
+| `name_en` 撞同空间已有卡 | `400101 name_en already exists in this space`，`field: "name_en"`（更新时 `ne()` 排除自己）|
+| `name_en` 不是 `[a-z0-9-]` | `400101`（zod 正则）|
+| `skill_id` 缺失 / 非数字 / 不存在 | `400101` / `400101` / `400102` |
+
+### 五、验证
+
+| 用例 | 覆盖 |
+|---|---|
+| 更新卡片：仅创建人可改、`name_en` 查重、平台卡 403、他人不可见 | 权限矩阵 4 种；`config.slug`/`name_en`/`slash` 三处同步；7 种非法入参 |
+| 竞品形状：`name` / `is_home_recommend` / `mine?status` / `details?owner_type` 都能筛 | 四个参数各自生效；`is_home_recommend=0` 排除语义；下架卡只在 `mine?status=2` 出现；`owner_type=3` → 400101，`details?owner_type=2` 查平台卡 → 400102 |
+
+`apps/api/test/agent-skills.spec.ts` 9 → **11 例**；api 875 → **877 例**，总 **1,248 例**。`apps/api` typecheck / lint / build 全干净，`_acceptance/verify-round.ps1` **12/12 全绿**。
+
+规模：**702 端点 / 42 迁移 / 112 表 / 1,248 用例 / web 54,672 行 `.vue`**。
+
+### 六、诚实边界：为什么只到 96%
+
+竞品只给了**接口形状 + 字段名**，没有给**广场卡内容**与**首页推荐位编排**的数据证据（`is_home_recommend` 在 bundle 里只作为筛选参数出现，没有任何"哪些卡该上推荐位"的规则或默认值）。所以：
+
+- `is_home_recommend` 默认全 `false`，推荐位策略仍按自建口径（运营后台勾选）；
+- #4 从 95% → **96%**，剩 **0.80** = 真实 ASR 凭据约 **0.60**（现诚实返回 `available:false`，不假造转写结果）+ 运营位内容约 **0.20**。
+
+「0.60 / 0.20」是**判断而非实测**，两个数都已写进 §5 第 1 行。这批的净收益不是那 0.20 权重，而是**把一条错误归因改成了一条真实的能力缺口**：前者只能等一份不存在的清单，后者运营配一次就能验。
+
+---
+
+
 ## 变更登记（v6.17 · 第 63 批：#5 项目归属组 + 竞品两级分类投影，A 类缺口清零 · 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.6（同一批；本文件与主台账各有一套编号，勿混）。

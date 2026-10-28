@@ -539,4 +539,150 @@ describe("agent skills / stt / recommend e2e", () => {
     await db.delete(agentSessions).where(inArray(agentSessions.id, [BigInt(canvasSessionId)]));
     await db.delete(canvases).where(inArray(canvases.id, [BigInt(canvasId)]));
   }, 60_000);
+
+  /**
+   * 第 64 批：按 `competitor_endpoints.tsv` 的 9 条竞品形状补齐后锁住的行为。
+   *
+   * 竞品证据链：
+   * - `GET .../plaza` query = `["category","name","page","page_size","is_home_recommend"]`
+   * - `GET .../mine` query = `["status","page","page_size"]`
+   * - `GET .../details` query = `["skill_id","owner_type"]`
+   * - `PUT /web/v1/df/canvas/agent-skills`（params/query 全空 ⇒ 目标卡只能从 body 带）
+   * - `owner_type` 取值只有 1/2（`d.owner_type===1||d.owner_type===2`，平台卡引用固定写 1）
+   * - `name_en` 是卡片一等字段，前端按它精确查重（`we.name_en?.trim()===t.trim()`）
+   */
+  it("更新卡片：仅创建人可改、name_en 查重、平台卡 403、他人不可见", async () => {
+    const created = await inject("POST", "/agent-skills", {
+      name: "E2E 待改卡",
+      name_en: "e2e-edit-me",
+      category: "script",
+      prompt_template: "/e2e-edit-me 初版提示词",
+    });
+    expect(created.code).toBe(0);
+    const card = created.data as { skill_id: string; name_en: string; owner_type: number };
+    createdSkillIds.push(card.skill_id);
+    // 团队卡 owner_type=2（平台卡才是 1）
+    expect(card.owner_type).toBe(2);
+    expect(card.name_en).toBe("e2e-edit-me");
+
+    const updated = await inject("PUT", "/agent-skills", {
+      skill_id: card.skill_id,
+      name: "E2E 已改名",
+      summary: "改过的摘要",
+      name_en: "e2e-renamed",
+      visibility: 2,
+      prompt_template: "/e2e-renamed 新版提示词",
+    });
+    expect(updated.code).toBe(0);
+    const after = updated.data as {
+      name: string;
+      name_en: string;
+      summary: string;
+      visibility: number;
+      prompt_template: string;
+      config: Record<string, unknown>;
+    };
+    expect(after.name).toBe("E2E 已改名");
+    expect(after.name_en).toBe("e2e-renamed");
+    expect(after.summary).toBe("改过的摘要");
+    expect(after.visibility).toBe(2);
+    // 列与 config 的三个派生态必须一起改：老前端读 config.slug，漏改会看到旧指令名
+    expect(after.config.slug).toBe("e2e-renamed");
+    expect(after.config.name_en).toBe("e2e-renamed");
+    expect(after.config.slash).toBe("/e2e-renamed");
+
+    // 同空间 name_en 查重（竞品按 name_en 精确查重，重名会让首词无法确定用哪张卡）
+    const dup = await inject("POST", "/agent-skills", {
+      name: "E2E 撞名卡",
+      name_en: "e2e-renamed",
+      category: "script",
+    });
+    expect(dup.code).toBe(400101);
+    expect(dup.msg).toContain("name_en");
+
+    // 平台卡不可改（运营资产）
+    const plaza = await inject("GET", "/agent-skills/plaza?page_size=1");
+    const platformId = (plaza.data as { list: Array<{ skill_id: string }> }).list[0]!.skill_id;
+    const platformEdit = await inject("PUT", "/agent-skills", { skill_id: platformId, name: "改平台卡" });
+    expect(platformEdit.code).toBe(403101);
+
+    // 别人的空间卡：400102（不泄漏存在性）
+    const foreign = await inject("PUT", "/agent-skills", { skill_id: card.skill_id, name: "别人改" }, tokenB);
+    expect(foreign.code).toBe(400102);
+
+    // 入参校验
+    expect((await inject("PUT", "/agent-skills", {})).code).toBe(400101);
+    expect((await inject("PUT", "/agent-skills", { skill_id: "not-a-number" })).code).toBe(400101);
+    expect((await inject("PUT", "/agent-skills", { skill_id: "9999999999", name: "x" })).code).toBe(400102);
+    expect((await inject("PUT", "/agent-skills", { skill_id: card.skill_id, name_en: "Bad Slug!" })).code).toBe(400101);
+  });
+
+  it("竞品形状：name / is_home_recommend / mine?status / details?owner_type 都能筛", async () => {
+    // DTO 必须带 owner_type 与 is_home_recommend（前端按 owner_type 决定"能不能改删"）
+    const plaza = await inject("GET", "/agent-skills/plaza?page_size=5");
+    const first = (plaza.data as { list: Array<Record<string, unknown>> }).list[0] as {
+      skill_id: string;
+      name: string;
+      name_en: string;
+      owner_type: number;
+      is_home_recommend: boolean;
+    };
+    expect(first.owner_type).toBe(1);
+    expect(first.is_home_recommend).toBe(false);
+
+    // 竞品 `name`：只按显示名/英文名收敛（不是全文）
+    const byName = await inject("GET", `/agent-skills/plaza?name=${encodeURIComponent(first.name)}`);
+    expect(byName.code).toBe(0);
+    const namePage = byName.data as { list: Array<{ name: string; name_en: string }>; total: number };
+    expect(namePage.total).toBeGreaterThan(0);
+    expect(namePage.list.every((item) => item.name.includes(first.name) || item.name_en.includes(first.name))).toBe(
+      true,
+    );
+    // name_en 也能命中
+    const byEn = await inject("GET", `/agent-skills/plaza?name=${encodeURIComponent(first.name_en)}`);
+    expect((byEn.data as { list: Array<{ skill_id: string }> }).list.map((item) => item.skill_id)).toContain(
+      first.skill_id,
+    );
+
+    // 推荐位默认 0 张；标一张后 `is_home_recommend=1` 只回它（非法值 400101）
+    const homeOn = await inject("GET", "/agent-skills/plaza?is_home_recommend=1&page_size=100");
+    expect((homeOn.data as { total: number }).total).toBe(0);
+    await db.update(agentSkills).set({ isHomeRecommend: true }).where(eq(agentSkills.id, BigInt(first.skill_id)));
+    try {
+      const after = await inject("GET", "/agent-skills/plaza?is_home_recommend=1&page_size=100");
+      const homePage = after.data as { list: Array<{ skill_id: string; is_home_recommend: boolean }>; total: number };
+      expect(homePage.total).toBe(1);
+      expect(homePage.list[0]).toMatchObject({ skill_id: first.skill_id, is_home_recommend: true });
+      // `is_home_recommend=0` 是"排除推荐位"，不是"全部"
+      const off = await inject("GET", "/agent-skills/plaza?is_home_recommend=0&page_size=100");
+      expect((off.data as { list: Array<{ skill_id: string }> }).list.map((item) => item.skill_id)).not.toContain(
+        first.skill_id,
+      );
+    } finally {
+      await db.update(agentSkills).set({ isHomeRecommend: false }).where(eq(agentSkills.id, BigInt(first.skill_id)));
+    }
+
+    // `details?owner_type`：平台卡配 2 → 400102；配 3 → 400101
+    const detailsOk = await inject("GET", `/agent-skills/details?skill_id=${first.skill_id}&owner_type=1`);
+    expect(detailsOk.code).toBe(0);
+    expect((detailsOk.data as { skill_id: string }).skill_id).toBe(first.skill_id);
+    expect((await inject("GET", `/agent-skills/details?skill_id=${first.skill_id}&owner_type=2`)).code).toBe(400102);
+    expect((await inject("GET", `/agent-skills/details?skill_id=${first.skill_id}&owner_type=3`)).code).toBe(400101);
+
+    // `mine?status`：下架（status=2）的卡默认不出现在"我的"，显式查 status=2 才出
+    const created = await inject("POST", "/agent-skills", { name: "E2E 下架卡", category: "script" });
+    expect(created.code).toBe(0);
+    const cardId = (created.data as { skill_id: string }).skill_id;
+    createdSkillIds.push(cardId);
+    await db.update(agentSkills).set({ status: 2 }).where(eq(agentSkills.id, BigInt(cardId)));
+    const mineDefault = await inject("GET", "/agent-skills/mine?page_size=100");
+    expect((mineDefault.data as { list: Array<{ skill_id: string }> }).list.map((item) => item.skill_id)).not.toContain(
+      cardId,
+    );
+    const mineDown = await inject("GET", "/agent-skills/mine?status=2&page_size=100");
+    const downPage = mineDown.data as { list: Array<{ skill_id: string; status: number }> };
+    expect(downPage.list.map((item) => item.skill_id)).toContain(cardId);
+    expect(downPage.list.every((item) => item.status === 2)).toBe(true);
+    expect((await inject("GET", "/agent-skills/mine?status=3")).code).toBe(400101);
+  });
 });

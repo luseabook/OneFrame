@@ -2544,3 +2544,117 @@ CREATE INDEX "idx_script_projects_group" ON "script_projects" USING btree ("spac
 - FILM 档不假装支持；
 - 画布没有分组概念（恒 `"0"`），这是竞品也没有的能力，不是我方缺口；
 - 因此 #5 只从 94% → **97%**（+0.09），剩 0.09 记在 `07-plan` §5 第 5 行。
+
+---
+
+### 17.23 Agent Skill 市场：竞品 9 条形状、`name_en` 提列与 `PUT /agent-skills`（第 64 批）
+
+#### 23.1 为什么现在才做：不是"补一个端点"，是"清单一直在"
+
+`07-plan/implement-progress-vs-reelmate.md` 的 #4 缺口栏从第 4 批起写着「平台 Skill 档位与竞品对齐需竞品清单」。第 64 批先去确认这份清单存不存在——`_acceptance/competitor_endpoints.tsv`（从 `core-lib-CKH7gQsw.js` 的 934 个端点配置对象去重导出，**904 条唯一端点**）里 `canvas/agent-skills` 共 **9 条**，每条都带 `queryNames`：
+
+| # | 方法 | 路径 | 参数（竞品 `paramNames` / `queryNames`） |
+|---|---|---|---|
+| 1 | GET | `/web/v1/df/canvas/agent-skills/plaza` | query: `category`, `name`, `page`, `page_size`, `is_home_recommend` |
+| 2 | GET | `/web/v1/df/canvas/agent-skills/favorites` | query: `page`, `page_size` |
+| 3 | GET | `/web/v1/df/canvas/agent-skills/mine` | query: `status`, `page`, `page_size` |
+| 4 | GET | `/web/v1/df/canvas/agent-skills/details` | query: `skill_id`, `owner_type` |
+| 5 | POST | `/web/v1/df/canvas/agent-skills` | — |
+| 6 | PUT | `/web/v1/df/canvas/agent-skills` | **params/query 全空 ⇒ 目标卡只能从 body 带** |
+| 7 | DELETE | `/web/v1/df/canvas/agent-skills/:skill_id` | params: `skill_id` |
+| 8 | POST | `/web/v1/df/canvas/agent-skills/:skill_id/favorite` | params: `skill_id` |
+| 9 | DELETE | `/web/v1/df/canvas/agent-skills/:skill_id/favorite` | params: `skill_id` |
+
+注意第 6 条：竞品的**更新没有路径 id**，目标卡从 body 的 `skill_id` 取。这与第 59 批知识库实体的判据同一手法——**路由形状本身就是证据**。
+
+bundle 侧的字段用法（`_acceptance/out_probe64.txt`）：
+
+```
+we.name_en?.trim()===t.trim()                       // 按英文名精确查重
+lookupPlazaSkillByNameEn(...)                        // 同名反查
+Vr.addSkillRef({skill_id, name, name_en, owner_type})// 引用时三个字段一起带
+d.owner_type===1||d.owner_type===2                   // 只接受 1/2
+owner_type:1                                         // 平台卡引用固定写 1
+```
+
+权限模块 `canvas_agent_skill`；埋点 `canvas_agent_skill_recommendation_expose` / `_click`、`agent_skill_favorite`、`agent_skill_create`。
+
+#### 23.2 三块真缺口
+
+| 缺口 | 竞品证据 | 我方原状态 | 后果 |
+|---|---|---|---|
+| 无更新端点 | `PUT /canvas/agent-skills` | 只有 `POST`（新建）与 `DELETE` | 改名只能删了重建，`favoriteCount`/`useCount` 归零 |
+| 四个筛选参数未接 | `plaza`: `name`/`is_home_recommend`；`mine`: `status`；`details`: `owner_type` | `listQuerySchema = {page, page_size, category, q}` | 按名字查、按推荐位筛、看下架卡全做不到 |
+| DTO 缺三字段 | `name_en` / `owner_type` / `is_home_recommend` | 只有 `slug`（藏在 `config` 里） | 前端要靠猜平台卡与团队卡、英文名只能从 `config` 里挖 |
+
+#### 23.3 迁移 0041：`name_en` 为什么必须提列
+
+```sql
+ALTER TABLE "agent_skills" ADD COLUMN "name_en" text DEFAULT '' NOT NULL;
+ALTER TABLE "agent_skills" ADD COLUMN "is_home_recommend" boolean DEFAULT false NOT NULL;
+CREATE INDEX "idx_agent_skills_home" ON "agent_skills" USING btree ("is_home_recommend","use_count" DESC NULLS LAST);
+-- ↓ 手工追加（前 3 条由 drizzle-kit generate 生成）
+UPDATE "agent_skills" SET "name_en" = COALESCE("config"->>'slug', '') WHERE "name_en" = '';
+```
+
+我方原先把英文名放在 `config.slug`（jsonb）。这带来三个硬伤：
+
+1. **不能建索引**——按英文名查要全表 `config->>'slug'`；
+2. **不能在 SQL 层查重**——两张卡的斜杠指令名撞车时，只能靠**前端第一次匹配到谁**，谁先谁生效；
+3. **不能稳定排序/筛选**。
+
+第 4 条 `UPDATE` 是刻意的：只加列不回填，等于把已有的斜杠指令名留在 JSON 里继续飘。实测回填后 33 张平台卡 `with_name_en = 33`（全部有值）。迁移 41 → **42**。
+
+#### 23.4 `PUT /v1/agent-skills` 的请求与错误码
+
+```jsonc
+// 请求（skill_id 必填，其余「传了才改」）
+{
+  "skill_id": "1234567890123456789",
+  "name": "新名字",
+  "name_en": "new-slug",
+  "summary": "一句话简介",
+  "category": "general",
+  "prompt_template": "……",
+  "config": { "any": "json" },
+  "visibility": 2,
+  "cover_uri": "u/1/assets/abc.png"
+}
+```
+
+| 场景 | HTTP | code | msg / field |
+|---|---:|---:|---|
+| 成功 | 200 | 0 | 返回更新后的 `AgentSkillDto` |
+| `skill_id` 缺失 / 非数字 | 200 | 400101 | zod 消息 / `field: skill_id` |
+| 卡片不存在 | 200 | 400102 | — |
+| 别的空间 | 200 | 400102 | — |
+| 平台卡（`space_id is null`）| 200 | 403101 | `platform skill cannot be edited`，reason `platform_skill` |
+| 本空间非创建人 | 200 | 403101 | `only the creator can edit this skill` |
+| `name_en` 同空间重复 | 200 | 400101 | `name_en already exists in this space`，`field: name_en` |
+| `name_en` 不合 `[a-z0-9-]` | 200 | 400101 | zod 正则消息 |
+
+**改 `name_en` 时列与三个派生态同步**：`agent_skills.name_en`（列，供 SQL 查重/筛选）、`config.name_en`、`config.slug`、`config.slash`。老前端还在读 `config`，只改列会让新旧两处指令名分裂。
+
+#### 23.5 四个参数的语义（都有坑）
+
+| 参数 | 语义 | 不显然处 |
+|---|---|---|
+| `plaza?name` | `or(ilike(name), ilike(nameEn))` | **与 `q` 刻意分开**：`q` 是全文（含 `prompt_template`），按名字查的用户会看到 prompt 里偶然提到该词的卡，以为筛错了 |
+| `plaza?is_home_recommend` | 三元：不传=不过滤、`1`=只推荐位、`0`=**排除**推荐位 | 把 `0` 当"全部"是这参数最常见的误读；`1/0/true/false` 四种写法都认 |
+| `mine?status` | `eq(status, query.status ?? 1)` | **不能沿用写死 `status=1` 的 `alive()`**：运营下架的卡要能在「我的」里被看见并恢复，写死就永远捞不回来 |
+| `details?owner_type` | 1 → `isNull(spaceId)`（平台卡）、2 → `isNotNull(spaceId)`（团队卡），不符 400102 | **只做收敛、不做探测**：不收敛的话调用方可拿它反查某个 id 属于谁；非法值（如 3）→ 400101 |
+
+`owner_type` 同时下发在 DTO 里：`owner_type = row.spaceId === null ? 1 : 2`（竞品原文 `d.owner_type===1||d.owner_type===2`，平台卡引用固定写 `1`）。
+
+#### 23.6 测试
+
+`apps/api/test/agent-skills.spec.ts` **9 → 11 例**：
+
+1. **更新卡片：仅创建人可改、`name_en` 查重、平台卡 403、他人不可见** —— 建卡（`name_en: "e2e-edit-me"`）→ 断言 `owner_type === 2` → PUT 改 name/summary/name_en/visibility/prompt_template → 断言 **`config.slug`/`config.name_en`/`config.slash` 三处同步**；同空间建同名 `name_en` → 400101 且 msg 含 `name_en`；平台卡 PUT → 403101；别人的空间 PUT → 400102；`{}`、非数字 `skill_id`、`Bad Slug!` → 400101；`9999999999` → 400102。
+2. **竞品形状：`name` / `is_home_recommend` / `mine?status` / `details?owner_type` 都能筛** —— plaza 首卡 `owner_type === 1`、`is_home_recommend === false`；`?name=<显示名>` 与 `?name=<name_en>` 均命中；`is_home_recommend=1` 默认 0 张 → db 置 `true` 后恰 1 张，且 `?is_home_recommend=0` **不含**它（`finally` 复位）；`details?owner_type=1` 命中、`=2` → 400102、`=3` → 400101；建卡后 db 置 `status: 2` → `mine` 默认不含、`mine?status=2` 含且全为 2、`mine?status=3` → 400101。
+
+#### 23.7 诚实边界
+
+- **竞品只给了接口形状 + 字段名**，没有**广场卡内容**与**首页推荐位编排**的数据证据：`is_home_recommend` 在 bundle 里只作为筛选参数出现，没有任何"哪些卡该上推荐位"的规则或默认值。故 `is_home_recommend` 默认全 `false`、推荐位策略仍按自建口径（运营后台勾选），**不写成"已对齐"**。
+- 因此 #4 只从 95% → **96%**（+0.20），剩 **0.80** = 真实 ASR 凭据约 **0.60** + 运营位内容约 **0.20**；两个数是**判断不是实测**，已在该行写明各自估算。
+- 端点总数 **701 → 702**，迁移 **41 → 42**（`0041_lyrical_darkhawk.sql`），用例 **1,246 → 1,248**（api 875 → 877）。

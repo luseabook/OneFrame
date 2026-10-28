@@ -99,10 +99,16 @@ describe("ops admin creator-audits e2e", () => {
   });
 
   it("待审队列：只返回 status=2 的作品，带作者/空间/标题", async () => {
-    const pending = await seedAsset(2, `待审作品-${Date.now()}`);
-    const approved = await seedAsset(3, `已通过作品-${Date.now()}`);
+    const stamp = Date.now();
+    const pending = await seedAsset(2, `待审作品-${stamp}`);
+    const approved = await seedAsset(3, `已通过作品-${stamp}`);
+    const title = `待审作品-${stamp}`;
 
-    const res = await adminInject("GET", "/ops/admin/creator-audits?status=2&page_size=100");
+    // 这是**全平台**队列且按 created_at 升序（最旧的在前）。被测库是所有 spec 共用的开发库、
+    // 历史轮次会在里面留下 status=2 的创作者作品，`page_size` 上限又只有 100 —— 直接断言
+    // "新建的行出现在第一页"会随累计数据量随机变红（第 64 批总闸就是这么红的）。
+    // 故用接口自带的 `q` 标题模糊过滤收敛到本用例造的行，同时保留对状态过滤与字段的完整断言。
+    const res = await adminInject("GET", `/ops/admin/creator-audits?status=2&page_size=100&q=${encodeURIComponent(title)}`);
     expect(res.code).toBe(0);
     const data = res.data as {
       list: Array<{ id: string; status: number; creator_user_id: string; space_id: string; title: string }>;
@@ -112,6 +118,9 @@ describe("ops admin creator-audits e2e", () => {
     const ids = data.list.map((item) => item.id);
     expect(ids).toContain(String(pending));
     expect(ids).not.toContain(String(approved));
+    // 标题过滤 + 状态过滤双生效：页内不允许混进别的标题或非待审的行
+    expect(data.list.every((item) => item.title.includes(title))).toBe(true);
+    expect(data.list.every((item) => item.status === 2)).toBe(true);
     const row = data.list.find((item) => item.id === String(pending))!;
     expect(row.status).toBe(2);
     expect(row.creator_user_id).toBe(userId);
