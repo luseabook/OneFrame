@@ -90,6 +90,37 @@ export class AgentController {
     @Query("task_id") taskId: string | undefined,
     @Res() reply: FastifyReply,
   ): Promise<void> {
+    await this.pipeTaskStream(req, taskId, reply);
+  }
+
+  /**
+   * 任务进度流的 POST 别名（第 84 批）。
+   *
+   * 竞品这条是 `POST /web/v1/agent/task/stream`（bundle 证据：`method: Method.POST`、
+   * `requestBodyType: json`、`queryNames: ["task_id"]`）—— 按竞品形状发 POST 的客户端
+   * 打到我方只读 GET 路径上是 **404**，这是客户端自己改不掉的形状差异，所以补别名而不是只登记。
+   * GET 保留：浏览器原生 `EventSource` 只能发 GET，断线重连语义靠它。
+   *
+   * `task_id` 先看 query、再看 body（竞品的 raw body 里也可能带），两处都给时 query 优先。
+   */
+  @Post("task/stream")
+  @SkipEnvelope()
+  async taskStreamPost(
+    @Req() req: AuthedRequest,
+    @Query("task_id") queryTaskId: string | undefined,
+    @Body() body: unknown,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const input = parseOrThrow(z.object({ task_id: z.string().min(1).optional() }), body ?? {});
+    await this.pipeTaskStream(req, queryTaskId ?? input.task_id, reply);
+  }
+
+  /** GET / POST 两条流共用的取数与校验（避免两份鉴权/参数校验漂移） */
+  private async pipeTaskStream(
+    req: AuthedRequest,
+    taskId: string | undefined,
+    reply: FastifyReply,
+  ): Promise<void> {
     const a = this.auth(req);
     if (!taskId) throw new AppError(ErrorCode.INVALID_PARAM, "task_id is required", { field: "task_id" });
     await this.stream.pipeTask(reply, a.spaceId, taskId);

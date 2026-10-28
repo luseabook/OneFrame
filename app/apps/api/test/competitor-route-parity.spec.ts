@@ -10,8 +10,8 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的九组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
- * task 17 / home 5 / share 5 / ops_market 18，共 178 条，来自
+ * 本文件把竞品的十一组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12，共 219 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -24,8 +24,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：九组共 178 条竞品操作。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #8 / #10 / #21 / #24 / #26 / #27 七行的
+ * 数字口径：十一组共 219 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #8 / #10 / #12 / #21 / #24 / #26 / #27 九行的
  * 「逐条对照」说法。
  */
 
@@ -351,6 +352,72 @@ const NOVEL_ADMIN_PAIRS: Array<[shape: string, ours: string, reason: string]> = 
 ];
 const OPS_MARKET_SHAPES = NOVEL_ADMIN_PAIRS.map(([shape]) => shape);
 
+/**
+ * #12 剧本广场（消费侧）：竞品 29 条，前缀 `/web/v1/df/novel_market/*`（第 84 批）。
+ *
+ * 竞品把剧本广场挂在 `df`（剧本文件域）下，我方是独立资源 `/market/*`；`normalize()` 只剥 `/web/v1`，
+ * 所以 29 条全部要登记「我方等价形状」。逐条核过：**方法一致、路径尾段一一对应**，
+ * 差异只有「挂在哪个前缀下」这一层，没有一条需要补别名或补能力。
+ * 管理面 18 条不在这里 —— 它们是 #27 运营后台的对账对象（`NOVEL_ADMIN_PAIRS`），
+ * 此前台账把两边写在一起（「竞品 29+12 全覆盖」）导致同一批行被记了两次，第 84 批已拆开。
+ */
+const NOVEL_MARKET_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  ["GET /web/v1/df/novel_market/scripts", "GET /market/scripts", "竞品消费侧前缀 `df/novel_market`，我方独立资源 `/market/*`；方法一致、尾段同构"],
+  ["GET /web/v1/df/novel_market/scripts/config", "GET /market/scripts/config", "同上：广场配置页"],
+  ["GET /web/v1/df/novel_market/scripts/promotions", "GET /market/scripts/promotions", "同上：推广位列表"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/detail", "GET /market/scripts/{}/detail", "同上：作品详情（参数名 nm_id → id，形状同构）"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/characters", "GET /market/scripts/{}/characters", "同上：角色表"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/episodes", "GET /market/scripts/{}/episodes", "同上：分集表"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/timestamp", "GET /market/scripts/{}/timestamp", "同上：时间轴"],
+  ["POST /web/v1/df/novel_market/scripts/:nm_id/preorder", "POST /market/scripts/{}/preorder", "同上：预约（写动作，方法一致）"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/download", "GET /market/scripts/{}/download", "同上：下载（购买后）"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/author", "GET /market/scripts/{}/author", "同上：作者信息"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/business", "GET /market/scripts/{}/business", "同上：商务信息"],
+  ["POST /web/v1/df/novel_market/scripts/:nm_id/cancelorder", "POST /market/scripts/{}/cancelorder", "同上：取消预约"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/content-tree", "GET /market/scripts/{}/content-tree", "同上：内容树（购买后可读）"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/creator", "GET /market/scripts/{}/creator", "同上：作者简介（广场视角）"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/agreement", "GET /market/scripts/{}/agreement", "同上：授权协议"],
+  ["GET /web/v1/df/novel_market/scripts/:nm_id/agreement-file", "GET /market/scripts/{}/agreement-file", "同上：协议文件"],
+  ["GET /web/v1/df/novel_market/creator/profile", "GET /market/creator/profile", "同上：创作者资料"],
+  ["GET /web/v1/df/novel_market/creator/works", "GET /market/creator/works", "同上：我的作品列表"],
+  ["POST /web/v1/df/novel_market/creator/works/save", "POST /market/creator/works/save", "同上：保存作品草稿"],
+  ["POST /web/v1/df/novel_market/creator/works/:nm_id/submit", "POST /market/creator/works/{}/submit", "同上：提交审核"],
+  ["POST /web/v1/df/novel_market/creator/works/:nm_id/withdraw", "POST /market/creator/works/{}/withdraw", "同上：撤回投稿"],
+  ["POST /web/v1/df/novel_market/creator/works/:nm_id/offline", "POST /market/creator/works/{}/offline", "同上：下架"],
+  ["GET /web/v1/df/novel_market/creator/revenues", "GET /market/creator/revenues", "同上：收益明细"],
+  ["GET /web/v1/df/novel_market/creator/revenues/overview", "GET /market/creator/revenues/overview", "同上：收益概览"],
+  ["GET /web/v1/df/novel_market/creator/works/stats", "GET /market/creator/works/stats", "同上：作品数据"],
+  ["GET /web/v1/df/novel_market/creator/works/:nm_id", "GET /market/creator/works/{}", "同上：作品详情（创作者视角）"],
+  ["GET /web/v1/df/novel_market/creator/works/:nm_id/agreement", "GET /market/creator/works/{}/agreement", "同上：作品的授权协议"],
+  ["GET /web/v1/df/novel_market/creator/works/:nm_id/content-tree", "GET /market/creator/works/{}/content-tree", "同上：作品内容树"],
+  ["POST /web/v1/df/novel_market/creator/works/parse", "POST /market/creator/works/parse", "同上：解析作品（上传剧本 → 结构解析）"],
+];
+const NOVEL_MARKET_SHAPES = NOVEL_MARKET_PAIRS.map(([shape]) => shape);
+
+/**
+ * #4 创作 Agent：竞品 `/web/v1/agent/*` 12 条（第 84 批）。
+ *
+ * 12 条里 7 条同形（其中 `POST /agent/task/stream` 是本批补的别名：竞品是 POST + json body +
+ * query task_id，我方原先只有 GET）、1 条偏离（分享页 SSE）、4 条豁免（`/agent/home/resource/*`
+ * 三条是「有意不做」：竞品只有端点名、无响应体，依赖内容运营表，为"可能不存在的内容模型"设计表
+ * = 凭空造数据；`stt-token` 需要语音服务凭据，属外部输入）。
+ */
+const AGENT_SHAPES = [
+  "POST /web/v1/agent/task/create",
+  "POST /web/v1/agent/task/create-check",
+  "POST /web/v1/agent/task/chat",
+  "POST /web/v1/agent/task/chat-end",
+  "PUT /web/v1/agent/task/:task_id",
+  "POST /web/v1/agent/task/stream",
+  "POST /web/v1/agent/task/batch-download",
+  "GET /web/v1/agent/task/share/:share_id/sse",
+  "GET /web/v1/agent/stt-token",
+  "GET /web/v1/agent/home/resource/recommend",
+  "GET /web/v1/agent/home/resource/info",
+  "GET /web/v1/agent/home/resource/sse",
+];
+
+
 const WAIVED: Record<string, string> = {
   "GET /task/is_first/interact":
     "我方没有「结果互动」概念，`task_events` 也没有 user_id 列 —— 算不出「这个人的首次互动」，硬回一个 true 就是假数据",
@@ -360,6 +427,13 @@ const WAIVED: Record<string, string> = {
     "同上：结果互动需要「谁在什么时候对哪条结果做了什么」的落库模型，`task_events` 缺 user_id，补了也不能去重",
   "POST /task/workflow/retry":
     "我方 Capability 只有 video/image/text/speech/music，没有 workflow 任务实体；workflow 在我方是画布/agent 编排，条目不同",
+  // ---- 第 84 批：#4 创作 Agent 的 4 条 ----
+  "GET /agent/home/resource/recommend":
+    "有意不做（api-spec §14.9.3）：竞品只给了端点名、无响应体证据，推荐位内容是运营依赖；为「可能不存在的内容模型」建表 = 凭空造数据",
+  "GET /agent/home/resource/info":
+    "同上：资源详情同属 agent 首页运营位，缺响应体证据。我方 agent 首页的推荐位按自建口径（`is_home_recommend` 默认全 false）",
+  "GET /agent/home/resource/sse":
+    "同上：运营位实时流；我方分享/会话两条 SSE 已覆盖实时需求，这条没有可复现的帧语义",
 };
 
 /**
@@ -436,6 +510,9 @@ const DEVIATIONS: Record<string, { ours: string; reason: string }> = {
 // 第 83 批：#27 运营后台 18 条（前缀是 `/v1/rmadminsrv`，全部登记我方 `/ops/market/*` 等价物）
 for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)] = { ours, reason };
 
+// 第 84 批：#12 剧本广场消费侧 29 条（前缀 `/df/novel_market` → 我方 `/market/*`）
+for (const [shape, ours, reason] of NOVEL_MARKET_PAIRS) DEVIATIONS[shapeOf(shape)] = { ours, reason };
+
 // 第 83 批：#1 首页 1 条 —— 能力在、形状不同（竞品是「查一次有没有未读」，我方是长轮询）
 DEVIATIONS["GET /msg/exist-unread"] = {
   ours: "GET /home/unread",
@@ -463,6 +540,8 @@ const EXPECTED_COUNTS: Record<string, number> = {
   home: HOME_SHAPES.length,
   share: SHARE_SHAPES.length,
   ops_market: OPS_MARKET_SHAPES.length,
+  novel_market: NOVEL_MARKET_SHAPES.length,
+  agent: AGENT_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -561,9 +640,14 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("PATCH /ops/market/tags/{}")).toBe(true);
     expect(ROUTES.has("GET /home/unread")).toBe(true);
     expect(ROUTES.has("GET /share/{}/stream")).toBe(true);
+    // 第 84 批：剧本广场消费侧（`/market/*`）与 agent 任务流的两条形状（GET 保留 + POST 别名）
+    expect(ROUTES.has("GET /market/scripts/config")).toBe(true);
+    expect(ROUTES.has("GET /market/creator/works/{}")).toBe(true);
+    expect(ROUTES.has("GET /agent/task/stream")).toBe(true);
+    expect(ROUTES.has("POST /agent/task/stream")).toBe(true);
   });
 
-  it("竞品九组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18）", () => {
+  it("竞品十一组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -574,6 +658,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       home: 5,
       share: 5,
       ops_market: 18,
+      novel_market: 29,
+      agent: 12,
     });
     expect(
       FILM_SHAPES.length +
@@ -584,8 +670,10 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         TASK_SHAPES.length +
         HOME_SHAPES.length +
         SHARE_SHAPES.length +
-        OPS_MARKET_SHAPES.length,
-    ).toBe(178);
+        OPS_MARKET_SHAPES.length +
+        NOVEL_MARKET_SHAPES.length +
+        AGENT_SHAPES.length,
+    ).toBe(219);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -597,6 +685,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       home: HOME_SHAPES,
       share: SHARE_SHAPES,
       ops_market: OPS_MARKET_SHAPES,
+      novel_market: NOVEL_MARKET_SHAPES,
+      agent: AGENT_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -685,6 +775,35 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(sameMethod.length).toBe(12);
     expect(OPS_MARKET_SHAPES.length - sameMethod.length).toBe(6);
   });
+  it("#12 剧本广场（消费侧）：29 条全部有等价物（前缀 df/novel_market → 我方 /market，0 缺口）", () => {
+    expect(NOVEL_MARKET_SHAPES.length).toBe(29);
+    expect(missing(NOVEL_MARKET_SHAPES)).toEqual([]);
+    // 前缀不同，29 条全走 DEVIATIONS；但方法必须与竞品一致（这一组没有方法偏离）
+    const deviated = NOVEL_MARKET_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    expect(deviated.length).toBe(29);
+    const sameMethod = NOVEL_MARKET_SHAPES.filter((raw) => {
+      const shape = shapeOf(raw);
+      return DEVIATIONS[shape]!.ours.startsWith(`${shape.split(" ")[0]} `);
+    });
+    expect(sameMethod.length).toBe(29);
+  });
+
+  it("#4 创作 Agent：12 条里 8 条同形 + 1 条偏离 + 3 条豁免", () => {
+    expect(AGENT_SHAPES.length).toBe(12);
+    expect(missing(AGENT_SHAPES)).toEqual([]);
+    const exact = AGENT_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = AGENT_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = AGENT_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    expect(exact.length).toBe(8);
+    expect(deviated).toEqual(["GET /web/v1/agent/task/share/:share_id/sse"]);
+    expect(waived.length).toBe(3);
+    expect(exact.length + deviated.length + waived.length).toBe(AGENT_SHAPES.length);
+    // `stt-token` 是**已实现**的（无 Key 时 200 + available:false），不能算豁免 —— 缺的是真实凭据，不是端点
+    expect(ROUTES.has("GET /agent/stt-token")).toBe(true);
+    // 那条偏离指向分享页的匿名 SSE（同一形状第 83 批已为 #26 登记过）
+    expect(DEVIATIONS["GET /agent/task/share/{}/sse"]!.ours).toBe("GET /share/{}/stream");
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -697,12 +816,15 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...HOME_SHAPES,
         ...SHARE_SHAPES,
         ...OPS_MARKET_SHAPES,
+        ...NOVEL_MARKET_SHAPES,
+        ...AGENT_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只给 #24 开过口子：以后想给别的域用，必须显式改这条断言并在台账记账
-    const taskShapes = new Set(TASK_SHAPES.map(shapeOf));
-    expect(Object.keys(WAIVED).filter((shape) => !taskShapes.has(shape))).toEqual([]);
+    // 豁免只在两个域开过口子：#24 任务（缺数据模型）与 #4 Agent（有意不做 + 外部凭据）。
+    // 以后想给别的域用，必须显式改这条断言并在台账记账。
+    const waiverScope = new Set([...TASK_SHAPES, ...AGENT_SHAPES].map(shapeOf));
+    expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);
   });
 });

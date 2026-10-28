@@ -127,6 +127,71 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.38 · 第 84 批：#12 剧本广场的「竞品 29+12」是重复记账、#4 创作 Agent 有一条「只登记没实现」）
+
+**一、这批在回答什么问题**
+
+第 83 批发现「竞品端点列」本身会记错（#27 写的 12 条其实是 18 条）。于是本批继续验剩下两个 XL(20) 里最没底的：
+#12 剧本广场（台账自称「竞品 29+12 全覆盖」）与 #4 创作 Agent（12 条竞品路由，0.80 是当时剩余里最大的一项）。
+要回答的不是「有没有做」，而是「那 29+12 和那 12 到底是哪几条、我方的对应物在哪、差的是形状还是能力」。
+
+**二、47 行怎么拆（记账错误的来历）**
+
+| 侧 | 前缀 | 行数 | 归属 |
+|---|---|---:|---|
+| 消费侧 | `/web/v1/df/novel_market/*` | 29 | #12 剧本广场 |
+| 管理侧 | `/v1/rmadminsrv/novel_market/*` | 18 | #27 运营后台（第 83 批已归） |
+
+所以 #12 的「+12」就是管理侧那批行 —— 同一批行被 #27 与 #12 各算了一次。这不是「少做了 12 条」，是**把别人的 12 条算进自己的覆盖率里**，属于记账错误；本批把它修成「消费侧 29 条全覆盖」。
+
+**三、#12 消费侧 29 条：零缺口，只差前缀**
+
+逐条对完：**29 条全部有等价物**，差的是前缀 `df/novel_market` → `market`，方法全一致、尾段一一对应（`scripts` / `scripts/:id/detail` / `scripts/config` / `scripts/promotions` / `creator/works` / `creator/withdraw*` 等）。我方另多 7 条自建能力：买断（`POST /market/scripts/:id/buy`）、解析（`POST /market/scripts/:id/parse`）、创作者作品增改（`POST/PATCH /market/creator/works*`）、提现三件（申请 / 列表 / 撤销）。多出来的不算缺口，只是口径更宽。
+
+**四、#4 创作 Agent 12 条：8 同形 + 1 偏离 + 3 豁免**
+
+| 分类 | 条数 | 具体 |
+|---|---:|---|
+| 同形 | 8 | `task/create`、`task/create-check`、`task/chat`、`task/chat-end`、`PUT task/{id}`、`POST task/stream`（本批补齐）、`POST task/batch-download`、`GET stt-token` |
+| 偏离 | 1 | `GET task/share/{share_id}/sse` → 我方 `GET /share/{token}/stream`（token 替代 share_id，第 83 批已为 #26 登记过一次） |
+| 豁免 | 3 | `GET home/resource/{recommend,info,sse}` —— 竞品只有端点名、无响应体，依赖内容运营表，属「为可能不存在的内容模型设计表」，`api-spec.md §14.9.3` 早已登记「有意不做」 |
+
+**五、唯一真补：`POST /agent/task/stream`**
+
+竞品这条是 `POST + json body + query task_id`（bundle 里 `requestDataJsonSchema` 为空，只有方法/形状有证据），我方原先只有 `GET ?task_id=`。有意思的是 GET 那段的 JSDoc 里**早就写了「差异已登记」** —— 但登记不等于实现，按竞品形状发 POST 的客户端拿到的仍是 404。本批抽 `pipeTaskStream(req, taskId, reply)` 给两条共用（鉴权、缺参校验、错误码只有一份实现），入参优先级 **`query` > `body`**，两条都走 `@SkipEnvelope()` + SSE。
+
+**六、顺带纠正一个旧说法：`GET /agent/stt-token` 是已实现的**
+
+它一直躺在 #4 的缺口栏里，看起来像「端点不存在」。实测 `agent-stt.controller.ts` 早就有它：无 Key 时 `200 + available:false`（不暴露空壳），另有 `POST /agent/stt/transcribe` 中继（`@Public` + 票据 `aud=agent-stt`）。缺的是**真实凭据**，不是端点。本批用 `expect(ROUTES.has("GET /agent/stt-token")).toBe(true)` 把这条事实锁进守卫。
+
+**七、守卫从九组 178 条扩到十一组 219 条**
+
+- `NOVEL_MARKET_PAIRS`(29)：成对登记「竞品形状 → 我方等价物 + 理由」，避免只改一边导致白名单指向不存在的路径；
+- `AGENT_SHAPES`(12)：8/1/3 三类分别断言条数，偏离必须是那一条、豁免必须都在；
+- `WAIVED` 作用域从「⊆ `TASK_SHAPES`」显式扩成「⊆ `TASK_SHAPES ∪ AGENT_SHAPES`」——注释写明「开这个口子必须改这条断言」，避免以后随便往豁免里塞东西；
+- 反向验证：把 `@Post("task/stream")` 改名 `-BROKEN` → **3 例红**（parity 自检锚点、`#4` 分类例、agent 的 POST 别名功能例），改回后 28/28 绿。
+
+**八、验证与数字**
+
+| 项 | 改前 | 改后 |
+|---|---:|---:|
+| 守卫形状（`competitor-route-parity.spec.ts`） | 178 条 / 12 例 | **219 条 / 14 例** |
+| `agent.spec.ts` | 13 例 | **14 例** |
+| api 全量 | 84 文件 941 例 | **84 文件 944 例** |
+| 用例总数 | 1,342 | **1,345** |
+| 端点（`-ScaleOnly`） | 738 | **739** |
+| 12 项门禁 | 12/12 | **12/12**（`_acceptance/out_gate_r84.txt`） |
+| scoreboard | 202.43 / 剩余 3.57 | **202.43 / 剩余 3.57（不变）** |
+
+**九、诚实边界**
+
+1. 守卫只比 METHOD + path，不比 query/body 语义；`task/stream` 的「query 优先」是我方口径，竞品 body 里到底放什么**无证据**；
+2. `/agent/home/resource/*` 仍是「有意不做」而不是「做到了」——豁免是「允许缺」，不是「已经补上」；
+3. #12 的 0.64（真实打款/资质合规、买断后二次改编、作品解析产出未取证）与 #4 的 0.80（真实 ASR 凭据、Skill 运营位内容）**本批一分未清**，只把背后的路由事实钉住；
+4. 管理侧那 18 行仍按 #27 记账，本批没有改它的分数；
+5. 豁免与偏离都是快照式登记：竞品改路由、我方改命名，都要人工同步这三张表，测试只能保证「今天登记的和今天实现的对得上」。
+
+
 ## 变更登记（v6.37 · 第 83 批：审计完剩下的三个满分模块 —— #27 的「竞品 12 条」是记账错误，实际 18 条且在别的域下 · 2026-10-28）
 
 ### 一、这批要回答的问题

@@ -4034,3 +4034,72 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 4. `.tsv` 里的 `/v1/rmopsrv/abtest/consume`（1 行）意图无证据，`/v1/rmdfsrv/*`（4 行）、`/v1/rmaisrv/*`（2 行）属 #2/#4 侧，
    本批未归属；
 5. 守卫是快照式：竞品新增 `/v1/rmadminsrv/*` 路由要人工加进 `NOVEL_ADMIN_PAIRS`。
+
+## 17.41 Agent 任务进度流的两种调用形状，与「竞品管理面」的记账归属（第 84 批）
+
+> 本节解决两个具体问题：① 竞品的任务进度流是 `POST`，我方原先只有 `GET`，按竞品形状写客户端会 404；② 台账里 `#12 剧本广场` 的「竞品 29+12 全覆盖」把 `#27` 的管理面又算了一遍 —— 同一批 18 行被两个模块重复记账。
+
+### 41.1 为什么这条进 API 文档
+
+`POST /agent/task/stream` 不是一个后台细节：它返回的是 `text/event-stream`，客户端要按 SSE 帧解析，且"用 query 还是 body 传 `task_id`"直接决定调用方怎么写。第 80–83 批把「竞品形状 vs 我方形状」的差异都记进了守卫，但**记进守卫不等于客户端能打通**（第 81 批 kds 的 8 条 POST 别名就是这个教训），所以本批把这条补上并写清契约。
+
+### 41.2 契约：`POST /agent/task/stream`
+
+| 输入位置 | 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| query | `task_id` | string | 二者其一 | 优先于 body |
+| body | `task_id` | string | 二者其一 | `{ "task_id": "…" }` |
+
+| 情况 | 结果 |
+|---|---|
+| 两个位置都没给 | `400101`，msg `task_id is required` |
+| `task_id` 非法（`abc`） | `400101`，msg 含 `invalid task_id` |
+| `task_id` 合法但不存在 / 不在本 space | `400102` |
+| 成功 | `text/event-stream`（`@SkipEnvelope()`，无 JSON 信封），帧格式见 §17.35 |
+
+同时保留 `GET /agent/task/stream?task_id=`：已有客户端、文档与测试都按它写，改成 POST-only 是**破坏**；两条共用同一段实现（`pipeTaskStream()`），避免鉴权与校验漂移。
+
+### 41.3 为什么是「别名」而不是「替换」
+
+| | 第 81 批 kds | 第 84 批 agent |
+|---|---|---|
+| 差什么 | METHOD（竞品 POST / 我方 GET） | METHOD（同上） |
+| 客户端能改吗 | 能，但改了就和竞品文档不一致 | 同上 |
+| 处理 | 补 POST 别名，GET 保留 | **补 POST 别名，GET 保留** |
+| 理由 | 同名路径两种调用形状，成本极低即可兼容 | 同上；且这条是 SSE，重复实现代价高，所以抽公共函数 |
+
+判断标准是「**同一个能力、同一个响应语义、只是入口形状不同**」——满足就补别名；如果语义也不同（例如竞品是"打包 zip"、我方是"给 URL 列表"），就不能靠别名，必须显式登记为偏离。
+
+### 41.4 #4 的 12 条：三类缺口
+
+| 分类 | 条数 | 例子 | 处理 |
+|---|---:|---|---|
+| 同形 | 8 | `task/chat`、`task/create`、`PUT task/{id}`、`stt-token` | 无需动作；`stt-token` 无 Key 时 `200 + available:false` |
+| 偏离 | 1 | `GET task/share/{share_id}/sse` | 登记为偏离：我方用不可猜的 `token`，落 `GET /share/{token}/stream` |
+| 豁免 | 3 | `GET home/resource/{recommend,info,sse}` | 登记为「有意不做」：竞品只有端点名、无响应体（§14.9.3） |
+
+### 41.5 记账修正：#12 的「29+12」
+
+竞品 `novel_market` 共 47 行，按前缀拆开：
+
+| 侧 | 前缀 | 行数 | 归属 |
+|---|---|---:|---|
+| 消费侧 | `/web/v1/df/novel_market/*` | 29 | `#12 剧本广场` |
+| 管理侧 | `/v1/rmadminsrv/novel_market/*` | 18 | `#27 运营后台`（第 83 批已归） |
+
+`#12` 原先写的「竞品 29+12 全覆盖」里的 12 来自管理侧（且不完整：管理侧是 18），同一批行被两个模块各算一次。本批把 `#12` 的竞品基准改为「消费侧 29 条」，并逐条验证：29 条方法全一致、尾段一一对应，只差前缀；我方另多 7 条自建能力（买断 / 解析 / 创作者作品与提现）。
+
+### 41.6 守卫与测试
+
+- `competitor-route-parity.spec.ts`：新增 `NOVEL_MARKET_PAIRS`(29) 与 `AGENT_SHAPES`(12)，形状总数 178 → **219**；`WAIVED` 作用域显式扩到 `TASK_SHAPES ∪ AGENT_SHAPES`；
+- `agent.spec.ts`：新增 1 例覆盖「无参 400101 / 非法 id 400101 / 不存在 400102 / query 优先 / GET 行为不变」；
+- 反向验证：把 `@Post("task/stream")` 改名 `-BROKEN` → 3 例红（含 `deviation target missing`），改回 28/28 绿；
+- 功能与守卫之外，`12/12` 门禁与 `_acceptance/scoreboard.py` 均在本批跑过。
+
+### 41.7 边界
+
+1. 只比 METHOD + path：`query` vs `body` 的优先级是我方口径，竞品 body 里放什么**无字段证据**（`requestDataJsonSchema` 为 `{}`）；
+2. `stt-token` 的「已实现」指**端点与降级语义**在，真实 ASR 仍需语音服务凭据（外部输入）；
+3. `/agent/home/resource/*` 仍是「有意不做」，豁免不等于实现；
+4. 管理侧 18 行的分数归 `#27`，本批不动；
+5. 偏离/豁免是快照式登记，竞品或我方改路由都要人工同步。

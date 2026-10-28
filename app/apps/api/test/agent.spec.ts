@@ -424,4 +424,30 @@ describe("agent e2e", () => {
     expect(rows[0]?.scope).toBe(1);
     expect(rows[0]?.canvas_id).toBeNull();
   }, 60_000);
+
+  it("任务进度流：竞品是 POST，我方 GET 保留 + POST 别名（第 84 批）", async () => {
+    // 竞品形状：POST /web/v1/agent/task/stream（json body + query task_id）。
+    // 先把三种"写不进 SSE 之前就会抛错"的路径验掉 —— 它们证明 POST 路由真的到了同一个处理函数。
+    const noId = await inject("POST", "/agent/task/stream", {});
+    expect(noId.code).toBe(400101);
+    expect(noId.msg).toContain("task_id");
+
+    const badBody = await inject("POST", "/agent/task/stream", { task_id: "abc" });
+    expect(badBody.code).toBe(400101);
+    expect(badBody.msg).toContain("invalid task_id");
+
+    // body 里的 task_id 真的被取到了：不存在的任务 → 400102（不是 400101）
+    const missing = await inject("POST", "/agent/task/stream", { task_id: "999999999999999999" });
+    expect(missing.code).toBe(400102);
+
+    // query 与 body 同时给时 query 优先
+    const byQuery = await inject("POST", "/agent/task/stream?task_id=abc", { task_id: "999999999999999999" });
+    expect(byQuery.code).toBe(400101);
+    expect(byQuery.msg).toContain("invalid task_id");
+
+    // GET 仍然可用（EventSource 只能发 GET），行为与 POST 一致
+    const legacy = await inject("GET", "/agent/task/stream?task_id=abc");
+    expect(legacy.code).toBe(400101);
+    expect(legacy.msg).toContain("invalid task_id");
+  }, 30_000);
 });
