@@ -3435,3 +3435,66 @@ ttl   60s（HEARTBEAT_TTL_S） + 1      # 整 hash 一起过期
 - 本轮**不改任何服务端/前端代码**；本节是把既存行为写成契约，不是新增契约。
 - 未覆盖：第三人及以上的并发、断线重连后的心跳补发、跨设备（不同 UA）的渲染差异、
   以及"两个人在不同节拍上同时保存"的高并发时序。
+
+
+## 17.34 整集导出的镜头裁剪：`clip_trim` 契约与「包里写的时长」（第 77 批）
+
+### 34.1 为什么要把一件 worker 内部的事写进 API 文档
+
+`POST /v1/script/projects/:id/episodes/:eid/film-synthesis-export`（整集导出）返回的是**一个 zip 产物**。
+调用方（前端、CLI、外部集成）不解析 zip，但会读 `file_uri` 之后下载、交给下游拼片，并依据 **`manifest.json` 里的
+`duration_s`** 决定「这个镜头占多久」。
+
+第 77 批之前，manifest 的 `duration_s` 与 zip 内 mp4 的真实时长可以不一致：文件是把生成结果原样复制的，
+而 `duration_s` 写的是分镜表里 authored 的值。这属于**产物契约**问题（不是内部实现），所以记在这里。
+
+### 34.2 处理规则（`trimShotBuffer`）
+
+| 条件 | 处理 | manifest `file_duration_mode` |
+|---|---|---|
+| `durationS` 为空 / `null` / 非有限 / ≤0 | 不裁，原样写入 zip | `copy`（`trim_reason = "storyboard has no authored duration to trim to"`） |
+| `1 ≤ durationS ≤ 30` | `trimVideoBuffer(buf, 0, round(durationS)*1000)` | 成功 `ffmpeg`；失败 `copy` + ffmpeg 原因 |
+| `durationS` 超出 1..30 | 先钳位到 `1..30` 再裁 | 同上 |
+
+### 34.3 manifest 字段（追加，向后兼容）
+
+`manifest.clip_trim`：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `mode` | `"ffmpeg" \| "copy" \| "mixed"` | 全裁 / 全没裁 / 混合；**不留「看起来都一样」的模糊态** |
+| `trimmed` | number | 成功裁过的镜头数 |
+| `copied` | number | 原样复制的镜头数 |
+| `reasons[]` | string[] | 去重后的降级原因（例如 ffmpeg 不可用） |
+
+`manifest.shots[]` 新增：
+
+| 字段 | 含义 |
+|---|---|
+| `duration_s` | 分镜表 authored 时长（语义未变） |
+| `file_duration_s` | 我们要求裁到的时长；`copy` 时为 `null`（长度由源视频决定） |
+| `file_duration_mode` | `ffmpeg` / `copy` |
+| `trim_reason` | `copy` 时的原因，`ffmpeg` 时为 `null` |
+| `source_bytes` / `file_bytes` | 裁剪前后字节数（便于确认「真的换了内容」） |
+
+### 34.4 降级与失败语义
+
+- **裁剪失败不是导出失败**：`runExport` 不会因为 `trimVideoBuffer` 返回 `ok:false` 而把 `exports.status` 置 4；
+  它复制原文件并在 manifest 里写原因。导出作业只有在「成功镜头 < 80%（400106）」或打包异常（500000）时才失败。
+- **没有 ffmpeg 的部署**：`main.ts` 的 `episodeExportDeps` 把 `FFMPEG_PATH` 传进 zip 通道；未配置时走 PATH 探测，
+  探测不到即全量 `copy`。这与 `GET /v1/meta/capabilities` 暴露的 `ffmpeg` 能力一致。
+
+### 34.5 测试与验证
+
+`apps/worker/test/export-trim.spec.ts` 9 例：4 例 `trimShotBuffer` 注入点（不猜时长 / 失败退 copy 带原因 /
+成功记 ffmpeg 与 authored 时长 / 1..30 钳位）+ 5 例 DB 端到端（注入成功 → zip 内字节确为裁后字节且
+`clip_trim.mode="ffmpeg"`；注入失败 → `"copy"` + `reasons`；无时长 → `"copy"` + 原因；两例真 ffmpeg 用
+ffprobe 复核源 5s → zip 内 ≈2s）。反向验证：强制返回 copy → 7 例红。
+
+### 34.6 诚实边界
+
+- 只覆盖**首尾对齐的前 N 秒**（`-ss 0 -to N`），不做智能选段 / 关键帧对齐。
+- `file_duration_s` 是「请求的时长」，实际输出有帧对齐的毫秒级差异（测试按 1.5–2.6s 区间断言）。
+- `quality-check` 的评分口径（竞品 `requestDataJsonSchema` 是空对象）**不在本批范围**，仍是 #3 的 E 类 0.13。
+- 成片合成通道（`timeline-export`）与本批的 zip 通道各自独立实现裁剪，共用 `@app/shared/ffmpeg-trim`；
+  两处的 `durationS` 语义一致（分镜 authored 时长），但没有做「一次抽公共合成器」的重构 —— 属于后续可选项。

@@ -151,6 +151,17 @@ const timelineExportDeps = {
 };
 
 /**
+ * 整集导出（zip 打包）：第 77 批起每个镜头文件按分镜表时长真裁，
+ * 因此同样需要 ffmpeg 路径。没配就退回「复制 + manifest 记原因」，不会失败。
+ */
+const episodeExportDeps = {
+  db,
+  storage,
+  ffmpegPath: process.env.FFMPEG_PATH,
+  log: (obj: Record<string, unknown>, msg: string) => log.info(obj, msg),
+};
+
+/**
  * 启动时记录媒体能力（`ffmpeg`）。
  *
  * 为什么放在启动日志里：`ffmpeg` 决定"真裁剪/显式水印"能不能做，是**部署环境属性**。
@@ -307,7 +318,7 @@ const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
       if (name === QUEUES.EXPORT) {
         const exportId = (job.data as { exportId?: string }).exportId;
         if (!exportId) throw new Error("missing exportId");
-        await runExport(exportId, { db, storage, log: (obj, msg) => log.info(obj, msg) });
+        await runExport(exportId, episodeExportDeps);
         return { ok: true, exportId };
       }
       if (name === QUEUES.TIMELINE_EXPORT) {

@@ -127,6 +127,77 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.31 · 第 77 批：#3 剧集分镜「真 ffmpeg 切片裁剪」—— zip 包里写的时长，从来不是包里视频的时长 · 2026-10-28）
+
+### 一、缺口长什么样（台账原话）
+
+`docs/07-plan/implement-progress-vs-reelmate.md` 的 #3 行缺口栏、以及 §5.5 表 A 的判据栏，写的是同一句话：
+
+> `quality-check` 评分口径自建（竞品只有路由、无响应字段证据）；**真 ffmpeg 切片裁剪待 worker handler**。
+
+第二句被判成 **I 类（内部可做、只是没排期）**，占 #3 剩余 0.15 里的 0.02。
+
+### 二、为什么「要新增 handler」这个判断不准
+
+这句话是我自己写的，复核时发现它把两件不同的事当成了同一件：
+
+| 通道 | 谁在裁 | 状态 |
+|---|---|---|
+| **成片合成**（`app/apps/worker/src/timeline-export.ts:82-130`） | `normalizeSegment` 用 `-t String(durationS)` 真裁，`mockSegment` 用 lavfi 造对应时长 | 早就裁了 |
+| **切片发布**（#20，第 57 批） | `publish.transcode` 异步下沉 worker，`PUBLISH_TRANSCODE_MODE` | 早就裁了 |
+| **整集导出 zip**（`app/apps/worker/src/export.ts`） | `zip.file(fileName, await readResult(...))` —— **原样复制** | 没裁 |
+
+第三条才是真缺口，而且它比「没裁」更难受：`manifest.json` 里每个镜头一直写着 `duration_s: shot.durationS`，
+可那个 mp4 文件是生成模型的原始产物，长度是模型自己定的。于是**「包里写的时长」和「包里视频的实际时长」
+是两回事** —— 下游拿到 zip 后按 manifest 拼片，会得到一段对不齐的片子，而且没有任何地方看得出「这包没裁」。
+
+### 三、改了什么
+
+新增 `trimShotBuffer(source, durationS)`（`app/apps/worker/src/export.ts`）：
+
+| 输入 | 行为 | manifest 记什么 |
+|---|---|---|
+| `durationS` 为空 / 非有限 / ≤0 | **不裁**，原样写入 | `mode:"copy"`、`reason:"storyboard has no authored duration to trim to"` |
+| `1..30` 秒（与 `storyboards.duration_s` 契约一致） | `trimVideoBuffer(source, 0, authored*1000)` | 成功 `mode:"ffmpeg"`、`file_duration_s: authored`；失败 `mode:"copy"` + ffmpeg 给的原因 |
+| 超出 1..30 | 先 `clamp(round(x), 1, 30)` 再裁 | 同上（`file_duration_s` 记钳位后的值） |
+
+manifest 新增两层留痕（都是**追加字段**，老消费者不受影响）：
+
+- 汇总：`clip_trim: { mode: "ffmpeg" | "copy" | "mixed", trimmed, copied, reasons[] }`
+- 逐镜：`file_duration_s`、`file_duration_mode`、`trim_reason`、`source_bytes`、`file_bytes`
+
+另外 `app/apps/worker/src/main.ts` 新增 `episodeExportDeps`（含 `ffmpegPath: process.env.FFMPEG_PATH`）——
+此前 zip 通道的 deps 只有 `db/storage/log`，**根本拿不到 ffmpeg 路径**，这也是它一直只复制的原因之一。
+
+### 四、三个不显然的决定
+
+1. **不猜时长**：分镜表没写时长的镜头，宁可原样交付也不裁 1 秒。猜出来的时长会**静默截短用户的片子**，
+   而「包里多了 3 秒」比「内容被砍掉」容易发现得多。
+2. **失败不失败**：与 #20 的切片发布同一套诚实降级口径 —— 部署机没有 ffmpeg 时导出仍要能出包（复制），
+   但必须让人从 manifest 的 `clip_trim.mode` 看出「这一包没裁」。`runExport` 不会因为裁剪失败而转 FAILED。
+3. **注入点**：`ExportDeps.trim` 是给测试用的，让「裁 / 不裁 / 降级」三条分支都能在**没有 ffmpeg 的机器**上测，
+   真 ffmpeg 的两例才 `skipIf`。否则这类逻辑在 CI 里只能测到「复制」一条路。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| `apps/worker/test/export-trim.spec.ts` | **9 例全绿**（4 例 `trimShotBuffer` 注入点 + 5 例 DB 端到端，其中 2 例真 ffmpeg） |
+| 真 ffmpeg 端到端 | 源 5s → 分镜 2s → zip 内文件 ffprobe ≈2s（断言 1.5–2.6s） |
+| 反向验证 | 把 `trimShotBuffer` 强制返回 copy → **7 例红**（`expected 'copy' to be 'ffmpeg'`），改回即绿 |
+| worker 全量 | 10 文件 **61 例**（原 9 文件 52 例） |
+| 总闸 | `pwsh _acceptance/verify-round.ps1` → **12/12 全绿** |
+| 规模 | endpoints 712 / migrations 45 / tables 112 均不变；用例合计 1,295 → **1,304** |
+
+### 六、诚实边界
+
+- 只改**整集导出 zip 通道的文件内容**；`quality-check` 评分口径（竞品 `ApiDfEpisodeEpIdQualityCheckPostRequestConfig`
+  的 `requestDataJsonSchema` 是空对象）仍是 **E 类 0.13**，本批不动。
+- 裁的是**首尾对齐**的前 N 秒（`-ss 0 -to N`），不做智能选段 / 场景检测。
+- `file_duration_s` 表达的是「我们要求裁到多久」；ffmpeg 输出受帧对齐影响有毫秒级差异，所以测试按区间断言而不是等值。
+- 本批**加分 0.02**（#3 95% → 95.7%，全站 202.52/206），来源是「缺口栏里那条 I 类真的消失了」，
+  不是把权重或完成度四舍五入。
+
 ## 变更登记（v6.30 · 第 76 批：#19 3D 导演台「真实双人协同」—— 两个真浏览器，不是 Redis 里的一行心跳 · 2026-10-28）
 
 ### 一、缺口长什么样
