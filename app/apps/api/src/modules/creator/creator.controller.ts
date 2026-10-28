@@ -24,6 +24,18 @@ const pageQuery = z.object({
 
 const pageBody = pageQuery;
 
+/**
+ * 「我的作品」列表筛选：GET 走 query、POST 走 body，规则必须完全一致。
+ * 抽出来是因为两条路由（`assets/me` 的 GET 与 POST）共用它——
+ * 复制一份 zod 的后果是两边漂移，而漂移只有调用方才会发现。
+ */
+const myAssetsSchema = z.object({
+  status: z.coerce.number().int().min(1).max(5).optional(),
+  kind: z.coerce.number().int().min(1).max(3).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 const assetInputBody = z.object({
   title: z.string().min(1).max(80),
   summary: z.string().max(1000).optional(),
@@ -88,6 +100,19 @@ export class CreatorController {
   /** rt:303 `crc/user/info` */
   @Get("user/info")
   async userInfo(@Req() req: AuthedRequest) {
+    return this.creator.profileInfo(await this.ctx(req));
+  }
+
+  /**
+   * rt:303 `crc/user/info` 的 POST 形状。
+   *
+   * 竞品把"读自己的资料"写成 POST（`_acceptance/competitor_endpoints.tsv` 里是
+   * `POST /web/v1/crc/user/info`），路径与语义都和 GET 完全一样，只是方法不同。
+   * 这里保留两种方法：GET 是 REST 的正确形状，POST 是给「照竞品前端写的调用方」的别名。
+   * body 一律忽略——资料只由登录身份决定，带参数进来也没有可读的东西。
+   */
+  @Post("user/info")
+  async userInfoPost(@Req() req: AuthedRequest) {
     return this.creator.profileInfo(await this.ctx(req));
   }
 
@@ -202,16 +227,16 @@ export class CreatorController {
   @Get("assets/me")
   async assetsMe(@Req() req: AuthedRequest, @Query() query: unknown) {
     const m = await this.ctx(req);
-    const q = parseOrThrow(
-      z.object({
-        status: z.coerce.number().int().min(1).max(5).optional(),
-        kind: z.coerce.number().int().min(1).max(3).optional(),
-        page: z.coerce.number().int().min(1).optional(),
-        page_size: z.coerce.number().int().min(1).max(100).optional(),
-      }),
-      query ?? {},
-    );
+    const q = parseOrThrow(myAssetsSchema, query ?? {});
     return this.creator.myAssets(m, { status: q.status, kind: q.kind, page: q.page, pageSize: q.page_size });
+  }
+
+  /** rt:286 `crc/assets/me` 的 POST 形状（竞品用 POST 传筛选条件，body 与 GET 的 query 同构） */
+  @Post("assets/me")
+  async assetsMePost(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const m = await this.ctx(req);
+    const b = parseOrThrow(myAssetsSchema, body ?? {});
+    return this.creator.myAssets(m, { status: b.status, kind: b.kind, page: b.page, pageSize: b.page_size });
   }
 
   /** rt:281 `crc/assets/auditing/list` */
@@ -350,6 +375,20 @@ export class CreatorController {
     const m = await this.ctx(req);
     const q = parseOrThrow(z.object({ id: z.string().min(1) }), query ?? {});
     return this.creator.filePreview(m, q.id);
+  }
+
+  /**
+   * rt:293 `crc/file_preview` 的 POST 形状。
+   *
+   * 竞品用 POST 传 `id`；这里同时接受 body 与 query，body 优先——
+   * 照竞品前端写的调用方只发 body，照我方文档写的调用方只发 query，两种都能通。
+   */
+  @Post("file_preview")
+  async filePreviewPost(@Req() req: AuthedRequest, @Query() query: unknown, @Body() body: unknown) {
+    const m = await this.ctx(req);
+    const source = { ...(query as object | undefined), ...(body as object | undefined) };
+    const b = parseOrThrow(z.object({ id: z.string().min(1) }), source);
+    return this.creator.filePreview(m, b.id);
   }
 
   // ── 活动位（rt:275-278）────────────────────────────────────

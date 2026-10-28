@@ -367,6 +367,27 @@ export class FilmController {
     return this.tasks.query(spaceId, table, userId, input);
   }
 
+  /**
+   * 表格主查询的 POST 形状 —— 竞品就是用 POST 调它
+   * （`POST /web/v1/film/projects/:project_id/task-tables/:table_id/tasks/query`，
+   * 见 `_acceptance/competitor_endpoints.tsv`）。
+   *
+   * 我方先做了 GET 版（`filters`/`sorts` 走 JSON 字符串 query），能力是齐的，
+   * 但「照竞品写的调用方」按 METHOD+path 找会 404。两条并存：
+   * body 直接用既有的 `filmTaskQuerySchema`（筛选已是数组，不需要 JSON 字符串那层转义）。
+   */
+  @Post("projects/:project_id/task-tables/:table_id/tasks/query")
+  async queryTasksPost(
+    @Req() req: AuthedRequest,
+    @Param("project_id") projectId: string,
+    @Param("table_id") tableId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId, userId, table } = await this.tableCtx(req, projectId, tableId, "read");
+    const input: FilmTaskQueryRequest = parseOrThrow(filmTaskQuerySchema, body ?? {});
+    return this.tasks.query(spaceId, table, userId, input);
+  }
+
   @Post("projects/:project_id/task-tables/:table_id/tasks")
   async createTask(
     @Req() req: AuthedRequest,

@@ -127,6 +127,77 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.34 · 第 80 批：把「100%」用 120 条竞品路由逐条对过，并固化成测试 · 2026-10-28）
+
+### 一、这批要回答的问题
+
+上一批（v6.33）审计 #7 团队时得出一个判断：**「100%」只应出现在「竞品路由逐条对过、一条不缺」的地方**。三个 XL(20) 里只查了一个，剩下 **#8 影视版** 与 **#10 活动/创作者** 仍是自证的 100%。这批把它们也逐条对一遍，而且不接受「对过一遍、写进文档、以后靠人记得」——**把对照固化成测试**。
+
+### 二、对账结果（120 条 METHOD+path）
+
+竞品来源 `_acceptance/competitor_endpoints.tsv`（904 行），四组：
+
+| 组 | 竞品条数 | 我方 | 结论 |
+|---|---:|---|---|
+| `film` | 48（37 路径 / 48 操作） | `film.controller.ts` 50 + func-whitelist 1 | **只差 1 条**：竞品 `POST …/task-tables/:table_id/tasks/query`，我方只有同路径 GET |
+| `crc` | 30 | `creator.controller.ts` 32 | 差 3 条，**全是方法差异**：`POST user/info`、`POST assets/me`、`POST file_preview`（竞品把查询写成 POST） |
+| `op` | 35 | `op.controller.ts` 42 | 差 2 条 GET：`register-questionnaire`（我方 `GET /op/questionnaire` 是等价物）、**`beta-questionnaire`（真缺口）** |
+| `campaign` | 7 | `campaign.controller.ts` 9 | **全部是命名偏离**：竞品单数 `campaign` 且不带资源 id，我方 `campaigns` + `:id`（ADR-009 已登记） |
+
+**`GET /op/beta-questionnaire` 是本批唯一的真能力缺口**：我方只有「提交内测申请表」（`POST beta-questionnaire`）和「是否已填」（`GET beta-questionnaire/check`），却没有「取内测申请表的题目定义」。前端要渲染这张表，只能把题目**写死在页面里**——题目一改就得发版，而且 `beta-questionnaire-abroad` 的题面与国内不同，写死等于两份真相。
+
+### 三、补了什么（6 条别名）
+
+| 域 | 新增 | 怎么实现 |
+|---|---|---|
+| film | `POST …/task-tables/:table_id/tasks/query` | body 直接是 `{filters, sorts, roots_only, page, page_size}`，不需要 GET 那层把 `filters`/`sorts` 当 **JSON 字符串**塞进 query 转义；两条走同一个 `filmTaskQuerySchema` |
+| crc | `POST user/info` | body 忽略，直接 `profileInfo(ctx)` |
+| crc | `POST assets/me` | GET 与 POST **复用同一个 `myAssetsSchema`**（注释写明：复制一份 zod 之后两边必然漂移） |
+| crc | `POST file_preview` | `body.id ?? query.id`，两条都缺仍然 400101 |
+| op | `GET register-questionnaire` | `survey.view(ctx, "register")`，与旧 `GET /op/questionnaire` 同构（不删旧路径，外部已有调用方） |
+| op | `GET beta-questionnaire` | `survey.view(ctx, "beta")` —— **真缺口** |
+
+端点 722 → **728**。
+
+### 四、为什么把对照做成测试，而不是再写一遍文档
+
+文档会漂移，测试不会。新增 `apps/api/test/competitor-route-parity.spec.ts`（**7 例**）：
+
+1. 路由表 > 600 且 6 个锚点存在（含本批新增的 4 条）；
+2. 四组条数与台账口径一致（48 / 30 / 35 / 7，合计 120，且**组内无重复形状**）；
+3–5. film / crc / op 三组**零缺口**；
+6. campaign 的 7 条全部落在偏离表里，且每条理由长度 > 10；
+7. **偏离表无死条目**。
+
+其中最关键的一条设计：偏离表登记的是「竞品形状 → 我方形状」，测试除了断言「这条竞品形状允许缺失」，还断言 **`ours` 那条形状必须真的存在**。否则白名单会变成万能橡皮擦——写一句「这是命名偏离」，就能让任何缺失消失。
+
+### 五、反向验证
+
+把 `op.controller.ts` 的 `@Get("beta-questionnaire")` 改名成 `@Get("beta-questionnaire-BROKEN")` → **2 例立刻红**，打印 `expected [ 'GET /op/beta-questionnaire' ] to deeply equal []`；改回即绿。这说明守卫真的在盯路由，而不是盯一个常量。
+
+功能层面另加 2 例（不是「路由存在」就算过）：
+- `crc.spec.ts`：GET 与 POST 三组返回**深等**（`user/info`、`assets/me?page=1&page_size=10` vs body、`file_preview?id=` vs `{id}`），POST 空 body 仍 400101；
+- `op.spec.ts`：`GET register-questionnaire` 与旧 `GET questionnaire` 深等；`GET beta-questionnaire` 的 `questionnaire.id === "beta"` 且 `questions` 非空。
+
+### 六、验证
+
+| 项 | 结果 |
+|---|---|
+| `crc.spec.ts` + `op.spec.ts` | 17 + 18 = **35 passed** |
+| api 全量 | **84 文件 931 例**（原 83 / 922；+7 守卫 +1 crc +1 op） |
+| 用例总数 | 1,323 → **1,332** |
+| 门禁 12 项 | **12/12 全绿**（api 真跑 170.83s，其余 11 cached） |
+| `-ScaleOnly` | endpoints **728**、controller 52、迁移 45、cli 204（38 组）不变 |
+| `scoreboard.py` | **202.44 / 206 = 98.3% / 剩余 3.56 —— 不变** |
+
+### 七、诚实边界
+
+1. **只比 METHOD + path，不比 query/body 语义**。同一条路径、两边字段名不同，这套测试看不见——它抓到的是「路由层缺失」，不是「契约层不一致」。
+2. **campaign 的 7 条仍是形状偏离**，只是「已登记且登记项必须自证」，不是「已对齐」。要不要真的加 `/campaign/*` 单数别名，属 API 风格决策（ADR-009），本批不改。
+3. **本批不加分**。#8 与 #10 原本就记 100%，这批的价值是让那个 100% 从「自证」变成「可复跑的对账」；唯一的真能力缺口（`GET beta-questionnaire`）落在本来就计满的模块里，按现行权重表表达不出来——**这正是权重粒度的问题，不是分数的诚实性问题**，已在 §5.5 记录。
+4. 守卫测试内联了 120 条竞品形状。竞品更新后这批常量会变成**过期快照**——它保证「不比昨天差」，不保证「和今天的竞品一样」。真正的对账仍需重跑 `competitor_endpoints.tsv` 的抽取脚本。
+
+
 ## 变更登记（v6.33 · 第 79 批：审计「满分」模块 —— #7 团队的 100% 是拿自己的 33 条当全集 · 2026-10-28）
 
 > 这一批不补缺口，**怀疑自己的账**。上一批收尾时提过一个疑点：11 个模块标着 100%，其中三个 XL(20)（团队 #7 / 影视版 #8 / 活动创作者 #10）占了 60 权重。100% 只应出现在「竞品路由逐条对过、一条不缺」的地方——那就去对。

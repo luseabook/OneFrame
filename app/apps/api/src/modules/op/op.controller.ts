@@ -261,6 +261,18 @@ export class OpController {
     return this.survey.submit(m, "register", b.answers, { channel: b.channel });
   }
 
+  /**
+   * rt:853 `GET /op/register-questionnaire` —— 取「注册问卷」的定义。
+   *
+   * 我方原本只有 `GET /op/questionnaire`（同一份 register 定义，路径是我方命名）。
+   * 竞品路径是 `register-questionnaire`，两条都留下：老路径不动（已有调用方），
+   * 新路径让「照竞品写的调用方」也能取到同一份定义。返回体完全一致。
+   */
+  @Get("register-questionnaire")
+  async registerQuestionnaireView(@Req() req: AuthedRequest) {
+    return this.survey.view(await this.ctx(req), "register");
+  }
+
   @Get("register-questionnaire/check")
   async registerQuestionnaireCheck(@Req() req: AuthedRequest) {
     const m = await this.ctx(req);
@@ -268,6 +280,19 @@ export class OpController {
   }
 
   // ── 内测申请（rt:830-834）──────────────────────────────────
+  /**
+   * rt:830 `GET /op/beta-questionnaire` —— 取「内测申请表」的字段定义。
+   *
+   * 这是本批审计出来的**真缺口**：竞品有这条读接口，我方只有提交（`POST beta-questionnaire`）
+   * 与「是否已填」（`GET beta-questionnaire/check`），前端拿不到题目只能自己写死在页面里——
+   * 题目一改就要发版。定义来自 `op.survey.service.ts` 的 `view(m, "beta")`，
+   * 与 `questionnaire/mgr/list?questionnaire_id=beta` 用的是同一份定义，不会漂移。
+   */
+  @Get("beta-questionnaire")
+  async betaQuestionnaireView(@Req() req: AuthedRequest) {
+    return this.survey.view(await this.ctx(req), "beta");
+  }
+
   @Post("beta-questionnaire")
   async betaQuestionnaire(@Req() req: AuthedRequest, @Body() body: unknown) {
     const m = await this.ctx(req);

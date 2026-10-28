@@ -3695,3 +3695,81 @@ data: {"id":"<frame_id>","type":"<type>","seq":<n>,"payload":{...}}
 3. 项目维度积分依赖 `ref_task_id → tasks.episode_id → episodes.project_id` 这条链，任务被删后该流水会落到 `project_id: null`（这是刻意保留，不是 bug）；
 4. 导出的 CSV 上限 5,000 行，超出会截断（未分页导出的取舍写在 service 注释里）；
 5. 成员凭据不返回密码哈希、不返回完整手机号——**只有打码账号**；「能不能改密码」这件事本版本答案是「不能，因为没有子账号」。
+
+---
+
+## 17.37 竞品路由对照守卫与 6 条形状别名（第 80 批）
+
+### 37.1 为什么「路由对照」要写进 API 文档
+
+第 79 批的教训是：一个模块标着 100%，可能只是**拿自己实现的端点当全集**。第 80 批把这件事做实了——但做实一次不够，文档记录会漂移，人也会忘。所以把「竞品路由 ⊆ 我方路由」这条不变量写成测试（`app/apps/api/test/competitor-route-parity.spec.ts`），并在本文件登记：**哪些竞品路由我方以别名承接、哪些是已登记的命名偏离、别名与主路径是否同源**。
+
+对调用方的意义：这段决定了「竞品客户端迁过来要改什么」。凡是本节点名列为别名的，**不需要改代码**；凡是列在偏离表里的，需要改方法或路径。
+
+### 37.2 对账口径（可复跑）
+
+```
+竞品侧：_acceptance/competitor_endpoints.tsv（METHOD / PATH / ...）
+        → 取 /web/v1/{film,crc,op,campaign}/*，共 120 条
+归一化：去掉 "/web/v1" 前缀；":param" 与 "{param}" 一律折成 "{}"
+我方侧：解析 app/apps/api/src/**/*.controller.ts
+        @Controller("base") 与 @(Get|Post|Put|Patch|Delete) 按位置配对
+判定  ：METHOD + 归一化 path 双向比对；缺失项必须落在偏离表里
+```
+
+注意：**只比 METHOD + path**。同一条路径两边 query/body 字段不同，这套对账看不见（见 37.5）。
+
+### 37.3 本批补的 6 条别名
+
+| 类别 | 竞品形状 | 我方形状 | 实现要点 |
+|---|---|---|---|
+| film | `POST /film/projects/:project_id/task-tables/:table_id/tasks/query` | 同路径（原只有 GET） | body 直接是 `{filters?, sorts?, roots_only?, page?, page_size?}`；GET 版把 `filters`/`sorts` 当 **JSON 字符串**传，两条最终走同一个 `filmTaskQuerySchema` |
+| crc | `POST /crc/user/info` | 同路径（原只有 GET） | body 忽略；直接 `profileInfo(ctx)` |
+| crc | `POST /crc/assets/me` | 同路径（原只有 GET） | GET/POST **复用同一个 `myAssetsSchema`**；body 与 query 同构 |
+| crc | `POST /crc/file_preview` | 同路径（原只有 GET） | `body.id ?? query.id`，两条都缺 → 400101 |
+| op | `GET /op/register-questionnaire` | 同路径 | `survey.view(ctx, "register")`；**旧 `GET /op/questionnaire` 保留**，两者同构 |
+| op | `GET /op/beta-questionnaire` | 同路径 | `survey.view(ctx, "beta")` —— 本批唯一的**真能力缺口**（此前前端只能把内测申请表题目写死） |
+
+### 37.4 已登记的命名偏离（campaign 7 条）
+
+| 竞品 | 我方 | 理由 |
+|---|---|---|
+| `GET /campaign/list` | `GET /campaigns` | 复数资源名 |
+| `GET /campaign/detail` | `GET /campaigns/{id}` | 资源 id 进路径而非 query |
+| `GET /campaign/awards` | `GET /campaigns/{id}/awards` | 同上 |
+| `GET /campaign/shortlist` | `GET /campaigns/{id}/shortlist` | 同上 |
+| `GET /campaign/signup/draft` | `GET /campaigns/{id}/signup` | 同上 |
+| `POST /campaign/signup/draft` | `PUT /campaigns/{id}/signup` | 草稿保存是整体替换，故用 PUT |
+| `GET /campaign/signup/detail` | `GET /campaigns/{id}/signup` | 同上 |
+
+依据 **ADR-009**：允许我方按资源所有权命名，行为对齐即可；`campaign.controller.ts` 头部注释已有同样声明。
+
+### 37.5 守卫测试的 7 个断言
+
+`app/apps/api/test/competitor-route-parity.spec.ts`：
+
+1. 路由表 > 600 且 6 个锚点存在（含本批 4 条新形状）；
+2. 四组条数与台账一致（48 / 30 / 35 / 7，合计 120），且**组内无重复形状**；
+3–5. film / crc / op 三组**零缺口**；
+6. campaign 7 条全部落在偏离表内，且每条理由长度 > 10；
+7. **偏离表无死条目**——并且对每条偏离额外断言 `ours` 那条形状**必须真的存在**。
+
+第 7 条是整套设计的核心：白名单若不能自证，就能用一句「这是命名偏离」抹掉任何缺失。
+
+### 37.6 反向验证与功能用例
+
+- 反向验证：`@Get("beta-questionnaire")` → `@Get("beta-questionnaire-BROKEN")`，**2 例红**并打印 `expected [ 'GET /op/beta-questionnaire' ] to deeply equal []`；改回即绿。
+- 功能用例（别名不能只是「路由存在」）：
+  - `crc.spec.ts`：GET 与 POST 三组返回**深等**（`user/info`、`assets/me?page=1&page_size=10` vs body、`file_preview?id=` vs `{id}`）；POST 空 body → 400101。
+  - `op.spec.ts`：`GET register-questionnaire` 与旧 `GET questionnaire` 深等；`GET beta-questionnaire` 的 `questionnaire.id === "beta"` 且 `questions` 非空。
+
+### 37.7 数字与边界
+
+端点 722 → **728**；用例 1,323 → **1,332**（api 84 文件 931 例）；门禁 12/12；**分数不变 202.44 / 98.3% / 剩余 3.56**（#8/#10 本就记 100%，本批不加分）。
+
+边界：
+
+1. 只比 METHOD + path，**不比 query/body 语义**；
+2. 偏离表里 campaign 的 7 条是「已登记」而非「已对齐」，是否补单数别名属 ADR-009 的 API 风格决策；
+3. 测试内联 120 条竞品形状，是**快照式守卫**：保证不比昨天差，不保证和今天的竞品一致；竞品更新后需重跑抽取脚本刷新常量；
+4. 本批未改任何既有路径的行为（别名为纯新增），旧调用方零影响。

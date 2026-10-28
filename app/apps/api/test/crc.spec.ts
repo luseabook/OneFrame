@@ -599,9 +599,40 @@ describe("crc e2e", () => {
     );
     expect(badAction.code).toBe(400101);
   });
+
+  // ── 竞品形状别名（第 80 批）──────────────────────────────
+  /**
+   * 竞品把这三条「查询」写成 POST（`POST /web/v1/crc/user/info`、
+   * `POST /web/v1/crc/assets/me`、`POST /web/v1/crc/file_preview`），
+   * 我方原本只有 GET。第 80 批补了 POST 别名，本用例钉死「别名与 GET 是同一份数据」——
+   * 别名最容易腐坏的方式是复制一份逻辑，然后两边慢慢不一致。
+   */
+  it("竞品形状：POST user/info · assets/me · file_preview 与 GET 返回同一份数据", async () => {
+    const u = await loginNewUser("71");
+    const created = await inject("POST", "/crc/assets/create", { title: `别名作品${Date.now()}` }, u.token);
+    expect(created.code).toBe(0);
+    const assetId = String((created.data as { id: string }).id);
+
+    const profileGet = await inject("GET", "/crc/user/info", undefined, u.token);
+    const profilePost = await inject("POST", "/crc/user/info", {}, u.token);
+    expect(profileGet.code).toBe(0);
+    expect(profilePost.code).toBe(0);
+    expect(profilePost.data).toEqual(profileGet.data);
+
+    const meGet = await inject("GET", "/crc/assets/me?page=1&page_size=10", undefined, u.token);
+    const mePost = await inject("POST", "/crc/assets/me", { page: 1, page_size: 10 }, u.token);
+    expect(meGet.code).toBe(0);
+    expect(mePost.code).toBe(0);
+    expect(mePost.data).toEqual(meGet.data);
+
+    const previewGet = await inject("GET", `/crc/file_preview?id=${assetId}`, undefined, u.token);
+    const previewPost = await inject("POST", "/crc/file_preview", { id: assetId }, u.token);
+    expect(previewGet.code).toBe(0);
+    expect(previewPost.code).toBe(0);
+    expect(previewPost.data).toEqual(previewGet.data);
+
+    // body 与 query 都缺 id 时仍然是 400101，不是 500
+    const missing = await inject("POST", "/crc/file_preview", {}, u.token);
+    expect(missing.code).toBe(400101);
+  });
 });
-
-
-
-
-

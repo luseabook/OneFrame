@@ -670,12 +670,27 @@ describe("op e2e", () => {
     );
     expect(badVariants.code).toBe(400101);
   });
+
+  // ── 问卷定义的读接口（第 80 批补齐竞品形状）────────────────
+  /**
+   * 审计出来的真缺口：竞品有 `GET /op/beta-questionnaire`（取内测申请表定义），
+   * 我方只有提交与「是否已填」，前端要拿题目只能把题目写死在页面里 —— 题目一改就得发版。
+   * 本用例同时钉住 `GET /op/register-questionnaire` 与旧 `GET /op/questionnaire` 同构
+   * （两条路径读同一份 register 定义，不能各读各的）。
+   */
+  it("问卷定义：GET register-questionnaire 与旧 questionnaire 同构；GET beta-questionnaire 能取到题目", async () => {
+    const u = await loginNewUser("27");
+    const legacy = await inject("GET", "/op/questionnaire", undefined, u.token);
+    expect(legacy.code).toBe(0);
+    const alias = await inject("GET", "/op/register-questionnaire", undefined, u.token);
+    expect(alias.code).toBe(0);
+    expect(alias.data).toEqual(legacy.data);
+
+    const beta = await inject("GET", "/op/beta-questionnaire", undefined, u.token);
+    expect(beta.code).toBe(0);
+    const questionnaire = (beta.data as { questionnaire?: { id?: string; questions?: unknown[] } }).questionnaire;
+    expect(questionnaire?.id).toBe("beta");
+    expect(Array.isArray(questionnaire?.questions)).toBe(true);
+    expect((questionnaire?.questions ?? []).length).toBeGreaterThan(0);
+  });
 });
-
-
-
-
-
-
-
-
