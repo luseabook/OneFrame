@@ -39,6 +39,8 @@ import {
   type ScriptDraftGenerateRequest,
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
+  type StoryboardCreateRequest,
+  type StoryboardRenumberRequest,
   type StoryboardsGenerateRequest,
   type StoryboardVideoMode,
 } from "@app/shared";
@@ -55,6 +57,9 @@ import { AssetGatesService } from "./asset-gates.service";
 import { WorksService } from "./works.service";
 import { LlmService } from "./llm.service";
 import type { TimelineClipAssetDto, TimelineClipDto, TimelineClipInput, TimelinePutRequest } from "./timeline.schema";
+
+/** 第 68 批：分镜增删改要用事务（改号 + 删绑定 + 删行必须原子）。 */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type ProjectRow = typeof scriptProjects.$inferSelect;
 type EpisodeRow = typeof episodes.$inferSelect;
@@ -829,6 +834,190 @@ export class ScriptService {
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found");
     return this.storyboardDtoWithUrls(row);
+  }
+
+  /**
+   * 第 68 批：手动新增一条分镜。
+   *
+   * 缺口来自 CLI skeleton（`storyboard add` 的 reason 写着「我方无单条新增分镜」），
+   * 竞品有 `POST /web/v1/df/episode/:ep_id/storyboard-add`。竞品不给字段名，
+   * 所以入参口径是我方自定的（见 `storyboardCreateSchema`），待取证。
+   *
+   * 追加是最常见路径，直接取 max(shot_no)+1，不产生 N 次更新；
+   * 只有显式插到中间（`insert_after`/`shot_no`）才整体重排一次。
+   */
+  async createStoryboard(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    input: StoryboardCreateRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    if (input.shot_no !== undefined && input.insert_after !== undefined) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "shot_no and insert_after are mutually exclusive", {
+        field: "insert_after",
+      });
+    }
+    const fields = {
+      shotDesc: input.shot_desc ?? "",
+      // 与 parse.service 的解析口径一致：没给提示词就用分镜描述兜底，时长/比例回落到项目默认
+      videoPrompt: input.video_prompt ?? input.shot_desc ?? "",
+      durationS: input.duration_s ?? 5,
+      ratio: input.ratio ?? project.ratio,
+      ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
+    };
+    const row = await db.transaction(async (tx) => {
+      const shots = await tx
+        .select({ id: storyboards.id, shotNo: storyboards.shotNo })
+        .from(storyboards)
+        .where(eq(storyboards.episodeId, episode.id))
+        .orderBy(storyboards.shotNo);
+      if (input.insert_after === undefined && input.shot_no === undefined) {
+        const nextNo = shots.reduce((max, shot) => Math.max(max, shot.shotNo), 0) + 1;
+        const [created] = await tx
+          .insert(storyboards)
+          .values({ id: newId(), episodeId: episode.id, shotNo: nextNo, ...fields })
+          .returning();
+        return created!;
+      }
+      let at = shots.length;
+      if (input.insert_after !== undefined) {
+        const index = shots.findIndex((shot) => String(shot.id) === input.insert_after);
+        if (index < 0) {
+          throw new AppError(ErrorCode.NOT_FOUND, "insert_after storyboard not found in this episode", {
+            field: "insert_after",
+          });
+        }
+        at = index + 1;
+      } else if (input.shot_no !== undefined) {
+        if (shots.some((shot) => shot.shotNo === input.shot_no)) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "shot_no already used in this episode", {
+            field: "shot_no",
+          });
+        }
+        at = Math.min(input.shot_no - 1, shots.length);
+      }
+      // 先落一个临时号再整体重排：既有行此刻都占着正数号，0 一定空着，
+      // 于是不需要先给谁腾位（重排见 applyShotOrder）。
+      const [created] = await tx
+        .insert(storyboards)
+        .values({ id: newId(), episodeId: episode.id, shotNo: 0, ...fields })
+        .returning();
+      const order = shots.map((shot) => shot.id);
+      order.splice(at, 0, created!.id);
+      await this.applyShotOrder(tx, order, 1);
+      const [fresh] = await tx.select().from(storyboards).where(eq(storyboards.id, created!.id));
+      return fresh ?? created!;
+    });
+    return this.storyboardDtoWithUrls(row);
+  }
+
+  /**
+   * 第 68 批：批量删除分镜。
+   *
+   * 竞品有 `POST /df/episode/:ep_id/storyboard/delete`（它的路径里有个双斜杠笔误，
+   * 且分镜 id 只能放在 body）。我方 `storyboards` 没有软删列，
+   * `storyboard_assets` 是唯一指向 `storyboards.id` 的外键 —— 所以走事务硬删：
+   * 先删绑定再删行（顺序与 `parse.service` 重新解析时一致）。
+   * 已投递的任务（`image_task_id`/`video_task_id`）不在此处回收：它们有自己的生命周期。
+   */
+  async deleteStoryboards(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    shotIds: string[],
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const ids = this.parseIdList(shotIds, "shot_ids");
+    return db.transaction(async (tx) => {
+      await tx.delete(storyboardAssets).where(inArray(storyboardAssets.storyboardId, ids));
+      const removed = await tx
+        .delete(storyboards)
+        .where(and(eq(storyboards.episodeId, episode.id), inArray(storyboards.id, ids)))
+        .returning({ id: storyboards.id });
+      return { deleted: removed.length, shot_ids: removed.map((item) => String(item.id)) };
+    });
+  }
+
+  /**
+   * 第 68 批：重排分镜号。
+   *
+   * 竞品有 `POST /df/episode/:ep_id/storyboard/num-update`。传 `shot_ids` = 按给定顺序重排
+   * （必须恰好覆盖该集全部分镜，否则拒绝 —— 否则"漏掉的那条"会被挤到末尾，等于静默改数据）；
+   * 不传 = 按现有号压实成 `step, 2*step, …`。
+   */
+  async renumberStoryboards(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    input: StoryboardRenumberRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const rows = await db.transaction(async (tx) => {
+      const shots = await tx
+        .select({ id: storyboards.id, shotNo: storyboards.shotNo })
+        .from(storyboards)
+        .where(eq(storyboards.episodeId, episode.id))
+        .orderBy(storyboards.shotNo);
+      let order = shots.map((shot) => shot.id);
+      if (input.shot_ids !== undefined) {
+        const given = this.parseIdList(input.shot_ids, "shot_ids");
+        const known = new Set(order.map((id) => String(id)));
+        const unique = new Set(given.map((id) => String(id)));
+        if (unique.size !== given.length) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "shot_ids contains duplicates", {
+            field: "shot_ids",
+          });
+        }
+        if (given.length !== order.length || given.some((id) => !known.has(String(id)))) {
+          throw new AppError(
+            ErrorCode.INVALID_PARAM,
+            "shot_ids must list every storyboard of this episode exactly once",
+            { field: "shot_ids" },
+          );
+        }
+        order = given;
+      }
+      await this.applyShotOrder(tx, order, input.step);
+      return tx
+        .select({ id: storyboards.id, shotNo: storyboards.shotNo })
+        .from(storyboards)
+        .where(eq(storyboards.episodeId, episode.id))
+        .orderBy(storyboards.shotNo);
+    });
+    return { list: rows.map((row) => ({ id: String(row.id), shot_no: row.shotNo })) };
+  }
+
+  /**
+   * 两段式改号：`uq_storyboards_episode_shot` 是 (episode_id, shot_no) 唯一索引，
+   * 逐条改成目标号会在中途撞车（把 1 改成 2 时 2 还没让位）。因此先把所有号改成负数
+   * 腾空正数区间，再写终值 —— 负号段本身也唯一，任一步都不会违反约束。
+   */
+  private async applyShotOrder(tx: Tx, ordered: bigint[], step: number) {
+    for (let index = 0; index < ordered.length; index += 1) {
+      await tx
+        .update(storyboards)
+        .set({ shotNo: -(index + 1), updatedAt: new Date() })
+        .where(eq(storyboards.id, ordered[index]!));
+    }
+    for (let index = 0; index < ordered.length; index += 1) {
+      await tx
+        .update(storyboards)
+        .set({ shotNo: step * (index + 1), updatedAt: new Date() })
+        .where(eq(storyboards.id, ordered[index]!));
+    }
+  }
+
+  private parseIdList(raw: string[], field: string): bigint[] {
+    return raw.map((value) => {
+      if (!/^\d{1,20}$/.test(value)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, `${field} must be numeric ids`, { field });
+      }
+      return BigInt(value);
+    });
   }
 
   async generatePortrait(

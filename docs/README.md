@@ -126,6 +126,78 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.22 · 第 68 批：分镜手动增删改 —— 唯一索引逼出来的两段式改号 · 2026-10-28）
+
+> 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.1**（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批不加分**：下面这 4 条能力此前没被记进任何模块的扣分项（#3 的 0.15 记的是 `quality-check` 口径自建与真 ffmpeg 切片），补上它们不等于原有扣分项消失。
+
+### 一、起点是一条「挂了很久」的 CLI 骨架
+
+`apps/cli` 的 `storyboard` 组里有 4 条命令一直是 `todo(...)`，reason 写得很具体：
+
+```
+todo("storyboard", "add",          …, "我方无单条新增分镜；用 storyboard batch-generate（AI 生成）或 node table-import 导表")
+todo("storyboard", "delete",       …, "我方无删除分镜端点（storyboard 目前只可改不可删）")
+todo("storyboard", "batch-delete", …, "我方无批量删除分镜端点")
+todo("storyboard", "num-update",   …, "我方无分镜号重排端点；编号随 shot_no 生成")
+```
+
+竞品侧的三个形状是取得到的（`_acceptance/competitor_endpoints.tsv`）：
+
+| 竞品端点 | params | 说明 |
+|---|---|---|
+| `POST /web/v1/df/episode/:ep_id/storyboard-add` | `ep_id` | 单条新增 |
+| `POST /web/v1/df//episode/:ep_id/storyboard/delete` | `ep_id` | **竞品路径自身有两个斜杠的笔误**，分镜 id 只能进 body |
+| `POST /web/v1/df/episode/:ep_id/storyboard/num-update` | `ep_id` | 重排分镜号 |
+
+但三者 `requestDataJsonSchema` 都是**空对象** —— 字段名没有证据。所以这 4 条端点的入参口径是**我方自定**的
+（`packages/shared/src/schemas/pipeline.ts` 里逐条注明「待取证」，不自称对齐）。
+
+### 二、真正的工作量不在端点，在一个唯一索引
+
+`storyboards` 上有 `uq_storyboards_episode_shot (episode_id, shot_no)`。它让「插队 / 重排」不能逐条改成目标号：
+把第 1 条改成 2 号时，2 号还占着位，直接撞约束。逐条 `+1` 也一样（顺序不管怎么排都会踩到前一个）。
+
+做法是**两段式改号**：先把整集改成负数腾空正数区间，再写终值 —— 负号段本身也唯一，任一步都不违反约束。
+
+```ts
+// apps/api/src/modules/script/script.service.ts  applyShotOrder
+for (let index = 0; index < ordered.length; index += 1) {
+  await tx.update(storyboards).set({ shotNo: -(index + 1) }).where(eq(storyboards.id, ordered[index]!));
+}
+for (let index = 0; index < ordered.length; index += 1) {
+  await tx.update(storyboards).set({ shotNo: step * (index + 1) }).where(eq(storyboards.id, ordered[index]!));
+}
+```
+
+代价是 `2N` 次 `UPDATE`（N = 该集分镜数，接口上限 500）。只在**显式插队或重排**时才走；
+最常见路径「追加到末尾」直接取 `max(shot_no) + 1`，一次 insert，不重排。
+
+### 三、三个不显然的决定
+
+| 决定 | 为什么 |
+|---|---|
+| 追加不重排（`max+1`） | 追加是最常见路径，为它付 `2N` 次更新不值得；顺带也避免把「只是加一条」变成「整集的分镜号都变」（下游若按 shot_no 记录过什么，编号无谓变动就是噪音） |
+| 跨集 id 删除返回 `deleted: 0`，不报 400 | 「批量删除」的语义是「把这些 id 从这个剧集里删掉」，别的集里的 id 本来就不在这个集合里；报 400 会让前端处理「部分失效」变得很别扭。真正的错误（id 不是数字）才 400101 |
+| 删除顺序：先 `storyboard_assets` 再 `storyboards`；已投递任务不回收 | `storyboard_assets` 是**唯一**引用 `storyboards.id` 的外键，顺序反了就是外键错（与 `parse.service` 重新解析时的清理顺序一致）。`image_task_id` / `video_task_id` 指向的 tasks 有自己的生命周期（可能还在跑），删分镜不该连锁杀任务 |
+
+### 四、验证
+
+| 层 | 覆盖 |
+|---|---|
+| `apps/api/test/storyboard-edit.spec.ts`（新增 8 例） | 追加序列 / 插队顺延 / 撞号 400101 / `shot_no`+`insert_after` 互斥 400101 / `insert_after` 指向别的集 400102 / 跨集批量删 `deleted:0` / 重排按给定顺序 + `step=10` 留空号 / 漏项、重复、跨集重排均 400101 |
+| `apps/api/test/` 全量 | 77 文件 **891 例**（原 883，+8） |
+| `apps/cli` | 4 条 `todo(...)` → `http(...)`；build 触发 `gen-skill` 重写 3 个文件；**ready 140 → 144、骨架 57 → 53**；`registry-routes.spec.ts`（读 `apps/api` controller 源码建路由表逐条比对）复跑仍绿 |
+| 总闸 | `pwsh _acceptance/verify-round.ps1` → 12/12 全绿 |
+
+规模：端点 **702 → 706**、controller 52 不变、迁移 **42** 不变（`uq_storyboards_episode_shot` 是既有约束，本批不需要迁移）、表 112 不变；用例 **1,256 → 1,264**。
+
+### 五、诚实边界
+
+- **字段名是自定的**：竞品只给路径与方法，`requestDataJsonSchema` 为空对象。`shot_desc`/`insert_after`/`shot_ids`/`step` 这些名字没有竞品证据，已在 schema 注释里登记「待取证」。
+- **不加分**：全站仍是 **202.45/206 = 98.3%**、剩余 **3.55**。先前的 95%/97% 不是按「有没有这 4 条命令」打的，所以补上也不该动分数。
+- **重排必须覆盖全集**：只传一部分 id 会 400101 —— 否则「没被点到的那条」会被挤到末尾，等于静默改数据。
+
 ## 变更登记（v6.21 · 第 67 批：把前端路由门禁的覆盖面补满 —— 408 → 544 条、未解析 0 · 2026-10-28）
 
 > 批次台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 的 **v9.0**（同一批，编号体系不同，勿混）。

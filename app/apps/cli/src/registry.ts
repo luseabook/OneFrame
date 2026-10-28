@@ -352,10 +352,29 @@ const storyboardCommands: CommandSpec[] = [
     ],
     write: true,
   }),
-  todo("storyboard", "add", "新增分镜", "commands/storyboard.md:93", "我方无单条新增分镜；用 `storyboard batch-generate <EP_ID>`（AI 生成）或 `node table-import` 导表"),
-  todo("storyboard", "delete", "删除分镜", "commands/storyboard.md:137", "我方无删除分镜端点（storyboard 目前只可改不可删）；要重来用 `storyboard batch-generate` 覆盖"),
-  todo("storyboard", "batch-delete", "批量删除分镜", "commands/storyboard.md:153", "我方无批量删除分镜端点；同上，用重新生成覆盖"),
-  todo("storyboard", "num-update", "重排分镜号", "commands/storyboard.md:170", "我方无分镜号重排端点；编号随 shot_no 生成，需改请 `storyboard edit` 逐条"),
+  http("storyboard", "add", "POST", "projects/{project_id}/episodes/{episode_id}/storyboards", "新增分镜（追加到末尾；`--set insert_after=<分镜ID>` 或 `--set shot_no=<号>` 可插队）", "commands/storyboard.md:93", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+  }),
+  http("storyboard", "delete", "DELETE", "projects/{project_id}/episodes/{episode_id}/storyboards/{storyboard_id}", "删除单条分镜", "commands/storyboard.md:137", {
+    slots: ["episode_id", "storyboard_id"],
+    positionals: [
+      { display: "EPISODE_ID", desc: "剧集 ID", required: true },
+      { display: "STORYBOARD_ID", desc: "分镜 ID", required: true },
+    ],
+    write: true,
+  }),
+  http("storyboard", "batch-delete", "POST", "projects/{project_id}/episodes/{episode_id}/storyboards/batch-delete", "批量删除分镜（`--set shot_ids=[id,id]`）", "commands/storyboard.md:153", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+  }),
+  http("storyboard", "num-update", "POST", "projects/{project_id}/episodes/{episode_id}/storyboards/num-update", "重排分镜号（不给 shot_ids 则按现有顺序压实；`--set step=10` 可留空号）", "commands/storyboard.md:170", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+  }),
   todo("storyboard", "link-draft", "关联草稿", "commands/storyboard.md:186", "我方无“分镜草稿”概念（草稿批次未落地、无端点）；分镜即正式数据，直接 `storyboard edit`"),
   todo("storyboard", "ext", "分镜扩展参数", "commands/storyboard.md:202", "我方无 ext 端点；扩展字段走 `storyboard edit --set key=value`（PATCH 既有 storyboards）"),
   todo("storyboard", "total-list", "跨集全量分镜", "commands/storyboard.md:220", "我方无跨集全量分镜端点；用 `episode list --workspace <SP>` 拿矩阵（含每集分镜数）再逐集 `storyboard list`"),

@@ -2800,3 +2800,62 @@ await api.post(`${base(canvasId)}/commit`, body); // 首参以 ${helper(...)} �
 后端路由、端点数、迁移数、模块得分均未变（本批是门禁强化，不改应用代码）。
 
 **边界**：只校验路径形状，不校验 query / body 语义，也不校验方法语义（`POST /x` 与 `GET /x` 各算各的）。
+
+## 17.26 分镜手动增删改：`storyboards` 四个端点与两段式改号（第 68 批）
+
+### 26.1 缺口来源与竞品证据
+
+`apps/cli` 的 `storyboard` 组原有 4 条骨架命令（`add` / `delete` / `batch-delete` / `num-update`），
+reason 直指「我方无该端点」。竞品三处形状（`_acceptance/competitor_endpoints.tsv`）：
+
+| 竞品 | params | body |
+|---|---|---|
+| `POST /web/v1/df/episode/:ep_id/storyboard-add` | `ep_id` | 无字段级证据 |
+| `POST /web/v1/df//episode/:ep_id/storyboard/delete` | `ep_id` | 无字段级证据（**竞品路径自身双斜杠笔误**） |
+| `POST /web/v1/df/episode/:ep_id/storyboard/num-update` | `ep_id` | 无字段级证据 |
+
+三者 `requestDataJsonSchema` 均为 `{}`（`core-lib` 的端点配置对象原样为空），故**入参字段名我方自定**，
+在 `packages/shared/src/schemas/pipeline.ts` 的注释里逐条登记「待取证」。
+
+### 26.2 数据层：本批不需要迁移
+
+`storyboards` 已有 `uq_storyboards_episode_shot (episode_id, shot_no)`（`packages/db/src/schema.ts`）——
+它是本批真正的约束来源，不是需要新增的东西。`storyboards` 无软删列，`storyboard_assets` 是唯一指向
+`storyboards.id` 的外键（`ON DELETE` 由应用层按顺序处理）。
+
+### 26.3 端点
+
+| # | 方法与路径 | body | 说明 | 主要错误 |
+|---|---|---|---|---|
+| 69 | `POST /v1/projects/:id/episodes/:eid/storyboards` | `shot_no?` / `shot_desc?` / `video_prompt?` / `duration_s?` / `ratio?` / `resolution?` / `insert_after?` | 新增；省略定位参数 = 追加末尾 | 400101（撞号、两参互斥）、400102（`insert_after` 不在该集） |
+| 70 | `DELETE /v1/projects/:id/episodes/:eid/storyboards/:sid` | — | 删一条 | 400102（剧集/项目不存在） |
+| 71 | `POST /v1/projects/:id/episodes/:eid/storyboards/batch-delete` | `shot_ids: string[1..200]` | 批量删（跨集 id 只计 0） | 400101（非数字 id、空数组） |
+| 72 | `POST /v1/projects/:id/episodes/:eid/storyboards/num-update` | `shot_ids?: string[1..500]` / `step?: 1..100 = 1` | 重排；省略 `shot_ids` = 按现号压实 | 400101（漏项、重复、跨集、`step` 越界） |
+
+编号 69–72 时点：第 68 批（此前 script 域 61 条 → 65 条）。
+
+### 26.4 两段式改号（`applyShotOrder`）
+
+`uq_storyboards_episode_shot` 让「插队/重排」无法逐条写目标号：把 1 号改成 2 号时 2 号仍被占用。
+`applyShotOrder` 因此先整集写负数（`-(index+1)`，负号段同样唯一），再写终值 `step*(index+1)`。
+代价 `2N` 次 UPDATE（N ≤ 500）；只在显式插队/重排时走，「追加到末尾」用 `max(shot_no)+1` 一次 insert。
+
+### 26.5 语义边界
+
+- **跨集 id**：批量删用 `where episode_id = :eid and id in (…)` 收敛，别的集 id 只让 `deleted` 变小、不报错。
+- **重排必须覆盖全集**：只传一部分 → 400101（否则未点到的那条会被挤到末尾，等于静默改数据）。
+- **任务不回收**：`image_task_id`/`video_task_id` 指向的 tasks 有独立生命周期，删分镜不连锁杀任务。
+- **`video_prompt` 回落**：未给时用 `shot_desc` 兜底，`duration_s` 默认 5、`ratio` 回落项目比例（与 `parse.service` 解析口径一致）。
+
+### 26.6 测试
+
+`apps/api/test/storyboard-edit.spec.ts` **8 例**：追加序列 / 插队顺延 / 撞号 400101 / 两参互斥 400101 /
+`insert_after` 指向别的集 400102 / 跨集批量删 `deleted:0` / 重排按给定顺序与 `step=10` / 漏项·重复·跨集均 400101。
+api 全量 77 文件 **891 例**。
+
+### 26.7 CLI 侧
+
+`apps/cli/src/registry.ts` 4 条 `todo(...)` → `http(...)`；`pnpm --filter @app/cli build` 触发
+`gen-skill` 重写 3 个文件；**ready 140 → 144、骨架 57 → 53**；
+`apps/cli/test/registry-routes.spec.ts`（读 api controller 源码建路由表逐条比对）复跑 `missing: 0`。
+

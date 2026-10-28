@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 18 条命令：可用 5 条、骨架 13 条。
+共 18 条命令：可用 9 条、骨架 9 条。
 
 ## `storyboard list`
 
@@ -68,50 +68,50 @@ oneframe storyboard match-assets <EPISODE_ID> <STORYBOARD_ID> [--set KEY=VALUE].
 
 ## `storyboard add`
 
-新增分镜
+新增分镜（追加到末尾；`--set insert_after=<分镜ID>` 或 `--set shot_no=<号>` 可插队）
 
 ```text
-oneframe storyboard add [--json]
+oneframe storyboard add <EPISODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无单条新增分镜；用 `storyboard batch-generate <EP_ID>`（AI 生成）或 `node table-import` 导表
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/episodes/{episode_id}/storyboards`
 - 契约证据：`commands/storyboard.md:93`
 
 ## `storyboard delete`
 
-删除分镜
+删除单条分镜
 
 ```text
-oneframe storyboard delete [--json]
+oneframe storyboard delete <EPISODE_ID> <STORYBOARD_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无删除分镜端点（storyboard 目前只可改不可删）；要重来用 `storyboard batch-generate` 覆盖
+- 状态：可用（HTTP 端点已存在）
+- 端点：`DELETE projects/{project_id}/episodes/{episode_id}/storyboards/{storyboard_id}`
 - 契约证据：`commands/storyboard.md:137`
 
 ## `storyboard batch-delete`
 
-批量删除分镜
+批量删除分镜（`--set shot_ids=[id,id]`）
 
 ```text
-oneframe storyboard batch-delete [--json]
+oneframe storyboard batch-delete <EPISODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无批量删除分镜端点；同上，用重新生成覆盖
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/episodes/{episode_id}/storyboards/batch-delete`
 - 契约证据：`commands/storyboard.md:153`
 
 ## `storyboard num-update`
 
-重排分镜号
+重排分镜号（不给 shot_ids 则按现有顺序压实；`--set step=10` 可留空号）
 
 ```text
-oneframe storyboard num-update [--json]
+oneframe storyboard num-update <EPISODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无分镜号重排端点；编号随 shot_no 生成，需改请 `storyboard edit` 逐条
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/episodes/{episode_id}/storyboards/num-update`
 - 契约证据：`commands/storyboard.md:170`
 
 ## `storyboard link-draft`

@@ -19,6 +19,9 @@ import {
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
   storyboardAssetsPutSchema,
+  storyboardBatchDeleteSchema,
+  storyboardCreateSchema,
+  storyboardRenumberSchema,
   storyboardsGenerateSchema,
   storyboardPatchSchema,
   AppError,
@@ -540,6 +543,59 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(storyboardPatchSchema, body);
     return this.script.patchStoryboard(req.auth?.spaceId ?? "", id, eid, sid, input);
+  }
+
+  /**
+   * 第 68 批：手动新增分镜（竞品 `POST /df/episode/:ep_id/storyboard-add`）。
+   * 不加 `_eid`/`_sid` 之外的路径段：竞品把 ep_id 放在路径里、分镜 id 不给 —— 与之一致。
+   */
+  @Post("projects/:id/episodes/:eid/storyboards")
+  async createStoryboard(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(storyboardCreateSchema, body ?? {});
+    return this.script.createStoryboard(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /** 第 68 批：删一条分镜（竞品把「删分镜」做成 body 里传 ids，我方才给单条路径） */
+  @Delete("projects/:id/episodes/:eid/storyboards/:sid")
+  async deleteStoryboard(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("sid") sid: string,
+  ) {
+    return this.script.deleteStoryboards(req.auth?.spaceId ?? "", id, eid, [sid]);
+  }
+
+  /**
+   * 第 68 批：批量删除分镜（竞品 `POST /df/episode/:ep_id/storyboard/delete`）。
+   * 竞品路径里有个双斜杠笔误，且分镜 id 只能在 body —— 我方用显式 `batch-delete` 子路径。
+   */
+  @Post("projects/:id/episodes/:eid/storyboards/batch-delete")
+  async deleteStoryboards(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(storyboardBatchDeleteSchema, body);
+    return this.script.deleteStoryboards(req.auth?.spaceId ?? "", id, eid, input.shot_ids);
+  }
+
+  /** 第 68 批：重排分镜号（竞品 `POST /df/episode/:ep_id/storyboard/num-update`） */
+  @Post("projects/:id/episodes/:eid/storyboards/num-update")
+  async renumberStoryboards(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(storyboardRenumberSchema, body ?? {});
+    return this.script.renumberStoryboards(req.auth?.spaceId ?? "", id, eid, input);
   }
 
   @Post("projects/:id/characters/:cid/portrait")

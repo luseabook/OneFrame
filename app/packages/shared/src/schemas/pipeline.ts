@@ -89,6 +89,52 @@ export const storyboardPatchSchema = z.object({
 });
 export type StoryboardPatchRequest = z.infer<typeof storyboardPatchSchema>;
 
+/**
+ * 第 68 批：手动新增一条分镜。
+ *
+ * 证据：竞品 `POST /web/v1/df/episode/:ep_id/storyboard-add`
+ * （`_acceptance/competitor_endpoints.tsv` 里的 `ApiDfEpisodeEpIdStoryboardAddPOST`，
+ * `paramNames:["ep_id"]`）。竞品的 `requestDataJsonSchema` 是空对象，
+ * 所以**字段名是我方自定的**（沿用 `storyboardPatchSchema` 的命名口径），待取证。
+ */
+export const storyboardCreateSchema = z.object({
+  /** 省略 = 追加到末尾；给了就必须是该集当前没占用的号 */
+  shot_no: z.number().int().min(1).max(999).optional(),
+  shot_desc: z.string().max(500).optional(),
+  video_prompt: z.string().max(2000).optional(),
+  duration_s: z.number().int().min(1).max(30).optional(),
+  ratio: z.string().min(1).optional(),
+  resolution: z.string().min(1).optional(),
+  /** 插到这一条之后（其余自动顺延）；与 `shot_no` 互斥 */
+  insert_after: z.string().min(1).max(20).optional(),
+});
+export type StoryboardCreateRequest = z.infer<typeof storyboardCreateSchema>;
+
+/**
+ * 第 68 批：批量删除分镜。
+ *
+ * 证据：竞品 `POST /web/v1/df//episode/:ep_id/storyboard/delete`
+ * （注意竞品路径里有一个双斜杠，是它自己的笔误；`paramNames:["ep_id"]`，
+ * 要删的分镜 id 只能放在 body 里）。字段名我方自定，待取证。
+ */
+export const storyboardBatchDeleteSchema = z.object({
+  shot_ids: z.array(z.string().min(1).max(20)).min(1).max(200),
+});
+export type StoryboardBatchDeleteRequest = z.infer<typeof storyboardBatchDeleteSchema>;
+
+/**
+ * 第 68 批：重排分镜号。
+ *
+ * 证据：竞品 `POST /web/v1/df/episode/:ep_id/storyboard/num-update`
+ * （`ApiDfEpisodeEpIdStoryboardNumUpdatePOST`）。它只给形状不给字段，故：
+ * 传 `shot_ids` = 按这个顺序重排；不传 = 按现有号压实成 `step, 2*step, …`。
+ */
+export const storyboardRenumberSchema = z.object({
+  shot_ids: z.array(z.string().min(1).max(20)).min(1).max(500).optional(),
+  step: z.number().int().min(1).max(100).default(1),
+});
+export type StoryboardRenumberRequest = z.infer<typeof storyboardRenumberSchema>;
+
 export const generateVideosBatchSchema = z.object({
   shot_ids: z.array(z.string().min(1)).min(1).max(30),
   budget_credits_max: z.number().int().min(1),
