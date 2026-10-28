@@ -3498,3 +3498,92 @@ ffprobe 复核源 5s → zip 内 ≈2s）。反向验证：强制返回 copy →
 - `quality-check` 的评分口径（竞品 `requestDataJsonSchema` 是空对象）**不在本批范围**，仍是 #3 的 E 类 0.13。
 - 成片合成通道（`timeline-export`）与本批的 zip 通道各自独立实现裁剪，共用 `@app/shared/ffmpeg-trim`；
   两处的 `durationS` 语义一致（分镜 authored 时长），但没有做「一次抽公共合成器」的重构 —— 属于后续可选项。
+
+---
+
+## 17.35 Agent 会话的流式客户端契约（第 78 批）
+
+### 35.1 为什么客户端行为要写进 API 文档
+
+Agent 的「一轮对话」不是一次请求-响应，而是**两条连接**：
+
+1. `POST /v1/agent/task/chat` —— 投递用户消息，**立刻**返回 `{message_id, stream_id, queued}`（回合在后台跑）；
+2. `GET /v1/canvas/chat/sessions/{session_id}/stream` —— 消费这一轮的事件（SSE 长连接）。
+
+任何调用方（CLI、Web、第三方 SDK）都必须按这个顺序理解它，否则会出现两种典型误解：
+「POST 返回了是不是就代表答完了」和「SSE 里第一个 `ping` 是不是响应」。所以契约写在这里，而不是只写在 CLI 文档里。
+
+### 35.2 两条端点的形状
+
+| 端点 | 关键入参 | 返回 | 说明 |
+|---|---|---|---|
+| `POST /v1/agent/task/chat` | `{session_id?, content 1..4000, content_type? 1|2|3|4, attachments?, wait?}` | `{message_id, stream_id, queued}` | 无 `session_id` 时自动建 `scope=1` 会话；用户消息与 `user_message` 事件**先落库**再返回 |
+| `GET /v1/canvas/chat/sessions/{session_id}/stream` | `last_stream_id?` | `text/event-stream` | **首次连接不重放历史**，只从此刻开始；带 `last_stream_id` 才 replay 增量，游标过期 → `746004` |
+| `POST /v1/agent/task/chat-end` | `{session_id}` | `{ok:true, session:{status:2}}` | 结束会话；之后发言会被拒 |
+
+### 35.3 帧格式（逐字）
+
+```
+id: <frame_id>
+event: <type>
+data: {"id":"<frame_id>","type":"<type>","seq":<n>,"payload":{...}}
+```
+
+- 帧之间用 **空行**（`\n\n`）分隔；客户端必须按「缓冲到空行再派发」解析，**不能假设一块网络分块等于一帧**。
+- 心跳：每 15s 一行 `event: ping` + `data: {"ts":...}`。**`ping` 不是业务事件**，不影响终态判断。
+- 服务端另有 2s 兜底轮询（`POLL_MS`），因此事件顺序靠 `seq`，不靠到达时间。
+- 响应头：`text/event-stream; charset=utf-8` + `X-Accel-Buffering: no`（避免反代缓冲）。
+
+事件类型（`apps/api/src/modules/agent/agent.types.ts` 的 `AGENT_EVENT`）：
+
+| event | payload | 语义 |
+|---|---|---|
+| `session_opened` | — | 会话被创建 |
+| `user_message` | `{content, ...}` | 用户消息回显 |
+| `model_step` | `{step:"thinking"}` | 模型开始思考（进度） |
+| `task_progress` | `{task_id, status, progress}` | 回合里触发了生成任务（可选） |
+| `agent_message` | `{message_id, content, content_type, payload, task_id}` | **本轮终态：助手回复** |
+| `error` | `{code, message}` | **本轮终态：回合失败**（注意：HTTP 仍是 200） |
+
+### 35.4 客户端必须实现的四件事
+
+| # | 要求 | 不做会怎样 |
+|---|---|---|
+| 1 | 投递后**用返回的 `stream_id` 作 `last_stream_id` 连流** | 不带游标会「从此刻开始」，可能漏掉本轮已经推送的事件 |
+| 2 | 按空行切帧、多行 `data` 拼接、跳过注释与无 `data` 帧 | 遇到反代插注释或分块边界错位就解析失败 |
+| 3 | 把 `ping` 与业务事件分开 | 15s 一次心跳被当成响应，出现「空回复」 |
+| 4 | 终态后**主动切断连接**（`AbortController` / `cancel()`） | 进程/线程被挂起的 `read()` 拖住不退出（见 35.6） |
+
+### 35.5 本轮 CLI 的落地（`apps/cli/src/agent.ts`）
+
+- `SseDecoder`：`push(chunk)` / `flush()`，输出 `{id, event, data, json}`；`json` 为 `null` 表示 data 不是合法 JSON（原文照样展示）。
+- `followSession({runtime, client, sessionId, lastStreamId, timeoutMs, onFrame})` → `{terminal, frames, reply, error}`；
+  `terminal ∈ {agent_message, error, timeout, closed}`，`reply` 只从 `agent_message.payload.content` 取，`closed` 时**不编造**回复。
+- 命令映射：
+
+| CLI 命令 | 落到的端点 | 行为 |
+|---|---|---|
+| `agent run SID --set content=…` | `POST agent/task/chat` | 只投递，返回 `followed:false` + `hint` |
+| `agent run SID --set content=… --follow [--timeout]` | 上面 + `GET …/stream` | 跟流到终态；`error`→退出码 4、`timeout`→退出码 6 |
+| `agent enter SID` | 逐轮重复上面两步 | 最小 REPL（`/exit`、`/help`、`/session`）；进度走 stderr，stdout 只出一个信封 |
+| `agent exit SID` | `POST agent/task/chat-end` | 结束会话（`status=2`） |
+
+### 35.6 一个真实踩坑：连接不关，进程不退
+
+第一版实现拿到 `agent_message` 后只是「不再读」那条 SSE。结果：**信封已经写到 stdout，命令却一直不回 shell**（实测 180s 未退出）。
+原因：`reader.read()` 仍挂在 socket 上，Node 因句柄未关闭而不退出。单元测试注入的是「立刻 EOF 的流」，所以完全测不出来。
+
+修法（客户端契约的一部分）：
+
+1. `StreamHandle.cancel?: () => void`，默认实现用 `AbortController` 传给 `fetch`；
+2. `followSession` 的 `finally` **先 `cancel()`**，再 fire-and-forget `iterator.return()`；
+   **不能 `await`** —— 生成器可能正挂在一次永不 settle 的 `read()` 上，`await` 会把「到点超时」变成「永远等」；
+3. 回归断言：每条跟流用例都要求 `streamCancels === 1`。
+
+### 35.7 验证与边界
+
+- `app/apps/cli/test/agent.spec.ts` 13 例（帧边界 4 / `run` 5 / REPL 3 / `followSession` 直调 1），cli 用例 105→**118**；
+- 反向验证：去掉 `cancel()` → 「进程不退出」断言红；把 `error` 的退出码改回 0 → 对应用例红；
+- 真链路：起 3002 栈、真登录、真 SSE，`--follow` 收到 `model_step` + `agent_message`，`agent exit` 后 `status=2`。
+- 边界：不做自动重连（游标续传能力有，重连策略没有）；`--ndjson` 仍是 `--json` 别名；`ping` 目前只记帧不做「连接健康度」展示；
+  真实模型下「一轮多久」取决于上游，`--timeout` 默认 120s 可能偏短。

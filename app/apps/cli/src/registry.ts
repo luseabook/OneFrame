@@ -47,6 +47,8 @@ export type BuiltinName =
   | "workflow-resume"
   | "task-wait"
   | "task-download"
+  | "agent-enter"
+  | "agent-run"
   | "ledger-list"
   | "ledger-show"
   | "ledger-resolve"
@@ -827,8 +829,27 @@ const pendingCommands: CommandSpec[] = [
     positionals: [{ display: "SESSION_ID", desc: "会话 ID", required: true }],
     write: true,
   }),
-  todo("agent", "enter", "进入交互式会话", "commands/agent.md:93", "交互式 REPL 未实现；用 `agent session-create --canvas <ID>` + `POST /v1/canvas/canvases/:id/chat/sessions/:sid/messages`"),
-  todo("agent", "run", "运行一轮对话", "commands/agent.md:135", "`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）；非交互场景用 canvas chat 的 REST 消息端点"),
+  // 第 78 批：这两条**不是**「缺端点」，是「缺客户端」。竞品 `commands/agent.md:93/135`
+  // 写的是进入会话 / 跑一轮并持续消费事件，而我方两端点早已就绪：
+  // `POST /agent/task/chat`（投递消息，立刻返回 `stream_id`）+
+  // `GET /canvas/chat/sessions/{sid}/stream`（SSE 事件流）。原来那两条 reason 会让
+  // agent 误以为能力不存在，比缺能力更有害 —— 故改为纯客户端命令（`impl`）。
+  local("agent", "enter", "进入交互式会话（REPL：逐行发送并实时消费 SSE 事件）", "commands/agent.md:93", "agent-enter", {
+    positionals: [{ display: "SESSION_ID", desc: "会话 ID", required: true }],
+  }),
+  local(
+    "agent",
+    "run",
+    '跑一轮对话（--set content="…"；加 --follow 消费 SSE 到本轮有结论）',
+    "commands/agent.md:135",
+    "agent-run",
+    { positionals: [{ display: "SESSION_ID", desc: "会话 ID", required: true }] },
+  ),
+  http("agent", "exit", "POST", "agent/task/chat-end", "结束会话（服务端把 status 置 2，之后发言会被拒）", "commands/agent.md:113", {
+    positionals: [{ display: "SESSION_ID", desc: "会话 ID", required: true }],
+    bodyParams: [{ key: "session_id", index: 0 }],
+    write: true,
+  }),
   // 小说（我方只有表，无 controller）
   todo("novel", "config", "小说改写配置", "commands/novel.md:59", "我方无 novel/config 端点；可配置项直接走 `novel create --set key=value`，现有任务用 `novel get <NT_ID>` 查看"),
   http("novel", "create", "POST", "novel", "创建小说改写任务（--set title=… / source_text=…）", "commands/novel.md:84", {

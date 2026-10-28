@@ -22,6 +22,10 @@ export interface HarnessResult {
   calls: TransportRequest[];
   /** 实际发生的二进制下载 URL（断言"没泄露签名 URL"时也能对照） */
   binaryCalls: string[];
+  /** 实际打开的 SSE 流请求（断言 URL/头） */
+  streamCalls: TransportRequest[];
+  /** 被 cancel 的流数量（每条流收尾时必须 cancel，否则进程挂住） */
+  streamCancels: number;
   dir: string;
 }
 
@@ -37,13 +41,17 @@ export interface HarnessOptions {
   cleanup?: boolean;
   /** 二进制下载注入（`task download` 落盘用）；缺省返回固定字节，测试可断言落盘内容 */
   fetchBinary?: (url: string) => Promise<Buffer>;
+  /** SSE 裸流注入（`agent enter`/`run`）；缺省给一条空流（会立即 EOF） */
+  stream?: (req: TransportRequest) => Promise<{ status: number; chunks: AsyncIterable<string> }>;
+  /** 交互式输入注入（`agent enter` 的 REPL）；缺省视为 EOF */
+  lines?: string[];
 }
 
 export function makeDir(): string {
   return mkdtempSync(join(tmpdir(), "oneframe-cli-test-"));
 }
 
-export function withProfile(dir: string, overrides: Partial<OneframeConfig> = {}): void {
+export function withProfile(dir: string, overrides: Partial<OneframeConfig> = {}): OneframeConfig {
   const config: OneframeConfig = {
     version: 1,
     current_uid: "u-1",
@@ -60,6 +68,8 @@ export function withProfile(dir: string, overrides: Partial<OneframeConfig> = {}
     ...overrides,
   };
   writeConfig(dir, config);
+  // 返回同一份对象，便于 `harness(..., { config: withProfile })` 直接当注入函数用
+  return config;
 }
 
 export async function harness(argv: string[], opts: HarnessOptions = {}): Promise<HarnessResult> {
@@ -78,6 +88,11 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
     // 默认给一段可识别字节：测试可验证"写盘的是下载到的内容"而不是占位
     (async (url: string) => Buffer.from(`binary:${url}`));
 
+  const streamCalls: TransportRequest[] = [];
+  let streamCancels = 0;
+  const queue = [...(opts.lines ?? [])];
+  const readLine = async (): Promise<string | null> => (queue.length > 0 ? queue.shift()! : null);
+
   let stdout = "";
   let stderr = "";
   const code = await run(argv, {
@@ -89,6 +104,27 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
       ONEFRAME_WEB_BASE_URL: "http://web.test",
     },
     transport,
+    readLine,
+    openStream: async (req) => {
+      streamCalls.push(req);
+      const handle = opts.stream
+        ? await opts.stream(req)
+        : {
+            // 默认：一条立刻结束的空流（不阻塞、不假装有事件）
+            status: 200,
+            chunks: (async function* empty(): AsyncGenerator<string> {
+              // 没有任何帧
+            })(),
+          };
+      return {
+        ...handle,
+        // 包装一层：断言 CLI 在收尾时必须 cancel，否则真实环境里进程会挂着不退出
+        cancel: () => {
+          streamCancels += 1;
+          handle.cancel?.();
+        },
+      };
+    },
     fetchBinary: async (url: string) => {
       binaryCalls.push(url);
       return fetchBinary(url);
@@ -111,5 +147,5 @@ export async function harness(argv: string[], opts: HarnessOptions = {}): Promis
   }
 
   if (opts.cleanup !== false && !opts.dir) rmSync(dir, { recursive: true, force: true });
-  return { code, stdout, output, stderr, calls, dir, binaryCalls };
+  return { code, stdout, output, stderr, calls, dir, binaryCalls, streamCalls, streamCancels };
 }

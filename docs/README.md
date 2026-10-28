@@ -127,6 +127,73 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.32 · 第 78 批：#9 的 `agent enter`/`run` —— 「SSE 未接」不是缺能力，是缺客户端 · 2026-10-28）
+
+**一句话**：CLI 有两条骨架命令的 reason 写着「交互式 REPL 未实现」「`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）」，但后端这两个端点早就在；
+这一批补的是**客户端**，并且顺手抓到一个只在真实网络下才暴露的 bug：拿到终态后不切断 SSE，Node 进程会挂着不退。
+
+### 一、缺口长什么样
+
+| 命令 | 骨架 reason 原文 | 实际情况 |
+|---|---|---|
+| `agent enter SESSION_ID` | 「交互式 REPL 未实现；用 `agent session-create` + `POST …/messages`」 | 会话事件流 `GET /canvas/chat/sessions/{sid}/stream` 一直在；缺的是「读一行 → 发一条 → 跟流」的循环 |
+| `agent run SESSION_ID` | 「`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）；非交互场景用 canvas chat 的 REST 消息端点」 | `POST /agent/task/chat` 投递即返回 `{message_id, stream_id, queued}`，回合在后台跑；事件从上面那条 SSE 出来 |
+
+竞品 `commands/agent.md` 有五个动词（session create/list/delete、`enter`、`exit`、`run --follow`）；我方 `enter`/`run` 是骨架，`exit`（= `POST agent/task/chat-end`）压根没登记。
+
+### 二、为什么不能复用现有的 `Transport`
+
+`apps/cli/src/http.ts` 的传输层刻意只回 `{status, body:string}` ——**一次读完、再 JSON.parse**，因为除 SSE 外所有端点都是「一个信封」。
+把它改成流式会让 200 多个命令都变成「先拼完再解析」，那正是这批要修的问题的反面。所以新增的是**另一条通道**：
+
+| 关注点 | `Transport`（既有） | `StreamHandle`（本批新增） |
+|---|---|---|
+| 返回 | `{status, body}` | `{status, chunks: AsyncIterable<string>, cancel?}` |
+| 生命周期 | 请求-响应即结束 | 长连接，直到终态/超时/断开 |
+| 谁负责解析 | `ApiClient.call()` 直接 `JSON.parse` | `SseDecoder` 按 `\n\n` 切帧 |
+| 测试注入 | `harness({transport})` | `harness({stream, lines})` |
+
+### 三、改了什么
+
+1. `runtime.ts`：`StreamHandle` / `StreamOpener` + `readLine()` 两个注入点（`fetch` + `getReader` + `TextDecoder(stream:true)`；`createInterface({crlfDelay: Infinity})` 让 Windows 的 `\r\n` 只当一个换行）。
+2. `http.ts`：`ApiClient.streamRequest()` —— **只拼 URL 与头，不发请求**（`accept: text/event-stream`、`authorization`、`x-space-id`），交给 `runtime.openStream`。
+3. 新文件 `apps/cli/src/agent.ts`：
+   - `SseDecoder`：缓冲到 `\n\n` 才派发（网络分块与帧边界无关）；多行 `data` 用换行拼；`: 注释` 与「无 data 的帧」跳过；`JSON.parse` 失败给 `json:null` 而不抛（非 JSON 的 data 仍能把原文展示给用户）。
+   - `followSession()`：`Promise.race([iterator.next(), timeout])`；终态四选一 **`agent_message` / `error` / `timeout` / `closed`**；`ping` 记帧但不影响终态（否则 15s 心跳会被误当响应）。
+4. `builtins.ts`：`agentRun`（`--set content=`/`prompt=`；无 `--follow` 只投递并回 `followed:false` + `hint`；有则跟流，`error`→退出码 4、`timeout`→退出码 6）+ `agentEnter`（最小 REPL：`/exit`|`/quit`、`/help`、`/session`；逐帧进度与提示全走 stderr，stdout 仍只出**一个**信封）。
+5. `registry.ts`：两条 `todo`→`local`，并补竞品有而我方缺的 `agent exit` → `POST agent/task/chat-end`。命令 203→**204**、ready 161→**164**、骨架 42→**40**。
+
+### 四、抓到的真 bug：信封打完了，进程不退
+
+拿到 `agent_message` 后，`followSession` 只是「不再读」那条连接。真实环境里 `reader.read()` 仍挂在 socket 上，Node 因此不退出 ——
+症状是**命令把 JSON 打到 stdout 了，shell 却一直不回来**（第一版实测 180s 没退）。单元测试里注入的是「立刻 EOF 的流」，压根碰不到这条路径。
+
+修法：
+- `StreamHandle.cancel?: () => void`，默认实现用 `AbortController` 传给 `fetch`，`iterate()` 里把 `AbortError` 当正常收尾吞掉；
+- `followSession` 的 `finally` **先 `cancel()`**，再 fire-and-forget `iterator.return()`（**不 await**：挂起的 read 会让 `await` 永不返回，正好把「到点超时」变成「一直等下去」）；
+- 补一例回归断言：每条跟随用例都必须 `streamCancels === 1`。
+
+### 五、验证
+
+| 层 | 结果 |
+|---|---|
+| `SseDecoder` | 4 例：跨块拼接 / 一块多帧 + CRLF / 多行 data + 注释 + 无 data 不派发 / `flush` 兜底 |
+| `agent run` | 5 例：只投递（断言 body `{session_id, content}`）/ `--follow` 拿到 `agent_message` 与帧序列、URL 带 `last_stream_id`、stderr 有 `[thinking]`/`[reply]` / `error` 事件→退出码 **4** / `--timeout 30ms` 挂死流→退出码 **6** / 缺 content→退出码 **2** 且零请求 |
+| `agent enter` | 3 例：REPL 一轮（`/session`、`/help`、`/exit`）+ 只出一个信封 / EOF 也算正常退出 / 缺 SESSION_ID→2 |
+| `followSession` 直调 | 1 例：立刻 EOF→`closed`，不编造 reply |
+| 反向验证 | 去掉 `cancel()`→「进程不退出」的断言红；`error` 分支退出码改回 0→对应用例红 |
+| cli 总量 | 105→**118** 例；`registry-routes.spec.ts` 仍绿（三条新路径都对上后端 controller） |
+| 总闸 | 12/12 全绿；`_r65_cli_audit.py` ready 路径缺 0；`_r66_web_audit.py` 408/408 |
+| 真链路 | 起 3002 栈 → 真登录 → 建画布+会话 → `agent run --follow` 收到 `model_step`+`agent_message` 且**进程正常退出**；REPL 一轮问答；`agent exit` 后 `session list` 显示 `status=2` |
+
+### 六、诚实边界
+
+- REPL 只做「一行一句 + 三个命令」，不做历史翻阅/编辑 —— 再加就会变成半个 TUI，而 Skill 的用途是让 agent 调命令行；
+- `--ndjson` 目前只是 `--json` 的别名（没有真正的逐行 NDJSON 输出）；
+- 不做自动重连：`last_stream_id` 支持游标续传，但连接断了要用户重跑；
+- 额度/模型错误被服务端当 `error` 事件推，CLI 统一映射到退出码 4（`task_failed`），不细分；
+- 测的是 mock LLM 的回合（`LLM_MODE=mock`）；真实模型下「一轮多久」取决于上游，`--timeout` 默认 120s 可能偏短。
+
 ## 变更登记（v6.31 · 第 77 批：#3 剧集分镜「真 ffmpeg 切片裁剪」—— zip 包里写的时长，从来不是包里视频的时长 · 2026-10-28）
 
 ### 一、缺口长什么样（台账原话）

@@ -1,10 +1,83 @@
+import { createInterface } from "node:readline";
 import {
   configDir as defaultConfigDir,
   DEFAULT_API_BASE_URL,
   readConfig,
   type OneframeConfig,
 } from "./config";
-import { ApiClient, fetchTransport, type Transport } from "./http";
+import { ApiClient, fetchTransport, type Transport, type TransportRequest } from "./http";
+
+/** 一条 SSE 长连接的句柄（`agent enter`/`run` 消费事件用） */
+export interface StreamHandle {
+  status: number;
+  /** 逐块产出**已解码**的文本；调用方负责按 SSE 帧语法切分 */
+  chunks: AsyncIterable<string>;
+  /**
+   * 主动切断底层连接。
+   *
+   * 为什么必须提供：SSE 响应体永不结束，拿到终态（或超时）后如果只是「不再读」，
+   * 那条 socket 上的 read 会一直挂着，Node 进程就不退出 —— 表现为「信封已经打到
+   * stdout 了，命令却迟迟不回 shell」。第 78 批实测踩到：`agent run --follow` 在
+   * 拿到 `agent_message` 后进程仍存活。
+   */
+  cancel?: () => void;
+}
+
+/**
+ * 打开裸字节流的注入点。
+ *
+ * 为什么不能复用 {@link Transport}：传输层刻意只回 `{status, body:string}`（一次读完、
+ * 能安全 JSON.parse），而 SSE 是「一条连接 + 持续增量」，两者语义相反。硬塞进同一个
+ * 接口会让「进度条卡住直到整轮结束」——那正是本批要修的问题。
+ */
+export type StreamOpener = (req: TransportRequest) => Promise<StreamHandle>;
+
+const nodeOpenStream: StreamOpener = async (req) => {
+  // 用一个可 abort 的控制器：终态/超时后由调用方 `cancel()` 切断，避免挂起的 read 拖住进程
+  const controller = new AbortController();
+  const res = await fetch(req.url, {
+    method: req.method,
+    headers: req.headers,
+    body: req.body,
+    signal: controller.signal,
+  });
+  const body = res.body;
+  async function* iterate(): AsyncGenerator<string> {
+    if (!body) return;
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) yield decoder.decode(value, { stream: true });
+      }
+      const tail = decoder.decode();
+      if (tail) yield tail;
+    } catch {
+      // 主动 abort 会让 read 抛 AbortError：这是正常收尾，不是错误
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  return { status: res.status, chunks: iterate(), cancel: () => controller.abort() };
+};
+
+/**
+ * 默认的「读一行」：交互式 REPL 用。
+ *
+ * 惰性创建 readline 接口（测试注入时不会碰真实 stdin）；`crlfDelay: Infinity`
+ * 让 Windows 的 `\r\n` 被当成一个换行，避免每行末尾带一个 `\r` 进请求体。
+ */
+let stdinLines: AsyncIterator<string> | null = null;
+const nodeReadLine = async (): Promise<string | null> => {
+  if (!stdinLines) {
+    const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    stdinLines = rl[Symbol.asyncIterator]();
+  }
+  const next = await stdinLines.next();
+  return next.done ? null : next.value;
+};
 
 /**
  * 运行时依赖注入点。
@@ -21,6 +94,10 @@ export interface Runtime {
   transport: Transport;
   /** 二进制下载（`task download` 落盘用；与 JSON transport 分开，测试可独立注入） */
   fetchBinary: (url: string) => Promise<Buffer>;
+  /** SSE 裸流（`agent enter`/`run`；见 {@link StreamOpener}） */
+  openStream: StreamOpener;
+  /** 交互式输入一行；EOF 返回 null（`agent enter` 的 REPL 用） */
+  readLine: () => Promise<string | null>;
   stdout: (chunk: string) => void;
   stderr: (chunk: string) => void;
   now: () => Date;
@@ -45,6 +122,8 @@ export function createRuntime(overrides: RuntimeOverrides = {}): Runtime {
     dir: overrides.dir ?? defaultConfigDir(env),
     transport: overrides.transport ?? fetchTransport(),
     fetchBinary: overrides.fetchBinary ?? nodeFetchBinary,
+    openStream: overrides.openStream ?? nodeOpenStream,
+    readLine: overrides.readLine ?? nodeReadLine,
     stdout: overrides.stdout ?? ((chunk) => process.stdout.write(chunk)),
     stderr: overrides.stderr ?? ((chunk) => process.stderr.write(chunk)),
     now: overrides.now ?? (() => new Date()),

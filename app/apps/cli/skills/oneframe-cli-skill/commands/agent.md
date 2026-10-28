@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 5 条命令：可用 3 条、骨架 2 条。
+共 6 条命令：可用 6 条、骨架 0 条。
 
 ## `agent session-create`
 
@@ -43,24 +43,34 @@ oneframe agent session-delete <SESSION_ID> [--set KEY=VALUE]... [--dry-run] [--i
 
 ## `agent enter`
 
-进入交互式会话
+进入交互式会话（REPL：逐行发送并实时消费 SSE 事件）
 
 ```text
-oneframe agent enter [--json]
+oneframe agent enter <SESSION_ID> [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：交互式 REPL 未实现；用 `agent session-create --canvas <ID>` + `POST /v1/canvas/canvases/:id/chat/sessions/:sid/messages`
+- 状态：可用（纯客户端，不发请求）
 - 契约证据：`commands/agent.md:93`
 
 ## `agent run`
 
-运行一轮对话
+跑一轮对话（--set content="…"；加 --follow 消费 SSE 到本轮有结论）
 
 ```text
-oneframe agent run [--json]
+oneframe agent run <SESSION_ID> [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）；非交互场景用 canvas chat 的 REST 消息端点
+- 状态：可用（纯客户端，不发请求）
 - 契约证据：`commands/agent.md:135`
+
+## `agent exit`
+
+结束会话（服务端把 status 置 2，之后发言会被拒）
+
+```text
+oneframe agent exit <SESSION_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
+```
+
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST agent/task/chat-end`
+- 契约证据：`commands/agent.md:113`

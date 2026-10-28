@@ -137,6 +137,29 @@ export class ApiClient {
   }
 
   /**
+   * SSE 用的裸请求描述（URL + 鉴权头），交给 `runtime.openStream` 打开长连接。
+   *
+   * 为什么单独开一个方法而不是复用 {@link call}：`call` 会把响应体整段文本读下来再
+   * 解 `{code,msg,data}` 信封，而 SSE 的响应体永远不会结束、也没有信封——走同一个
+   * 路径只会等到超时。这里只借用鉴权头与 baseUrl，其余全部交给流式处理。
+   */
+  streamRequest(path: string, query: Record<string, unknown> = {}): RequestDescription & {
+    method: HttpMethod;
+    headers: Record<string, string>;
+  } {
+    const url = this.buildUrl(path, query);
+    const headers: Record<string, string> = { accept: "text/event-stream" };
+    if (this.token) headers.authorization = `Bearer ${this.token}`;
+    if (this.spaceId) headers["x-space-id"] = this.spaceId;
+    return {
+      ...this.describe({ method: "GET", path, query }),
+      method: "GET" as HttpMethod,
+      url,
+      headers,
+    };
+  }
+
+  /**
    * 发一次业务请求并解开信封。
    * 统一信封 `{code,msg,data}`（api-spec §1）：`code===0` 返回 data，否则按
    * exit-codes.ts 的业务码表抛 CliError（HTTP 200 + code≠0 是我方约定）。

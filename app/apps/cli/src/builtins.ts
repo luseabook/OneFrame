@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { flagString, type ParsedArgs } from "./args";
+import { flagBool, flagString, type ParsedArgs } from "./args";
+import { followSession, type FollowOutcome, type SseFrame } from "./agent";
 import {
   cacheDir as cacheDirPath,
   currentProfile,
@@ -488,6 +489,222 @@ async function taskWait(ctx: BuiltinContext): Promise<BuiltinResult> {
   return { data: { tasks: latest } };
 }
 
+/** Agent 一回合理应多久内给出结论（竞品 `commands/agent.md:147` 的 `--timeout` 缺省口径） */
+const AGENT_TURN_TIMEOUT_MS = 120_000;
+
+function agentSessionId(ctx: BuiltinContext, label: string): string {
+  const id = ctx.args[0];
+  if (!id || id.startsWith("--")) {
+    throw usageError(`${label} 需要 SESSION_ID（从 \`agent session list\` 或 \`agent session-create\` 拿）`);
+  }
+  return id;
+}
+
+/** agent 事件的单行人读摘要（`--json` 时不打，只进 envelope） */
+function describeAgentFrame(frame: SseFrame): string | null {
+  if (frame.event === "ping") return null;
+  const payload = asRecord(frame.json?.payload);
+  switch (frame.event) {
+    case "user_message":
+      return `[echo] ${String(payload.content ?? "")}`;
+    case "model_step":
+      return `[thinking] ${String(payload.step ?? "-")}`;
+    case "task_progress":
+      return `[task ${String(payload.task_id ?? "-")}] status=${String(payload.status ?? "-")} progress=${String(payload.progress ?? "-")}`;
+    case "agent_message":
+      return `[reply] ${String(payload.content ?? "")}`;
+    case "error":
+      return `[error] ${String(payload.message ?? "agent turn failed")}`;
+    default:
+      return `[${frame.event}] ${frame.data.slice(0, 200)}`;
+  }
+}
+
+function agentClient(ctx: BuiltinContext): ApiClient {
+  return createClient({
+    runtime: ctx.runtime,
+    config: ctx.config,
+    apiUrl: flagString(ctx.parsed, "api-url"),
+    spaceId: flagString(ctx.parsed, "space"),
+  });
+}
+
+/** 发一条用户消息（服务端立刻返回 `{message_id, stream_id, queued}`，回合在后台跑） */
+async function sendAgentMessage(
+  client: ApiClient,
+  sessionId: string,
+  content: string,
+): Promise<{ message_id: string; stream_id: string; queued: boolean }> {
+  return client.call<{ message_id: string; stream_id: string; queued: boolean }>({
+    method: "POST",
+    path: "/agent/task/chat",
+    body: { session_id: sessionId, content },
+  });
+}
+
+/**
+ * 送一条消息并**跟着事件流跑到本轮有结论**。
+ *
+ * 三个分支都原样报给调用方，不在这里把它们揉成一个"成功"：
+ * - `agent_message` → 有正文；
+ * - `error` → 回合失败（服务端把错误当事件推，连接本身是 200）；
+ * - `timeout`/`closed` → 没有结论（可能是 LLM 太慢，也可能是服务端重启）。
+ */
+async function agentTurn(
+  ctx: BuiltinContext,
+  client: ApiClient,
+  sessionId: string,
+  content: string,
+  timeoutMs: number,
+): Promise<{ sent: { message_id: string; stream_id: string; queued: boolean }; outcome: FollowOutcome }> {
+  const { runtime, parsed } = ctx;
+  const sent = await sendAgentMessage(client, sessionId, content);
+  const outcome = await followSession({
+    runtime,
+    client,
+    sessionId,
+    lastStreamId: sent.stream_id,
+    timeoutMs,
+    onFrame: (frame) => {
+      if (parsed.json) return;
+      const line = describeAgentFrame(frame);
+      if (line) runtime.stderr(`${line}\n`);
+    },
+  });
+  if (outcome.terminal === "error" || outcome.error) {
+    throw new CliError("task_failed", outcome.error?.message ?? "agent turn failed", {
+      exitCode: EXIT.TASK_FAILED,
+      retryable: false,
+      raw: { session_id: sessionId, code: outcome.error?.code ?? null, frames: outcome.frames },
+    });
+  }
+  if (outcome.terminal === "timeout") {
+    throw new CliError(
+      "timeout",
+      `等待 Agent 回合超时（${timeoutMs}ms）：消息已发出，回合可能仍在跑（用 --timeout 5m 拉长）`,
+      {
+        exitCode: EXIT.TIMEOUT,
+        retryable: true,
+        raw: { session_id: sessionId, message_id: sent.message_id, frames: outcome.frames },
+      },
+    );
+  }
+  return { sent, outcome };
+}
+
+/**
+ * `agent run SESSION_ID --set content=… [--follow]`
+ *
+ * 不加 `--follow` 时只把消息投出去就返回（信封里带 `queued` 与 `stream_id`）；
+ * 加 `--follow` 才连 SSE 事件流。为什么默认不跟流：Agent 回合可能几十秒，
+ * 而 `--json` 的调用方（脚本/agent）通常只想「投递成功」就继续。
+ */
+async function agentRun(ctx: BuiltinContext): Promise<BuiltinResult> {
+  const { runtime, config, parsed } = ctx;
+  requireProfile(config);
+  const sessionId = agentSessionId(ctx, "agent run");
+  const content = String(parsed.sets.content ?? parsed.sets.prompt ?? "").trim();
+  if (!content) {
+    throw usageError('agent run 需要 --set content="要发送的内容"（也接受 --set prompt=…）');
+  }
+  const client = agentClient(ctx);
+  if (!flagBool(parsed, "follow")) {
+    const sent = await sendAgentMessage(client, sessionId, content);
+    return {
+      data: {
+        session_id: sessionId,
+        ...sent,
+        followed: false,
+        hint: "加 --follow 可持续消费本轮事件（SSE）直到助手回复或失败",
+      },
+    };
+  }
+  const timeoutMs = parseDuration(flagString(parsed, "timeout"), AGENT_TURN_TIMEOUT_MS);
+  const { sent, outcome } = await agentTurn(ctx, client, sessionId, content, timeoutMs);
+  if (!parsed.json && outcome.terminal === "closed") {
+    runtime.stderr("[warn] 事件流由服务端关闭，本轮没有拿到终态事件\n");
+  }
+  return {
+    data: {
+      session_id: sessionId,
+      ...sent,
+      followed: true,
+      terminal: outcome.terminal,
+      reply: outcome.reply,
+      frames: outcome.frames.map((frame) => ({
+        id: frame.id,
+        event: frame.event,
+        data: frame.json ?? frame.data,
+      })),
+    },
+  };
+}
+
+/**
+ * `agent enter SESSION_ID`：交互式 REPL。
+ *
+ * 契约出处 `commands/agent.md:93`（「进入 session」）。竞品没写 REPL 的内部行为，所以
+ * 这里只做「一个会话 + 一行一句 + 实时看事件」三件事，并把命令集压到最小：
+ * `/exit`（或 EOF）、`/help`、`/session`。**不做历史翻阅/编辑**——那些会把 CLI 变成一个
+ * 半个 TUI，而 Skill 的用途是让 agent 用命令行，不是给人当聊天客户端。
+ *
+ * stdout 仍然只出**一个** envelope（`envelope.ts` 的既有约束），逐轮进度全走 stderr。
+ */
+async function agentEnter(ctx: BuiltinContext): Promise<BuiltinResult> {
+  const { runtime, config, parsed } = ctx;
+  requireProfile(config);
+  const sessionId = agentSessionId(ctx, "agent enter");
+  const client = agentClient(ctx);
+  const timeoutMs = parseDuration(flagString(parsed, "timeout"), AGENT_TURN_TIMEOUT_MS);
+  const transcript: { input: string; reply: string | null }[] = [];
+  let turns = 0;
+  let exitReason: "exit" | "eof" = "eof";
+
+  if (!parsed.json) {
+    runtime.stderr(`进入会话 ${sessionId}（直接输入内容回车发送；/exit 退出，/help 帮助）\n`);
+  }
+
+  for (;;) {
+    if (!parsed.json) runtime.stderr("agent> ");
+    const line = await runtime.readLine();
+    if (line === null) {
+      exitReason = "eof";
+      break;
+    }
+    const text = line.trim();
+    if (!text) continue;
+    if (text === "/exit" || text === "/quit") {
+      exitReason = "exit";
+      break;
+    }
+    if (text === "/help") {
+      runtime.stderr(
+        ["/exit    退出（等价于按 Ctrl-D）", "/help    显示本帮助", "/session 打印当前会话 ID", ""].join("\n"),
+      );
+      continue;
+    }
+    if (text === "/session") {
+      runtime.stderr(`${sessionId}\n`);
+      continue;
+    }
+
+    const { outcome } = await agentTurn(ctx, client, sessionId, text, timeoutMs);
+    turns += 1;
+    transcript.push({ input: text, reply: outcome.reply });
+    if (!parsed.json) runtime.stderr("\n");
+  }
+
+  return {
+    data: {
+      session_id: sessionId,
+      turns,
+      exit_reason: exitReason,
+      exited: true,
+      transcript,
+    },
+  };
+}
+
 function ledgerList(ctx: BuiltinContext): BuiltinResult {
   const { runtime, parsed } = ctx;
   const all = readLedger(runtime.dir);
@@ -769,6 +986,10 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
       return taskWait(ctx);
     case "task-download":
       return taskDownload(ctx);
+    case "agent-enter":
+      return agentEnter(ctx);
+    case "agent-run":
+      return agentRun(ctx);
     case "ledger-list":
       return ledgerList(ctx);
     case "ledger-show":
