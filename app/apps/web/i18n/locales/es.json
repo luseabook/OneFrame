@@ -402,7 +402,12 @@
     "restoredDone": "Restaurada",
     "addFailed": "No se pudo añadir el episodio",
     "duplicateDone": "«{title}» copiada: {episodes} episodios · {characters} personajes",
-    "duplicateFailed": "No se pudo copiar"
+    "duplicateFailed": "No se pudo copiar",
+    "group": "Grupo: {name}",
+    "groupAll": "Todos los grupos",
+    "groupNone": "Sin grupo",
+    "changeGroup": "Cambiar grupo",
+    "groupChanged": "Grupo actualizado"
   },
   "projects": {
     "metaTitle": "Proyectos · OneFrame",

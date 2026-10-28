@@ -2406,3 +2406,141 @@ ALTER TABLE "canvases" ADD CONSTRAINT "canvases_cover_asset_id_assets_id_fk"
 
 - 项目分组（`group_id`/`group_name` + `POST /df/script_project/:sp_id/group/edit`）与五档分类（`project_category` = SHORT_FILM/DRAMA/FILM，`project_subcategory` = ALL/AI_SHORT_FILM/AI_AD_DRAMA/AI_DRAMA/VIDEO_REDRAW，证据已取到）**本批未做**——所以 #5 只从 90% → 94%，并把这两项据实从"卡竞品证据"改记为 A 类"待排期 0.18"（见 `07-plan` §3.5）。
 - 竞品"封面可多图（`covers[]`）"只做了形状兼容，没有多封面选择 UI；我方语义是单封面 + 自动兜底。
+
+---
+
+### 17.22 项目归属组与竞品两级分类投影：迁移 0040 与 `POST /script/projects/:project_id/group`（第 63 批）
+
+#### 22.1 为什么现在才做：先纠正一个语义
+
+第 62 批把「项目分组 + 五档分类」记成"证据已拿到、待排期"，但当时只拿到了**参数名**（`group_id` / `project_category` / `project_subcategory`），没拿到**语义**。本批先把语义钉死：
+
+```
+// Cp3a6_yk.js —— 换组动作
+g.open("project-change-group", { sp_id, old_group_id: t.group_id ?? "0", old_group_name })
+
+// DDLTpMu7.js —— 文案 key（关键判据）
+project.groupOwnership.changeModal.title
+project.groupOwnership.tooltip.noPermission
+data-testid="home-film-project-change-group"    // 按钮，由 canChangeGroup 控制 disabled
+
+// D7aUDXP7.js —— 端点 → 权限码（分组 CRUD 在团队域，不在 script_project 域）
+POST /web/v1/cam/team/:team_id/group                  → group.create
+POST /web/v1/cam/team/:team_id/group/:group_id/edit   → group.edit
+POST /web/v1/cam/team/:team_id/group/:group_id/delete → group.delete
+GET  /web/v1/cam/team/:team_id/groups                 → group.view
+POST /web/v1/cam/team/member/change-group             → group.member_change
+```
+
+结论：竞品的「分组」是**项目归属团队分组**（`groupOwnership`），不是「项目文件夹」；分组本身的 CRUD 在团队域。`script_project` 域自己只有两个 group 相关端点：`list` 的 `group_id` 查询参数、`POST /script_project/:sp_id/group/edit`。
+
+#### 22.2 数据层：迁移 0040
+
+```sql
+ALTER TABLE "script_projects" ADD COLUMN "group_id" bigint;
+ALTER TABLE "script_projects" ADD CONSTRAINT "script_projects_group_id_team_groups_id_fk"
+  FOREIGN KEY ("group_id") REFERENCES "public"."team_groups"("id") ON DELETE set null;
+CREATE INDEX "idx_script_projects_group" ON "script_projects" USING btree ("space_id","group_id");
+```
+
+三个刻意决定：
+
+| 决定 | 内容 | 为什么 |
+|---|---|---|
+| 复用 `team_groups` | 不新建「项目分组」表 | 竞品分组 CRUD 在团队域；两套分组会造成两套权限、两套计数，且用户在两处看到互不相通的"分组" |
+| `on delete set null` | 组删除 → 项目退回未分组 | 悬空外键会让列表投影出错，级联删除更糟（删一个组连带删项目） |
+| 取消分组写 `null` | 接 `null` / `"0"` / `""`，内部统一 `null` | 写 `0` 会留下悬空外键（`team_groups` 没有 id=0） |
+
+#### 22.3 端点：`POST /v1/script/projects/:project_id/group`
+
+对齐竞品 `POST /df/script_project/:sp_id/group/edit` 的语义（换组 / 取消分组），但走我方 REST 形状：
+
+请求：
+
+```json
+{ "group_id": "123" }
+```
+
+| 入参 | 类型 | 语义 |
+|---|---|---|
+| `group_id` | `string \| null`（可选） | 数字 id = 归到该组；`null` / `"0"` / `""` / 不传 = 取消分组 |
+
+响应 `data`：
+
+```json
+{ "id": "456", "group_id": "123", "group_name": "第一组" }
+```
+
+取消分组时回 `{ "id": "456", "group_id": "0", "group_name": null }`（`"0"` 只是**对外**的"未分组"表示，对齐竞品 mapper 的缺省值；库里存 `null`）。
+
+错误码：
+
+| 场景 | code | msg |
+|---|---|---|
+| `group_id` 不是数字（非 `"0"`/空） | 400101 | `group_id must be a numeric id or 0` |
+| 组不属于本 space | 400102 | `group not found in this space` |
+| 组存在但已停用（`status !== 1`） | 400101 | `group is disabled` |
+| 项目不存在 / 不属于本 space | 400102 | （沿用项目自身校验） |
+
+#### 22.4 `/works` 新增字段与查询参数
+
+响应行新增（工坊与画布**两种形态都下发**，保证前端不用按形态分支）：
+
+| 字段 | 工坊（workshop） | 画布（canvas） |
+|---|---|---|
+| `group_id` | 归属组 id；未分组为 `"0"` | 恒 `"0"` |
+| `group_name` | 组名（子查询 `team_groups.name`） | 恒 `null` |
+| `project_mode` | `1` / `2`（广告剧）/ `3`（转绘）；未知按 `1` | 恒 `null` |
+| `project_category` | 由 `workCategoryOf()` 反算：mode1→2、mode2→1、mode3→2 | 恒 `1` |
+| `project_subcategory` | mode1→3、mode2→2、mode3→4 | 恒 `1` |
+
+新增/接通的查询参数：
+
+| 参数 | 语义 |
+|---|---|
+| `group_id` | 归到该组；`"0"` 或空 = 只回未分组 |
+| `project_category` + `project_subcategory` | 竞品五档分类 → 翻成 `kind`/`project_mode`（见 22.5） |
+| `project_categories` | 逗号多选（如 `1,2`），逐个翻译 |
+
+`sp_source` / `sp_type` 继续**拒收**（我方无对应维度，不由 zod 接受）。`name` ≡ `keyword`、`process_status=-1` ≡ `status=all` 是第 62 批已接的别名。
+
+#### 22.5 两级分类的映射与拒收规则
+
+实现集中在新文件 `packages/shared/src/project-category.ts`（唯一真相，前后端共用）：
+
+| 竞品 tab | `project_category` | `project_subcategory` | 我方 `kind` | `project_mode` |
+|---|---:|---:|---|---:|
+| AI 剧（DRAMA_WORKFLOW） | 2 | 3（AI_DRAMA） | `workshop` | 1 |
+| 画布（CANVAS） | 1 | 1（AI_SHORT_FILM） | `canvas` | — |
+| 广告剧（AD_DRAMA） | 1 | 2（AI_AD_DRAMA） | `workshop` | 2 |
+| 视频转绘（VIDEO_REDRAW） | 2 | 4（VIDEO_REDRAW） | `workshop` | 3 |
+| 影视版（FILM） | 3 | 0（ALL） | **无对应** | — |
+
+拒收规则（均为 `400101`，`field` 指向出错的参数）：
+
+1. `project_category=3`（FILM）：我方由独立影视模块承接，未合流到 `/works`。msg 说明由影视模块提供，**不假装支持**。
+2. `project_category=1` 单给（不带 `project_subcategory`）：**二义**（画布 vs 广告剧），要求补 subcategory。
+3. `project_subcategory` 非法值（如 `9`）。
+4. `project_categories` 逗号多选中**任一项**不支持 → 整体拒绝，不做"能筛多少筛多少"。
+
+> 为什么"静默忽略"不可接受：调用方按竞品参数筛完拿到未筛选的全集，会以为筛选生效了——这比报错危险得多。这也是本文件第 62 批起对所有"未接参数"的统一口径。
+
+#### 22.6 一个只有跑测试才暴露的 bug
+
+`tab=all` 时工坊与画布两路各自过滤后内存归并，而画布那路的 `canvasFilterable` 只看 `kind`/`keyword`/时间段，**不吃 `group_id`/`projectMode`** → 「按组筛选」的结果里混进了**所有画布**。修法：设了 `projectMode` 直接排除画布；`groupId` 非空且非 `"0"` 时也排除（画布没有分组概念）。
+
+测试夹具坑：该测试空间的登录会自动带一条示例作品（`is_sample=1`，标题「示例：雨夜来信」），凡是"只回我造的项目"的断言都要按 `stamp` 过滤。
+
+#### 22.7 测试与诚实边界
+
+`apps/api/test/works-aggregate.spec.ts` **9 → 11 例**：
+
+1. 赋组 → `/works` 带出 `group_id`/`group_name` → 按组过滤只回该项目 → `"0"`/`null`/`group_id=0` 三种取消写法都能清空 → 跨空间组 400102、`"abc"` 400101、不存在组 400102；
+2. 竞品两级分类投影（画布 1/1、剧本 2/3）与四类拒收（FILM、二义、非法 subcategory、多选含不支持）。
+
+**边界（都写进文档、不当成已对齐）**：
+
+- 五档 tab 的**列表 UI** 未做：我方 tab 仍是形态维度（工坊/画布/全部），分类只做到**参数层**；
+- FILM 档不假装支持；
+- 画布没有分组概念（恒 `"0"`），这是竞品也没有的能力，不是我方缺口；
+- 因此 #5 只从 94% → **97%**（+0.09），剩 0.09 记在 `07-plan` §5 第 5 行。

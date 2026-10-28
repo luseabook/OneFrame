@@ -1,0 +1,3 @@
+ALTER TABLE "script_projects" ADD COLUMN "group_id" bigint;--> statement-breakpoint
+ALTER TABLE "script_projects" ADD CONSTRAINT "script_projects_group_id_team_groups_id_fk" FOREIGN KEY ("group_id") REFERENCES "public"."team_groups"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_script_projects_group" ON "script_projects" USING btree ("space_id","group_id");

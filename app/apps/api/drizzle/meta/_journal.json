@@ -281,6 +281,13 @@
       "when": 1793147072726,
       "tag": "0039_quiet_carlie_cooper",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793148816268,
+      "tag": "0040_stiff_tyrannus",
+      "breakpoints": true
     }
   ]
 }

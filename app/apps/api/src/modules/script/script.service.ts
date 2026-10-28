@@ -13,6 +13,7 @@ import {
   storyboards,
   taskEvents,
   tasks,
+  teamGroups,
   timelineExports,
 } from "@app/db";
 import {
@@ -255,6 +256,8 @@ export class ScriptService {
       pageSize?: number;
       tab?: "workshop" | "canvas" | "all";
       kind?: "workshop" | "canvas";
+      projectMode?: number;
+      groupId?: string;
       state?: "draft" | "producing" | "ready" | "archived";
       keyword?: string;
       from?: string;
@@ -264,6 +267,8 @@ export class ScriptService {
     return this.works.list(spaceId, {
       tab: opts.tab,
       kind: opts.kind,
+      projectMode: opts.projectMode,
+      groupId: opts.groupId,
       // status 兼容旧值 archived / 其它（active）；all 表示不过滤归档
       status: opts.status === "archived" ? "archived" : opts.status === "all" ? "all" : "active",
       state: opts.state,
@@ -274,6 +279,52 @@ export class ScriptService {
       pageSize: opts.pageSize,
     });
   }
+
+  /**
+   * 换组：项目归属组变更（对齐竞品 `POST /df/script_project/:sp_id/group/edit`）。
+   *
+   * 三个校验，缺一不可：
+   * 1. 项目必须属于当前 space（`findProject` 已做）；
+   * 2. 目标组必须存在且属于当前 space —— 不校验就会出现"把项目挂到别的空间的组上"，
+   *    分组名会跟着列表接口泄露出去（跨空间信息泄露）；
+   * 3. 目标组必须 `status=1`（停用的组不该再接新项目）。
+   *
+   * `groupId` 传 null / "0" / "" = 移出分组（写 null），不是写 0 —— `team_groups.id` 是真实 ID，
+   * 写 0 会变成悬空外键（外键约束直接报错，反而暴露实现细节）。
+   */
+  async setProjectGroup(spaceId: string, projectId: string, groupId: string | null) {
+    const project = await this.findProject(spaceId, projectId);
+    const raw = (groupId ?? "").trim();
+    if (raw === "" || raw === "0") {
+      await db
+        .update(scriptProjects)
+        .set({ groupId: null, updatedAt: new Date() })
+        .where(eq(scriptProjects.id, project.id));
+      return { id: String(project.id), group_id: "0", group_name: null };
+    }
+    if (!/^\d{1,20}$/.test(raw)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "group_id must be a numeric id or 0", {
+        field: "group_id",
+      });
+    }
+    const [group] = await db
+      .select({ id: teamGroups.id, name: teamGroups.name, status: teamGroups.status })
+      .from(teamGroups)
+      .where(and(eq(teamGroups.id, BigInt(raw)), eq(teamGroups.spaceId, BigInt(spaceId))))
+      .limit(1);
+    if (!group) {
+      throw new AppError(ErrorCode.NOT_FOUND, "group not found in this space", { field: "group_id" });
+    }
+    if (Number(group.status) !== 1) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "group is disabled", { field: "group_id" });
+    }
+    await db
+      .update(scriptProjects)
+      .set({ groupId: group.id, updatedAt: new Date() })
+      .where(eq(scriptProjects.id, project.id));
+    return { id: String(project.id), group_id: String(group.id), group_name: group.name };
+  }
+
   /** 归档 / 恢复作品（软标记） */
   async setArchived(spaceId: string, projectId: string, archived: boolean) {
     const project = await this.findProject(spaceId, projectId);

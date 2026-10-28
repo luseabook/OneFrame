@@ -33,6 +33,17 @@ const range = ref<"all" | "7d" | "30d">("all");
 const loading = ref(true);
 const error = ref("");
 const busyId = ref("");
+/**
+ * 项目归属组（第 63 批）。
+ *
+ * 竞品证据：列表项带 `group_id` + `group_name`，换组走
+ * `POST /df/script_project/:sp_id/group/edit`，文案是 `project.groupOwnership.*`（归属组）。
+ * 分组的 CRUD 在团队域（`/team/group*`），作品页只做"项目 → 组"的归属变更，
+ * 所以这里拉一次团队分组列表给下拉用，不新建一套"项目分组"。
+ */
+const groups = ref<Array<{ id: string; name: string; status: number }>>([]);
+const groupFilter = ref("");
+const savingGroupId = ref("");
 
 /** 四态 / 画布态的展示名与色调：label 随语言，tone 是视觉语义（不翻译） */
 function stateMeta(state: string): { label: string; tone: "neutral" | "brand" | "info" | "success" | "warning" } {
@@ -66,6 +77,8 @@ async function load(): Promise<void> {
     if (statusFilter.value !== "active") q.set("status", statusFilter.value);
     if (stateFilter.value !== "all") q.set("state", stateFilter.value);
     if (keyword.value.trim()) q.set("keyword", keyword.value.trim());
+    // 归属组筛选（竞品同名参数 group_id；"0" 由后端解释为"未分组"）
+    if (groupFilter.value) q.set("group_id", groupFilter.value);
     const from = fromIso();
     if (from) q.set("from", from);
     const data = await api.get<WorksListDto>(`/works?${q.toString()}`);
@@ -77,6 +90,35 @@ async function load(): Promise<void> {
     error.value = e instanceof Error ? e.message : t("errors.load");
   } finally {
     loading.value = false;
+  }
+}
+
+/** 拉团队分组列表（停用的组不参与下拉：后端也会拒收停用组） */
+async function loadGroups(): Promise<void> {
+  try {
+    const data = await api.get<{ list: Array<{ id: string; name: string; status: number }> }>("/team/groups");
+    groups.value = (data.list ?? []).filter((g) => Number(g.status) === 1);
+  } catch {
+    // 分组列表是增强功能：拿不到时作品页照常可用，只是不显示下拉
+    groups.value = [];
+  }
+}
+
+/**
+ * 换组：`""` / `"0"` 都表示移出分组（后端写 null）。
+ * 竞品把"取消分组"表达成 `group_id: "0"`，所以下拉里必须留一个"未分组"选项。
+ */
+async function changeGroup(work: WorkDto, next: string): Promise<void> {
+  savingGroupId.value = work.id;
+  try {
+    await api.post(`/projects/${work.id}/group`, { group_id: next === "0" ? null : next });
+    toast.success(t("works.groupChanged"));
+    await load();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : t("errors.operation");
+    toast.error(msg);
+  } finally {
+    savingGroupId.value = "";
   }
 }
 
@@ -101,6 +143,7 @@ function resetFilters(): void {
   stateFilter.value = "all";
   keyword.value = "";
   range.value = "all";
+  groupFilter.value = "";
   page.value = 1;
   void load();
 }
@@ -159,7 +202,10 @@ async function duplicateSample(work: WorkDto): Promise<void> {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadGroups();
+});
 </script>
 
 <template>
@@ -208,6 +254,11 @@ onMounted(load);
         <option value="draft">{{ t("works.stateDraft") }}</option>
         <option value="producing">{{ t("works.stateProducing") }}</option>
         <option value="ready">{{ t("works.stateReady") }}</option>
+      </select>
+      <select v-if="tab !== 'canvas' && groups.length" v-model="groupFilter" class="mini-select" @change="applyFilters">
+        <option value="">{{ t("works.groupAll") }}</option>
+        <option value="0">{{ t("works.groupNone") }}</option>
+        <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
       </select>
       <select v-model="range" class="mini-select" @change="applyFilters">
         <option value="all">{{ t("works.rangeAll") }}</option>
@@ -277,9 +328,22 @@ onMounted(load);
               <div v-if="w.shot_count" class="prog">
                 <Progress :value="progress(w)" :tone="progress(w) === 100 ? 'success' : 'brand'" />
               </div>
+              <p v-if="w.group_name" class="meta group-line">{{ t("works.group", { name: w.group_name }) }}</p>
               <p class="time">{{ new Date(w.created_at).toLocaleDateString(locale) }}</p>
 
               <div class="ops">
+                <!-- 换组：竞品是「归属组」弹层；我方用就地下拉（分组数量在团队域里是十几级，弹层过重） -->
+                <select
+                  v-if="!w.is_sample && groups.length"
+                  class="mini-select group-select"
+                  :value="w.group_id ?? '0'"
+                  :disabled="savingGroupId === w.id"
+                  :title="t('works.changeGroup')"
+                  @change="changeGroup(w, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="0">{{ t("works.groupNone") }}</option>
+                  <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                </select>
                 <Button
                   v-if="w.is_sample"
                   size="sm"
@@ -537,6 +601,14 @@ onMounted(load);
   display: flex;
   gap: var(--space-2);
   align-items: center;
+}
+/* 归属组（第 63 批）：卡片上的"分组名"行与就地换组下拉 */
+.group-line {
+  color: var(--text-3);
+}
+.group-select {
+  max-width: 120px;
+  font-size: var(--text-xs);
 }
 .pager {
   display: flex;

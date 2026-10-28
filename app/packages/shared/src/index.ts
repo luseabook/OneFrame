@@ -15,3 +15,5 @@ export * from "./ffmpeg-trim";
 export * from "./publish-transcode";
 // 第 60 批：知识库「模板场景」维度（竞品前端 bundle 取证，值不连续、业务串与枚举名不同名）
 export * from "./knowledge-scene";
+// 第 63 批：「全部项目」竞品两级分类（project_category/project_subcategory）↔ 我方 kind/project_mode
+export * from "./project-category";

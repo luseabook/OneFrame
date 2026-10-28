@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import cookie from "@fastify/cookie";
 import { sql } from "drizzle-orm";
-import { canvasNodes, canvases, assets, tasks } from "@app/db";
+import { canvasNodes, canvases, assets, tasks, teamGroups } from "@app/db";
 import { newId } from "@app/shared";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
@@ -80,6 +80,10 @@ describe("works aggregate e2e", () => {
   let imageNodeId = "";
   let foreignAssetId = "";
   let coverTaskId = "";
+  // 第 63 批：项目归属组（复用团队域 team_groups，不另建分组表）
+  let groupId = "";
+  let groupName = "";
+  let otherGroupId = "";
 
   beforeAll(async () => {
     app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
@@ -196,6 +200,23 @@ describe("works aggregate e2e", () => {
       uri: `u/${otherSpaceId}/assets/foreign-${stamp}.png`,
       name: `别人的图-${stamp}`,
     });
+
+    // ── 第 63 批夹具：团队分组（项目归属组复用 team_groups，不另建表）──
+    groupId = String(newId());
+    groupName = `A组-${stamp}`;
+    await db.insert(teamGroups).values({
+      id: BigInt(groupId),
+      spaceId: BigInt(spaceId),
+      name: groupName,
+      sort: 1,
+    });
+    otherGroupId = String(newId());
+    await db.insert(teamGroups).values({
+      id: BigInt(otherGroupId),
+      spaceId: BigInt(otherSpaceId),
+      name: `别人组-${stamp}`,
+      sort: 1,
+    });
   });
 
   afterAll(async () => {
@@ -211,6 +232,8 @@ describe("works aggregate e2e", () => {
     // 第 62 批夹具：先删素材（canvases.cover_asset_id 是 set null，不挡删除），再删任务
     await cleanup(sql`delete from assets where name like ${`%${stamp}%`}`);
     if (coverTaskId) await cleanup(sql`delete from tasks where id = ${BigInt(coverTaskId)}`);
+    // 第 63 批夹具：分组要在项目删完之后再删（script_projects.group_id 是 set null，顺序其实宽松）
+    await cleanup(sql`delete from team_groups where name like ${`%${stamp}%`}`);
     await app.close();
     await pool.end().catch(() => {});
   });
@@ -279,6 +302,100 @@ describe("works aggregate e2e", () => {
     expect(p1.data.page_size).toBe(1);
     expect(p1.data.list).toHaveLength(1);
     expect(p1.data.has_more).toBe(p1.data.total > 1);
+  });
+
+  // ── 第 63 批：项目归属组 + 竞品两级分类 ─────────────────
+  /**
+   * 竞品证据（第 63 批取证）：
+   * - `GET /df/script_project/list` 的 queryNames 含 `group_id`，列表项返回 `group_id` + `group_name`；
+   * - 换组是 `POST /df/script_project/:sp_id/group/edit`；
+   * - 前端文案 `project.groupOwnership.changeModal.title` + `canChangeGroup` 权限 →「归属组」语义；
+   * - 分组 CRUD 在团队域（`/cam/team/:team_id/group*`，权限码 `group.*`）→ 我方直接复用 `team_groups`。
+   */
+  it("project group: assign, expose group_id/group_name, filter by group, and clear back to ungrouped", async () => {
+    // 未分组时竞品契约是 group_id "0"（`DDLTpMu7.js` mapper 的缺省值）
+    const before = await inject("GET", `/works?tab=all&page_size=60`);
+    const rowBefore = before.data.list.find((item: { id: string }) => item.id === activeProjectId);
+    expect(rowBefore.group_id).toBe("0");
+    expect(rowBefore.group_name).toBeNull();
+
+    const assigned = await inject("POST", `/projects/${activeProjectId}/group`, { group_id: groupId });
+    expect(assigned.code).toBe(0);
+    expect(assigned.data).toMatchObject({ id: activeProjectId, group_id: groupId, group_name: groupName });
+
+    // 列表项带出组名（竞品是列表项自带 group_name，不是再查一次分组表）
+    const after = await inject("GET", `/works?tab=all&page_size=60`);
+    const rowAfter = after.data.list.find((item: { id: string }) => item.id === activeProjectId);
+    expect(rowAfter.group_id).toBe(groupId);
+    expect(rowAfter.group_name).toBe(groupName);
+
+    // 按组过滤：命中本组，未分组的归档项目不出现
+    const inGroup = await inject("GET", `/works?tab=all&status=all&group_id=${groupId}&page_size=60`);
+    expect(inGroup.code).toBe(0);
+    expect(inGroup.data.list.map((item: { id: string }) => item.id)).toEqual([activeProjectId]);
+    // group_id=0 等价"未分组"：归档项目未分组 → 出现在这里，已分组的不出现
+    const ungrouped = await inject("GET", "/works?tab=all&status=all&group_id=0&page_size=60");
+    expect(ungrouped.code).toBe(0);
+    const ungroupedIds = ungrouped.data.list.map((item: { id: string }) => item.id);
+    expect(ungroupedIds).toContain(archivedProjectId);
+    expect(ungroupedIds).not.toContain(activeProjectId);
+
+    // 移出分组：传 "0" 与传 null 都合法（null 是"取消分组"的唯一表达，不能只收字符串）
+    const cleared = await inject("POST", `/projects/${activeProjectId}/group`, { group_id: "0" });
+    expect(cleared.code).toBe(0);
+    expect(cleared.data).toMatchObject({ group_id: "0", group_name: null });
+    const clearedNull = await inject("POST", `/projects/${activeProjectId}/group`, { group_id: null });
+    expect(clearedNull.code).toBe(0);
+
+    // 越权与非法值：别的空间的组、非数字、不存在的 id
+    expect((await inject("POST", `/projects/${activeProjectId}/group`, { group_id: otherGroupId })).code).toBe(400102);
+    expect((await inject("POST", `/projects/${activeProjectId}/group`, { group_id: "abc" })).code).toBe(400101);
+    expect((await inject("POST", `/projects/${activeProjectId}/group`, { group_id: "9999999999" })).code).toBe(400102);
+  });
+
+  /**
+   * 竞品两级分类是**投影**而不是新列：`project_category` / `project_subcategory` 由
+   * 我方 `kind` + `project_mode` 反推（映射表见 `@app/shared/project-category`）。
+   * 这样既能让竞品形状的调用方按分类筛选，又不给 `script_projects` 加两列
+   * （两套分类同时落库必然出现"我改了 mode 忘了改 category"的漂移）。
+   */
+  it("projects competitor two-level category: project into kind/projectMode, reject FILM honestly", async () => {
+    const all = await inject("GET", "/works?tab=all&page_size=60");
+    expect(all.code).toBe(0);
+    const canvasRow = all.data.list.find((item: { id: string }) => item.id === canvasId);
+    const workshopRow = all.data.list.find((item: { id: string }) => item.id === activeProjectId);
+    // 画布 = 竞品 CANVAS tab 的固定组合 SHORT_FILM(1) + AI_SHORT_FILM(1)
+    expect(canvasRow).toMatchObject({ project_category: 1, project_subcategory: 1, project_mode: null });
+    // 普通剧本项目 = DRAMA_WORKFLOW 的 DRAMA(2) + AI_DRAMA(3)
+    expect(workshopRow).toMatchObject({ project_category: 2, project_subcategory: 3, project_mode: 1 });
+
+    // 分类 → 我方筛选：AI 剧档只回工坊项目；画布档只回画布
+    const drama = await inject("GET", "/works?tab=all&project_category=2&project_subcategory=3&page_size=60");
+    expect(drama.code).toBe(0);
+    // 只断言本测试造的项目（空间里还有示例作品，is_sample=1，也是 mode=1/DRAMA 档）
+    expect(
+      drama.data.list
+        .filter((item: { title: string }) => item.title.includes(stamp))
+        .map((item: { id: string }) => item.id),
+    ).toEqual([activeProjectId]);
+    expect(drama.data.list.every((item: { project_category: number }) => item.project_category === 2)).toBe(true);
+    const canvasByCat = await inject("GET", "/works?tab=all&project_category=1&project_subcategory=1&page_size=60");
+    expect(canvasByCat.code).toBe(0);
+    expect(canvasByCat.data.list.map((item: { id: string }) => item.id)).toEqual([canvasId]);
+    // 广告剧档（mode=2）本 space 无数据 → 空列表而不是全集（静默忽略会返回全集）
+    const adDrama = await inject("GET", "/works?tab=all&project_subcategory=2&page_size=60");
+    expect(adDrama.code).toBe(0);
+    expect(adDrama.data.total).toBe(0);
+
+    // FILM(3) 我方无对应（影视版是独立模块）→ 明确拒绝并说明，不静默当"全部"
+    const film = await inject("GET", "/works?project_category=3");
+    expect(film.code).toBe(400101);
+    expect(String(film.msg)).toContain("FILM");
+    // category=1 单独给是二义的（画布 vs 广告剧）→ 要求补 subcategory，而不是猜一个
+    expect((await inject("GET", "/works?project_category=1")).code).toBe(400101);
+    expect((await inject("GET", "/works?project_subcategory=9")).code).toBe(400101);
+    // 多选参数：并集口径，FILM 混进来也拒收
+    expect((await inject("GET", "/works?project_categories=2,3")).code).toBe(400101);
   });
 
   it("invalid filter values are rejected with 400101", async () => {

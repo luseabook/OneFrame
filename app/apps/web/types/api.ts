@@ -152,6 +152,21 @@ export interface WorkDto extends ProjectDto {
   creation_mode?: number | null;
   running_nodes?: number | null;
   failed_nodes?: number | null;
+  /**
+   * 项目归属组（第 63 批）：`team_groups.id`，未分组时后端按竞品契约给 `"0"`。
+   * 竞品列表项自带 `group_id` + `group_name`，前端不用再查一次分组表。
+   */
+  group_id?: string;
+  group_name?: string | null;
+  /** 编排模式（1 普通 / 2 广告剧 / 3 视频转绘）；画布为 null */
+  project_mode?: number | null;
+  /**
+   * 竞品两级分类的**投影**（不落库）：由 kind + project_mode 反推。
+   * `project_category`：1 短片 / 2 剧 / 3 影视；`project_subcategory`：0 全部 / 1 AI 短片 /
+   * 2 AI 广告剧 / 3 AI 剧 / 4 视频转绘。映射表见 `@app/shared/project-category`。
+   */
+  project_category?: number;
+  project_subcategory?: number;
 }
 
 /** GET /works 聚合响应（tab=workshop|canvas|all + 筛选 + has_more） */

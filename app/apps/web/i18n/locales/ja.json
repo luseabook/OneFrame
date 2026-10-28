@@ -402,7 +402,12 @@
     "restoredDone": "元に戻しました",
     "addFailed": "エピソードの追加に失敗しました",
     "duplicateDone": "「{title}」をコピーしました：{episodes} 話 · {characters} キャラクター",
-    "duplicateFailed": "コピーに失敗しました"
+    "duplicateFailed": "コピーに失敗しました",
+    "group": "グループ：{name}",
+    "groupAll": "すべてのグループ",
+    "groupNone": "未分類",
+    "changeGroup": "グループを変更",
+    "groupChanged": "グループを変更しました"
   },
   "projects": {
     "metaTitle": "プロジェクト · OneFrame",

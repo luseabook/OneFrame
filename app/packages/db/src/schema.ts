@@ -460,6 +460,24 @@ export const scriptProjects = pgTable(
      */
     modeMeta: jsonb("mode_meta").notNull().default(sql`'{}'::jsonb`),
     /**
+     * 项目归属组（`team_groups.id`，可空 = 未分组）。
+     *
+     * 竞品证据（第 63 批取证）：
+     * - `GET /df/script_project/list` 的 queryNames 含 `group_id`，列表项返回 `group_id` + `group_name`；
+     * - 换组走 `POST /df/script_project/:sp_id/group/edit`（`_acceptance/competitor_endpoints.tsv`）；
+     * - 前端文案 key 是 `project.groupOwnership.changeModal.title`、
+     *   `project.groupOwnership.tooltip.noPermission`，按钮 `data-testid="home-film-project-change-group"`，
+     *   由 `canChangeGroup` 控制 disabled —— `groupOwnership` 是「归属组」，不是"项目文件夹"；
+     * - 分组的 CRUD 不在 script_project 域，而在团队域 cam：`/cam/team/:team_id/group*`
+     *   → 权限码 `group.create` / `group.edit` / `group.delete` / `group.view` / `group.member_change`。
+     *
+     * 所以这里**复用 `team_groups`**（ADR-010：team_id 即 space_id），不另建一套"项目分组"表。
+     * 外键 `on delete set null`：分组被删时项目回到"未分组"，而不是跟着消失或拒绝删分组。
+     */
+    groupId: bigint("group_id", { mode: "bigint" }).references(() => teamGroups.id, {
+      onDelete: "set null",
+    }),
+    /**
      * 来源本子（`novels.id`，可空）：`source_type=1` 且由「已定稿本子拆集」创建时写入。
      *
      * 为什么需要这一列：`POST /novel/:nt/reopen` 必须回答"这个本子有没有被拆成项目"。
@@ -486,6 +504,8 @@ export const scriptProjects = pgTable(
     index("idx_script_projects_space").on(t.spaceId, t.createdAt.desc()),
     // reopen 的"被引用"判断按来源本子查，必须有索引（否则每次撤回定稿都全表扫）
     index("idx_script_projects_source_novel").on(t.sourceNovelId),
+    // 作品列表按归属组过滤（竞品 `GET /script_project/list?group_id=`），走 (space, group) 复合索引
+    index("idx_script_projects_group").on(t.spaceId, t.groupId),
   ],
 );
 

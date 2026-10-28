@@ -402,7 +402,12 @@
     "restoredDone": "已恢复",
     "addFailed": "新增失败",
     "duplicateDone": "已复制「{title}」：{episodes} 集 · {characters} 个角色",
-    "duplicateFailed": "复制失败"
+    "duplicateFailed": "复制失败",
+    "group": "分组：{name}",
+    "groupAll": "全部分组",
+    "groupNone": "未分组",
+    "changeGroup": "更换分组",
+    "groupChanged": "已更换分组"
   },
   "projects": {
     "metaTitle": "项目 · 一帧",

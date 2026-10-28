@@ -126,6 +126,90 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.17 · 第 63 批：#5 项目归属组 + 竞品两级分类投影，A 类缺口清零 · 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.6（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：202.08 → **202.17/206 = 98.1%**，剩余 3.92 → **3.83**（#5 94% → 97%，+0.09）。
+
+### 一、先把语义搞对：竞品的「分组」是"项目归属组"，不是"项目文件夹"
+
+上一批把「项目分组 + 五档分类」记成「证据已拿到、待排期」，其实只拿到了**参数名**，没拿到**语义**。这批先把语义钉死：
+
+```
+// Cp3a6_yk.js —— 换组动作
+g.open("project-change-group", { sp_id, old_group_id: t.group_id ?? "0", old_group_name })
+
+// DDLTpMu7.js —— 文案 key（关键判据）
+project.groupOwnership.changeModal.title
+project.groupOwnership.tooltip.noPermission
+data-testid="home-film-project-change-group"   // 按钮，由 canChangeGroup 控制 disabled
+```
+
+`groupOwnership` 这三个字说明它不是「文件夹」，而是**归属关系**。再往下一层验证：分组本身的 CRUD 根本不在 `script_project` 域，而在**团队域**（`D7aUDXP7.js` 的「端点→权限码」映射表）：
+
+```
+POST /web/v1/cam/team/:team_id/group              → group.create
+POST /web/v1/cam/team/:team_id/group/:group_id/edit → group.edit
+POST /web/v1/cam/team/:team_id/group/:group_id/delete → group.delete
+GET  /web/v1/cam/team/:team_id/groups             → group.view
+POST /web/v1/cam/team/member/change-group         → group.member_change
+```
+
+而 `script_project` 域自己**只有两个** group 端点：`list` 的一个 `group_id` 查询参数，和 `POST /script_project/:sp_id/group/edit`。**没有分组 CRUD。**
+
+### 二、所以不建第二套分组表
+
+我方已经有 `team_groups`（含负责人、排序、启用/停用）与它的 CRUD。再建一套「项目分组」就会出现两套分组、两套权限、两套计数，且用户会在两个地方看到"分组"却互不相通。做法：
+
+| 决定 | 内容 | 为什么 |
+|---|---|---|
+| 复用 | 迁移 `0040_stiff_tyrannus.sql`：`script_projects.group_id` → `team_groups.id` | 竞品的分组 CRUD 在团队域，归属关系才是项目侧的事 |
+| 外键语义 | `on delete set null` | 组被删时项目**退回未分组**，而不是悬空或跟着组一起消失 |
+| 取消分组 | 接 `null` / `"0"` / `""`，内部一律写 `null` | 写 `0` 会留下悬空外键 |
+| 校验 | 跨空间组 400102、停用组 400101、非数字 400101 | 三条缺一条都会让"归属"说谎 |
+| 端点 | `POST /script/projects/:id/group` | 对齐竞品 `POST /script_project/:sp_id/group/edit` 的语义 |
+
+### 三、分类：把竞品口径当「视图」，不当「真相」
+
+竞品有两套分类：`project_category`（SHORT_FILM=1 / DRAMA=2 / FILM=3）与 `project_subcategory`（ALL=0 / AI_SHORT_FILM=1 / AI_AD_DRAMA=2 / AI_DRAMA=3 / VIDEO_REDRAW=4），UI 上是五档 tab。我方已有 `kind`（workshop/canvas）+ `project_mode`（1 普通 / 2 广告剧 / 3 转绘）。
+
+**不给项目加第二套分类列**——两套分类同时落库，必然出现「改了 `project_mode` 忘改 `project_category`」的漂移。做法是 `packages/shared/src/project-category.ts` 里的**双向映射**：
+
+```
+AI 剧 DRAMA_WORKFLOW   category 2 / subcategory 3  →  workshop, mode 1
+画布 CANVAS            category 1 / subcategory 1  →  canvas
+广告剧 AD_DRAMA        category 1 / subcategory 2  →  workshop, mode 2
+视频转绘 VIDEO_REDRAW  category 2 / subcategory 4  →  workshop, mode 3
+影视版 FILM            category 3 / subcategory 0  →  无对应 → 400101
+```
+
+- **反方向也下发**：`/works` 每行都带 `project_category`/`project_subcategory`，调用方两边都能读。
+- **FILM 明确拒收**，msg 写清「由影视模块承接」——假装支持会让调用方以为筛过了。
+- **只给 `project_category=1` 是二义**（画布 vs 广告剧）→ 也 400101，要求补 `project_subcategory`。
+- `project_categories`（逗号多选）逐个翻译，**任一不支持即整体拒绝**，不做部分筛选。
+
+### 四、跑测试才暴露的真 bug：`canvasFilterable`
+
+`tab=all` 时画布和工坊两路各自过滤后内存归并，而画布那路的 `canvasFilterable` 只看 `kind`/`keyword`/时间段，**不吃 `group_id`/`projectMode`**——于是「按组筛选」的结果里会混进**所有画布**。两条都补上：设了 `projectMode` 直接排除画布；`groupId` 非空且非 `"0"` 时也排除（画布没有分组概念）。
+
+这个 bug 靠读代码很难发现（两路过滤逻辑分居两个函数），是新增的「按组过滤只回该项目」断言把它逼出来的。顺带记一个夹具坑：该测试空间的登录会自动带一条示例作品「示例：雨夜来信」（`is_sample=1`），凡是"只回我造的项目"的断言都必须按 `stamp` 过滤。
+
+### 五、验证与数字
+
+| 用例 | 覆盖的不变量 |
+|---|---|
+| 赋组 / 列出 `group_id`+`group_name` / 按组过滤 | 归属写入与投影一致；未分组回 `"0"` |
+| `"0"`、`null`、`group_id=0` 三种取消写法 | 三种入口都不留悬空外键 |
+| 跨空间组 400102 / `"abc"` 400101 / 不存在组 400102 | 归属不能跨空间，也不能指向停用组 |
+| 两级分类投影（画布 1/1、剧本 2/3） | 双向映射两边一致 |
+| FILM / 只给 category=1 / subcategory=9 / `categories=2,3` → 400101 | 不支持的就报错，不静默筛空 |
+
+规模：`works-aggregate.spec.ts` **9 → 11 例**，api 全量 **875 例**；迁移 40 → **41**、端点 700 → **701**；`verify-round.ps1` **12/12 全绿**。
+
+**诚实边界**：`sp_source`/`sp_type` 仍**拒收**（我方无对应维度，不硬凑）；FILM 档不假装支持；五档 tab 的**列表 UI** 未做（我方 tab 是形态维度：工坊/画布/全部）。所以 #5 只到 **97%**，剩 0.09 如实记在 §5 第 5 行——**A 类缺口至此清零，代码侧不再有"排一轮就能加分"的整块**。
+
+---
+
 ## 变更登记（v6.16 · 第 62 批：#5 全部项目补「画布封面」，并把「项目分组/分类」从"卡证据"改记为"待排期" · 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.5（同一批；本文件与主台账各有一套编号，勿混）。

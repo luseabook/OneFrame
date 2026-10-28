@@ -1,6 +1,6 @@
 # OneFrame × ReelMate 实现进度对照（以竞品为标准）
 
-> 评估对象：工作区 `E:\wanxing`（40 个迁移 / 112 张表 / **700 端点 / 52 controller** / 64 页面 / 1,244 用例）
+> 评估对象：工作区 `E:\wanxing`（41 个迁移 / 112 张表 / **701 端点 / 52 controller** / 64 页面 / 1,246 用例）
 > 评估时间：… · 19:10（v2.4）· 19:40（v2.5）· 20:10（v2.6）· 20:40（v2.7）· 21:10（v2.8）· 21:40（v2.9）· 22:10（v3.0）· 22:40（v3.1）· 23:20（v3.2）· 23:55（v3.3）· 00:35（v3.4）· 01:10（v3.5）· 01:45（v3.6）· 02:20（v3.7）· 02:55（v3.8）· 03:30（v3.9）· 04:05（v4.0）· 04:40（v4.1）· 05:15（v4.2）· 05:55（v4.3）· 06:45（v4.4）· 07:20（v4.5）· 08:05（v4.6）· 08:45（v4.7）· 09:20（v4.8）· 09:55（v4.9）· 10:35（v5.0）· 11:10（v5.1）· 12:00（v5.2）· 12:40（v5.3）· 13:25（v5.4）· 14:10（v5.5）· 15:00（v5.6）· 15:45（v5.7）· 16:25（v5.8）· 17:05（v5.9）· 17:55（v6.0）· 18:40（v6.1）· 19:30（v6.2）· 20:15（v6.3）· 20:55（v6.4）· 21:40（v6.5）· 22:20（v6.6）· 22:55（v6.7 缺口复核）· 23:45（v6.8）· 00:30（v6.9）· 01:15（v7.0）· 02:00（v7.1）· 02:45（v7.2）· 03:30（v7.3）· 04:35（v7.4）· **2026-10-29 04:50 重算（v7.5）** · 05:20（v7.6）· 06:05（v7.7）
 > 竞品基准：万兴剧厂 ReelMate（`www.reelmate.cn`），功能地图见 [reelmate-feature-map.md](../01-product/reelmate-feature-map.md)，分域附录见 [_parts/](../01-product/_parts/)
 > 本文用途：**排期与投入优先级的事实基线**。不是验收报告，不含主观评价。
@@ -9,25 +9,25 @@
 
 ## 0. 一句话结论
 
-**以竞品为基准，OneFrame 全站实现进度 ≈ 98.1%（202.08/206，剩余 3.92；v1.0 基线 35.4%）；首发口径 ≈ 97.9%（130.25/133，基线 54.4%）。**
+**以竞品为基准，OneFrame 全站实现进度 ≈ 98.1%（202.17/206，剩余 3.83；v1.0 基线 35.4%）；首发口径 ≈ 98.0%（130.34/133，基线 54.4%）。**
 
-最近一批（第 62 批）做的是**补齐「全部项目」里唯一还缺的真实能力：画布封面**。竞品 `GET /df/script_project/list` 返回 `cover` + `covers[]`（`Cp3a6_yk.js` 的取值是 `cover || covers[0] || ""`），封面本身是 **file_id**，设置走 `POST /df/script_project/edit { cover: file_id, sp_id }`；而我方 `/works` 的画布行此前 `cover_uri` **恒为 null**（`works.service.ts` 的 `queryCanvas` 只统计 `node_count/running_nodes/failed_nodes`），`works.vue` 的画布卡片只渲染一个空占位——也就是说"画布项目永远没有封面"，而竞品有。本批新增 `canvases.cover_asset_id`（迁移 0039，外键 `on delete set null`，存 id 不存 URL：key 会变死链而外键能自动退兜底）+ 三档取值（人工 `asset_id` → 节点 `node_id` → 自动兜底「画布内最近一次图片节点产物」，即 `canvas_nodes.task_id` → `assets.source_task_id`）+ 独立端点 `POST /canvas/canvases/:canvas_id/cover`（**不塞进** `PATCH canvases/:id`：改名要带乐观锁 `version`，封面与画布内容无关）+ `/works` 画布行补 `cover_uri`/`covers[]`/`creator_nick`/`last_edited_at` + 前端卡片渲染真封面与创建人、画布检查器加「设为画布封面」。顺带补齐竞品列表的两个**参数名**别名（`name` ≢ `keyword`、`process_status=-1` ≢ `status=all`），其余 6 个竞品参数（`group_id`/`sp_source`/`sp_type`/`project_category`/`project_subcategory`/`project_categories`）我方**没有对应维度**，由 zod 明确拒绝并在文档登记为口径差异——静默忽略会让调用方以为筛过了，比报错更危险。#5 90% → 94%，**+0.12 权重**。
-剩余 **3.92** 权重里已无「从零开发」，全部是外部输入与取证：
+最近一批（第 63 批）做的是**把「全部项目」最后一块自建缺口清掉：项目归属组 + 竞品两级分类**。上一批把「项目分组/五档分类」记成 A 类待排期，本批就从竞品 Vite 产物里把语义钉死了：竞品项目列表的 `group` 不是「项目文件夹」，而是**归属团队分组**——换组动作是 `g.open("project-change-group", {sp_id, old_group_id: t.group_id ?? "0", old_group_name})`，文案 key 是 `project.groupOwnership.changeModal.title`，而分组本身的 CRUD 在**团队域**（`POST /cam/team/:team_id/group`→ `group.create`，`GET /cam/team/:team_id/groups` → `group.view`，见 `D7aUDXP7.js` 的端点→权限码表）。所以我方**不另建分组表**，直接给 `script_projects` 加 `group_id` 指向已有的 `team_groups`（迁移 0040，外键 `on delete set null`：组被删时项目退回未分组，而不是悬空或跟着消失），并补 `POST /script/projects/:id/group` 换组（跨空间组 400102、停用组 400101、`null`/`"0"` 都表示取消分组——写 0 会悬空外键，所以内部一律写 `null`）。分类一侧用 `@app/shared` 的**双向映射**把竞品`project_category`/`project_subcategory` 翻成我方 `kind`/`project_mode`（AI 剧 2/3→workshop+1、画布 1/1→canvas、广告剧 1/2→workshop+2、视频转绘 2/4→workshop+3），**不给项目加第二套分类列**：两套分类同时落库必然出现「改了 mode 忘改 category」的漂移；反过来 `/works` 每行也下发 `project_category`/`project_subcategory`，调用方两边都能读。竞品第五档**影视版 FILM（category=3）我方没有对应**，明确 `400101` 拒收并在 msg 里说清「由影视模块承接」——假装支持会让调用方以为筛过了。#5 94% → **97%**，**+0.09 权重**。
+剩余 **3.83** 权重里已无「从零开发」，全部是外部输入与取证：
 
 | 拆分 | 模块 | 权重 | 进度 | v2.1 | v2.0 | v1.0 | 含义 |
 |---|---|---:|---:|---:|---:|---:|---|
-| **核心创作闭环** | 18 | 110 | **97.5%** | 92.4% | 83.6% | 51.3% | 只剩"外部 Key / 取证"级别 |
+| **核心创作闭环** | 18 | 110 | **97.6%** | 92.4% | 83.6% | 51.3% | 只剩"外部 Key / 取证"级别 |
 | **生态与规模化** | 10 | 96 | **98.8%** | 84.1% | 45.8% | 19.3% | 创作者中心 5 页齐 + 影视版达 100% |
-| **全站** | 28 | 206 | **98.1%** | 88.5% | 66.0% | 36.4% | 见 §3.4（逐轮重算至 **202.08/206**，剩余 3.92） |
-| **首发口径**（剔除 8 个非阻塞模块） | 20 | 133 | **97.9%** | 93.0% | 83.0% | 55.9% | 「Beta 可对外收钱出片」已达 97.9%（**130.25/133**） |
+| **全站** | 28 | 206 | **98.1%** | 88.5% | 66.0% | 36.4% | 见 §3.4（逐轮重算至 **202.17/206**，剩余 3.83） |
+| **首发口径**（剔除 8 个非阻塞模块） | 20 | 133 | **98.0%** | 93.0% | 83.0% | 55.9% | 「Beta 可对外收钱出片」已达 98.0%（**130.34/133**） |
 
 **五个必须说清的事实：**
 
-1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、8 个 99–99.9%、4 个 97–98%、5 个 95–96%、2 个 92%**；最低的三个是 #12 集市 92、#25 视频转绘 92、#5 全部项目 94，全部卡在"外部资质"或"取证后待排期"。
-2. **剩余 3.92 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、真实渠道联调、升级补差价下单、项目分组与分类维度（竞品有证据、本批未做）、知识库条目级字段（竞品有证据但属扩展能力）、CLI 57 条骨架命令（卡在后端未落地的端点）。**没有一块是"从零开发"**。
-3. **核心与生态两条线都已过 97%**：核心创作闭环 97.5%、生态与规模化 98.8%。首发口径（剔除 8 个非阻塞模块）97.9%，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 3.92 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
+1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、8 个 99–99.9%、5 个 97–98%、4 个 95–96%、2 个 92%**；最低的三个是 #12 集市 92、#25 视频转绘 92、#3/#4/#22 各 95，全部卡在"外部资质"或"待外部证据"。
+2. **剩余 3.83 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、真实渠道联调、升级补差价下单、知识库条目级字段（竞品有证据但属扩展能力）、CLI 57 条骨架命令（卡在后端未落地的端点）、#5 剩下的影视版 FILM 档合流与五档 tab。**没有一块是"从零开发"**。
+3. **核心与生态两条线都已过 97%**：核心创作闭环 97.6%、生态与规模化 98.8%。首发口径（剔除 8 个非阻塞模块）98.0%，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 3.83 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
 4. **每一轮的进度都有可复跑的证据**：`_acceptance/verify-round.ps1`（12 个任务全绿）+ 8 套真实浏览器 E2E（导演台/广告剧 12 项/转绘 11 项/创作者/分享/模板 UI/运营审核）+ 各类 smoke 脚本，命令与结论都登记在 §8。
-5. **本轮（第 62 批）做了什么**：① `canvases.cover_asset_id`（迁移 `0039_quiet_carlie_cooper.sql`：`ADD COLUMN cover_asset_id bigint` + FK `assets(id) on delete set null`），迁移 39 → **40**；② `canvas.service.ts` 新增「── 封面 ──」段：`setCover()` 三档语义（`node_id` 优先解析节点产物、`asset_id` 走素材校验、都不传=清除回落自动）+ `coverOf()` 人工优先 + `autoCoverAssetId()` 自动兜底（`assets` 内连 `canvas_nodes` 按 `sourceTaskId = taskId` 取最近一张图片）；③ `works.service.ts` 的 `queryCanvas` CTE 补封面子查询（`order by (a.id = c.cover_asset_id) desc, a.id desc` —— 人工封面优先于自动）、`creator_nick`（`users.nickname`）、`last_edited_at`，并给两张形态都补 `covers[]`；④ `worksQuerySchema` 加竞品别名 `name`/`process_status`，其余 6 个参数由 zod 拒绝；⑤ api 测试 `works-aggregate.spec.ts` 6 → **9 例**（自动兜底与签名、人工优先与清除回落、越权/非法参数、参数别名）。**边界**：工坊项目没有"创建人"字段，`creator_nick` 明确返回 `null` 而不是拿空间 owner 冒充；项目分组（`group_id`/`group_name` + `POST /script_project/:sp_id/group/edit`）与五档分类（`project_category`/`project_subcategory`）**本批未做**——证据已拿到，从"卡证据"改为"待排期"，如实记在 §5 里。
+5. **本轮（第 63 批）做了什么**：① 迁移 `0040_stiff_tyrannus.sql`：`script_projects` 加 `group_id bigint` + FK `team_groups(id) on delete set null` + `idx_script_projects_group (space_id, group_id)`，迁移 40 → **41**；② `works.service.ts`：`queryWorkshop` CTE 补 `project_mode`/`group_id::text`/`group_name` 子查询，`workshopWhere` 支持 `projectMode` 与 `groupId`（`"0"`/空 = 未分组），**`canvasFilterable` 补两条**——`tab=all` 时画布侧原先不吃这两个过滤条件，会让"本组项目"结果里混进画布（首次跑测试才暴露）；两种形态都下发 `project_category`/`project_subcategory`；③ 新增 `packages/shared/src/project-category.ts`：竞品两套枚举 + 五档 tab 组合 + `workCategoryOf()` / `workFilterOfCategory()`（FILM 与"只给 category=1"都返回 `{ok:false,reason}`，由 controller 转 400101）；④ `worksQuerySchema` 接 `group_id`/`project_category`/`project_subcategory`/`project_categories`（逗号多选，任一不支持即整体拒绝）；新增 `POST /script/projects/:id/group`；⑤ 前端 `works.vue` 加分组筛选与卡片就地换组、`types/api.ts` 补字段、i18n 五语言 +5 key；api 测试 `works-aggregate.spec.ts` 9 → **11 例**。**边界**：`sp_source`/`sp_type` 仍拒收（我方无对应维度）；FILM 档不假支持；五档 tab UI 未做（我方 tab 是形态维度），所以 #5 只到 97% 而不是 100%。
 
 ---
 
@@ -68,14 +68,14 @@
 | 维度 | ReelMate | OneFrame（v2.1） | 覆盖 | v1.0 |
 |---|---|---:|---:|---:|
 | 页面路由 | 102（可比 93） | **64** | 61%（full）/ 69%（含 partial） | 29 |
-| API 端点 | 821 路径常量 | **700**（52 个 controller） | 85% | 236 |
+| API 端点 | 821 路径常量 | **701**（52 个 controller） | 85% | 236 |
 | 后端域 | 12 个服务前缀 | **30 个模块目录** | — | 14 |
-| 数据表 | 未知 | **112 张**（迁移 0000–0039） | — | 49 |
+| 数据表 | 未知 | **112 张**（迁移 0000–0040） | — | 49 |
 | 模型目录 | 46 条 / 8 生成端点 | **46 条 seed + 15 条内部能力行**（目录 100%） | 100% | 10 条占位 |
 | 单点工具 | 22（17 有路由 + 5 报告点名） | **19 张卡 / 19 个落地页** | 100% | 18 卡 / 8 落地 |
 | CLI/MCP | 38 命令组 | **197 命令 / 38 组**（140 可用 + 57 骨架；`skill-path` 分发随包 Skill 已落地，MCP 侧无工具清单可对齐） | 85% | 0 |
 | 源码规模 | — | **api 216 个 `.ts` + web 54,600 行 `.vue` + cli 20 文件 + 4 个 packages** | — | — |
-| 测试 | — | **1,244 用例全绿**（api 873 / adapters 164 / cli 97 / worker 52 / db 26 / shared 26 / storage 6）＋ 浏览器 E2E 8 套（_acceptance 下 26 个 e2e/smoke 脚本） | — | 482 |
+| 测试 | — | **1,246 用例全绿**（api 875 / adapters 164 / cli 97 / worker 52 / db 26 / shared 26 / storage 6）＋ 浏览器 E2E 8 套（_acceptance 下 26 个 e2e/smoke 脚本） | — | 482 |
 
 ### 2.2 我方逐域端点（精确，可直接核对）
 
@@ -83,7 +83,7 @@
 |---|---|---:|
 | **novel（小说改编链）** | novel 45 + original 20 + agent 16 + variant 16 | **97** |
 | **canvas（画布）** | canvas 27 + material 15 + node-tasks 13 + group 8 + template 7 + download 3 + table 2 + chat 11 | **86** |
-| **script（剧本工厂/剧集/时间线）** | script.controller（含 quality-check / film-synthesis / parse / publish / works） | **60** |
+| **script（剧本工厂/剧集/时间线）** | script.controller（含 quality-check / film-synthesis / parse / publish / works） | **61** |
 | **market（集市 + Admin）** | market 36 + market-admin 22 | **58** |
 | **film（影视版）** | film 50 + func-whitelist 1 | **51** |
 | **op（运营增长）** | op.controller | **42** |
@@ -101,7 +101,7 @@
 | **ad（广告剧）** | ad-drama.controller（五段流程 12 端点） | **12** |
 | **redraw（视频转绘）** | redraw.controller（8 竞品 + 1 列表） | **9** |
 | **health / metrics / app / files / generations / models / reports / workflow** | 3+1+1+1+2+1+1+1 | **11** |
-| **合计** | — | **683** |
+| **合计** | — | **684** |
 
 ### 2.2.1 前端页面 i18n 覆盖（新增口径，2026-10-28）
 
@@ -173,7 +173,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 2 | **小说改编链** | 86 | L(8) | **98%** | 7.84 | **90 路由**：主链 38 + **原创链 20** + 编辑 Agent 16 + 裂变 16；`reopen` 两级引用判据（`source_novel_id` 精确 + 快照回落）；会话锁 Redis（多副本安全）；40 例 + 51 项 E2E | `original_script/characters/*` 5 条**有意不单列**（角色卡走既有 content-analysis，`novel-original.controller.ts:25-33` 已登记理由：不造第二份"角色卡怎么生成"的真相）；~~原创 `idea/:ni_id` 详情/编辑~~ **已实现**（`NovelOriginalChain.vue:143-170` 调 `GET/PATCH /novel/original/idea/:ni_id`） |
 | 3 | 剧集与分镜 | 69 | M(3) | **95%** | 2.85 | `quality-check`（只读，五维加权）+ `film-synthesis-export`（同步 80% 闸门 → 400106 + zip/mp4 双通道）+ `parse`/`parse-reset`/`parse-retry`（先备份再覆盖）；24 例 | quality-check 评分口径**自建**（竞品只有路由、无字段证据）；真 ffmpeg 切片裁剪待 worker handler |
 | 4 | 创作 Agent | 12 | XL(20) | **95%** | 19.00 | 29 端点 + `/agent` 对话页 + 33 张平台 Skill 卡 + SSE 续传/降级轮询；22 例 + 29 项 E2E | ~~分享侧实时流~~ **已实现（自建口径）**：`GET /share/:token/stream` 只读 SSE（六类帧，撤销/过期即断，终态自关，不推 storage key/积分/space）；~~`/agent/home/resource/*`~~ **有意不做**（见 `api-spec.md §14.9.3`：竞品只有端点名、无响应体，依赖内容运营表，为"可能不存在的内容模型"设计表 = 凭空造数据）；真实 ASR（需语音服务凭据 → 现 `available:false`，同样已登记"不暴露空壳"） |
-| 5 | 全部项目 | 64 | M(3) | **94%** | 2.82 | `GET /works` 扩展：`tab=workshop\|canvas\|all` + 6 种筛选 + **竞品参数别名**（`name` ≡ `keyword`、`process_status=-1` ≡ `status=all`）+ `has_more` + `tabs{}`；画布侧跨域只读投影 + **画布封面三档**（人工 `asset_id`/节点 `node_id`/自动取"画布内最近一次图片节点产物"）+ `covers[]`/`creator_nick`/`last_edited_at` + `POST /canvas/canvases/:id/cover`（迁移 0039）；`/works` 三形态 tab；**9 例** | 项目分组（`group_id`/`group_name` + `POST /script_project/:sp_id/group/edit`）与五档分类（`project_category`/`project_subcategory`）**证据已拿到、本批未做**（原记为"卡证据"，第 62 批起改记"待排期"）；工坊项目无创建人字段，`creator_nick` 返 `null` 而不拿空间 owner 冒充 |
+| 5 | 全部项目 | 65 | M(3) | **97%** | 2.91 | `GET /works` 扩展：`tab=workshop\|canvas\|all` + 6 种筛选 + **竞品参数别名**（`name` ≡ `keyword`、`process_status=-1` ≡ `status=all`）+ **竞品两级分类投影**（`project_category`/`project_subcategory`/`project_categories` → 我方 `kind`/`project_mode`，反向也下发） + **项目归属组**（`group_id`/`group_name` + list 过滤 + `POST /script/projects/:id/group` 换组，复用 `team_groups`，迁移 0040） + `has_more` + `tabs{}`；画布侧跨域只读投影 + **画布封面三档**（人工 `asset_id`/节点 `node_id`/自动取"画布内最近一次图片节点产物"，迁移 0039） + `covers[]`/`creator_nick`/`last_edited_at` + `POST /canvas/canvases/:id/cover`；**11 例** | 剩 0.09：**影视版 FILM 档**（竞品 `project_category=3`）我方由独立影视模块承接、未合流到 `/works`（明确 400101 拒收，不假装支持）；分类只做到**参数层**，没有照着竞品的五档 tab 重排列表 UI（我方 tab 是形态维度：工坊/画布/全部）；工坊项目无创建人字段，`creator_nick` 返 `null` 而不拿空间 owner 冒充 |
 | 6 | 工具箱 | 63 | XL(20) | **97%** | 19.40 | 19 卡全可点（目录驱动）+ 15 工具 mode 接线 + 通用工作台 + 11 个落地页；15 例 + 164 适配器例 + 19 项 E2E | 真实供应商 Key（全 mock，外部依赖）；其余已验：图片工具真实提交→worker→产物→现签 URL→浏览器可渲染 |
 | 7 | 团队 | 39 | XL(20) | **100%** | 20.00 | 33 端点：成员/分组/角色/积分池/流水导出 + **权限码目录 70 条（11 组）+ 角色权限矩阵读写（幂等）+ `temp-info` 模型开关矩阵**；`/team` 权限矩阵页签 | 无（6 个码已落拦截：team.edit / team.permission / member.create / member.remove / member.edit / member.points；默认放行策略保零回归） |
 | 8 | 影视版 | 37 | XL(20) | **100%** | 20.00 | 49 操作 + `/film`、`/film/[id]`；47 例 + 18 项 E2E | 无（xlsx 真导出 + 离线通知 webhook 投递均已完成；WS 真传输属网关部署项，不是功能缺口） |
@@ -212,15 +212,15 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 | 分组 | 模块 | 权重 | 已完成 | 进度 |
 |---|---:|---:|---:|---:|
-| 核心创作闭环 | 18 | 110 | 107.25 | **97.5%** |
+| 核心创作闭环 | 18 | 110 | 107.33 | **97.6%** |
 | 生态与规模化 | 10 | 96 | 94.84 | **98.8%** |
-| **全站** | **28** | **206** | **202.08** | **98.1%** |
-| （参考）首发口径：剔除 8 个非阻塞模块 | 20 | 133 | 130.25 | **97.9%** |
+| **全站** | **28** | **206** | **202.17** | **98.1%** |
+| （参考）首发口径：剔除 8 个非阻塞模块 | 20 | 133 | 130.34 | **98.0%** |
 
-> **核心组 18 个**（权重 110）：#1 首页 · #2 小说改编链 · #3 剧集分镜 · #4 Agent · #5 全部项目 · #6 工具箱 · #11 无限画布 · #15 后处理 · #17 资产主体 · #19 3D 导演 · #20 ReelFlow · #22 账号 · #23 计费 · #24 任务 · #25 内容安全 · #26 分享 · #27 运营后台 · #28 架构 → 已完成 **107.25**
+> **核心组 18 个**（权重 110）：#1 首页 · #2 小说改编链 · #3 剧集分镜 · #4 Agent · #5 全部项目 · #6 工具箱 · #11 无限画布 · #15 后处理 · #17 资产主体 · #19 3D 导演 · #20 ReelFlow · #22 账号 · #23 计费 · #24 任务 · #25 内容安全 · #26 分享 · #27 运营后台 · #28 架构 → 已完成 **107.33**
 > **生态组 10 个**（权重 96）：#7 团队 · #8 影视版 · #9 CLI/MCP · #10 活动创作者 · #12 剧本广场 · #13 广告剧 · #14 视频转绘 · #16 多语言 · #18 团队知识库 · #21 数据看板 → 已完成 **94.84**
 > **首发口径剔除的 8 个非阻塞模块**（权重 73）：影视版 · CLI/MCP · 活动创作者 · 剧本广场 · 多语言 · 广告剧 · 视频转绘 · 团队知识库。团队（#7）与数据看板（#21）保留在首发口径内。
-> **剩余总权重**：206 − 202.08 = **3.92**（**没有整块未做**；单块最大是 Agent 1.00、集市 0.64、工具箱 0.60、CLI/MCP 0.32、全部项目 0.18，其余都是 0.03~0.30 的取证/接 Key/口径）。
+> **剩余总权重**：206 − 202.17 = **3.83**（**没有整块未做**；单块最大是 Agent 1.00、集市 0.64、工具箱 0.60、CLI/MCP 0.32、画布 0.20，其余都是 0.03~0.26 的取证/接 Key/口径）。
 
 分布形态：
 
@@ -228,11 +228,11 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 |---|---:|---|
 | 100% | **9** | #1 首页 · #7 团队 · #8 影视版 · #10 活动/创作者 · #21 数据看板 · #24 任务系统 · #26 分享 · #27 运营后台 · #28 架构 |
 | 99–99.9% | **8** | #11 画布 99 · #15 后处理 99 · #16 多语言 99.9 · #17 资产 99 · #18 知识库 99.5 · #19 3D 99 · #20 ReelFlow 99 · #23 计费 99.5 |
-| 97–98% | **4** | #2 小说 98 · #6 工具箱 97 · #13 广告剧 97 · #14 转绘 97 |
-| 95–96% | **5** | #3 剧集分镜 95 · #4 Agent 95 · #22 账号 95 · #9 CLI/MCP 96 · #5 全部项目 94 |
+| 97–98% | **5** | #2 小说 98 · #6 工具箱 97 · #13 广告剧 97 · #14 转绘 97 · #5 全部项目 97 |
+| 95–96% | **4** | #3 剧集分镜 95 · #4 Agent 95 · #22 账号 95 · #9 CLI/MCP 96 |
 | 92% | **2** | #12 集市 92 · #25 内容安全 92 |
 
-**分布解读**：**28 个模块全部 ≥92%，中位数 99%，9 个满分**。剩下 2 个 92% 的模块，缺口都不是"没写代码"：集市差的是打款资质、内容安全差的是审核供应商；全部项目（94%）差项目分组与五档分类维度（证据已拿到、待排期），账号（95%）差真实渠道联调与账号合并口径，CLI/MCP（96%）差 57 条骨架命令背后尚未落地的后端端点与"竞品无形状可对齐"的 MCP 端。逐项"卡在谁"见 §5。
+**分布解读**：**28 个模块全部 ≥92%，中位数 99%，9 个满分**。剩下 2 个 92% 的模块，缺口都不是"没写代码"：集市差的是打款资质、内容安全差的是审核供应商；全部项目（97%）只剩影视版 FILM 档是否合流到 `/works` 与五档 tab UI，账号（95%）差真实渠道联调与账号合并口径，CLI/MCP（96%）差 57 条骨架命令背后尚未落地的后端端点与"竞品无形状可对齐"的 MCP 端。逐项"卡在谁"见 §5。
 
 ### 3.5 缺口分类（2026-10-28 逐条按代码复核后）
 
@@ -242,8 +242,8 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 | 类型 | 模块 | 缺口 | 我方能做什么 |
 |---|---|---|---|
-| **A. 可独立实现**（无外部依赖） | — | **除 #5 外已清零**：分享侧只读 SSE 已完成（第 45 批）；`/agent/home/resource/*` 经复核属"有意不做"（见 D 类） | ✅ 无待做项 |
-| | #5 | **项目分组 + 五档分类维度**（`group_id`/`group_name` + `POST /script_project/:sp_id/group/edit`；`project_category`/`project_subcategory`）——**证据已拿到**（第 62 批：`BMnzEdEX.js` 两套枚举 + `DDLTpMu7.js` 的 10 个 queryNames），不卡任何人，只差排期 | ⚠️ 待排期（1–2 轮，约 0.18） |
+| **A. 可独立实现**（无外部依赖） | — | **已清零**：分享侧只读 SSE（第 45 批）；#5 项目分组与五档分类投影（**第 63 批已做**）；`/agent/home/resource/*` 经复核属"有意不做"（见 D 类） | ✅ 无待做项 |
+| | #5 | ~~项目分组 + 五档分类维度~~ **第 63 批已实现**（迁移 0040 `script_projects.group_id` → `team_groups`、`POST /script/projects/:id/group`、双向分类映射）；剩影视版 FILM 档合流（产品定义）与五档 tab UI（工程量） | ✅ 主体已清 |
 | | #23 | ~~按秒计价转译层~~ **已实现**（第 52 批：`ceil(秒 × 单价)` 外推 + `pricingBasis` 可解释） | ✅ 已清 |
 | | #3 | `quality-check` 评分口径自建（竞品只给路由、无字段证据） | ⚠️ 需竞品证据才能对齐 |
 | **B. 需产品/口径一句话拍板** | #17 | `prompt_inject_mode=replace` 语义（~~集级 resources 等价性~~ **已由迁移 0031 的 `episode_resources` 表解决**，第 53 批） | ⚠️ 确认后 1 轮 |
@@ -262,11 +262,11 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | | #4 | `/agent/stt-token` | ❌ 无 STT 供应商；返回假 token 会让前端"看起来能用"（同表） |
 | **E. 环境依赖** | — | **已清零**：ffmpeg 改运行时探测（`GET /meta/capabilities`）+ **真裁剪已接进发布链**（`transcode_mode=ffmpeg/copy` 留痕） |
 
-**读法（2026-10-28 第 62 批复核后）**：**A 类只剩一项**——#5 的项目分组与五档分类（约 **0.18**，证据齐、纯工程量，排期即可做，**不需要任何人给输入**）；
-其余每一条都至少要一个输入：**B 类需你一句话定口径**（约 0.26）、**C 类需外部账号/资质/证据**（约 3.48）、
+**读法（2026-10-28 第 63 批复核后）**：**A 类已清零**——#5 的项目分组与五档分类投影在第 63 批做完，剩余 0.09 是"影视版 FILM 档是否合流到 /works"（产品一句话）与五档 tab UI（工程量），归入 B 类；
+其余每一条都至少要一个输入：**B 类需你一句话定口径**（约 0.26 + #5 剩余 0.09）、**C 类需外部账号/资质/证据**（约 3.48）、
 **E 类已自助解锁**：`ffmpeg` 改为运行时探测（本机实测 8.1.1 可用），不再需要人工判断"环境有没有"；D 类不是缺口。
 
-> 含义：**98.1% → 100% 的主干仍不可能只靠"继续写代码"达成**。要做剩下 1.9%，最小启动动作是：排一轮做 A 类（0.18）＋给 B 类四条各一句话口径（合计约 0.26），或推进 C 类任一项（单项 0.6 起）。
+> 含义：**98.1% → 100% 的主干仍不可能只靠"继续写代码"达成**。要做剩下 1.9%，最小启动动作是：给 B 类四条各一句话口径（合计约 0.26）＋ #5 剩余 0.09 的产品一句话（影视版是否合流），或推进 C 类任一项（单项 0.6 起）。
 
 ## 4. 已完成、可作为资产的部分（正面清单）
 
@@ -292,8 +292,8 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ## 5. 缺口清单（按剩余加权工作量排序）
 
-剩余总权重 **3.92**（1.9%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径 / 排一轮工程"。
-下表按**模块实际扣分**逐项列出（数字由各模块行 `权重 ×(1−完成度)` 直接得出，合计恰为 3.92）：
+剩余总权重 **3.83**（1.9%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径 / 排一轮工程"。
+下表按**模块实际扣分**逐项列出（数字由各模块行 `权重 ×(1−完成度)` 直接得出，合计恰为 3.83）：
 
 | 排名 | 模块 | 权重 | 剩余 | 具体缺什么 | 卡在谁 |
 |---:|---|---:|---:|---|---|
@@ -301,7 +301,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 2 | **剧本广场（#12）** | 8 | **0.64** | 真实打款（商户资质）；买断后二次改编许可范围 | 财务/商务 + 产品口径 |
 | 3 | **工具箱（#6）** | 20 | **0.60** | 真实供应商 Key（现全 mock 占位字节） | 商务 |
 | 4 | **CLI/MCP（#9）** | 8 | **0.32** | ~~MCP 0 行（竞品无工具清单，待取证）~~ **第 61 批已据实修正**：竞品无 MCP server 工具清单（606 个 js 里 `mcp` 仅 3 处：侧栏 `menu.mcpCli` 入口 + `integration_type=mcp` 归因参数），无形状可对齐；`skill-path` 分发通道已落地。剩 57 条骨架命令（卡在后端未落地端点，见各模块扣分）+ MCP 端不实现 | 后端端点 + 竞品证据 |
-| 5 | **全部项目（#5）** | 3 | **0.18** | ~~画布封面 + 画布元信息~~ **第 62 批已做**（迁移 0039 + 三档取值 + `covers[]`/`creator_nick`/`last_edited_at`）；剩**项目分组**（`group_id`/`group_name`、`POST /script_project/:sp_id/group/edit`）与**五档分类**（`project_category`/`project_subcategory`）——**证据已拿到，不再卡证据** | 排期（我可独立做） |
+| 5 | **全部项目（#5）** | 3 | **0.09** | ~~画布封面 + 画布元信息~~ **第 62 批已做**；~~项目分组（`group_id`/`group_name` + 换组）与五档分类投影~~ **第 63 批已做**（迁移 0040 + `POST /script/projects/:id/group` + 双向分类映射 + 分组筛选/就地换组）；剩**影视版 FILM 档**（竞品 `project_category=3`，我方由独立影视模块承接、未合流，明确 400101 拒收）与**五档 tab UI**（我方 tab 是形态维度） | 产品口径 + 工程量 |
 | 6 | **广告剧 / 转绘 / 内容安全** | 3+3+1 | **0.26** | 真实出片与真实重绘依赖供应商 Key；真实审核供应商（0.08） | 商务 |
 | 7 | **无限画布（#11）** | 20 | **0.20** | 竞品 85 端点中最后几条的响应字段取证 | 竞品证据 |
 | 8 | **小说改编链（#2）** | 8 | **0.16** | `characters/*` 5 条薄路径有意不做；结局分支字段取证 | 有意偏离 + 证据 |
@@ -310,7 +310,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 11 | **资产/主体（#17）** | 8 | **0.08** | `prompt_inject_mode=replace` 语义；`prompt_blocked` 需竞品字段 | 产品口径 + 证据 |
 | 12 | **ReelFlow（#20）** | 8 | **0.08** | ~~切片转码异步下沉 worker~~（**第 57 批已做**，见 §9 v8.0）；只剩切片业务语义的竞品字段证据 | 竞品证据 |
 | 13 | **后处理 / 3D / 计费 / 多语言 / 知识库** | 3+3+3+8+3 | **0.10** | 后处理真实 Key（0.03）、3D 真实双人（0.03）、计费补差价只报价（0.01）、多语言法务 2 页（0.01）、知识库条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 未落库（0.015，证据已有见 §9 v8.3） | 商务 + 产品 + 法务 |
-| | **合计** | **206** | **3.92** | | |
+| | **合计** | **206** | **3.83** | | |
 
 ### 5.1 逐批把"整块"清零的过程
 
@@ -330,16 +330,17 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 第 60 批（v8.3） | 97.9% | **97.9%** | **#18 补「模板场景」维度**（竞品 `0zWWdXb_.js` 原文：16 值 scene + 每类字段规则 + 10 条 tab；`dir/list`/`tag/list`/`asset/search` 都以 scene 为首要维度）→ 三表补列（迁移 0038）+ 读接口过滤 + 重名码 `747007`；#18 99%→**99.5%**（+0.015，剩条目级字段未落库） |
 | 第 61 批（v8.4） | 97.9% | **98.0%** | **#9 CLI/MCP 补 Agent 分发通道**：`oneframe skill path` + 随包 Skill（43 文件，`registry` 渲染、单测双向逐字节防漂移）+ `package.json files` + `747007` CLI 退出码映射；并把「MCP 0 行待取证」据实改为「竞品无 MCP server 工具清单，无形状可对齐」→ #9 92%→**96%**（+0.32） |
 | 第 62 批（v8.5） | 98.0% | **98.1%** | **#5 画布封面 + 全部项目元信息**：迁移 0039 `canvases.cover_asset_id`（FK `set null`）+ 三档取值（人工 `asset_id` / 节点 `node_id` / 自动取画布内最近图片节点产物）+ `POST /canvas/canvases/:id/cover` + `/works` 画布行补 `cover_uri`/`covers[]`/`creator_nick`/`last_edited_at` + 竞品参数别名（`name` ≡ `keyword`、`process_status=-1` ≡ `status=all`）→ #5 90%→**94%**（+0.12）。同时把"项目分组/分类维度"从"卡证据"据实改记为"待排期 0.18" |
+| 第 63 批（v8.6） | 98.1% | **98.1%** | **#5 项目归属组 + 竞品两级分类**（竞品 `group` 是"归属团队分组"不是文件夹：换组文案 `project.groupOwnership.*`、分组 CRUD 在 cam 团队域 → 复用 `team_groups`；迁移 0040 `script_projects.group_id` + `POST /script/projects/:id/group` + `workCategoryOf`/`workFilterOfCategory` 双向映射五档分类，FILM 明确 400101 拒收）→ #5 94%→**97%**（+0.09） |
 
 ### 5.2 排序修正建议
 
-剩下 3.92 里，**代码侧还能独立推进的是 0.18**（#5 项目分组与五档分类，证据齐、纯工程量）；
-其余 **≈3.74 卡在外部依赖、竞品取证或产品口径**。
+剩下 3.83 里，**代码侧已无"整块"可独立推进**——A 类那 0.18（#5 项目分组与五档分类）已在第 63 批清掉；
+全部 **3.83 卡在外部依赖、竞品取证或产品口径**。
 
 → 从第 46 批起已进入**外部依赖清单**阶段（见 §5.3）：需要产品/商务/法务一起提供东西，否则进度会长期停在 98.1%。
-代码侧仍可独立推进的收尾项只剩：① A 类那 0.18（排一轮即做）；② §5.4 里你一句话能拍的口径（按口径实现即得分）。
+代码侧仍可独立推进的收尾项只剩：① B 类里那 0.09（#5 剩余：影视版是否合流，产品一句话）；② §5.4 里你一句话能拍的口径（按口径实现即得分）。
 
-### 5.3 外部依赖清单（剩余 3.92 到底卡在谁手上）
+### 5.3 外部依赖清单（剩余 3.83 到底卡在谁手上）
 
 > 这张表的用途：把"没做完"拆成"谁在什么时候能给什么"。每一行都写清**解锁条件**与**解锁后的权重**。
 
@@ -349,14 +350,14 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 2 | **CLI/MCP**：57 条骨架命令 + MCP 端 | 0.32 | ~~竞品证据缺位~~ **第 61 批已据实修正**：竞品从 606 个 js 里 `mcp` 仅 3 处命中（侧栏 `menu.mcpCli` 入口 + `integration_type=mcp`/`client_source=cli|web` 归因参数），**不存在 MCP server 工具清单**——"等竞品给清单"这个假设不成立；`skill-path` 分发通道已落地。剩下 57 条骨架命令各自卡在对应后端端点未落地（权重已计入各模块），MCP 端因无形状可对齐**不实现** | 后端端点（各模块内）+ 竞品证据（若有） | 0.32 → 骨架随端点落地自然收敛 |
 | 3 | **剧本广场**：真实打款 | 0.64 | 商户资质：分账/代付需主体资质与支付通道签约 | 商务/财务：支付通道 + 分账权限 | 0.64 → 全清 |
 | 4 | **工具箱**：真实供应商 Key | 0.60 | 无凭据：`ADAPTER_MODE=mock` 下所有生成走占位字节 | 商务：至少 1 家真实供应商 Key + 额度预算 | 0.60 → 全清 |
-| 5 | **多模块"最后一项"** | **1.17** | 多数需**产品定义或凭据**：广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库条目级字段未落库（0.015）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07）。**（第 62 批已从这里移出"全部项目画布封面 0.30"：已实现；#5 剩余的 0.18 是 A 类，见第 7 行）** | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
+| 5 | **多模块"最后一项"** | **1.17** | 多数需**产品定义或凭据**：广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库条目级字段未落库（0.015）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07）。**（第 62 批移出"画布封面 0.30"、第 63 批移出"项目分组 0.18"，均已实现）** | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
 | 6 | **多语言法务页** | 0.01 | privacy/terms 按原则不机翻，需法务复核文案；韩语是否上线（产品决策） | 法务 / 产品 | 0.01 |
-| 7 | **全部项目：项目分组 + 五档分类（A 类）** | **0.18** | **不卡任何人**——证据已在手（`BMnzEdEX.js` 枚举 / `DDLTpMu7.js` 参数 / `POST /script_project/:sp_id/group/edit`），只是还没排期 | —（我独立做，1–2 轮） | 0.18 → 全清 |
-| | **合计** | **3.92** | | | |
+| 7 | **全部项目剩余（#5）** | **0.09** | 影视版 FILM 档是否合流到 `/works`（竞品 `project_category=3`，我方有独立影视模块，合流是产品定义而非技术障碍）；五档 tab UI（现在 tab 是形态维度） | 产品一句话 + 工程量 | 0.09 → 全清 |
+| | **合计** | **3.83** | | | |
 
-**结论**：3.92 拆成三类——**0.18 属 A 类**（#5 项目分组 + 分类维度，证据齐、纯工程量，我 1–2 轮可独立清掉）；
-**0.26 属 B 类**（§5.4 四条口径，你一句话拍板后我可做）；
-其余 **≈3.48 必须由外部输入**（账号/资质/证据/产品定义）。**98.1% → 100% 的最后一公里仍是"输入问题"，但不再是"完全不能动"——A 类那 0.18 可以马上开工**。
+**结论**：3.83 拆成三类——**0.35 属 B 类**（#5 剩余 0.09：影视版是否合流，产品一句话；+ §5.4 四条口径 0.26，拍板后我可做）；
+其余 **≈3.48 必须由外部输入**（账号/资质/证据/产品定义）。**98.1% → 100% 的最后一公里已是纯粹的"输入问题"**——本批把最后一块自建缺口（#5 项目分组 + 分类投影）也清掉了，A 类清零，代码侧不再有"排一轮就能加分"的整块。
+
 
 ### 5.4 B 类「一句话确认单」（合计约 0.26 权重）
 
@@ -389,7 +390,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ### 6.1 「35%」不等于「做完了 35% 的工作量」
 
-> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（98.1%，剩余 3.92）。
+> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（98.1%，剩余 3.83）。
 
 剩余 131.0 权重（64%）的构成：
 
@@ -469,7 +470,7 @@ pwsh _acceptance/verify-round.ps1 -ScaleOnly # 只出规模口径（秒级）
 # ① 我方端点总数（含无参 @Get() 写法）
 $f = @(Get-ChildItem 'app\apps\api\src' -Recurse -File -Filter '*.controller.ts')
 $s = 0; foreach ($x in $f) { $s += ([regex]::Matches((Get-Content -LiteralPath $x.FullName -Raw), '@(Get|Post|Put|Patch|Delete)\s*\(')).Count }
-"controllers=$($f.Count) endpoints=$s"                  # 52 / 700
+"controllers=$($f.Count) endpoints=$s"                  # 52 / 701
 
 # ② 页面数
 @(Get-ChildItem 'app\apps\web\pages' -Recurse -File -Filter '*.vue').Count   # 64
@@ -477,7 +478,7 @@ $s = 0; foreach ($x in $f) { $s += ([regex]::Matches((Get-Content -LiteralPath $
 # ③ 表数 / 模型种子数 / 迁移数
 (Select-String -Path 'app\packages\db\src\schema.ts' -Pattern 'pgTable\(').Count      # 112
 (Select-String -Path 'app\apps\api\src\db\seed.ts' -Pattern 'displayName: "').Count   # 46
-@(Get-ChildItem 'app\apps\api\drizzle' -File -Filter '00*.sql').Count                 # 40（0000–0039）
+@(Get-ChildItem 'app\apps\api\drizzle' -File -Filter '00*.sql').Count                 # 41（0000–0040）
 
 # ④ CLI 命令数（从构建产物读真实长度；源码是"按组展开的数组"，正则数不准）
 node -e "const m=require('./app/apps/cli/dist/registry.js'); console.log(m.COMMANDS.length, m.GROUP_ORDER.length)"  # 197 38
@@ -535,6 +536,7 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 
 | 日期 | 版本 | 变更 | 基线 HEAD |
 |---|---|---|---|
+| 2026-10-28 | **v8.6** | **#5 全部项目：项目归属组 + 竞品两级分类投影 —— 把上一批记成"A 类待排期"的那 0.18 清掉（第 63 批）**：第 62 批把「项目分组 + 五档分类」从"卡竞品证据"改记为"待排期 A 类"，本批把语义钉死后实现。**关键判断（先把语义搞对再写代码）**：竞品项目列表里的 `group` **不是"项目文件夹"而是"项目归属团队分组"**——换组动作是 `g.open("project-change-group", {sp_id, old_group_id: t.group_id ?? "0", old_group_name})`，文案 key 为 `project.groupOwnership.changeModal.title` / `project.groupOwnership.tooltip.noPermission`，卡片动作按钮 `data-testid="home-film-project-change-group"` 且由 `canChangeGroup` 控制 disabled；而分组本身的 CRUD 在**团队域**：`D7aUDXP7.js` 的「端点→权限码」表给出 `POST /cam/team/:team_id/group → group.create`、`.../group/:group_id/edit → group.edit`、`.../group/:group_id/delete → group.delete`、`GET /cam/team/:team_id/groups → group.view`、`POST /cam/team/member/change-group → group.member_change`。`script_project` 域自己**只有两个** group 端点（`list` 的 `group_id` 查询参数、`POST /script_project/:sp_id/group/edit`），没有分组 CRUD —— 这条证据决定了实现方式：**复用已有 `team_groups`，不另建一套项目分组表**（另建就会出现两套分组、两套权限、两套计数）。**代码侧**：① 迁移 `0040_stiff_tyrannus.sql`：`script_projects` 加 `group_id bigint` + FK `team_groups(id) on delete set null` + `idx_script_projects_group (space_id, group_id)`；`set null` 是刻意的——组被删时项目**退回未分组**，而不是悬空或跟着项目一起消失。② 新增 `packages/shared/src/project-category.ts`：竞品两套枚举（`project_category` SHORT_FILM=1/DRAMA=2/FILM=3、`project_subcategory` ALL=0/AI_SHORT_FILM=1/AI_AD_DRAMA=2/AI_DRAMA=3/VIDEO_REDRAW=4）与五档 tab 组合的**双向映射**：`workCategoryOf({kind, projectMode})` 反向给每行下发 `project_category`/`project_subcategory`，`workFilterOfCategory(category, subcategory)` 把竞品筛选翻成我方 `kind`/`project_mode`。**不给项目加第二套分类列**：两套分类同时落库必然出现「改了 `project_mode` 忘改 `project_category`」的漂移，把竞品口径当**视图**而不是**真相**是唯一稳的做法。映射表：AI 剧 2/3 → workshop+mode1、画布 1/1 → canvas、广告剧 1/2 → workshop+mode2、视频转绘 2/4 → workshop+mode3。③ 竞品第五档**影视版 FILM（category=3）我方没有对应**（由独立影视模块承接）→ `400101` 明确拒收、msg 写清由影视模块承接；只给 `project_category=1` 是**二义**（画布 vs 广告剧）→ 也 400101 要求补 `project_subcategory`。「静默忽略」比报错更危险：调用方会以为筛过了。④ `POST /script/projects/:id/group`：`group_id` 为空/`"0"` 表示取消分组、内部一律写 `null`（写 0 会悬空外键）；跨空间组 400102、停用组（`status !== 1`）400101、非数字 400101。⑤ `works.service.ts`：`queryWorkshop` CTE 补 `project_mode`、`group_id::text`、`group_name` 子查询；`workshopWhere` 支持 `projectMode` 与 `groupId`（`"0"`/空 = `group_id is null`）；两种形态的 DTO 都补 `group_id`（未分组回 `"0"`，照竞品 mapper 缺省值）、`group_name`、`project_mode`、`project_category`、`project_subcategory`。**本批唯一一个"跑测试才暴露"的真 bug**：`tab=all` 时画布侧走的是 `canvasFilterable`，而它只看 `kind`/`keyword`/`time`，不吃 `group_id`/`projectMode` —— 于是"按组筛选"的结果里会混进所有画布。已补两条：设了 `projectMode` 直接过滤掉画布；`groupId` 非空且非 `"0"` 时也过滤掉画布（画布没有分组概念）。**前端**：`works.vue` 加分组筛选下拉（`GET /team/groups` 只留 `status===1`，失败静默降级为空而不是报错挡住列表）、卡片上就地换组 `changeGroup()`（`"0"` → `null`）、卡片显示「分组：X」；`types/api.ts` 的 `WorkDto` 补 5 个字段；i18n 五语言 +5 key（`works.group/groupAll/groupNone/changeGroup/groupChanged`）。**测试**：`apps/api/test/works-aggregate.spec.ts` 9 → **11 例**（赋组/列出/按组过滤/取消分组三种写法/跨空间 400102/非法 400101；两级分类投影与 FILM、二义、非法 subcategory、逗号多选任一不支持即整体 400101）。**踩到一个夹具坑**：该测试空间的登录会自动带一条示例作品「示例：雨夜来信」（`is_sample=1`），凡是"只回我造的项目"的断言都必须按 `stamp` 过滤。**诚实边界**：`sp_source`/`sp_type` 仍**拒收**（我方无对应维度，不硬凑）；FILM 档不假装支持；五档 tab 的**列表 UI** 未做（我方 tab 是形态维度：工坊/画布/全部）——所以 #5 只到 **97%** 而不是 100%，剩 0.09 如实记在 §5 第 5 行。**数字**：`scoreboard.py` → **202.17/206 = 98.1%**（剩余 **3.83**），核心组 **107.33（97.6%）**、生态组 94.84（98.8%）、首发口径 **130.34/133 = 98.0%**；#5 `94% → 97%`（+0.09）。规模：迁移 40 → **41**、端点 700 → **701**、测试 1,244 → **1,246**（api 873 → **875**）。基线 `04e3d67`。 |
 | 2026-10-28 | **v8.5** | **#5 全部项目：补画布封面与项目元信息，并把"项目分组/分类"从"卡证据"改记为"待排期"（第 62 批）**：本文件此前把 #5 的缺口写成"画布封面 + 跨域投影字段之外的画布元信息"，卡点是**竞品证据**。第 62 批从竞品 Vite 产物里把证据取全：`GET /df/script_project/list` 返回 `cover` + `covers[]`（`Cp3a6_yk.js` 取值 `cover || covers[0] || ""`），封面本身是 **file_id**，设置走 `POST /df/script_project/edit { cover: file_id, sp_id }`；同文件里还有 `group_id`/`group_name` 与换组动作 `POST /df/script_project/:sp_id/group/edit`，以及 `BMnzEdEX.js` 的两套分类枚举（`project_category` = SHORT_FILM/DRAMA/FILM，`project_subcategory` = ALL/AI_SHORT_FILM/AI_AD_DRAMA/AI_DRAMA/VIDEO_REDRAW）。**代码侧**：① 迁移 `0039_quiet_carlie_cooper.sql` 给 `canvases` 加 `cover_asset_id bigint` + FK `assets(id) on delete set null`——存 id 不存 URL 的理由是 key 会变死链而外键能自动退兜底；② `canvas.service.ts` 新增「── 封面 ──」段：`setCover()` 三档语义（`node_id` 优先解析该节点产物、`asset_id` 走素材校验含跨 space 400102、都不传=清除回落自动）+ `coverOf()` 人工优先 + `autoCoverAssetId()` 自动兜底（`canvas_nodes.task_id` → `assets.source_task_id` 取最近一张图）；③ 独立端点 `POST /canvas/canvases/:canvas_id/cover`——**不塞进** `PATCH canvases/:id`，因为改名要带乐观锁 `version`，封面与画布内容无关；④ `works.service.ts` 的 `queryCanvas` CTE 补封面子查询（`order by (a.id = c.cover_asset_id) desc, a.id desc`，人工优先于自动）、`creator_nick`（`users.nickname`）与 `last_edited_at`，并给两种形态都补 `covers[]`；⑤ `worksQuerySchema` 补竞品**参数名别名**（`name` ≡ `keyword`、`process_status=-1` ≡ `status=all`），其余 6 个竞品参数（`group_id`/`sp_source`/`sp_type`/`project_category`/`project_subcategory`/`project_categories`）我方没有对应维度 → 由 zod **明确拒绝**，理由：静默忽略会让调用方以为筛过了，比报错更危险。**前端**：`works.vue` 画布卡片渲染真封面 + 创建人行（时间改用 `last_edited_at ?? updated_at ?? created_at`）；`CanvasInspector.vue` 加「设为画布封面」（仅图片结果可用）；`useCanvasApi.setCover()`；i18n 五语言 +5 key。**测试**：`works-aggregate.spec.ts` 6 → **9 例**（自动兜底与签名 URL、人工优先与清除回落、越权/非法参数/无产物节点、参数别名与 `process_status=1` 拒绝）。**诚实边界**：工坊项目没有创建人字段 → `creator_nick` 返 `null`，不拿空间 owner 冒充；项目分组与五档分类**本批未做**，从"卡证据"改记为"待排期 0.18"（A 类，见 §3.5），所以 #5 只从 90% → **94%**（+0.12），而不是直接打到 100%。**数字**：全站 201.96 → **202.08/206 = 98.1%**，剩余 4.04 → **3.92**；核心 107.25（97.5%）、首发 130.25/133（97.9%）、生态 94.84（98.8%）不变；迁移 39 → **40**、端点 699 → **700**、测试 1,241 → **1,244**（api 873）。 |
 | 2026-10-28 | **v8.4** | **#9 CLI/MCP：补 Agent 分发通道 `skill-path` + 随包 Skill，并纠正一条写错多轮的「MCP 缺口」（第 61 批）**：竞品把 CLI 接进各类 Agent 的**唯一**方式是文档包分发——`INSTALL.md:17/44` 与 `SKILL.md:41` 逐字要求「用 `reelmate skill-path` 打印**已安装 npm 包内**的 Skill 目录，把该目录**整份拷入**宿主 Skill 目录；若已有同名目录先**整目录删除**再拷入，**禁止与旧文件合并**（否则技能与二进制对不齐）」。我方 `git grep skill-path` 在 `apps/cli/src` **零命中**：没有这个命令、没有随包 Skill 包、`package.json` 连 `files` 字段都没有——即**发版产物里根本带不出 Skill**，Agent 拿不到任何使用说明。**做了什么**：① 新增 `apps/cli/src/skill.ts`：`renderAllFiles()` 从 `registry.ts`（197 条命令 / 38 组）+ `version.ts` + `exit-codes.ts` 渲染 **43 个文件**——`SKILL.md`（frontmatter + `<HARD-GATE>` 8 条 + 10 行路由表 + 命令组总览表 + stdout/stderr 契约 + 升级段）、`INSTALL.md`（9 步 Agent 安装流程）、`VERSION`、`manual/user-guide.md`、`manual/error-codes.md`（退出码 0..10 全表 + `error.kind`→退出码 + `BUSINESS_CODE_MAP` 全表）、`commands/<group>.md` × 38（每篇由 registry 里该组的 `summary/syntax/evidence/ready` 生成）。**命令文档一律生成、不手写**——手写文档必然与 197 条命令漂移，而漂移的文档比没有文档更糟。② 新增 `oneframe skill path`（`registry.ts` 的 `local("skill","path",…)` + `builtins.ts` 的 `case "skill-path"`）：返回 `{skill, path, installed, version, groups, commands, files, note}`，`installed` 以包内是否真有 `SKILL.md` 判定，缺文件时明确提示先 build。**竞品把 `skill-path` 放一级命令**（不是 `version skill-path`），防脚本迁移时按错层级找。③ `apps/cli/scripts/gen-skill.cjs` 挂在 build 尾部，**内容没变就不写盘**（否则每次 build 都弄脏 git）；`package.json` 补 `files: ["dist","skills"]`。④ `exit-codes.ts` 的 `BUSINESS_CODE_MAP` 补 **`747007 → usage/退出码 1`**：第 60 批只加了后端重名码，CLI 侧缺映射会落进 `internal/1`，让脚本把「改个名」当成服务故障去重试——这是真缺陷、不是包装。⑤ 新增 **6 例** `apps/cli/test/skill.spec.ts`，核心一条是**双向逐字节比对**：磁盘产物必须与 `renderAllFiles()` 完全一致（少一个=忘了生成，多一个=旧版残留），单测直接钉死"文档不会漂移"。cli 91 → **97 例**。**同时纠正一条写错多轮的结论**：#9 的缺口栏此前一直写「**MCP 0 行**（竞品未公开工具清单 → 唯一真实缺口，待取证后再做）」。本批把两个 bundle 目录 **606 个 js** 全量扫 `mcp`，只有 **3 处命中**：① 侧栏一个 flag 门控的 `menu.mcpCli` 入口（`O("MCP_CLI")`）；② 埋点参数 `integration_type ∈ {plugin,mcp}`、`client_source ∈ {cli,web}`。**竞品不存在 MCP server、没有工具清单、没有 scope 定义**——「等竞品给工具清单」这个假设本身不成立，继续挂着它等于把一个不存在的依赖写成"待取证"。故据实改为：MCP 端**不实现**（无形状可对齐，自造一套 MCP server 反而是伪对齐），#9 剩余 0.32 全部来自 57 条**骨架命令**（各自卡在对应后端端点未落地，权重已计入各模块）。规模口径校正：旧文档写「196 命令 / 37 组 / 118 可用 + 78 骨架」，实测早已是 **197 命令 / 38 组 / 140 可用 + 57 骨架**（多出的 `skill` 组来自本批；组数差异另有一处口径：我方把竞品 `edge` 并入 `node`）；测试总量 1,232 → **1,241 例**（api 870 / adapters 164 / cli 97 / worker 52 / db 26 / shared 26 / storage 6）。**边界**：宿主 Skill 目录探测**不做**——竞品 `INSTALL.md:18` 明确「不要扫描其他工具配置目录」，靠用户或宿主规则给出路径。**#9 92% → 96%**（7.36 → 7.68，+0.32；没给满：骨架命令与 MCP 端仍在）。全站 **201.64 → 201.96/206 = 98.0%**、剩余 4.04；生态组 94.52 → **94.84（98.8%）**；首发口径 130.12/133 = 97.8% 不变（CLI/MCP 不在首发口径内）。基线 `eb9dbc3`。 |
 | 2026-10-28 | **v8.3** | **#18 团队知识库补「模板场景（scene）」维度 —— 第一次从竞品前端 bundle 拿到字段级证据（第 60 批）**：此前每一轮都写「竞品只给路由清单、无响应体证据」，本批证明**是取证方法不到位**：竞品把 Vite 产物完整留在 `rea-reelmate/scripts*/files/origins/<hash>/assets/`（两个目录分别 133 / 473 个 js）。从 `core-lib-CKH7gQsw.js`（1.1 MB）取到**每个端点**的 `{path, method, paramNames, queryNames, requestDataOptional}` 配置对象（`requestDataJsonSchema` 为空对象，所以只有形状没有字段级 schema）；从 `0zWWdXb_.js`（6 KB）取到知识库**全部枚举与每类字段规则**原文，含 16 值 `scene`（`Style=1/Genre=2/Composition=3/VideoEffect=4/AIStoryboard=5/StoryboardT2i=6/SeeDance2=7/ScreenplayNovel=9/StoryboardRef=11/Voice=14/ScenePrompt=15/Camera=16/Palette=17/Expression=18/AudioLibrary=20`，**值不连续**）、业务串映射（`Genre→theme`、`Voice→tone`、`ScreenplayNovel→novel_to_script`、`Composition→storyboard` 四处**枚举名与串不同名**）、每类 `{name.maxLength, prompt_template.maxLength/required, cover_file.required}` 与 10 条 tab（含真实表头列，音色/音频类**没有 prompt 列**）。**据此发现真缺口**：竞品 `dir/list` 的 query 是 `["scene","parent_ukd_id"]`、`tag/list` 是 `["scene","query"]`、`asset/search` 第一个参数就是 `scene` → 知识库按场景分树分标签，而我方三张表都没有 scene 列，「风格库」与「音色库」的目录混在同一棵树上。**做了什么**：① 迁移 **0038**（`smiling_inertia`）：`knowledge_dirs`/`knowledge_tags`/`knowledge_assets` 各加 `scene smallint not null default 0`；标签唯一索引 `uq_knowledge_tags` 从 `(space_id,name)` 改为 `(space_id, scene, name)`（同名标签可在不同场景各存一份）；补 `idx_knowledge_dirs_scene`、`idx_knowledge_assets_scene`；迁移总数 38→**39**。② 新增 `packages/shared/src/knowledge-scene.ts`：`KNOWLEDGE_SCENE` 常量、`KNOWLEDGE_SCENE_SLUG`、`knowledgeSceneBySlug`、`KNOWLEDGE_SCENE_RULES`（`{nameMaxLength, promptRequired, promptMaxLength, coverRequired, promptColumn, phase1}`）、`KNOWLEDGE_SCENE_TABS`（10 条，columns 与竞品表头逐字一致）、`validateKnowledgeSceneFields()`（返回 `{field,message}`，文案由规则生成）。③ 错误码新增 **`ErrorCode.KNOWLEDGE_NAME_EXISTS = 747007`** + 竞品原文文案 `knowledge name already exists`（依据 `B9INZ4se.js`：竞品前端就是 `Number(r.code)===747007` 判重名，外加文案兜底；我方原先用 `400101`，会让错误分支与竞品不一致）。④ 服务层：`dirTree`/`listTags`/`listAssets`/`searchAssets`/`flatList`/`info` 全部支持 `scene` 过滤（`normalizeScene` 统一校验，非法值 `400101 + field:"scene"` 而不是静默查空）；`createDir` 子目录跟随父场景；`createAsset`/`patchAsset` 按场景校验名称与 prompt，且**不允许跨场景挂目录**；`renameTag`/`deleteTag` 只改同场景条目；`info` 增 `asset_by_scene` 计数。⑤ DTO 随条目下发 `scene`/`scene_slug`/`scene_name_max_length`/`scene_prompt_required`/`scene_prompt_max_length`/`scene_prompt_column` —— **规则只维护在 `@app/shared` 一份**，前端不抄第二份。⑥ 前端：`/knowledge` 加场景 tab 条（16 个 tab、带条数角标，条数来自 `info.asset_by_scene` 不额外请求），切 tab 清目录选中并重载，新建条目带当前场景；i18n 新增 `knowledge.scene.*` 17 key × 5 语言。**验证**：`apps/api/test/knowledge.spec.ts` 18→**21 例**（场景隔离与同名共存 / 每类字段规则与非法场景值 / 条目跨场景被拒与三处读接口过滤 + 按场景计数），api typecheck/lint 干净，web typecheck 干净、i18n-check 通过（5 语言 key 一致）、web build 通过。**数字**：`scoreboard.py` → **201.64/206 = 97.9%**（剩余 **4.36**），核心 107.12（97.4%）、生态 94.52（98.5%）、首发 130.12（97.8%）；#18 `99% → 99.5%`（+0.015，**只上调半格**：条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 证据已有但本批未落库，不当成已对齐）。**边界**：`SeeDance2`/`Camera`/`Palette`/`Expression` 四类竞品没有文案证据，我方译名标「待考证」；`scene` 的**业务串**照抄竞品，但"我方 scene 值必须与竞品完全一致"这一点只在读接口形状上被证实，落库语义仍按我方口径。基线 `3593c2c`。 |

@@ -21,6 +21,9 @@ import {
   storyboardAssetsPutSchema,
   storyboardsGenerateSchema,
   storyboardPatchSchema,
+  AppError,
+  ErrorCode,
+  workFilterOfCategory,
 } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
@@ -143,18 +146,29 @@ const clipAssetsSchema = z.object({
 });
 
 /**
- * 作品库查询：形态（tab/kind）+ 状态 + 时间 + 关键词 + 四态。
+ * 作品库查询：形态（tab/kind）+ 状态 + 时间 + 关键词 + 四态 + 归属组 + 竞品分类。
  *
- * `name` / `process_status` 是竞品参数名兼容别名（第 62 批，证据：
- * `GET /df/script_project/list` 的 queryNames 依次为 page、page_size、name、group_id、
- * process_status、sp_source、sp_type、project_category、project_subcategory、project_categories）：
+ * 竞品参数名兼容别名（证据：`GET /df/script_project/list` 的 queryNames 依次为
+ * page、page_size、name、group_id、process_status、sp_source、sp_type、
+ * project_category、project_subcategory、project_categories）：
  * - `name` 等价于 `keyword`（竞品叫 name，我方叫 keyword；两个都给时 name 优先）；
  * - `process_status` 竞品用 `"-1"` 表示"全部"，我方对应 `status=all`；
- *   其它取值（1/2/3…）的语义竞品前端没暴露枚举，不外推，直接 400101 并说明待取证。
- * - `group_id` / `sp_source` / `sp_type` / `project_category` / `project_subcategory` /
- *   `project_categories` 我方不接：没有项目分组与分类维度（我方用 `kind` 加 `project_mode`），
- *   静默忽略会让调用方以为筛过了，比报错更危险 → 由 zod 拒绝，文档里登记为口径差异。
+ *   其它取值（1/2/3…）的语义竞品前端没暴露枚举，不外推，直接 400101 并说明待取证；
+ * - `group_id`（第 63 批）：项目归属组，`"0"` = 未分组（竞品 mapper 的缺省值）；
+ * - `project_category` / `project_subcategory` / `project_categories`（第 63 批）：
+ *   竞品两级分类，按 `@app/shared/project-category` 的映射表翻译成我方 `kind` / `project_mode`；
+ *   `FILM(3)` 我方无对应（影视版是独立模块）→ 400101 说明，不静默忽略。
+ * - `sp_source` / `sp_type` 仍不接：这两个是竞品"作品来源渠道"与"作品形态位掩码"，
+ *   我方没有对应维度，静默忽略会让调用方以为筛过了 → 由 zod 拒绝，文档登记为口径差异。
  */
+/**
+ * 换组请求：`group_id` 为 `null` / `"0"` / `""` 都表示移出分组（回到未分组）。
+ * 允许 `null` 是必须的 —— 否则"取消分组"这个动作没有合法表达（zod 会把 `null` 判 400101）。
+ */
+const projectGroupSchema = z.object({
+  group_id: z.union([z.string().max(20), z.null()]).optional(),
+});
+
 const worksQuerySchema = z.object({
   tab: z.enum(["workshop", "canvas", "all"]).optional(),
   kind: z.enum(["workshop", "canvas"]).optional(),
@@ -166,6 +180,11 @@ const worksQuerySchema = z.object({
     .string()
     .regex(/^-1$/, { message: "only process_status=-1 (all) is supported; other values await evidence" })
     .optional(),
+  group_id: z.string().max(20).optional(),
+  project_category: z.coerce.number().int().optional(),
+  project_subcategory: z.coerce.number().int().optional(),
+  /** 逗号分隔的 category 多选（竞品 `project_categories: S.join(",")`） */
+  project_categories: z.string().max(64).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -208,9 +227,39 @@ export class ScriptController {
   @Get("works")
   async works(@Req() req: AuthedRequest, @Query() query: unknown) {
     const q = parseOrThrow(worksQuerySchema, query ?? {});
+    // 竞品两级分类 → 我方 kind / project_mode（映射表见 @app/shared/project-category）。
+    // `project_categories` 是多选：竞品把它拼成逗号串，语义是"这些大类的并集"；我方只有
+    // SHORT_FILM/DRAMA 两个可用大类（FILM 拒收），并集就是"不筛"，所以只在单值时才收窄。
+    let kind = q.kind;
+    let projectMode: number | undefined;
+    const categories = (q.project_categories ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => Number(s));
+    if (categories.length > 0) {
+      for (const category of categories) {
+        const mapped = workFilterOfCategory(category, undefined);
+        if (!mapped.ok) {
+          throw new AppError(ErrorCode.INVALID_PARAM, mapped.reason, { field: "project_categories" });
+        }
+      }
+    } else if (q.project_category !== undefined || q.project_subcategory !== undefined) {
+      const mapped = workFilterOfCategory(q.project_category, q.project_subcategory);
+      if (!mapped.ok) {
+        throw new AppError(ErrorCode.INVALID_PARAM, mapped.reason, {
+          field: q.project_subcategory !== undefined ? "project_subcategory" : "project_category",
+        });
+      }
+      // 显式 `kind` 优先于分类翻译（调用方同时给了两套口径时以更具体的为准）
+      kind = kind ?? mapped.kind;
+      projectMode = mapped.projectMode;
+    }
     return this.script.listWorks(req.auth?.spaceId ?? "", {
       tab: q.tab,
-      kind: q.kind,
+      kind,
+      projectMode,
+      groupId: q.group_id,
       // `process_status=-1`（竞品"全部"）等价于 `status=all`；两者都给时显式 status 优先
       status: q.process_status === "-1" ? "all" : q.status,
       state: q.state,
@@ -221,6 +270,19 @@ export class ScriptController {
       page: q.page ?? 1,
       pageSize: q.page_size ?? 24,
     });
+  }
+
+  /**
+   * 换组（项目归属组）—— 对齐竞品 `POST /df/script_project/:sp_id/group/edit`。
+   *
+   * `group_id` 传 `null` / `"0"` / `""` = 移出分组（回到未分组）。分组本身复用团队域的
+   * `team_groups`（CRUD 在 `/team/group*`），这里只做"项目 → 组"的归属变更：
+   * 校验组存在且属于当前 space（否则会把项目挂到别的空间的组上，跨空间泄露）。
+   */
+  @Post("projects/:id/group")
+  async setProjectGroup(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(projectGroupSchema, body ?? {});
+    return this.script.setProjectGroup(req.auth?.spaceId ?? "", id, input.group_id ?? null);
   }
 
   /** 归档 / 恢复作品 */

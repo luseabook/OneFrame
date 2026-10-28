@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { workCategoryOf } from "@app/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/database";
 import { StorageService } from "../../storage/storage.service";
@@ -24,6 +25,13 @@ export interface WorksQuery {
   tab?: WorkTab;
   /** 形态筛选（与 tab 等价，保留 filter 语义供前端 URL 直传） */
   kind?: "workshop" | "canvas";
+  /** 编排模式（1 普通 / 2 广告剧 / 3 视频转绘）；竞品分类别名翻译后落到这里 */
+  projectMode?: number;
+  /**
+   * 归属组（`team_groups.id`）。竞品 `GET /script_project/list?group_id=`。
+   * `"0"` / `""` 表示"未分组"（竞品列表项里 group_id 缺省就是 `"0"`，见 `DDLTpMu7.js` 的 mapper）。
+   */
+  groupId?: string;
   /** 归档维度：archived / active（默认 active）/ all */
   status?: "archived" | "active" | "all";
   /** 作品四态：draft / producing / ready / archived */
@@ -64,6 +72,11 @@ interface WorkshopRow {
   timeline_duration_s: number;
   timeline_episode_count: number;
   work_state: string;
+  /** 编排模式（1 普通 / 2 广告剧 / 3 视频转绘），用于投影竞品两级分类 */
+  project_mode: number | null;
+  /** 归属组（`team_groups.id`）；null = 未分组。竞品缺省写 "0" */
+  group_id: string | null;
+  group_name: string | null;
 }
 
 interface CanvasRow {
@@ -134,7 +147,7 @@ export class WorksService {
     };
   }
 
-  /** 工坊侧筛选：归档 / 关键词 / 时间 / 四态 */
+  /** 工坊侧筛选：归档 / 关键词 / 时间 / 四态 / 归属组 / 编排模式 */
   private workshopWhere(opts: WorksQuery, status: "archived" | "active" | "all"): SQL | undefined {
     const clauses: SQL[] = [];
     if (status === "archived") clauses.push(sql`archived_at is not null`);
@@ -143,6 +156,16 @@ export class WorksService {
     if (opts.from) clauses.push(sql`updated_at >= ${opts.from}::timestamptz`);
     if (opts.to) clauses.push(sql`updated_at <= ${opts.to}::timestamptz`);
     if (opts.state) clauses.push(sql`work_state = ${opts.state}`);
+    if (opts.projectMode !== undefined) clauses.push(sql`project_mode = ${opts.projectMode}`);
+    if (opts.groupId !== undefined) {
+      // 竞品用 "0" 表示未分组（列表项缺省值），这里兼容 "0" / "" 两种写法
+      const raw = opts.groupId.trim();
+      if (raw === "" || raw === "0") {
+        clauses.push(sql`group_id is null`);
+      } else {
+        clauses.push(sql`group_id = ${BigInt(raw)}`);
+      }
+    }
     return clauses.length > 0 ? sql.join(clauses, sql` and `) : undefined;
   }
 
@@ -150,10 +173,21 @@ export class WorksService {
    * 画布侧筛选：只有关键词与时间。
    * 画布没有"归档"与"四态"概念 → 归档视图下画布侧必然为空；
    * 按四态筛（draft/producing/ready）时画布不参与（它的 work_state 恒为 canvas）。
+   *
+   * 第 63 批补两条：画布也没有"归属组"与"编排模式"——
+   * - 按某个具体组筛（`group_id=<id>`）时画布不参与，否则 `tab=all` 会把画布混进
+   *   "本组项目"的结果里（组筛选只作用在工坊侧 = 只筛了一半）；
+   * - `group_id=0`（未分组）时画布算未分组，照常参与；
+   * - 按分类档筛（翻译出的 `projectMode`）时画布不参与。
    */
   private canvasFilterable(opts: WorksQuery, status: "archived" | "active" | "all"): boolean {
     if (status === "archived") return false;
     if (opts.state && opts.state !== "archived") return false;
+    if (opts.projectMode !== undefined) return false;
+    if (opts.groupId !== undefined) {
+      const raw = opts.groupId.trim();
+      if (raw !== "" && raw !== "0") return false;
+    }
     return true;
   }
 
@@ -182,6 +216,10 @@ export class WorksService {
         select p.id::text as id, p.title, p.genre, p.drama_type, p.ratio, p.source_type,
                p.source_file_name, p.source_text, p.status,
                p.archived_at, p.is_sample, p.created_at, p.updated_at,
+               p.project_mode,
+               -- 归属组（竞品列表项给 group_id + group_name；缺省 "0" = 未分组）
+               p.group_id::text as group_id,
+               (select g.name from team_groups g where g.id = p.group_id) as group_name,
                (select count(*)::int from episodes e where e.project_id = p.id) as episode_count,
                (select count(*)::int
                   from storyboards s
@@ -245,6 +283,8 @@ export class WorksService {
     const coverUrl = coverKey
       ? await this.storage.signDownload(coverKey, 3600).catch(() => null)
       : null;
+    // 竞品两级分类的**投影**（不落列）：由 kind + project_mode 反推，映射表见 @app/shared/project-category
+    const category = workCategoryOf({ kind: "workshop", projectMode: row.project_mode });
     return {
       id: row.id,
       kind: "workshop" as const,
@@ -260,6 +300,12 @@ export class WorksService {
       is_sample: row.is_sample === 1,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      // 归属组：竞品列表项用 "0" 表示未分组（`DDLTpMu7.js` mapper 的缺省值），这里照抄该契约
+      group_id: row.group_id ?? "0",
+      group_name: row.group_name,
+      project_mode: row.project_mode === null ? 1 : Number(row.project_mode),
+      project_category: category.category,
+      project_subcategory: category.subcategory,
       episode_count: Number(row.episode_count ?? 0),
       shot_count: Number(row.shot_count ?? 0),
       done_count: Number(row.done_count ?? 0),
@@ -346,6 +392,14 @@ export class WorksService {
           is_sample: false,
           created_at: row.created_at,
           updated_at: row.updated_at,
+          // 画布没有归属组概念（团队分组是"项目归属组"，画布项目在竞品侧也会带 group_id，
+          // 但那是 script_project 行；我方 canvases 是独立表且无分组语义）→ 显式 "0"/null
+          group_id: "0",
+          group_name: null as string | null,
+          project_mode: null as number | null,
+          // 竞品 CANVAS tab 的固定组合：SHORT_FILM(1) + AI_SHORT_FILM(1)
+          project_category: workCategoryOf({ kind: "canvas" }).category,
+          project_subcategory: workCategoryOf({ kind: "canvas" }).subcategory,
           last_edited_at: row.last_edited_at,
           creator_nick: row.creator_nick,
           episode_count: 0,
