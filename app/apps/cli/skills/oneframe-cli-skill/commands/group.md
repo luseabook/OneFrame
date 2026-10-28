@@ -13,7 +13,7 @@ oneframe group create [NAME] [--set KEY=VALUE]... [--dry-run] [--idempotency-key
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/groups`
+- 端点：`POST canvas/canvases/{canvas_id}/groups`
 - 契约证据：`commands/group.md:27`
 
 ## `group delete`
@@ -25,7 +25,7 @@ oneframe group delete <GROUP_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`DELETE canvases/{canvas_id}/groups/{group_id}`
+- 端点：`DELETE canvas/canvases/{canvas_id}/groups/{group_id}`
 - 契约证据：`commands/group.md:86`
 
 ## `group template-save`
@@ -37,7 +37,7 @@ oneframe group template-save <GROUP_ID> [--set KEY=VALUE]... [--dry-run] [--idem
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/groups/{group_id}/templates`
+- 端点：`POST canvas/canvases/{canvas_id}/groups/{group_id}/templates`
 - 契约证据：`commands/group.md:110`
 
 ## `group template-list`
@@ -49,7 +49,7 @@ oneframe group template-list [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/group-templates`
+- 端点：`GET canvas/canvases/{canvas_id}/group-templates`
 - 契约证据：`commands/group.md:136`
 
 ## `group execute`

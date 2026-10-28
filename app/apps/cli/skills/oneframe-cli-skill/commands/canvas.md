@@ -13,7 +13,7 @@ oneframe canvas create [NAME] [--set KEY=VALUE]... [--dry-run] [--idempotency-ke
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases`
+- 端点：`POST canvas/canvases`
 - 契约证据：`commands/canvas.md:33`
 
 ## `canvas list`
@@ -25,7 +25,7 @@ oneframe canvas list [--set KEY=VALUE]... [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases`
+- 端点：`GET canvas/canvases`
 - `--set` 进 query 的白名单键：`page`、`page_size`
 - 契约证据：`commands/canvas.md:56`
 
@@ -38,7 +38,7 @@ oneframe canvas get <CANVAS_ID> [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}`
+- 端点：`GET canvas/canvases/{canvas_id}`
 - 契约证据：`commands/canvas.md:78`
 
 ## `canvas edit`
@@ -50,7 +50,7 @@ oneframe canvas edit <CANVAS_ID> [NAME] [--set KEY=VALUE]... [--dry-run] [--idem
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`PATCH canvases/{canvas_id}`
+- 端点：`PATCH canvas/canvases/{canvas_id}`
 - 契约证据：`commands/canvas.md:100`
 
 ## `canvas delete`
@@ -62,7 +62,7 @@ oneframe canvas delete <CANVAS_ID> [--set KEY=VALUE]... [--dry-run] [--idempoten
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`DELETE canvases/{canvas_id}`
+- 端点：`DELETE canvas/canvases/{canvas_id}`
 - 契约证据：`commands/canvas.md:122`
 
 ## `canvas template-publish`
@@ -74,7 +74,7 @@ oneframe canvas template-publish [--set KEY=VALUE]... [--dry-run] [--idempotency
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/tpls`
+- 端点：`POST canvas/canvases/{canvas_id}/tpls`
 - 契约证据：`commands/canvas.md:144`
 
 ## `canvas template-list`
@@ -86,7 +86,7 @@ oneframe canvas template-list [--set KEY=VALUE]... [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET templates`
+- 端点：`GET canvas/templates`
 - `--set` 进 query 的白名单键：`page`、`page_size`
 - 契约证据：`commands/canvas.md:165`
 
@@ -99,7 +99,7 @@ oneframe canvas template-get <TEMPLATE_ID> [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET templates/{template_id}`
+- 端点：`GET canvas/templates/{template_id}`
 - 契约证据：`commands/canvas.md:185`
 
 ## `canvas template-apply`
@@ -111,7 +111,7 @@ oneframe canvas template-apply <TEMPLATE_ID> [--set KEY=VALUE]... [--set KEY=VAL
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET templates/{template_id}/instantiate`
+- 端点：`GET canvas/templates/{template_id}/instantiate`
 - `--set` 进 query 的白名单键：`canvas_id`
 - 契约证据：`commands/canvas.md:202`
 
@@ -124,6 +124,6 @@ oneframe canvas snapshots [--set KEY=VALUE]... [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/snapshots`
+- 端点：`GET canvas/canvases/{canvas_id}/snapshots`
 - `--set` 进 query 的白名单键：`page`、`page_size`
 - 契约证据：`commands/canvas.md:220`

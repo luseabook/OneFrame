@@ -126,6 +126,97 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.19 · 第 65 批：审计出 36 条「宣称可用的 CLI 命令」实际全 404，并补上跨包守卫 · 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.8（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：202.37 → **202.45/206 = 98.3%**，剩余 3.63 → **3.55**（#9 CLI/MCP 96% → 97%，+0.08）。
+
+### 一、这批不是「加功能」，是原计划的取证失败后转做可证伪的事
+
+原本要补 #11 画布里竞品有、我方没有的 `pinned-timelines`。竞品 4 条形状是清楚的（`type` 与路径都从 `core-lib-CKH7gQsw.js` 取到）：
+
+| 方法 | 路径 | 请求形态 |
+|---|---|---|
+| POST | `/web/v1/df/canvas/:canvas_id/pinned-timelines` | `json` |
+| GET | `/web/v1/df/canvas/:canvas_id/pinned-timelines` | `query` |
+| DELETE | `/web/v1/df/canvas/:canvas_id/pinned-timelines/:node_id` | `form` |
+| DELETE | `/web/v1/df/canvas/:canvas_id/pinned-timelines` | `form` |
+
+但把两个 bundle 目录（133 + 473 个 js）扫干净后，`pinned-timelines` 只命中**端点配置对象本身**；`pinnedTimelines`/`pinned_timelines` 0 命中；
+`timeline_id` 的 3 处命中全是**会话时间线事件**（`t.type === "timeline"` 且 `t.update_mode ∈ {append, replace}`，另有一处 `upsertTimelineEvent`），与画布固定时间线无关。
+**没有 body/响应字段、没有客户端消费代码** → 造出来就是自建语义。于是放弃，转去做一件可以机械证伪的事：
+
+> **CLI 里那些 `ready: true` 的命令，真的指向后端存在的路由吗？**
+
+### 二、答案是「有 36 条不指向」
+
+写 `_acceptance/_r65_cli_audit.py`：解析 52 个 controller 的 `@Controller` + 方法装饰器建路由表（把 `:id` 与 `{id}` 双向归一成 `{}`），与 `apps/cli` 的 197 条命令逐条比对。
+
+结果：**140 条 `ready` 里 36 条不匹配**，且**全部集中在 canvas 家族**六个组（`canvas` / `node` / `group` / `pin-group` / `material` / `script`）：
+
+```
+canvas create            POST   /canvases                         ← 写成 canvases...
+canvas template-list     GET    /templates                        ← 写成 templates...
+node generate            POST   /canvases/{}/nodes/{}/generate    ← 少了 canvas/ 前缀
+script storyboard        POST   /canvases/{}/nodes/{}/storyboard-parse
+...
+```
+
+根因一句话：这些后端路由都挂在 `@Controller("canvas")` 下（`apps/api/src/modules/canvas/*.controller.ts` 与 `modules/agent/canvas-chat.controller.ts`），
+真实路径是 `/v1/canvas/canvases/...`、`/v1/canvas/templates/...`；而 `registry.ts` 里写的是 `canvases/...`、`templates/...`——**漏了 `canvas/` 模块前缀**。
+
+**运行时钉死（不是靠读代码猜）**：把 api 起在 3002 后直接打两条路径
+
+```
+GET /v1/canvases        → 404  {"code":400102,"msg":"Cannot GET /v1/canvases"}
+GET /v1/canvas/canvases → 200  {"code":401101,"msg":"missing bearer token"}   ← 路由存在，只是没带 token
+GET /v1/templates       → 404
+GET /v1/canvas/templates→ 200  {"code":401101,...}
+```
+
+即这 36 条命令**对外宣称可用、实际一条都调不通**。
+
+### 三、为什么这类缺陷能活 4 批
+
+- 原有 CLI 单测（97 例）只校验**参数解析与响应转换**，从不断言「URL 是否等于后端真实路由」；
+- 总闸 `verify-round.ps1` 只跑 api / worker 的测试，**CLI 侧没有跨包一致性检查**；
+- 每条命令的 `ready: true` 是人工判断"后端有这个能力"，而 `path` 是手写的字符串——**两者之间没有任何机器校验**。
+
+于是「140 条 ready」这个数字一直好看，但它统计的是"我打算实现多少"，不是"实际能调通多少"。
+
+### 四、修法与守卫
+
+1. `apps/cli/src/registry.ts`：36 条 path 统一补 `canvas/` 前缀。
+   **为什么说这是漏改而不是设计**：同一个文件里 `agent` 组的命令本来就写成 `canvas/canvases/{canvas_id}/chat/sessions`——
+   正确的写法在仓库里已经存在，只是 canvas 家族没跟上。
+2. `apps/cli/test/registry-routes.spec.ts`（**新增，2 例**）：
+   - 例 1：**只读地读 `apps/api` 的 controller 源码**建路由表，与本包所有 `ready` 且走 HTTP 的命令逐条比对（找不到 api 源码则 skip）；
+   - 例 2：canvas 家族的命令必须带 `canvas/` 前缀。
+   - 还做了**反向验证**：把 `canvas list` 的 path 改成坏值 → 两例立刻红；再改回 → 绿。并用 `routes.size > 600` 兜住"解析失败 → 空集合 → 全绿"这种假绿。
+3. `apps/cli` 的 build 尾部 `gen-skill` 重生成随包 Skill：canvas / node / group / pin-group / material / script 六篇 `commands/*.md` 随路径更新（43 文件里改了 6 个）。
+
+### 五、验证与数字
+
+| 项 | 结果 |
+|---|---|
+| `_r65_cli_audit.py` 复跑 | `ready 140 / 不匹配 **0**` |
+| `apps/cli` 单测 | 13 文件 **97 → 14 文件 99 例** 全绿（新增 2 例） |
+| 反向验证 | 改坏 1 条 path → 2 例立刻红；改回 → 绿 |
+| 总闸 `verify-round.ps1` | **12/12 全绿** |
+
+规模与分数：#9 CLI/MCP **96% → 97%（+0.08）**；全站 **202.37 → 202.45/206 = 98.3%**，剩余 **3.63 → 3.55**；
+核心 107.53（97.8%，#9 不在核心组故不变）、生态 **94.84 → 94.92（98.9%）**、首发 130.53（98.1%，#9 属剔除模块）；用例 **1,248 → 1,250**（cli 97 → 99）。
+端点 702 / 迁移 42 / 表 112 / 命令 197（38 组）均不变。
+
+### 六、诚实边界
+
+- 这批**修的是可用性缺陷，不是新增能力**：57 条骨架命令仍缺后端端点，所以 #9 只到 97%，剩余 0.24 如实记在 §5 第 4 行；
+- 顺带判定了 #11 画布的一处文档不自洽：缺口栏原文写「无」却只给 99%。查清那 1% 的真实出处是竞品有 `pinned-timelines` 4 条形状而我方没有，
+  但**竞品前端不消费该响应、无字段级证据** → 不凭空造，据实记为 0.20 待外部证据（**分数不变**：不能因为"找到了一个缺口"就扣分，也不能因为"补不了"就加分）；
+- 守卫测试的价值边界：它保证**路径形状**一致，不校验 query 参数名、body 字段与权限语义——那三类仍然只能靠逐批人工比对竞品 bundle 与集成测试。
+
+---
+
 ## 变更登记（v6.18 · 第 64 批：#4 Agent 的 Skill 市场按竞品 9 条形状补齐，顺手纠正一条挂了 60 批的错误归因 · 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.7（同一批；本文件与主台账各有一套编号，勿混）。

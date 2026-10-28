@@ -13,7 +13,7 @@ oneframe pin-group create <SLOT> [--set KEY=VALUE]... [--dry-run] [--idempotency
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`PUT canvases/{canvas_id}/pin-groups/{slot}`
+- 端点：`PUT canvas/canvases/{canvas_id}/pin-groups/{slot}`
 - 契约证据：`commands/pin-group.md:19`
 
 ## `pin-group delete`
@@ -25,7 +25,7 @@ oneframe pin-group delete <PIN_GROUP_ID> [--set KEY=VALUE]... [--dry-run] [--ide
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`DELETE canvases/{canvas_id}/pin-groups/{slot}`
+- 端点：`DELETE canvas/canvases/{canvas_id}/pin-groups/{slot}`
 - 契约证据：`commands/pin-group.md:42`
 
 ## `pin-group list`
@@ -37,5 +37,5 @@ oneframe pin-group list [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/pin-groups`
+- 端点：`GET canvas/canvases/{canvas_id}/pin-groups`
 - 契约证据：`commands/pin-group.md:63`

@@ -2658,3 +2658,59 @@ UPDATE "agent_skills" SET "name_en" = COALESCE("config"->>'slug', '') WHERE "nam
 - **竞品只给了接口形状 + 字段名**，没有**广场卡内容**与**首页推荐位编排**的数据证据：`is_home_recommend` 在 bundle 里只作为筛选参数出现，没有任何"哪些卡该上推荐位"的规则或默认值。故 `is_home_recommend` 默认全 `false`、推荐位策略仍按自建口径（运营后台勾选），**不写成"已对齐"**。
 - 因此 #4 只从 95% → **96%**（+0.20），剩 **0.80** = 真实 ASR 凭据约 **0.60** + 运营位内容约 **0.20**；两个数是**判断不是实测**，已在该行写明各自估算。
 - 端点总数 **701 → 702**，迁移 **41 → 42**（`0041_lyrical_darkhawk.sql`），用例 **1,246 → 1,248**（api 875 → 877）。
+
+### 17.24 CLI 命令路径与后端路由的契约（第 65 批）
+
+> 本节记录一条**不是新端点、但会让端点全部白做**的约定：`apps/cli` 的命令 `path` 必须等于后端真实路由（去掉 `/v1` 前缀）。
+
+#### 24.1 规则
+
+| 项 | 规则 |
+|---|---|
+| 来源 | 后端路由由 `@Controller("base")` + `@Get/@Post/...("sub")` 决定，最终是 `/v1/<base>/<sub>` |
+| CLI 写法 | `registry.ts` 里 `path` 写 **`<base>/<sub>`**（不带前导斜杠、不带 `/v1`），由 `src/http.ts` 拼成 `API_BASE + "/" + path` |
+| 占位符 | registry 用 `{param}`，后端用 `:param`；两者在比对时必须都归一成 `{}` |
+| 常见错误 | **漏模块前缀**：同一资源在多个 controller 下时（canvas 家族 8 个 controller 全挂 `@Controller("canvas")`），最容易写成 `canvases/...` 而漏掉 `canvas/` |
+
+#### 24.2 第 65 批修掉的 36 条
+
+全部在 canvas 家族，`registry` 侧的 `path` 缺 `canvas/`：
+
+| 组 | 命令 | 修前 path | 修后 path |
+|---|---|---|---|
+| canvas | `create`/`list` | `canvases` | `canvas/canvases` |
+| canvas | `get`/`edit`/`delete` | `canvases/{canvas_id}` | `canvas/canvases/{canvas_id}` |
+| canvas | `template-publish` | `canvases/{canvas_id}/tpls` | `canvas/canvases/{canvas_id}/tpls` |
+| canvas | `template-list`/`template-get`/`template-apply` | `templates…` | `canvas/templates…` |
+| canvas | `snapshots` | `canvases/{canvas_id}/snapshots` | `canvas/canvases/{canvas_id}/snapshots` |
+| node | `create`/`batch-create`/`list`/`get` | `canvases/{canvas_id}/nodes…` | `canvas/canvases/{canvas_id}/nodes…` |
+| node | `edit`/`delete`/`generate`/`table-import`/`table-confirm`/`edge` | 同上 | 同上 |
+| group | `create`/`delete`/`template-save`/`template-list` | `canvases/{canvas_id}/groups…`、`…/group-templates` | 加 `canvas/` |
+| pin-group | `create`/`delete`/`list` | `canvases/{canvas_id}/pin-groups…` | 加 `canvas/` |
+| material | `add`/`list`/`delete` | `canvases/{canvas_id}/materials…` | 加 `canvas/` |
+| script | `storyboard`/`asset-extract`/`asset-match`/`rematch`/`cancel`/`optimize` | `canvases/{canvas_id}/nodes/{node_id}/…` | 加 `canvas/` |
+
+运行时证据（api 起在 3002）：
+
+```
+GET /v1/canvases         → 404 {"code":400102,"msg":"Cannot GET /v1/canvases"}
+GET /v1/canvas/canvases  → 200 {"code":401101,"msg":"missing bearer token"}
+GET /v1/templates        → 404
+GET /v1/canvas/templates → 200 {"code":401101,...}
+```
+
+#### 24.3 守卫测试
+
+`apps/cli/test/registry-routes.spec.ts`（2 例，新增于第 65 批）：
+
+1. **跨包一致性**：只读地读 `apps/api/src/**/*.controller.ts`，用同一套归一化规则建路由集，断言所有 `ready` 且走 HTTP 的命令 `(method, path)` 都在集合里；
+   找不到 api 源码时 skip（发布态的独立包不需要这条）；并用 `routes.size > 600` 防"解析失败 → 空集合 → 假绿"。
+2. **canvas 家族必须带 `canvas/` 前缀**（第 65 批那 36 条的具体形状）。
+
+已做**反向验证**：把一条 path 改成坏值 → 两例立刻红；改回 → 绿。
+
+#### 24.4 诚实边界
+
+- 守卫只保证**路径形状**一致；query 参数名（如 `group_id`/`owner_type`）、body 字段、权限语义仍需逐批对照竞品 bundle 与集成测试；
+- 这批是**可用性修复**不是新能力：CLI 仍有 57 条 `skeleton` 命令卡在后端未落地的端点，因此 #9 只从 96% → **97%**（+0.08）；
+- 同类风险点：任何"人工写死 URL 字符串 + 人工判断 ready"的地方（例如 `apps/web` 的手写 `$fetch` 路径）都可能出现同样的漂移，本批未做全站扫描。

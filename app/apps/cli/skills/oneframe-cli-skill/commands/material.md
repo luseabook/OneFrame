@@ -13,7 +13,7 @@ oneframe material add <FILE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/materials`
+- 端点：`POST canvas/canvases/{canvas_id}/materials`
 - 契约证据：`commands/material.md:39`
 
 ## `material list`
@@ -25,7 +25,7 @@ oneframe material list [--set KEY=VALUE]... [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/materials`
+- 端点：`GET canvas/canvases/{canvas_id}/materials`
 - `--set` 进 query 的白名单键：`page`、`page_size`
 - 契约证据：`commands/material.md:113`
 
@@ -38,7 +38,7 @@ oneframe material delete [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/materials/batch-delete`
+- 端点：`POST canvas/canvases/{canvas_id}/materials/batch-delete`
 - 契约证据：`commands/material.md:149`
 
 ## `material batch-add`

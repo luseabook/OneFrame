@@ -13,7 +13,7 @@ oneframe script storyboard [--set KEY=VALUE]... [--dry-run] [--idempotency-key K
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/storyboard-parse`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-parse`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/script.md:41`
 
@@ -26,7 +26,7 @@ oneframe script asset-extract [--set KEY=VALUE]... [--dry-run] [--idempotency-ke
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/asset-extraction`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/asset-extraction`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/script.md:64`
 
@@ -39,7 +39,7 @@ oneframe script asset-match [--set KEY=VALUE]... [--dry-run] [--idempotency-key 
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/script.md:80`
 
@@ -52,7 +52,7 @@ oneframe script rematch [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-rematch`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-rematch`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/script.md:96`
 
@@ -65,7 +65,7 @@ oneframe script cancel [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] 
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match/cancel`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match/cancel`
 - 契约证据：`commands/script.md:112`
 
 ## `script optimize`
@@ -77,6 +77,6 @@ oneframe script optimize [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/script-optimization`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/script-optimization`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/script.md:128`

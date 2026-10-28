@@ -13,7 +13,7 @@ oneframe node create <NODE_TYPE> [--set KEY=VALUE]... [--dry-run] [--idempotency
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes`
 - 契约证据：`commands/node.md:35`
 
 ## `node batch-create`
@@ -25,7 +25,7 @@ oneframe node batch-create [--set KEY=VALUE]... [--dry-run] [--idempotency-key K
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/batch`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/batch`
 - 契约证据：`commands/node.md:161`
 
 ## `node list`
@@ -37,7 +37,7 @@ oneframe node list [--set KEY=VALUE]... [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/nodes`
+- 端点：`GET canvas/canvases/{canvas_id}/nodes`
 - `--set` 进 query 的白名单键：`page`、`page_size`
 - 契约证据：`commands/node.md:188`
 
@@ -50,7 +50,7 @@ oneframe node get <NODE_ID> [--json]
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`GET canvases/{canvas_id}/nodes`
+- 端点：`GET canvas/canvases/{canvas_id}/nodes`
 - 契约证据：`commands/node.md:210`
 
 ## `node edit`
@@ -62,7 +62,7 @@ oneframe node edit <NODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`PATCH canvases/{canvas_id}/nodes/{node_id}`
+- 端点：`PATCH canvas/canvases/{canvas_id}/nodes/{node_id}`
 - 契约证据：`commands/node.md:233`
 
 ## `node delete`
@@ -74,7 +74,7 @@ oneframe node delete <NODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-k
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`DELETE canvases/{canvas_id}/nodes/{node_id}`
+- 端点：`DELETE canvas/canvases/{canvas_id}/nodes/{node_id}`
 - 契约证据：`commands/node.md:264`
 
 ## `node generate`
@@ -86,7 +86,7 @@ oneframe node generate <NODE_TYPE> [NODE_ID] [--set KEY=VALUE]... [--dry-run] [-
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/generate`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/generate`
 - 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/node.md:287`
 
@@ -99,7 +99,7 @@ oneframe node table-import <NODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempot
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/table/import`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/table/import`
 - 契约证据：`commands/node.md:386`
 
 ## `node table-confirm`
@@ -111,7 +111,7 @@ oneframe node table-confirm <NODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempo
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/nodes/{node_id}/table/confirm-sheet`
+- 端点：`POST canvas/canvases/{canvas_id}/nodes/{node_id}/table/confirm-sheet`
 - 契约证据：`commands/node.md:408`
 
 ## `node edge`
@@ -123,5 +123,5 @@ oneframe node edge [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--j
 ```
 
 - 状态：可用（HTTP 端点已存在）
-- 端点：`POST canvases/{canvas_id}/edges`
+- 端点：`POST canvas/canvases/{canvas_id}/edges`
 - 契约证据：`commands/edge.md:8`

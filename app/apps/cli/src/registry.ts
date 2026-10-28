@@ -515,19 +515,19 @@ const resourceCommands: CommandSpec[] = [
 
 // ── 画布（commands/canvas.md）──────────────────────────────────────────
 const canvasCommands: CommandSpec[] = [
-  http("canvas", "create", "POST", "canvases", "创建画布", "commands/canvas.md:33", {
+  http("canvas", "create", "POST", "canvas/canvases", "创建画布", "commands/canvas.md:33", {
     write: true,
     positionals: [{ display: "NAME", desc: "画布名称（也可 --name）" }],
     bodyParams: [{ key: "title", index: 0 }],
   }),
-  http("canvas", "list", "GET", "canvases", "列出画布", "commands/canvas.md:56", {
+  http("canvas", "list", "GET", "canvas/canvases", "列出画布", "commands/canvas.md:56", {
     queryKeys: ["page", "page_size"],
   }),
-  http("canvas", "get", "GET", "canvases/{canvas_id}", "画布详情（含 node_list）", "commands/canvas.md:78", {
+  http("canvas", "get", "GET", "canvas/canvases/{canvas_id}", "画布详情（含 node_list）", "commands/canvas.md:78", {
     slots: ["canvas_id"],
     positionals: [{ display: "CANVAS_ID", desc: "画布 ID", required: true }],
   }),
-  http("canvas", "edit", "PATCH", "canvases/{canvas_id}", "修改画布", "commands/canvas.md:100", {
+  http("canvas", "edit", "PATCH", "canvas/canvases/{canvas_id}", "修改画布", "commands/canvas.md:100", {
     slots: ["canvas_id"],
     positionals: [
       { display: "CANVAS_ID", desc: "画布 ID", required: true },
@@ -536,29 +536,29 @@ const canvasCommands: CommandSpec[] = [
     bodyParams: [{ key: "title", index: 1 }],
     write: true,
   }),
-  http("canvas", "delete", "DELETE", "canvases/{canvas_id}", "删除画布", "commands/canvas.md:122", {
+  http("canvas", "delete", "DELETE", "canvas/canvases/{canvas_id}", "删除画布", "commands/canvas.md:122", {
     slots: ["canvas_id"],
     positionals: [{ display: "CANVAS_ID", desc: "画布 ID", required: true }],
     write: true,
   }),
-  http("canvas", "template-publish", "POST", "canvases/{canvas_id}/tpls", "把画布发布成模板", "commands/canvas.md:144", {
+  http("canvas", "template-publish", "POST", "canvas/canvases/{canvas_id}/tpls", "把画布发布成模板", "commands/canvas.md:144", {
     slots: ["canvas_id"],
     write: true,
   }),
-  http("canvas", "template-list", "GET", "templates", "列出模板", "commands/canvas.md:165", {
+  http("canvas", "template-list", "GET", "canvas/templates", "列出模板", "commands/canvas.md:165", {
     queryKeys: ["page", "page_size"],
   }),
-  http("canvas", "template-get", "GET", "templates/{template_id}", "模板详情", "commands/canvas.md:185", {
+  http("canvas", "template-get", "GET", "canvas/templates/{template_id}", "模板详情", "commands/canvas.md:185", {
     slots: ["template_id"],
     positionals: [{ display: "TEMPLATE_ID", desc: "模板 ID", required: true }],
   }),
-  http("canvas", "template-apply", "GET", "templates/{template_id}/instantiate", "实例化模板到画布", "commands/canvas.md:202", {
+  http("canvas", "template-apply", "GET", "canvas/templates/{template_id}/instantiate", "实例化模板到画布", "commands/canvas.md:202", {
     slots: ["template_id"],
     positionals: [{ display: "TEMPLATE_ID", desc: "模板 ID", required: true }],
     queryKeys: ["canvas_id"],
     write: true,
   }),
-  http("canvas", "snapshots", "GET", "canvases/{canvas_id}/snapshots", "列出画布快照（我方端点，竞品无对应子命令）", "commands/canvas.md:220", {
+  http("canvas", "snapshots", "GET", "canvas/canvases/{canvas_id}/snapshots", "列出画布快照（我方端点，竞品无对应子命令）", "commands/canvas.md:220", {
     slots: ["canvas_id"],
     queryKeys: ["page", "page_size"],
   }),
@@ -566,7 +566,7 @@ const canvasCommands: CommandSpec[] = [
 
 // ── 节点 / 连线（commands/node.md、edge.md）──────────────────────────────
 const nodeCommands: CommandSpec[] = [
-  http("node", "create", "POST", "canvases/{canvas_id}/nodes", "创建节点", "commands/node.md:35", {
+  http("node", "create", "POST", "canvas/canvases/{canvas_id}/nodes", "创建节点", "commands/node.md:35", {
     write: true,
     positionals: [
       {
@@ -577,27 +577,27 @@ const nodeCommands: CommandSpec[] = [
     ],
     bodyParams: [{ key: "node_type", index: 0 }],
   }),
-  http("node", "batch-create", "POST", "canvases/{canvas_id}/nodes/batch", "批量创建节点", "commands/node.md:161", {
+  http("node", "batch-create", "POST", "canvas/canvases/{canvas_id}/nodes/batch", "批量创建节点", "commands/node.md:161", {
     write: true,
   }),
-  http("node", "list", "GET", "canvases/{canvas_id}/nodes", "列出画布节点", "commands/node.md:188", {
+  http("node", "list", "GET", "canvas/canvases/{canvas_id}/nodes", "列出画布节点", "commands/node.md:188", {
     queryKeys: ["page", "page_size"],
   }),
-  http("node", "get", "GET", "canvases/{canvas_id}/nodes", "查看单个节点（客户端按 --node/位置参数过滤）", "commands/node.md:210", {
+  http("node", "get", "GET", "canvas/canvases/{canvas_id}/nodes", "查看单个节点（客户端按 --node/位置参数过滤）", "commands/node.md:210", {
     transform: "nodeById",
     positionals: [{ display: "NODE_ID", desc: "节点 ID（也可 --node）", required: true }],
   }),
-  http("node", "edit", "PATCH", "canvases/{canvas_id}/nodes/{node_id}", "修改节点", "commands/node.md:233", {
+  http("node", "edit", "PATCH", "canvas/canvases/{canvas_id}/nodes/{node_id}", "修改节点", "commands/node.md:233", {
     slots: ["node_id"],
     positionals: [{ display: "NODE_ID", desc: "节点 ID", required: true }],
     write: true,
   }),
-  http("node", "delete", "DELETE", "canvases/{canvas_id}/nodes/{node_id}", "删除节点", "commands/node.md:264", {
+  http("node", "delete", "DELETE", "canvas/canvases/{canvas_id}/nodes/{node_id}", "删除节点", "commands/node.md:264", {
     slots: ["node_id"],
     positionals: [{ display: "NODE_ID", desc: "节点 ID", required: true }],
     write: true,
   }),
-  http("node", "generate", "POST", "canvases/{canvas_id}/nodes/{node_id}/generate", "节点生成（图/视频/文本，付费）", "commands/node.md:287", {
+  http("node", "generate", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/generate", "节点生成（图/视频/文本，付费）", "commands/node.md:287", {
     slots: [null, "node_id"],
     positionals: [
       { display: "NODE_TYPE", desc: "生成类型", required: true },
@@ -606,17 +606,17 @@ const nodeCommands: CommandSpec[] = [
     write: true,
     paid: true,
   }),
-  http("node", "table-import", "POST", "canvases/{canvas_id}/nodes/{node_id}/table/import", "表格节点导入文件", "commands/node.md:386", {
+  http("node", "table-import", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/table/import", "表格节点导入文件", "commands/node.md:386", {
     slots: ["node_id"],
     positionals: [{ display: "NODE_ID", desc: "表格节点 ID", required: true }],
     write: true,
   }),
-  http("node", "table-confirm", "POST", "canvases/{canvas_id}/nodes/{node_id}/table/confirm-sheet", "表格节点确认工作表", "commands/node.md:408", {
+  http("node", "table-confirm", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/table/confirm-sheet", "表格节点确认工作表", "commands/node.md:408", {
     slots: ["node_id"],
     positionals: [{ display: "NODE_ID", desc: "表格节点 ID", required: true }],
     write: true,
   }),
-  http("node", "edge", "POST", "canvases/{canvas_id}/edges", "建立连线（--left / --right）", "commands/edge.md:8", {
+  http("node", "edge", "POST", "canvas/canvases/{canvas_id}/edges", "建立连线（--left / --right）", "commands/edge.md:8", {
     write: true,
     flagBody: { left: "src_node_id", right: "dst_node_id" },
   }),
@@ -624,75 +624,75 @@ const nodeCommands: CommandSpec[] = [
 
 // ── 组 / 固定组（commands/group.md、pin-group.md）────────────────────────
 const groupCommands: CommandSpec[] = [
-  http("group", "create", "POST", "canvases/{canvas_id}/groups", "创建组", "commands/group.md:27", {
+  http("group", "create", "POST", "canvas/canvases/{canvas_id}/groups", "创建组", "commands/group.md:27", {
     write: true,
     positionals: [{ display: "NAME", desc: "组名（也可 --name）" }],
     bodyParams: [{ key: "name", index: 0 }],
   }),
-  http("group", "delete", "DELETE", "canvases/{canvas_id}/groups/{group_id}", "删除组", "commands/group.md:86", {
+  http("group", "delete", "DELETE", "canvas/canvases/{canvas_id}/groups/{group_id}", "删除组", "commands/group.md:86", {
     slots: ["group_id"],
     positionals: [{ display: "GROUP_ID", desc: "组 ID", required: true }],
     write: true,
   }),
-  http("group", "template-save", "POST", "canvases/{canvas_id}/groups/{group_id}/templates", "把组存成模板", "commands/group.md:110", {
+  http("group", "template-save", "POST", "canvas/canvases/{canvas_id}/groups/{group_id}/templates", "把组存成模板", "commands/group.md:110", {
     slots: ["group_id"],
     positionals: [{ display: "GROUP_ID", desc: "组 ID", required: true }],
     write: true,
   }),
-  http("group", "template-list", "GET", "canvases/{canvas_id}/group-templates", "列出组模板", "commands/group.md:136"),
-  http("pin-group", "create", "PUT", "canvases/{canvas_id}/pin-groups/{slot}", "创建/替换固定组成员（按 slot）", "commands/pin-group.md:19", {
+  http("group", "template-list", "GET", "canvas/canvases/{canvas_id}/group-templates", "列出组模板", "commands/group.md:136"),
+  http("pin-group", "create", "PUT", "canvas/canvases/{canvas_id}/pin-groups/{slot}", "创建/替换固定组成员（按 slot）", "commands/pin-group.md:19", {
     slots: ["slot"],
     positionals: [{ display: "SLOT", desc: "固定组槽位", required: true }],
     write: true,
   }),
-  http("pin-group", "delete", "DELETE", "canvases/{canvas_id}/pin-groups/{slot}", "删除固定组", "commands/pin-group.md:42", {
+  http("pin-group", "delete", "DELETE", "canvas/canvases/{canvas_id}/pin-groups/{slot}", "删除固定组", "commands/pin-group.md:42", {
     slots: ["slot"],
     positionals: [{ display: "PIN_GROUP_ID", desc: "固定组槽位", required: true }],
     write: true,
   }),
-  http("pin-group", "list", "GET", "canvases/{canvas_id}/pin-groups", "列出固定组（我方端点，竞品无对应子命令）", "commands/pin-group.md:63"),
+  http("pin-group", "list", "GET", "canvas/canvases/{canvas_id}/pin-groups", "列出固定组（我方端点，竞品无对应子命令）", "commands/pin-group.md:63"),
   todo("group", "execute", "组执行（整组跑生成）", "commands/group.md:53", "canvas 域无 group execute 端点；逐节点 `node generate <TYPE> <NODE_ID>` 提交"),
   todo("group", "template-get", "查看单个组模板", "commands/group.md:157", "我方只有 `group template-list`（GET /canvas/canvases/:id/group-templates 列表），无单模板端点"),
 ];
 
 // ── 素材 / 脚本（commands/material.md、script.md）────────────────────────
 const materialCommands: CommandSpec[] = [
-  http("material", "add", "POST", "canvases/{canvas_id}/materials", "添加画布素材", "commands/material.md:39", {
+  http("material", "add", "POST", "canvas/canvases/{canvas_id}/materials", "添加画布素材", "commands/material.md:39", {
     write: true,
     positionals: [{ display: "FILE_ID", desc: "文件 ID", required: true }],
     bodyParams: [{ key: "file_id", index: 0 }],
   }),
-  http("material", "list", "GET", "canvases/{canvas_id}/materials", "列出画布素材", "commands/material.md:113", {
+  http("material", "list", "GET", "canvas/canvases/{canvas_id}/materials", "列出画布素材", "commands/material.md:113", {
     queryKeys: ["page", "page_size"],
   }),
-  http("material", "delete", "POST", "canvases/{canvas_id}/materials/batch-delete", "批量删除素材", "commands/material.md:149", {
+  http("material", "delete", "POST", "canvas/canvases/{canvas_id}/materials/batch-delete", "批量删除素材", "commands/material.md:149", {
     write: true,
   }),
-  http("script", "storyboard", "POST", "canvases/{canvas_id}/nodes/{node_id}/storyboard-parse", "从文本节点拆分镜", "commands/script.md:41", {
+  http("script", "storyboard", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-parse", "从文本节点拆分镜", "commands/script.md:41", {
     slots: ["node_id"],
     write: true,
     paid: true,
   }),
-  http("script", "asset-extract", "POST", "canvases/{canvas_id}/nodes/{node_id}/asset-extraction", "从文本节点提取资产", "commands/script.md:64", {
+  http("script", "asset-extract", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/asset-extraction", "从文本节点提取资产", "commands/script.md:64", {
     slots: ["node_id"],
     write: true,
     paid: true,
   }),
-  http("script", "asset-match", "POST", "canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match", "分镜资产匹配", "commands/script.md:80", {
+  http("script", "asset-match", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match", "分镜资产匹配", "commands/script.md:80", {
     slots: ["node_id"],
     write: true,
     paid: true,
   }),
-  http("script", "rematch", "POST", "canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-rematch", "重新匹配", "commands/script.md:96", {
+  http("script", "rematch", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-rematch", "重新匹配", "commands/script.md:96", {
     slots: ["node_id"],
     write: true,
     paid: true,
   }),
-  http("script", "cancel", "POST", "canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match/cancel", "取消匹配", "commands/script.md:112", {
+  http("script", "cancel", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/storyboard-asset-match/cancel", "取消匹配", "commands/script.md:112", {
     slots: ["node_id"],
     write: true,
   }),
-  http("script", "optimize", "POST", "canvases/{canvas_id}/nodes/{node_id}/script-optimization", "脚本优化", "commands/script.md:128", {
+  http("script", "optimize", "POST", "canvas/canvases/{canvas_id}/nodes/{node_id}/script-optimization", "脚本优化", "commands/script.md:128", {
     slots: ["node_id"],
     write: true,
     paid: true,
