@@ -41,6 +41,19 @@ export const users = pgTable("users", {
    * 与 cookie 的分工：cookie 是本设备的即时偏好，本字段是跨设备跟随账号的偏好。
    */
   preferredLocale: text("preferred_locale").notNull().default(""),
+  /**
+   * 账号级"设置项"（竞品 `GET/PUT /web/v1/user-settings`，第 85 批）。
+   *
+   * 形状：`{ [scope_type]: { [key]: unknown } }`，scope_type 缺省为 `"default"`。
+   * 为什么用一层 scope 而不是平铺：竞品的 GET 带 `scope_type` + `keys` 两个 query 参数，
+   * 说明它本来就是"按作用域取若干键"的接口；平铺会让"某个键属于哪个作用域"无处表达。
+   * 为什么是 jsonb 而不是一张 user_settings 表：设置项是"客户端自己解释的键值对"，
+   * 服务端没有查询需求（只按 scope 整体读/按键合并写），建表等于把客户端的私有 schema
+   * 固化进数据库，加一个设置项就要一次迁移。
+   *
+   * 不在这里放语言偏好：preferred_locale 是独立列，因为服务端要按它渲染邮件/短信文案。
+   */
+  settings: jsonb("settings").notNull().default({}),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

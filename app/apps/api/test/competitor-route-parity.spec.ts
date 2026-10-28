@@ -10,8 +10,8 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十一组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
- * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12，共 219 条，来自
+ * 本文件把竞品的十二组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28，共 247 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -24,9 +24,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十一组共 219 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十二组共 247 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #8 / #10 / #12 / #21 / #24 / #26 / #27 九行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #8 / #10 / #12 / #21 / #22 / #24 / #26 / #27 十行的
  * 「逐条对照」说法。
  */
 
@@ -418,6 +418,46 @@ const AGENT_SHAPES = [
 ];
 
 
+/**
+ * #22 账号/鉴权：竞品散落在 `/web/v1/{login,logout,renew,callback,user*,env,config,...}` 的 28 条（第 85 批）。
+ *
+ * 为什么这 28 条没有统一前缀也能算一个域：竞品自己也没有 `/web/v1/account/*` 域，
+ * 这些路径全是"跟这个人有关"的零散端点（登录态、资料、设置、积分、订阅、内容安全）。
+ * 判定结果：9 条同形（本批补齐）、11 条能力在但形状不同（登录改用 `/auth/*`、注销用 POST、
+ * 积分看板用 space 钱包…）、8 条豁免（邮箱验证码通道、欠费模型、火山用量、微信 JS-SDK 签名、
+ * i18n 上报、运行时 env/config —— 都是"我方没有这个模型/这个外部依赖"）。
+ */
+const ACCOUNT_SHAPES = [
+  "POST /web/v1/login",
+  "GET /web/v1/logout",
+  "GET /api/user/logout",
+  "GET /web/v1/renew",
+  "GET /web/v1/callback/login",
+  "POST /web/v1/email-captcha",
+  "POST /web/v1/email-captcha/validate",
+  "GET /web/v1/captcha-check",
+  "GET /web/v1/user-info",
+  "POST /web/v1/user-info",
+  "GET /web/v1/user-settings",
+  "PUT /web/v1/user-settings",
+  "GET /web/v1/user/ip",
+  "GET /web/v1/user/credits",
+  "GET /web/v1/user/credits-log",
+  "GET /web/v1/user/credits-dashboard",
+  "GET /web/v1/user/credits-dashboard/flows",
+  "GET /web/v1/user/credits-dashboard/debt-list",
+  "POST /web/v1/user/credits-dashboard/volc-query",
+  "GET /web/v1/user-vip-info",
+  "GET /web/v1/trade-order/latest",
+  "POST /web/v1/buy/sku-price",
+  "POST /web/v1/subscribe/activity-upgrade/upgrade",
+  "GET /web/v1/weixin/token",
+  "POST /web/v1/text-sensidetect",
+  "POST /web/v1/user/language/report",
+  "GET /web/v1/env",
+  "GET /web/v1/config",
+];
+
 const WAIVED: Record<string, string> = {
   "GET /task/is_first/interact":
     "我方没有「结果互动」概念，`task_events` 也没有 user_id 列 —— 算不出「这个人的首次互动」，硬回一个 true 就是假数据",
@@ -434,6 +474,23 @@ const WAIVED: Record<string, string> = {
     "同上：资源详情同属 agent 首页运营位，缺响应体证据。我方 agent 首页的推荐位按自建口径（`is_home_recommend` 默认全 false）",
   "GET /agent/home/resource/sse":
     "同上：运营位实时流；我方分享/会话两条 SSE 已覆盖实时需求，这条没有可复现的帧语义",
+  // ---- 第 85 批：#22 账号/鉴权的 8 条（能力不在，且不造假）----
+  "POST /email-captcha":
+    "我方没有邮箱注册/登录通道：账号体系只有手机号短信 + 4 渠道 SSO（wx/apple/google/wechat），做邮箱发码等于新增一条没人维护的登录路径",
+  "POST /email-captcha/validate":
+    "同上：没有邮箱验证码，就不存在「校验它」的端点；补一个恒回 true 的校验是最坏的那种假接口",
+  "GET /user/credits-dashboard/debt-list":
+    "我方没有欠费模型：`credit_accounts` 有 `check(balance >= 0)` 约束，余额不可能为负，「待补缴」用 `frozen`（预留）表达，没有可列的欠费单",
+  "POST /user/credits-dashboard/volc-query":
+    "火山引擎用量是外部供应商数据，需要 volc AK/SK；本仓没有该凭据，也不该为了一个查询端点引入供应商 SDK",
+  "GET /weixin/token":
+    "微信 JS-SDK 的 jsapi_ticket 签名需要公众号 appid/secret（外部输入）；且它只服务于微信内网页分享，我方分享页走的是自建 token，不依赖 JS-SDK",
+  "POST /user/language/report":
+    "i18n 缺陷上报没有落库模型（也不需要：这是运营反馈，前端走控制台/工单）；建一张只写不读的表等于把工单系统抄一遍",
+  "GET /env":
+    "我方配置是构建期注入（`NUXT_PUBLIC_*`）+ 运行期能力表 `/meta/capabilities`，没有「运行时下发环境变量」的需求；给客户端下发 env 还会把部署细节暴露到前端",
+  "GET /config":
+    "同上：竞品的 `config?module_name&key&lang` 是运营配置下发；我方的等价物是构建期常量与 `/meta/capabilities`，没有可复现的配置项清单可对",
 };
 
 /**
@@ -530,6 +587,26 @@ DEVIATIONS["GET /agent/task/share/{}/sse"] = {
     "不跟竞品一样把分享挂在 `agent/task/share/...` 下 —— 那条路径要求登录态，与分享的匿名语义冲突",
 };
 
+// ---- 第 85 批：#22 账号/鉴权 —— 能力都在，但竞品的调用形状与我方资源模型不同 ----
+// 这一组全是「登录态/资料/积分/订阅」的等价物：判定依据是**能力有对应实现**，
+// 不是"路径像"。每条 ours 都会被 `missing()` 断言真实存在，指着空气会红。
+const ACCOUNT_DEVIATIONS: Array<[string, string, string]> = [
+  ["POST /web/v1/login", "POST /auth/login", "登录在我方是 `/auth/*` 命名空间（短信发码 + 校验两步），竞品把 login 放在根路径；两者语义一致"],
+  ["GET /web/v1/logout", "POST /auth/logout", "注销是写操作，我方用 POST（GET 注销会让浏览器预取/爬虫把用户登出）"],
+  ["GET /api/user/logout", "POST /auth/logout", "同上：竞品有两条注销（web 与 api 前缀），我方只有一条 POST /auth/logout"],
+  ["GET /web/v1/renew", "POST /auth/renew", "续期要带 master_token 做凭据校验，必须是 POST；GET 会把长 token 写进 URL/日志"],
+  ["GET /web/v1/callback/login", "POST /auth/oauth/{}/callback", "OAuth 回调我方按 provider 分段（`/auth/oauth/:provider/callback`）并用 POST 提交授权码"],
+  ["GET /web/v1/captcha-check", "POST /moderation/captcha/verify", "行为验证码校验要提交票据/答案，我方在 `/moderation/captcha/verify`（POST）"],
+  ["GET /web/v1/user-info", "GET /me", "当前登录者的资料读 `/me`（同时带 space 与 credits，是一个聚合视图，比只回 user 更有用）"],
+  ["GET /web/v1/user-vip-info", "GET /billing/subscription", "VIP 信息就是订阅状态：`/billing/subscription` 无订阅返回 null（不是 404），与前端「未订阅」展示一致"],
+  ["GET /web/v1/trade-order/latest", "GET /billing/orders", "最近订单从订单列表取（`/billing/orders` 按时间倒序，分页第 1 页即最近），没有单独 latest 端点"],
+  ["POST /web/v1/subscribe/activity-upgrade/upgrade", "POST /billing/subscribe", "订阅/升级都走 `/billing/subscribe`（升级差价另有只读报价 `GET /billing/upgrade-quote`），我方不把「活动升级」单独建模"],
+  ["POST /web/v1/text-sensidetect", "POST /moderation/text-detect", "内容安全检测在 `/moderation/text-detect`（同一个 provider，命名按我方模块）"],
+];
+for (const [shape, ours, reason] of ACCOUNT_DEVIATIONS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -542,6 +619,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   ops_market: OPS_MARKET_SHAPES.length,
   novel_market: NOVEL_MARKET_SHAPES.length,
   agent: AGENT_SHAPES.length,
+  account: ACCOUNT_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -645,9 +723,19 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("GET /market/creator/works/{}")).toBe(true);
     expect(ROUTES.has("GET /agent/task/stream")).toBe(true);
     expect(ROUTES.has("POST /agent/task/stream")).toBe(true);
+    // 第 85 批：账号/鉴权本批新补的 9 条客户端形状
+    expect(ROUTES.has("POST /user-info")).toBe(true);
+    expect(ROUTES.has("GET /user-settings")).toBe(true);
+    expect(ROUTES.has("PUT /user-settings")).toBe(true);
+    expect(ROUTES.has("GET /user/ip")).toBe(true);
+    expect(ROUTES.has("GET /user/credits")).toBe(true);
+    expect(ROUTES.has("GET /user/credits-log")).toBe(true);
+    expect(ROUTES.has("GET /user/credits-dashboard")).toBe(true);
+    expect(ROUTES.has("GET /user/credits-dashboard/flows")).toBe(true);
+    expect(ROUTES.has("POST /buy/sku-price")).toBe(true);
   });
 
-  it("竞品十一组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12）", () => {
+  it("竞品十二组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -660,6 +748,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       ops_market: 18,
       novel_market: 29,
       agent: 12,
+      account: 28,
     });
     expect(
       FILM_SHAPES.length +
@@ -672,8 +761,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         SHARE_SHAPES.length +
         OPS_MARKET_SHAPES.length +
         NOVEL_MARKET_SHAPES.length +
-        AGENT_SHAPES.length,
-    ).toBe(219);
+        AGENT_SHAPES.length +
+        ACCOUNT_SHAPES.length,
+    ).toBe(247);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -687,6 +777,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       ops_market: OPS_MARKET_SHAPES,
       novel_market: NOVEL_MARKET_SHAPES,
       agent: AGENT_SHAPES,
+      account: ACCOUNT_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -804,6 +895,38 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(DEVIATIONS["GET /agent/task/share/{}/sse"]!.ours).toBe("GET /share/{}/stream");
   });
 
+  it("#22 账号/鉴权：28 条里 9 条同形 + 11 条偏离 + 8 条豁免", () => {
+    expect(ACCOUNT_SHAPES.length).toBe(28);
+    expect(missing(ACCOUNT_SHAPES)).toEqual([]);
+    const exact = ACCOUNT_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = ACCOUNT_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = ACCOUNT_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    expect(exact.length).toBe(9);
+    expect(deviated.length).toBe(11);
+    expect(waived.length).toBe(8);
+    expect(exact.length + deviated.length + waived.length).toBe(ACCOUNT_SHAPES.length);
+    // 同形的 9 条就是本批补的客户端形状（不是"恰好撞上"）
+    expect(exact.sort()).toEqual(
+      [
+        "GET /web/v1/user-settings",
+        "GET /web/v1/user/credits",
+        "GET /web/v1/user/credits-dashboard",
+        "GET /web/v1/user/credits-dashboard/flows",
+        "GET /web/v1/user/credits-log",
+        "GET /web/v1/user/ip",
+        "POST /web/v1/buy/sku-price",
+        "POST /web/v1/user-info",
+        "PUT /web/v1/user-settings",
+      ].sort(),
+    );
+    // 积分相关三条都指向空间钱包（本产品钱包挂 space，不挂 user）
+    expect(DEVIATIONS[shapeOf("GET /web/v1/user-info")]!.ours).toBe("GET /me");
+    expect(DEVIATIONS[shapeOf("POST /web/v1/login")]!.ours).toBe("POST /auth/login");
+    // 豁免里必须是"模型/外部依赖不存在"，而不是"没做"
+    expect(WAIVED[shapeOf("GET /web/v1/user/credits-dashboard/debt-list")]).toContain("balance >= 0");
+    expect(WAIVED[shapeOf("GET /web/v1/weixin/token")]).toContain("appid");
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -818,13 +941,15 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...OPS_MARKET_SHAPES,
         ...NOVEL_MARKET_SHAPES,
         ...AGENT_SHAPES,
+        ...ACCOUNT_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只在两个域开过口子：#24 任务（缺数据模型）与 #4 Agent（有意不做 + 外部凭据）。
+    // 豁免只在三个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
+    // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
-    const waiverScope = new Set([...TASK_SHAPES, ...AGENT_SHAPES].map(shapeOf));
+    const waiverScope = new Set([...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES].map(shapeOf));
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);
   });
 });

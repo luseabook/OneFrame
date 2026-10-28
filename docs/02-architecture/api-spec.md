@@ -4103,3 +4103,65 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 3. `/agent/home/resource/*` 仍是「有意不做」，豁免不等于实现；
 4. 管理侧 18 行的分数归 `#27`，本批不动；
 5. 偏离/豁免是快照式登记，竞品或我方改路由都要人工同步。
+
+## 17.42 账号域客户端契约：账号设置、积分看板与 `buy/sku-price` 的 POST 形状（第 85 批）
+
+### 42.1 为什么这部分进 API 文档
+
+第 85 批用竞品形状审计 #22 账号/鉴权，结论是**竞品账号域没有独立域前缀** —— 28 条 METHOD+path 散在 `/web/v1/{login,logout,renew,callback,user-info,user-settings,user/*,buy,subscribe,weixin,env,config,captcha-check,email-captcha,text-sensidetect}` 与 `/api/user/logout` 里。其中 9 条我方原先不存在，本批落地；它们与既有端点（`/me`、`/auth/*`、`/billing/*`、`/credits/*`）共同构成账号域的对外契约，因此在这里一次写清。
+
+### 42.2 九个新端点
+
+| 端点 | 方法 | 入参 | 返回要点 | 错误 |
+|---|---|---|---|---|
+| `/v1/user-info` | POST | `{nickname?: string≤40, avatar_uri?: string≤512 \| null}` | `{user:{id,nickname,avatar_uri,preferred_locale}}` | `nothing to update` / `nickname is required` / `nickname is too long` / `avatar_uri is too long` → 400101；账号不存在 → 400102 |
+| `/v1/user-settings` | GET | `?scope_type=&keys=k1,k2` | `{scope_type, settings:{...}}` | `invalid scope_type` / `too many keys` → 400101 |
+| `/v1/user-settings` | PUT | `{scope_type?, settings? \| patch? \| 顶层平铺}` | `{scope_type, updated:[k…], settings}` | `settings are required` / `settings patch is empty` / `too many settings in one call` / `setting "x" is too large` → 400101 |
+| `/v1/user/ip` | GET | — | `{ip}` | — |
+| `/v1/user/credits` | GET | — | `{balance, frozen, available, debt_supported:false}` | — |
+| `/v1/user/credits-log` | GET | `?page&page_size&event_type` | 分页流水 `{list[], total, page, page_size}` | `unsupported event_type` → 400101 |
+| `/v1/user/credits-dashboard` | GET | — | `{balance, frozen, available, spent, recharged, flow_count, last_flow_at, by_kind[], debt_supported:false}` | — |
+| `/v1/user/credits-dashboard/flows` | GET | `?tab&page&page_size` | 同上分页流水（tab 映射到 `kind` 过滤） | `unsupported event_type` → 400101 |
+| `/v1/buy/sku-price` | POST | body `{sku}` 或 `?sku=` | 与 `GET /v1/billing/sku-price` 完全同形 | `sku is required` → 400101 |
+
+### 42.3 `users.settings` 的存储契约
+
+- 列：`users.settings jsonb NOT NULL DEFAULT '{}'`（迁移 `0045_wise_steve_rogers.sql`）。
+- 形状：`{ [scope_type: string]: { [key: string]: unknown } }`；`scope_type` 缺省 `default`，规则 `/^[a-z][a-z0-9_:-]{0,31}$/`。
+- 写语义：**按键合并**，不是整袋替换。空 patch 拒绝；单次 ≤ 40 键；单值 `JSON.stringify` ≤ 4096 字节。
+- 读语义：`keys` 逗号分隔（≤ 20 个），只回命中键；未命中的键不返回也不报错。
+- 为什么不建 `user_settings` 表：设置是客户端私有键值对，服务端不查询；建表会把客户端 schema 固化进库，每加一个前端开关都要迁移。语言偏好（`preferred_locale`）仍单独成列，因为服务端要按它渲染文案。
+
+### 42.4 `event_type` → `credit_flows.kind` 映射
+
+| `event_type` | 映射到 `kind` |
+|---|---|
+| `consume` / `consume_flow` / `spend` / `settle` | `["settle"]` |
+| `recharge` / `recharge_flow` | `["recharge","gift","refund","adjust"]` |
+| `recharge_gift` | `["recharge","gift"]` |
+| `freeze` / `frozen` | `["freeze","unfreeze"]` |
+| `refund` / `gift` / `adjust` | 同名单值 |
+| `all` / 未传 | 不过滤 |
+| 其它 | 400101 `unsupported event_type` |
+
+映射在 controller 侧（`flowKinds()`），不进 service：这是对外命名口径，不该污染内部查询语法。
+
+### 42.5 与竞品 28 条的对应关系
+
+- **9 同形**（本批新增，见 42.2）；
+- **11 偏离**：`POST /login`→`POST /v1/auth/login`、`GET /logout`+`GET /api/user/logout`→`POST /v1/auth/logout`、`GET /renew`→`POST /v1/auth/renew`、`GET /callback/login`→`POST /v1/auth/oauth/:provider/callback`、`GET /captcha-check`→`POST /v1/moderation/captcha/verify`、`GET /user-info`→`GET /v1/me`、`GET /user-vip-info`→`GET /v1/billing/subscription`、`GET /trade-order/latest`→`GET /v1/billing/orders`、`POST /subscribe/activity-upgrade/upgrade`→`POST /v1/billing/subscribe`、`POST /text-sensidetect`→`POST /v1/moderation/text-detect`；
+- **8 豁免**：邮箱验证码 ×2（无邮箱通道）、`credits-dashboard/debt-list`（`balance >= 0` 有 check 约束，无欠费模型）、`volc-query`（供应商凭据）、`weixin/token`（公众号 appid+secret）、`user/language/report`（无落库表）、`env`+`config`（构建期注入）。
+
+### 42.6 守卫与测试
+
+- `competitor-route-parity.spec.ts`：`ACCOUNT_SHAPES`(28) + `ACCOUNT_DEVIATIONS`(11) + `WAIVED` 8 条；总形状 219→**247**；新用例断言 9/11/8 且和 = 28。
+- `account-shapes.spec.ts`：6 例（改昵称头像、设置读写合并与上限、`x-forwarded-for` 首跳、credits 三件套与 mock-pay 充值联动、`POST /buy/sku-price` 与 GET 深等、未登录 8 条全 401101）。
+- 反向验证：`@Put("user-settings")` 改名 → 4 例红；restore 后全绿。
+
+### 42.7 边界
+
+1. 只对齐 METHOD + path + 参数名；body/响应字段是我方自定（竞品 schema 全空）。
+2. 11 条偏离仍是偏离，按竞品形状写死的客户端会 404；这里只登记，不维护第二套路径。
+3. 8 条豁免是模型/凭据层面不存在，不是排期问题。
+4. 真实渠道联调与账号合并未做，#22 停在 98%。
+5. 守卫是快照式登记，竞品或我方改路由需人工同步。

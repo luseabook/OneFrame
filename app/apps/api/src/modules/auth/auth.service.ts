@@ -417,6 +417,173 @@ export class AuthService {
     return { preferred_locale: locale };
   }
 
+  /**
+   * 更新账号资料（第 85 批：竞品 `POST /web/v1/user-info`）。
+   *
+   * 只认 nickname / avatar_uri 两个字段，且都是"给了才改"（PATCH 语义）：
+   * 竞品这条虽然是 POST，但两个 schema 都是 `{}`，没有字段证据，
+   * 所以按最常见的"改资料"语义实现，未知字段由 zod 静默剥掉（不 500、也不假装支持）。
+   * avatar_uri 传 null 或空串都表示清空头像。
+   */
+  async updateProfile(
+    userId: string,
+    input: { nickname?: string; avatar_uri?: string | null },
+  ): Promise<{
+    user: { id: string; nickname: string; avatar_uri: string | null; preferred_locale: string };
+  }> {
+    const patch: { nickname?: string; avatarUri?: string | null; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
+    if (input.nickname !== undefined) {
+      const nickname = input.nickname.trim();
+      if (!nickname) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "nickname is required", { field: "nickname" });
+      }
+      if (nickname.length > 40) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "nickname is too long", { field: "nickname" });
+      }
+      patch.nickname = nickname;
+    }
+    if (input.avatar_uri !== undefined) {
+      const uri = input.avatar_uri === null ? null : input.avatar_uri.trim();
+      if (uri !== null && uri.length > 512) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "avatar_uri is too long", { field: "avatar_uri" });
+      }
+      patch.avatarUri = uri ? uri : null;
+    }
+    if (patch.nickname === undefined && patch.avatarUri === undefined) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "nothing to update", { field: "body" });
+    }
+    const [row] = await db
+      .update(users)
+      .set(patch)
+      .where(eq(users.id, BigInt(userId)))
+      .returning();
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "account not found");
+    return {
+      user: {
+        id: String(row.id),
+        nickname: row.nickname,
+        avatar_uri: row.avatarUri ?? null,
+        preferred_locale: row.preferredLocale ?? "",
+      },
+    };
+  }
+
+  /**
+   * 读取账号设置（第 85 批：竞品 `GET /web/v1/user-settings?scope_type=&keys=`）。
+   *
+   * 存储形状 `{ [scope_type]: { [key]: value } }`（见 `packages/db` 里 users.settings 的注释）。
+   * `keys` 是逗号分隔的键清单（竞品 query 名就是这个）：给了就只回这些键，
+   * 上限 20 个 —— 这个接口是客户端启动时取少量配置用的，不是批量导出。
+   */
+  async readSettings(
+    userId: string,
+    scopeType?: string,
+    keys?: string,
+  ): Promise<{ scope_type: string; settings: Record<string, unknown> }> {
+    const scope = this.settingsScope(scopeType);
+    const bag = await this.settingsBagOf(userId);
+    const all = bag[scope] ?? {};
+    const wanted = this.settingsKeys(keys);
+    const settings: Record<string, unknown> = {};
+    if (wanted) {
+      for (const key of wanted) if (key in all) settings[key] = all[key];
+    } else {
+      Object.assign(settings, all);
+    }
+    return { scope_type: scope, settings };
+  }
+
+  /**
+   * 合并写入账号设置（第 85 批：竞品 `PUT /web/v1/user-settings`）。
+   *
+   * 语义是**按键合并**而不是整体替换：不同页面各写各的键（引导条、通知、播放偏好…），
+   * 整体替换会让后写的页面把别的页面刚写的设置抹掉。
+   * 返回 `updated` 让客户端知道哪些键真的落库了（而不是"我发了一堆，鬼知道存了几个"）。
+   */
+  async mergeSettings(
+    userId: string,
+    scopeType: string | undefined,
+    patch: Record<string, unknown>,
+  ): Promise<{
+    scope_type: string;
+    updated: string[];
+    settings: Record<string, unknown>;
+  }> {
+    const scope = this.settingsScope(scopeType);
+    const keys = Object.keys(patch);
+    if (keys.length === 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "settings patch is empty", { field: "settings" });
+    }
+    if (keys.length > 40) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "too many settings in one call", {
+        field: "settings",
+      });
+    }
+    for (const key of keys) {
+      if (key.length === 0 || key.length > 60) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid setting key", { field: "settings" });
+      }
+      if (JSON.stringify(patch[key] ?? null).length > 4096) {
+        throw new AppError(ErrorCode.INVALID_PARAM, `setting "${key}" is too large`, {
+          field: "settings",
+        });
+      }
+    }
+    const bag = await this.settingsBagOf(userId);
+    const next = { ...(bag[scope] ?? {}), ...patch };
+    await db
+      .update(users)
+      .set({ settings: { ...bag, [scope]: next }, updatedAt: new Date() })
+      .where(eq(users.id, BigInt(userId)));
+    return { scope_type: scope, updated: keys, settings: next };
+  }
+
+  /** scope_type 归一：缺省 `default`；只接受 `[a-z][a-z0-9_:-]{0,31}`（它会被写进 jsonb 的键） */
+  private settingsScope(raw?: string): string {
+    const scope = (raw ?? "").trim() || "default";
+    if (!/^[a-z][a-z0-9_:-]{0,31}$/.test(scope)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid scope_type", { field: "scope_type" });
+    }
+    return scope;
+  }
+
+  /** `keys=a,b,c` 解析；空串/只逗号 → 不过滤（返回 null） */
+  private settingsKeys(raw?: string): string[] | null {
+    if (raw === undefined) return null;
+    const keys = raw
+      .split(",")
+      .map((key) => key.trim())
+      .filter((key) => key.length > 0);
+    if (keys.length > 20) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "too many keys", { field: "keys" });
+    }
+    return keys.length > 0 ? keys : null;
+  }
+
+  /**
+   * 读出 `users.settings` 并规整成 `{ [scope]: { [key]: value } }`。
+   * 库里可能被历史数据写成非对象（jsonb 不校验形状），这里一律当空处理而不是抛错 ——
+   * 设置项坏掉不该让人登不进来。
+   */
+  private async settingsBagOf(userId: string): Promise<Record<string, Record<string, unknown>>> {
+    const [row] = await db
+      .select({ settings: users.settings })
+      .from(users)
+      .where(eq(users.id, BigInt(userId)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "account not found");
+    const raw = row.settings;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const bag: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        bag[key] = { ...(value as Record<string, unknown>) };
+      }
+    }
+    return bag;
+  }
+
   /** 标记新手引导已读（关闭引导条时调用，幂等） */
   async markOnboarded(userId: string): Promise<{ onboarded: boolean }> {
     await db

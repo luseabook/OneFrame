@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, Res , Inject} from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query, Req, Res , Inject} from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode } from "@app/shared";
@@ -17,6 +17,29 @@ import { CaptchaService } from "../moderation/captcha.service";
  * 验证码是"开关式"的：`CAPTCHA_ENFORCE=1` 时必填，默认关（现有 e2e/真机验收全走无码路径）。
  * 字段名 `captcha_ticket`/`captcha_answer` 与 `POST /moderation/captcha/verify` 同口径。
  */
+/**
+ * 资料更新入参（第 85 批：竞品 `POST /web/v1/user-info`）。
+ * 两个字段都可选，但至少要给一个 —— 空 body 打进来按 400101 拒掉，
+ * 而不是"什么也没改却回 200 成功"（那会让客户端以为保存生效了）。
+ */
+const userInfoBody = z.object({
+  nickname: z.string().max(40).optional(),
+  avatar_uri: z.string().max(512).nullable().optional(),
+});
+
+/**
+ * 设置写入入参（第 85 批：竞品 `PUT /web/v1/user-settings`）。
+ *
+ * 竞品的 requestDataJsonSchema 是 `{}`，没有任何字段证据，所以这里**同时**接受三种写法：
+ * `{scope_type, settings:{...}}`、`{scope_type, patch:{...}}`、以及把键直接平铺在 body 顶层。
+ * 前两种是"明确包裹"，第三种是兼容"客户端直接把设置对象扔过来"的写法。
+ */
+const userSettingsBody = z.object({
+  scope_type: z.string().max(32).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
+  patch: z.record(z.string(), z.unknown()).optional(),
+});
+
 const smsBody = smsCodeRequestSchema.extend({
   invite_code: z.string().min(1).optional(),
   captcha_ticket: z.string().min(1).max(2048).optional(),
@@ -122,6 +145,68 @@ export class AuthController {
     const auth = req.auth;
     if (!auth) return null;
     return this.auth.me(auth.userId, auth.spaceId);
+  }
+
+  /**
+   * 更新账号资料（第 85 批：竞品 `POST /web/v1/user-info`）。
+   *
+   * 竞品有两条 `user-info`：GET 取资料、POST 改资料。我的 GET 对应物是 `GET /me`（登记为偏离），
+   * 但 POST 这条**原先没有** —— 按竞品形状发请求的客户端会 404，所以补上。
+   */
+  @Post("user-info")
+  async updateUserInfo(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.auth.updateProfile(auth.userId, parseOrThrow(userInfoBody, body ?? {}));
+  }
+
+  /** 账号设置读取（第 85 批：竞品 `GET /web/v1/user-settings?scope_type=&keys=`） */
+  @Get("user-settings")
+  async readUserSettings(
+    @Req() req: AuthedRequest,
+    @Query("scope_type") scopeType?: string,
+    @Query("keys") keys?: string,
+  ) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.auth.readSettings(auth.userId, scopeType, keys);
+  }
+
+  /**
+   * 账号设置合并写入（第 85 批：竞品 `PUT /web/v1/user-settings`）。
+   *
+   * body 里既没有 `settings` 也没有 `patch` 时，把除 `scope_type` 之外的所有顶层键当作设置项
+   * —— 竞品没有字段证据，客户端可能是"直接把对象扔过来"。空 patch 一律 400101。
+   */
+  @Put("user-settings")
+  async writeUserSettings(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    const input = parseOrThrow(userSettingsBody, body ?? {});
+    const { settings, patch, scope_type } = input;
+    let payload = settings ?? patch;
+    if (!payload) {
+      const rest = { ...(body as Record<string, unknown> | undefined) };
+      delete rest.scope_type;
+      delete rest.settings;
+      delete rest.patch;
+      if (Object.keys(rest).length > 0) payload = rest as Record<string, unknown>;
+    }
+    if (!payload) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "settings are required", { field: "settings" });
+    }
+    return this.auth.mergeSettings(auth.userId, scope_type, payload);
+  }
+
+  /**
+   * 客户端公网 IP（第 85 批：竞品 `GET /web/v1/user/ip`）。
+   *
+   * 与 `clientIp(req)` 同口径（信任代理时取 X-Forwarded-For 首个），
+   * 前端拿它做"当前区域/网络提示"，也是客服排查的白名单依据。
+   */
+  @Get("user/ip")
+  async userIp(@Req() req: FastifyRequest) {
+    return { ip: clientIp(req) };
   }
 
   /** 保存账号级语言偏好（跨设备跟随账号；空串=清除，回到跟随设备） */

@@ -129,6 +129,23 @@ export class BillingController {
   }
 
   /**
+   * 动态价格（POST 形状，第 85 批）。
+   *
+   * 竞品这条是 `POST /web/v1/buy/sku-price`（`requestBodyType: json`、两个 schema 都是 `{}`），
+   * 我方原先只有 `GET /billing/sku-price` —— 按竞品形状发 POST 的客户端会 404。
+   * 入参按"body 优先、query 兜底"取 sku：竞品把 sku 放 body 里，但既然没有字段证据，
+   * 两种都收，免得它其实是放 query 时又打不通。
+   */
+  @Public()
+  @Post("buy/sku-price")
+  async skuPricePost(@Query("sku") skuQuery?: string, @Body() body?: unknown) {
+    const input = (body ?? {}) as { sku?: unknown };
+    const sku = typeof input.sku === "string" && input.sku ? input.sku : skuQuery;
+    if (!sku) throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
+    return this.billing.skuPrice(sku);
+  }
+
+  /**
    * 升级补差价**报价**（登录态；只读，不动钱）。
    * 前端用它在定价页给出"补 ¥X"的明确数字；真正下单仍走 /billing/orders（原价），
    * 折抵接入动钱路径需产品确认，已在进度文档 §5.4 第 1 条登记。

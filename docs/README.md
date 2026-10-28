@@ -127,6 +127,85 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.39 · 第 85 批：拿竞品形状去量自己的「95%」—— #22 账号/鉴权 28 条里 9 条真缺 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 79–84 批把「自己写 100%」的模块逐个用竞品路由钉住了（#7 还被据实下调到 99.5%、#24 下调到 99%）。钉完之后剩下的问题反过来：**那些自己写 95% 的模块，缺口栏是不是也不完整？**
+
+第一个挑 #22 账号/鉴权不是随手 —— 它有 0.15 权重（M(3)），同时落在**核心组**（创作闭环）与**首发口径**（「Beta 可对外收钱出片」）两条线上，而且它的缺口栏只写了两个词：真实渠道联调、OAuth↔手机号合并。**没有一条是「接口形状」层面的**，这本身就是可疑信号。
+
+### 二、竞品账号域长什么样
+
+它没有 `/web/v1/account` 这种域。28 条 METHOD+path 散在 15 个零散前缀下：
+
+| 前缀 | 条数 | 例子 |
+|---|---:|---|
+| `/web/v1/login` `/logout` `/renew` `/callback/login` | 4 | 登录/登出/续期/OAuth 回调 |
+| `/web/v1/user-info` | 2 | `GET`（读自己）+ `POST`（改昵称头像） |
+| `/web/v1/user-settings` | 2 | `GET ?scope_type=&keys=` + `PUT` |
+| `/web/v1/user/*` | 6 | `ip`、`credits`、`credits-log?page&page_size&event_type`、`credits-dashboard`(+`/flows?tab`、`/debt-list`)、`volc-query` |
+| `/web/v1/buy` `/subscribe` `/trade-order` `/user-vip-info` | 4 | `POST sku-price`、活动升级、最近订单、VIP 信息 |
+| `/web/v1/{env,config,captcha-check,email-captcha,text-sensidetect,weixin/token,user/language/report}` | 7 | 环境变量、运行时配置、验证码、邮箱验证码 ×2、敏感词、微信签名、i18n 上报 |
+| `/api/user/logout` | 1 | 另一个前缀的登出（历史遗留） |
+
+证据强度与第 79/82 批一致：`method` / `paramNames` / `queryNames` 有，**两个 `jsonSchema` 全是 `{}`** —— 所以只能对齐「调用形状」，字段语义只能按我方既有 DTO 自定并在下面写清楚。
+
+### 三、三类结论
+
+**A. 9 条我方原先没有（本批全部落地）**
+
+| 竞品形状 | 我方新增 | 说明 |
+|---|---|---|
+| `POST /web/v1/user-info` | `POST /user-info` | 改昵称/头像；`avatar_uri:null` 清空；两字段都不给 → 400101 |
+| `GET /web/v1/user-settings?scope_type&keys` | `GET /user-settings` | 按 scope 分组返回，`keys` 逗号分隔只回命中键 |
+| `PUT /web/v1/user-settings` | `PUT /user-settings` | 合并写（不是整袋替换）；接受 `settings` / `patch` / 顶层平铺三种写法 |
+| `GET /web/v1/user/ip` | `GET /user/ip` | 取 `x-forwarded-for` 首跳（`trustProxy` 已开） |
+| `GET /web/v1/user/credits` | `GET /user/credits` | `{balance, frozen, available, debt_supported:false}` |
+| `GET /web/v1/user/credits-log?event_type` | `GET /user/credits-log` | `event_type` → `credit_flows.kind` 映射 |
+| `GET /web/v1/user/credits-dashboard` | `GET /user/credits-dashboard` | 消耗/充值/流水数/最近时间 + `by_kind[]` |
+| `GET /web/v1/user/credits-dashboard/flows?tab` | `GET /user/credits-dashboard/flows` | 看板页签，复用流水查询 |
+| `POST /web/v1/buy/sku-price` | `POST /buy/sku-price` | **竞品是 POST、我方原先只有 GET** —— 按竞品形状发请求会 404 |
+
+**B. 11 条形状偏离（能力在，只登记不补别名）**
+
+`POST /login`→`POST /auth/login`；`GET /logout` 与 `GET /api/user/logout`→`POST /auth/logout`（GET 注销会被浏览器/代理预取）；`GET /renew`→`POST /auth/renew`；`GET /callback/login`→`POST /auth/oauth/:provider/callback`；`GET /captcha-check`→`POST /moderation/captcha/verify`；`GET /user-info`→`GET /me`；`GET /user-vip-info`→`GET /billing/subscription`；`GET /trade-order/latest`→`GET /billing/orders`；`POST /subscribe/activity-upgrade/upgrade`→`POST /billing/subscribe`（+ `GET /billing/upgrade-quote` 报价）；`POST /text-sensidetect`→`POST /moderation/text-detect`。
+
+**C. 8 条豁免（能力不在，不造假）**
+
+邮箱验证码 ×2（我方只有手机号 + 4 渠道 SSO，没有邮箱注册通道）；`credits-dashboard/debt-list`（`credit_accounts.balance` 有 `check(balance >= 0)`，**没有欠费模型**，未结算用 `frozen` 表达）；`credits-dashboard/volc-query`（火山引擎外部用量，需供应商凭据）；`weixin/token`（微信 JS-SDK 签名，需公众号 appid+secret）；`user/language/report`（i18n 缺陷上报，没有落库表，前端走工单）；`env` + `config`（我方配置是**构建期** `NUXT_PUBLIC_*` 注入 + `/meta/capabilities`，没有运行时下发需求）。
+
+### 四、为什么这 9 条要补、那 11 条只登记
+
+分界线沿用第 81 批 kds 那条：**别名是给「改不动调用方」的**。
+
+- `POST /buy/sku-price` 属 kds 那类 —— 竞品就写 POST，客户端按参照站写死，我方只给 GET 就是 404，所以补 POST 别名（body 优先、query 兜底）。
+- `POST /login`、`GET /logout`、`GET /renew` 这些是「方法不同的同义动作」：客户端改一行 `auth/login` 就能对上，而且我方把 login/logout/renew 统一成 POST 有安全理由（GET 注销被判预取是真实事故类型），所以只登记偏离。
+- 9 条真缺里也没有一条是「别名」—— 都是我方原先确实没有的能力（设置、客户端 IP、积分看板、sku 取价）。
+
+### 五、实现细节
+
+1. **账号设置不建 `user_settings` 表**，给 `users` 加 `settings jsonb`（迁移 `0045_wise_steve_rogers.sql`）。理由：设置是**客户端自己的键值对**，服务端不做任何查询，建表等于把私有 schema 固化进库、以后每加一个前端开关都要迁移。一层 `scope_type`（`default`/`workspace`/…）只为对上竞品的 `GET ?scope_type=&keys=`。
+2. **合并写不是整袋替换**：`PUT /user-settings` 只覆盖传入的键，未传的保留 —— 否则「保存某一个 tab 的开关」会静默清掉其它键。
+3. **`credit_flows.kind` ↔ `event_type` 映射放在 controller 侧**（`flowKinds()`），不进 service：这是对外的命名口径，不该污染内部查询语法。`consume|spend|settle → ["settle"]`、`recharge → ["recharge","gift","refund","adjust"]`、`freeze → ["freeze","unfreeze"]`，未知值 400101。
+4. **`GET /user/ip` 取 `x-forwarded-for` 首跳**（不是整串、不是最后一跳）：`trustProxy: true` 已开，首跳是客户端可达地址。
+
+### 六、守卫与验证
+
+- `app/apps/api/test/competitor-route-parity.spec.ts` 新增 `ACCOUNT_SHAPES`（28）+ `ACCOUNT_DEVIATIONS`（11）+ `WAIVED` 增 8 条；总形状 **219 → 247**。新用例断言 exact 9 / deviated 11 / waived 8、三者相加 = 28，并锚定 `GET /user-info`→`GET /me`、`POST /login`→`POST /auth/login`。
+- 新增 `app/apps/api/test/account-shapes.spec.ts` **6 例**：改昵称头像（含 `avatar_uri:null` 清空）、设置读写/合并/`keys` 过滤/非法 scope/超大值、`clientIp` 首跳、credits 三件套（含真实 mock-pay 充值 1000 后余额与看板同步）、`POST /buy/sku-price` 与 GET 深等、未登录 8 条全 401101。
+- **反向验证**：把 `@Put("user-settings")` 改名 `-BROKEN` → parity + account 共 **4 例红**（guard 报 `+ Array ["PUT /user-settings"]`）；restore 后 21/21 绿。
+- api 全量 **85 文件 951 例**、门禁 **12/12**、迁移 **46**（0000–0045）、端点 **748**、用例 **1,352**。
+- 分数：**#22 95% → 98%**（2.85→2.94），全站 202.43→**202.52**、剩余 3.57→**3.48**；核心 107.58→**107.67**（97.9%）、首发 130.48→**130.57**（98.2%）；§5.5 表 A 里 #22 从 0.15（E 0.10+B 0.05）改 **0.06（E 0.04+B 0.02）**，故 E 2.83→2.77、B 0.745→0.715。
+
+### 七、诚实边界
+
+1. 只比 METHOD + path + 参数名，**不比 body/响应语义**（竞品两个 schema 都是 `{}`）；字段形状是我方自定并已写进 api-spec §17.42。
+2. 11 条偏离**仍然是偏离**：按竞品形状写死的客户端打到 `/web/v1/login` 上还是 404。只是这类「改一行可对上」不值得为它维护第二套别名。
+3. 8 条豁免没有一条是「以后可能做」：邮箱通道、欠费模型、火山凭据、公众号签名、i18n 落库表、运行时配置下发，都是模型/凭据层面不存在。
+4. 真实渠道联调（Apple/微信/支付宝测试号）与 OAuth↔手机号账号合并**仍未做**，所以 #22 是 98% 不是 100%。
+5. 守卫是快照式的：竞品或我方改路由都要人工同步这两张表（`DEVIATIONS` / `WAIVED`），测试会抓死条目但抓不到「双方一起改」。
+
 ## 变更登记（v6.38 · 第 84 批：#12 剧本广场的「竞品 29+12」是重复记账、#4 创作 Agent 有一条「只登记没实现」）
 
 **一、这批在回答什么问题**
