@@ -86,6 +86,11 @@ export const BUSINESS_CODE_MAP: Readonly<Record<number, CodeMapping>> = {
   // ── 7459 供应商 ──
   745900: { kind: "task_failed", exit: EXIT.TASK_FAILED },
   745901: { kind: "timeout", exit: EXIT.TIMEOUT },
+  // ── 7470 知识库 ──
+  // 同名实体（迁移 0038 起：目录/标签按 scene 隔离后，同场景同名才算重名）。
+  // 竞品码表里这是唯一一个「重名」专用码（`B9INZ4se.js`：`Number(r.code)===747007`），
+  // 属调用方参数问题 → usage/2，不能落进 internal/1（那样脚本会当服务故障重试）。
+  747007: { kind: "usage", exit: EXIT.USAGE },
   // ── 7460 冲突 ──
   746001: { kind: "internal", exit: EXIT.FAILURE }, // 幂等重放标记（正常路径不会到这里）
   746002: { kind: "version_conflict", exit: EXIT.VERSION_CONFLICT },

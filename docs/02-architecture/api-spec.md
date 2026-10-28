@@ -2193,3 +2193,120 @@ Official=1, Team=2
   （竞品还有拼错的历史别名 `orgin_cover_file` 并存）、`status`、`sp_type`、`res_type`、`meta_data`、
   `user_knowledge_info_items`（对应 `list` 的 `show_user_knowledge_info_list` 参数）——**证据已有但本批未落库**，
   属扩展能力，故 #18 只到 **99.5%**。
+
+### 17.20 CLI 的 Agent 分发通道：`skill path` 与随包 Skill 包（第 61 批）
+
+> 本节**没有 HTTP 端点变更**。它记录的是「CLI 怎么把 197 条命令的契约交付给宿主 Agent」——
+> 这块此前完全缺失，且不属于 API 语义，但与 API 契约的落地强相关（Agent 照文档调接口）。
+
+#### 20.1 竞品契约原文
+
+竞品把 CLI 接进各类 Agent 的**唯一**方式是随 npm 包分发 Skill，再让宿主整目录拷走。
+`_acceptance/reelmate_cli_skill/`（从 `rea-reelmate/reelmate_cli_skill.zip` 解出，63 个文件）里的三处：
+
+```
+INSTALL.md:17   reelmate skill-path            → 打印「已安装 npm 包内」的 Skill 目录
+INSTALL.md:44   Skill 留在 npm 包内。要给某个 Agent 用时，把 skill-path 的目录整份拷到该宿主的 Skill 目录
+INSTALL.md:44   若已有同名 reelmate-cli-skill 先「整目录删除」再拷入（禁止与旧文件合并）
+SKILL.md:41     升级时用它整目录替换当前宿主 Skill，不要只跑 npm，不要落地 zip 解压出的 Skill
+SKILL.md:8      发布态只依赖当前二进制帮助、本 Skill 和随包命令文档
+```
+
+关键在**「整目录替换、禁止合并」**：合并会留下上一版的残留 `.md`，于是 Agent 同时看到新旧两套命令语法——
+比完全没有文档更糟。
+
+#### 20.2 本仓实现
+
+| 项 | 值 |
+|---|---|
+| 命令 | `oneframe skill path [--json]`（挂在一级命令，与竞品同层级） |
+| 源码 | `apps/cli/src/skill.ts`（`renderAllFiles()` 纯函数，无 I/O）+ `apps/cli/src/builtins.ts` 的 `case "skill-path"` |
+| 生成时机 | `apps/cli/scripts/gen-skill.cjs` 挂在 `build` 尾部；**内容没变就不写盘**（否则每次 build 都弄脏 git） |
+| 产物 | `apps/cli/skills/oneframe-cli-skill/`，**43 个文件** |
+| 发版 | `package.json` 的 `files: ["dist", "skills"]` —— 缺这项则产物里根本没 Skill |
+
+`--json` 响应（纯本地，`calls` 为空）：
+
+```json
+{
+  "skill": "oneframe-cli-skill",
+  "path": "…/apps/cli/skills/oneframe-cli-skill",
+  "installed": true,
+  "version": "0.1.0",
+  "groups": 38,
+  "commands": 197,
+  "files": 43,
+  "note": "把整个目录整份拷入宿主 Skill 目录；已有同名目录请先删除再拷（禁止合并）"
+}
+```
+
+`installed` 以包内**是否真有 `SKILL.md`** 判定。目录不完整时（例如只跑了 `tsc` 没跑 `gen:skill`）
+`note` 明确提示先 `pnpm --filter @app/cli build` ——否则宿主会拷走一个空目录且毫无察觉。
+
+43 个文件的构成，以及**哪些是手写、哪些是生成**：
+
+| 文件 | 数量 | 手写 / 生成 | 内容 |
+|---|---:|---|---|
+| `SKILL.md` | 1 | **手写** | frontmatter + `<HARD-GATE>` 8 条 + 10 行路由表 + 命令组总览表 + stdout/stderr 契约 + 升级段 |
+| `INSTALL.md` | 1 | **手写** | 9 步 Agent 安装流程 + 手工安装 + 「重复执行即升级」 |
+| `VERSION` | 1 | 生成 | 取 `CLI_VERSION` |
+| `manual/user-guide.md` | 1 | 生成 | 入门与命令分类 |
+| `manual/error-codes.md` | 1 | 生成 | 退出码 0..10 全表 + `error.kind`→退出码 + `BUSINESS_CODE_MAP` 全表 |
+| `commands/<group>.md` | 38 | 生成 | 每篇由 `registry.ts` 里该组的 `summary / syntax / evidence / ready` 拼出 |
+
+**为什么命令文档一律生成**：手写 197 条命令文档必然与代码漂移，而漂移的文档比没有文档更糟——
+Agent 会照着已改的语法调用，且失败的形态是「参数不认」而不是「命令不存在」，更难定位。
+
+`SKILL.md` 里手写的只有**永远不会从代码推出来的东西**：路由表（什么意图读哪份场景文档）与
+`<HARD-GATE>` 行为约束（进度分母来自写死的步骤表、完成总结的输出格式、积分消耗只在流水全匹配时输出、
+禁止向用户贴内部 id 常量等）。
+
+#### 20.3 顺带修的退出码缺陷：`747007`
+
+第 60 批给知识库加了「名称重复」专用码 `747007`（依据竞品前端 `Number(r.code)===747007`）。
+`apps/cli/src/exit-codes.ts` 的 `BUSINESS_CODE_MAP` 当时没跟：
+
+```ts
+// 第 61 批：知识库重名。第 60 批只加了后端码，CLI 侧缺映射会落进 internal/1 让脚本重试。
+747007: { kind: "usage", exit: EXIT.USAGE },
+```
+
+未映射的业务码一律落进 `internal` → **进程退出码 1**，调用方的重试逻辑于是把
+「改个名字就能过」当成服务故障反复重试。这不是文档问题，是真缺陷。
+
+#### 20.4 测试
+
+`apps/cli/test/skill.spec.ts` 新增 **6 例**（cli 91 → 97）：
+
+| # | 断言 | 钉住什么 |
+|---:|---|---|
+| 1 | 磁盘产物与 `renderAllFiles()` **双向逐字节**一致 | 少一个=忘了生成、多一个=旧版残留，**两个方向都红** |
+| 2 | `SKILL.md` frontmatter + `VERSION` == `CLI_VERSION` | 版本号不会与包版本脱钩 |
+| 3 | 每条 registry 命令都出现在某个 `commands/<group>.md` 的 ``## `<id>` `` | 新加命令不写文档 = 红 |
+| 4 | `error-codes.md` 覆盖退出码全集 + `747007` + 「退出码是 1 不是 3」 | 退出码语义 |
+| 5 | `skill path --json`：`installed:true`、**`calls` 为空** | 纯本地命令不许碰网络 |
+| 6 | `commandSyntax` 恰为 `oneframe skill path [--json]`；`--help` 走纯文本分支 | 语法与 `--json` 契约 |
+
+#### 20.5 MCP 端：据实改为「无形状可对齐」，不实现
+
+此前多轮把 #9 的缺口写成「**MCP 0 行**（竞品未公开工具清单 → 待取证后再做）」。第 61 批把竞品两个
+bundle 目录的 **606 个 js** 全量扫 `mcp`，只有 **3 处命中**：
+
+| 文件 | 命中内容 | 含义 |
+|---|---|---|
+| `C_zfNpOW.js` | `O("MCP_CLI")`、`menu.mcpCli` | 侧栏一个 **flag 门控入口** |
+| `D7aUDXP7.js` | `integration_type ∈ {plugin, mcp}` | 埋点归因参数 |
+| `D7aUDXP7.js` | `client_source ∈ {cli, web}` | 埋点归因参数 |
+
+**竞品不存在 MCP server、没有工具清单、没有 scope 定义、没有一个 `tools/list`。**
+「等竞品给工具清单」这个假设本身不成立——继续挂着它，等于把一个**不存在的依赖**写成"待取证"。
+故本仓 MCP 端**不实现**（无形状可对齐，自造一套 MCP server 反而是伪对齐）；
+#9 剩余 0.32 全部来自 **57 条骨架命令**（各自卡在对应后端端点未落地）。
+
+#### 20.6 边界
+
+- **宿主 Skill 目录探测不做**：竞品 `INSTALL.md:18` 明确「不要扫描其他工具的配置目录」——
+  猜错会往无关目录里拷文件。路径由用户或宿主规则给出。
+- **`skill path` 只报路径、不替用户拷**：与竞品契约一致（它也只打印路径）。
+- **骨架命令的文档照写**：`commands/*.md` 里明确标 `ready: false` 与原因，
+  让 Agent 知道"这条还没实现"而不是"我调错了"。

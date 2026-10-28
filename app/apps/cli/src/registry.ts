@@ -49,6 +49,7 @@ export type BuiltinName =
   | "ledger-list"
   | "ledger-show"
   | "ledger-resolve"
+  | "skill-path"
   | "deeplink";
 
 export interface Positional {
@@ -137,6 +138,10 @@ const sessionCommands: CommandSpec[] = [
   local("cache", "clear", "清理缓存范围 --scope models|env|uploads", "commands/cache.md:39", "cache-clear"),
   local("version", "", "打印本机版本", "commands/version.md:19", "version"),
   local("version", "check", "检查是否有新版本", "commands/version.md:39", "version-check"),
+  // 第 61 批：git 竞品 `INSTALL.md:17/44` + `SKILL.md:41` —— 分发 Skill 的唯一入口是
+  // 「打印已安装包内的 Skill 目录，让宿主整目录拷贝」。竞品把这条放在 `skill-path`
+  // 这个**一级命令**下（不是 `version skill-path`），所以这里照抄形状。
+  local("skill", "path", "打印随包 Skill 目录（给宿主整目录拷贝/替换用）", "INSTALL.md:17", "skill-path"),
 ];
 
 // ── workflow（commands/workflow.md）────────────────────────────────────
@@ -852,6 +857,7 @@ export const GROUP_ORDER: readonly string[] = [
   "env",
   "cache",
   "version",
+  "skill",
   "workflow",
   "model",
   "task",

@@ -123,6 +123,120 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+
+---
+
+## 变更登记（v6.15 · 第 61 批：#9 CLI/MCP 补 Agent 分发通道 `skill-path` + 随包 Skill，并纠正一条写错多轮的「MCP 缺口」· 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.4（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：201.64 → **201.96/206 = 98.0%**，剩余 4.04（#9 92% → 96%，+0.32）。
+
+### 一、这批修的不是"缺个命令"，是"Agent 拿不到任何使用说明"
+
+竞品把 CLI 接进各类 Agent 的**唯一**方式，是把 Skill 包随 npm 包一起分发、再让宿主整目录拷走。证据是它自己文档里的三句话（`_acceptance/reelmate_cli_skill/`，从 `rea-reelmate/reelmate_cli_skill.zip` 解出，63 个文件）：
+
+```
+INSTALL.md:17  reelmate skill-path  →  打印「已安装 npm 包内」的 Skill 目录
+INSTALL.md:44  Skill 留在 npm 包内。要给某个 Agent 用时，把 skill-path 的目录整份拷到该宿主的 Skill 目录
+INSTALL.md:44  若已有同名 reelmate-cli-skill 先「整目录删除」再拷入（禁止与旧文件合并）
+SKILL.md:41    升级时用它整目录替换当前宿主 Skill，不要只跑 npm，不要落地 zip 解压出的 Skill
+```
+
+我方逐项对照：
+
+| 竞品有 | 我方（本批前） |
+|---|---|
+| `reelmate skill-path` 打印包内 Skill 目录 | **没有**（`git grep skill-path` 在 `apps/cli/src` 零命中） |
+| Skill 包随 npm 包分发（43 个文件：`SKILL.md` / `INSTALL.md` / `manual/*` / `commands/*`） | **没有**（连 `skills/` 目录都不存在） |
+| `package.json` 的 `files` 覆盖 Skill 目录 | **没有 `files` 字段** → 发版产物里根本带不出 Skill |
+
+**后果**：Agent 装上 `oneframe` 后，只能靠 `--help` 猜；197 条命令的**契约、退出码、哪些命令是骨架（`ready:false`）** 全在源码里，宿主 skill 拿不到。这不是"少了个便利命令"，是**分发通道缺失**。
+
+### 二、做法：命令文档一律生成，绝不手写
+
+```
+apps/cli/src/skill.ts            renderAllFiles() → 43 个文件（纯函数，无 I/O）
+apps/cli/scripts/gen-skill.cjs   build 尾部调用；内容没变就不写盘（不弄脏 git）
+apps/cli/skills/oneframe-cli-skill/
+  SKILL.md                 手写的「行为约束」：frontmatter + <HARD-GATE> 8 条 + 10 行路由表 + 契约 + 升级段
+  INSTALL.md               手写的 9 步 Agent 安装流程
+  VERSION                  生成的（取 CLI_VERSION）
+  manual/user-guide.md     生成的
+  manual/error-codes.md    生成的：退出码 0..10 全表 + error.kind→退出码 + BUSINESS_CODE_MAP 全表
+  commands/<group>.md ×38  生成的：每篇由 registry 里该组的 summary/syntax/evidence/ready 拼出
+```
+
+`SKILL.md` 里手写的只有**永远不会从代码推出来的东西**（路由表、`<HARD-GATE>` 行为约束）；凡是"命令有哪些、怎么拼、哪些还没实现"一律从 `registry.ts` 渲染——**手写 197 条命令文档必然与代码漂移，而漂移的文档比没有文档更糟**（Agent 会照着已改的语法调用）。
+
+`oneframe skill path --json` 实际输出：
+
+```json
+{"skill":"oneframe-cli-skill","path":"…/apps/cli/skills/oneframe-cli-skill","installed":true,
+ "version":"0.1.0","groups":38,"commands":197,"files":43,"note":"把整个目录整份拷入宿主 Skill 目录…"}
+```
+
+`installed` 以包内**是否真有 `SKILL.md`** 判定；目录不完整时 `note` 明确提示先 `pnpm --filter @app/cli build`——否则宿主会拷走一个空目录且毫无察觉。
+
+### 三、顺手修的真缺陷：`747007` 在 CLI 侧没有退出码映射
+
+第 60 批给后端加了「知识库重名」专用码 `747007`（竞品前端就是 `Number(r.code)===747007` 判重名）。但 `apps/cli/src/exit-codes.ts` 的 `BUSINESS_CODE_MAP` 没跟：任何未映射的业务码都落进 `internal` → **进程退出码 1**，于是调用方的重试逻辑会把"改个名字就能过"当成服务故障去重试。
+
+```ts
+// 第 61 批：知识库重名。第 60 批只加了后端码，CLI 侧缺映射会落进 internal/1 让脚本重试。
+747007: { kind: "usage", exit: EXIT.USAGE },
+```
+
+### 四、纠正一条写错多轮的结论：「MCP 0 行，等竞品给工具清单」
+
+`07-plan` 里 #9 的缺口栏写了好几轮：「**MCP 0 行**（竞品未公开工具清单 → 唯一真实缺口，待取证后再做）」。第 61 批把竞品两个 bundle 目录的 **606 个 js** 全量扫 `mcp`，只有 **3 处命中**：
+
+| 命中 | 内容 | 含义 |
+|---|---|---|
+| `C_zfNpOW.js` | `O("MCP_CLI")` + `menu.mcpCli` | 侧栏一个 **flag 门控入口** |
+| `D7aUDXP7.js` | `integration_type ∈ {plugin, mcp}` | 埋点归因参数 |
+| `D7aUDXP7.js` | `client_source ∈ {cli, web}` | 埋点归因参数 |
+
+**竞品不存在 MCP server、没有工具清单、没有 scope 定义、没有一个 `tools/list`**。也就是说「等竞品给工具清单」这个假设本身不成立——继续挂着它，等于把一个**不存在的依赖**写成"待取证"，读者会误以为补上是时间问题。
+
+改判为：MCP 端**不实现**（无形状可对齐，自造一套 MCP server 反而是伪对齐）；#9 剩余 0.32 **全部来自 57 条骨架命令**（每条卡在对应后端端点未落地，权重已计入各模块，不重复计）。同批校正的规模口径：旧文档写「196 命令 / 37 组 / 118 可用 + 78 骨架」，实测已是 **197 命令 / 38 组 / 140 可用 + 57 骨架**。
+
+### 五、验证
+
+| 层 | 用例 | 钉住的到底是什么 |
+|---|---|---|
+| `apps/cli/test/skill.spec.ts` ① | 磁盘产物 vs `renderAllFiles()` **双向逐字节**一致 | 少一个=忘了生成、多一个=旧版残留，**两个方向都红** |
+| ② | `SKILL.md` frontmatter + `VERSION` == `CLI_VERSION` | 版本号不会与包版本脱钩 |
+| ③ | 每条 registry 命令都出现在某个 `commands/<group>.md` 的 `## \`id\`` | 新加命令不写文档 = 红 |
+| ④ | `error-codes.md` 覆盖退出码全集 + `747007` + 「退出码是 1 不是 3」 | 退出码语义 |
+| ⑤ | `skill path --json`：`installed:true`、**`calls` 为空**（不发任何请求） | 纯本地命令不许碰网络 |
+| ⑥ | `commandSyntax` 恰为 `oneframe skill path [--json]`；`--help` 走纯文本分支 | 语法与 `--json` 契约 |
+
+- `pnpm --filter @app/cli typecheck` 干净；`node scripts/gen-skill.cjs` → 写入 43 个文件；cli 单测 91 → **97 例**（+6）。
+- `node -e '…registry…'` → **197 命令 / 38 组 / 140 ready + 57 skeleton**。
+- 全站测试总量 1,232 → **1,241 例**（api 870 / adapters 164 / cli 97 / worker 52 / db 26 / shared 26 / storage 6）。
+- `_acceptance/verify-round.ps1` 12/12 全绿。
+
+### 六、边界（写在代码注释里，也写在这里）
+
+1. **宿主 Skill 目录探测不做**：竞品 `INSTALL.md:18` 明确「不要扫描其他工具的配置目录」——靠用户或宿主规则给出路径，猜错会往无关目录里拷文件。
+2. **MCP 端不实现**：无形状可对齐，理由见第四节。
+3. **`skill path` 只报路径不替用户拷**：拷贝动作由用户在宿主侧执行，符合竞品契约（它也只打印路径）。
+
+### 七、涉及文件
+
+| 文件 | 性质 |
+|---|---|
+| `apps/cli/src/skill.ts` | **新增**：43 个文件的渲染器（纯函数） |
+| `apps/cli/scripts/gen-skill.cjs` | **新增**：build 尾部生成，内容不变不写盘 |
+| `apps/cli/skills/oneframe-cli-skill/**`（43 个） | **新增**：随包 Skill 产物 |
+| `apps/cli/test/skill.spec.ts` | **新增**：6 例（含双向防漂移） |
+| `apps/cli/src/registry.ts` | 加 `skill-path` builtin + `skill` 组 |
+| `apps/cli/src/builtins.ts` | 加 `case "skill-path"` |
+| `apps/cli/src/exit-codes.ts` | 加 `747007 → usage/1` |
+| `apps/cli/package.json` | 加 `files: ["dist","skills"]` + `gen:skill` |
+| `docs/07-plan/implement-progress-vs-reelmate.md` | §0 / §2.1 / §2.2 / §2.4 / §3.3 / §3.4 / §3.5 / §5 / §5.1 / §5.2 / §5.3 / §6.1 / §9 v8.4 |
+| `docs/README.md` | 本条变更登记 |
+| `docs/02-architecture/api-spec.md` | §17.20 |
 ## 变更登记（v6.14 · 第 60 批：#18 知识库补「模板场景」维度 —— 第一次从竞品前端 bundle 拿到字段级证据 · 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 **v8.3**（同一批；本文件与主台账各有一套编号，勿混）。

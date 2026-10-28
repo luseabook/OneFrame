@@ -20,7 +20,9 @@ import { EXIT } from "./exit-codes";
 import { ApiClient } from "./http";
 import { readLedger, removeEntry, writeLedger } from "./ledger";
 import type { BuiltinName, CommandSpec } from "./registry";
+import { COMMANDS, GROUP_ORDER } from "./registry";
 import { createClient, type Runtime } from "./runtime";
+import { listFilesRecursive, SKILL_PKG_NAME, skillRootDir } from "./skill";
 import { CLI_VERSION } from "./version";
 
 /**
@@ -716,6 +718,29 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
           reason: "我方无发布源清单端点（竞品读官网 Skill zip 的 INSTALL.md 钉死版本）；待取证",
         },
       };
+    case "skill-path": {
+      // 第 61 批：竞品 `INSTALL.md:17` —— 这条命令的**唯一**职责是打印「已安装包内」的
+      // Skill 目录，让宿主整目录拷入/替换。所以这里不做安装、不做拷贝、不猜宿主目录
+      // （`INSTALL.md:18` 明确「不要扫描其他工具的配置目录」）。
+      const dir = skillRootDir();
+      const files = listFilesRecursive(dir);
+      const installed = files.includes("SKILL.md");
+      return {
+        data: {
+          skill: SKILL_PKG_NAME,
+          path: dir,
+          installed,
+          version: CLI_VERSION,
+          groups: GROUP_ORDER.length,
+          commands: COMMANDS.length,
+          files: files.length,
+          // 目录不完整时明确报出来，而不是让宿主拷走一个半成品
+          note: installed
+            ? "把该目录整份拷到宿主 Skill 目录；已有同名目录请先删除再拷（不要合并）"
+            : "包内缺少 Skill 文件：先执行 `pnpm --filter @app/cli build` 重新生成 skills/",
+        },
+      };
+    }
     case "workspace-use": {
       const id = args[0] ?? flagString(parsed, "workspace");
       if (!id) throw usageError("workspace use 需要 WORKSPACE_ID");
