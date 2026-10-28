@@ -127,6 +127,123 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.46 · 第 92 批：审计 #5 全部项目 + #7 团队 —— 两个「只差一句话」的缺口栏都没有竞品证据，补 2 条项目级导出日志 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+到第 91 批为止，全站剩余权重表（3.52）里还剩两个模块，缺口栏各自只有一句话：
+
+- **#5 全部项目**（0.09）：「影视版 FILM 档是否合流到 `/works`；五档 tab 是否替代形态 tab」
+- **#7 团队**（0.10）：「子账号密码 2 条未实现」
+
+这两句话本身可能是对的——但**都没有被竞品全集验过**。而前十二批已经反复证明：缺口栏自己会写错（第 87 批 #11 的「4 个具名能力」大半是记账错误、第 91 批 #3 的 72 条里 3 条其实该补、第 84 批 #12 是重复记账）。所以这批做同一件事：把两个模块的竞品面切出来，逐条对。
+
+### 二、两个模块的竞品面
+
+| 模块 | 竞品前缀 | 条数 | 归一化后同形 |
+| --- | --- | ---: | ---: |
+| #5 全部项目 | `/web/v1/df/script_project/*` | 21 | **0** |
+| #7 团队 | `/web/v1/cam/team/*` | 29 | **10** |
+
+**#5 的 0 同形是结构性的**：竞品把项目挂在 `/df/script_project/*`，我方按 ADR-009 收敛到 `/projects/*`；守卫的 `normalize()` 只剥 `/web/v1`、不剥 `/df` —— 与第 90 批 #2（`/df/novel/*`）、第 91 批 #3（`/df/episode/*`）同一原因。测试里专门断言「21 条里同形的恰好是 0 条」，防止有人给 `normalize()` 加一条 `s|^/df||` 把 21 条静默变成「全覆盖」。
+
+**#7 的 10 同形是真的**：竞品团队域和我方同名同前缀（`/cam/team/*`），`points-allocation`、`points-recovery`、`points-flow/{list,export}`、`project-points-flow/{list,export}`、`project-points-ranking`、`member/batch/status`、`batch-points-allocation`、`member/change-group` 这 10 条形状完全一致。**#7 是本轮唯一同形不为 0 的模块。**
+
+### 三、#5 的 21 条怎么归属
+
+| 归类 | 条数 | 例子 |
+| --- | ---: | --- |
+| 纯前缀偏离 | 9 | `GET /df/script_project/list` → `GET /works`；`POST /df/script_project/add` → `POST /projects` |
+| 方法/入口偏离 | 3 | `POST …/edit` → `PATCH /projects/{id}`；`POST …/{}/split-delete` → `POST …/episodes/batch-delete` |
+| **本批补（列在、入口不在）** | **2** | `GET …/export-log` → `GET /projects/{id}/exports`；`GET …/export-log/{}` → `GET /projects/{id}/exports/{export_id}` |
+| 无模型 / 外部依赖 | 9 | `source_scripts` 一族 6 条、`process_status` 1 条、导出记录备注列 1 条、广告剧 agent 1 条 |
+
+**对账纠出的记账错误**：`export-log` 一族 3 条此前被当成「episode 级导出就够了」（我方本来就有 `GET /projects/{id}/episodes/{eid}/exports/{xid}`）。但竞品的 `export-log` 是**项目级**的，query 里带 `sp_id`（项目）、`scene_type`、`scene_id` 三个过滤维度 —— 也就是说「一个项目下所有集的导出记录，可按集筛」，这是项目详情页要用的视图，不是集详情页。而我方 `exports`（分镜 zip）与 `timeline_exports`（成片）**两张表都能按 project 反查**（前者经 `episodes.project_id`，后者自带 `project_id`），属于典型的「列在、入口不在」。
+
+### 四、补的 2 条：项目级导出日志
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /v1/projects/{id}/exports` | 把两张导出表合成一条按项目分页的日志。返回 `scene_types: ["storyboard","timeline"]`、`truncated`、`total`、`list[]` |
+| `GET /v1/projects/{id}/exports/{export_id}` | 单条。`?kind=storyboard\|timeline` 可选 |
+
+设计上的三个决定：
+
+1. **不建新表**。`exports` 经 `episodes.project_id` 反查、`timeline_exports` 自带 `project_id`，只读投影即可。建一张「项目导出日志表」意味着同一次导出要在两处写状态，是纯粹的写放大。
+2. **撞号不猜**。两张表 id 各自自增，`id=42` 可能同时是分镜导出与成片导出。单条查询若两边都命中 → `400101 export id is ambiguous; pass kind`，必须显式传 `?kind=` 消歧。猜一条会让排查的人拿到**别人的**记录。
+3. **上限诚实**。任一侧命中 500 行上限就置 `truncated: true`，不静默截断。
+4. **`sp_id` 与路径 id 冲突就报错**。竞品把项目 id 放在 query（`sp_id`），前端两种写法都可能出现，所以也接受 query 形式；但两处都给且不一致时抛 `400101 sp_id conflicts with path id` —— 静默采用其中一边会让「查 A 项目的导出」悄悄变成「查 B 项目的导出」。
+
+分镜行带 `episode_no`/`expires_at`/`error`，成片行额外带 `clip_count`/`skipped`/`duration_s`/`watermarked`；`status===3` 且有 `file_uri` 时才签 1 小时下载链接（`signDownload`）。
+
+### 五、#7 的 29 条怎么归属
+
+| 归类 | 条数 | 说明 |
+| --- | ---: | --- |
+| 同形 | 10 | 见上表 |
+| 方法/路径偏离 | 17 | `POST :team_id/edit`→`PATCH /cam/team/info`、`POST :team_id/group`→`POST /cam/team/group`、`POST :team_id/group/:gid/delete`→`DELETE`、`GET :team_id/groups`→`GET /cam/team/groups` 等；全部登记在守卫 `TEAM_PAIRS` |
+| 无模型豁免 | 2 | `PUT …/member/:member_id/password`、`POST …/member/batch/change-password` —— 无子账号体系 |
+
+**又一处记账错误**：`account-points-ranking` 一直记成同形，实际竞品是 **POST**、我方是 **GET**。对账时才由脚本打出来（`POST /cam/team/account-points-ranking` 不在我方 769 条路由里）。
+
+**结论：#7 的缺口栏是准确的** —— 29 条里唯一真缺的就是那 2 条子账号密码，其余全是形状差异。这与 #11 那批「缺口栏大半写错」形成对照：缺口栏有时对、有时错，只能逐条验。
+
+### 六、守卫十九组 685 条 + 反向验证
+
+`app/apps/api/test/competitor-route-parity.spec.ts` 从 **十七组 635 条 / 20 例**扩到 **十九组 685 条 / 22 例**（+21 #5、+29 #7），新增 `PROJECT_PAIRS`(12) / `PROJECT_WAIVED`(9) / `PROJECT_IMPLEMENTED`(2) / `TEAM_EXACT`(10) / `TEAM_PAIRS`(17) / `TEAM_WAIVED`(2)。
+
+```
+#5 全部项目：21 条竞品形状 = 0 同形 + 12 结构性偏离 + 9 条无模型/外部豁免（本批补 2 条形状）
+  ✓ PROJECT_SHAPES.length === 21
+  ✓ 同形数组为 []（/df 前缀使同形必为 0）
+  ✓ missing() === []
+  ✓ deviated 12 / waived 9，两者相加 21
+  ✓ 2 条 PROJECT_IMPLEMENTED 都在 ROUTES 里
+  ✓ 9 条豁免理由都 > 20 字，且以「B 类：」/「外部：」开头
+
+#7 团队：29 条竞品形状 = 10 同形 + 17 结构性偏离 + 2 条无模型豁免
+  ✓ TEAM_SHAPES.length === 29
+  ✓ 同形的恰好 10 条，且与 TEAM_EXACT 逐条深等
+  ✓ missing() === []
+  ✓ deviated 17 / waived 2，两者相加 19
+  ✓ 17 条偏离理由都 > 15 字
+  ✓ 2 条豁免都点名「子账号」
+```
+
+反向验证 `_acceptance/_r92_break.py` 把 `@Get("projects/:id/exports/:xid")` 改名成 `:xid-BROKEN`：
+
+```
+FAIL  test/competitor-route-parity.spec.ts > 注册表与后端路由一致
+  deviation target missing: GET /df/script_project/export-log/{} → GET /projects/{}/exports/{}
+FAIL  test/competitor-route-parity.spec.ts > #5 全部项目（21 条）
+FAIL  test/project-exports.spec.ts > 单条导出（撞号需消歧）
+FAIL  test/project-exports.spec.ts > 单条导出（跨链/跨项目）
+Tests  4 failed | 26 passed
+```
+
+恢复后 **22 parity + 9 project-exports = 31 passed**。
+
+### 七、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| api 测试 | **88 文件 982 例全绿**（原 87/971：+9 `project-exports.spec.ts` +2 parity） |
+| 总用例 | **1,393**（api 982 + adapters 164 + cli 128 + worker 61 + db 26 + shared 26 + storage 6） |
+| 端点 | 768 → **770** |
+| 门禁 | `verify-round.ps1` **12/12 全绿** |
+| 竞品覆盖守卫 | 十九组 **685 条 / 22 例** |
+| 分数 | **202.48/206 = 98.3%，剩余 3.52 不变**（本批不加分） |
+
+**为什么本批不加分**：#5 剩的 0.09 是「FILM 档（`project_category=3`）要不要合流到 `/works`」与「五档 tab 要不要替代形态 tab」，#7 剩的 0.10 是「要不要做子账号体系」。这三件事都是**产品口径**，21 + 29 条竞品形状里没有一条给出答案（竞品那 2 条密码接口的 `requestDataJsonSchema` 都是 `{}`）。补 2 条端点让形状更贴近竞品，但不改变任何模块的完成度判断。
+
+### 八、诚实边界
+
+1. 只比了**方法 + 路径 + 参数名**。竞品这 50 条的 `requestDataJsonSchema`/`responseDataJsonSchema` 里，#5 的 `export-log` 两个 schema 有 query 字段证据（`sp_id`/`scene_type`/`scene_id`），但响应体字段仍然为空。
+2. 合并两条导出链到一个列表里，意味着**两边的 `status` 枚举被原样输出**（都是 1/2/3/4 但语义不同：分镜是 PENDING/PACKAGING/SUCCEEDED/FAILED，成片是 排队/处理中/完成/失败）。前端靠 `kind` 区分。这是有意的：把两个枚举翻译成一个会隐藏差异。
+3. 500 行上限是**未做分页下沉**的临时口径：两个表各取 500 行后在内存合并排序再切片，因此超过 500 行时 `total` 是「真实 total 的下界」而非精确值，靠 `truncated: true` 诚实标注。要精确需给两张表都加 `(space_id, project_id, created_at)` 索引后写 UNION 查询——那是下一批的事，本批不做。
+4. `account-points-ranking` 的 POST/GET 差异只登记、不改方法：改成 POST 会让已有调用方 404，而竞品那条的 `requestDataJsonSchema` 是 `{}`，没有字段证据说明 POST body 该收什么。
+
+
 ## 变更登记（v6.45 · 第 91 批：审计 #3 剧集与分镜 —— 竞品 72 条 `/df/episode/*` 里 0 条同形，3 条单点/批量形状补上 · 2026-10-28）
 
 ### 一、这批在回答什么问题

@@ -10,9 +10,9 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十七组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * 本文件把竞品的十九组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
  * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 /
- * asset 36 / novel 102 / episode 72，共 635 条，来自
+ * asset 36 / novel 102 / episode 72 / project 21 / team 29，共 685 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -25,9 +25,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十七组共 635 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十九组共 685 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #2 / #3 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十四行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #2 / #3 / #4 / #5 / #6 / #7 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十六行的
  * 「逐条对照」说法。
  *
  * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
@@ -1565,6 +1565,105 @@ for (const [shape, reason] of Object.entries(EPISODE_WAIVED)) {
   WAIVED[shapeOf(shape)] = reason;
 }
 
+// ── #5 全部项目：竞品 `/df/script_project/*` 21 条 ──────────────────────────
+// 与 #2/#3 同因：竞品在 `/web/v1/df/` 下，我方是 `/projects/*`，前缀不同使同形必然为 0，
+// 覆盖只能靠显式登记。本批补了项目级导出日志 2 条（读取型投影，不建新表）。
+const PROJECT_PAIRS: Array<[string, string, string]> = [
+  ['POST /df/script_project/add', 'POST /projects', '竞品把创建做成 add 动词，我方按资源语义 POST /projects；入参（title/source_type/source_text）同义'],
+  ['POST /df/script_project/edit', 'PATCH /projects/{}', '竞品用 POST 做局部改；我方 PATCH /projects/{}，改的是同一批字段'],
+  ['GET /df/script_project/list', 'GET /works', '竞品列表只管工坊项目；我方 /works 是跨域只读投影（工坊 + 画布），筛选参数已按竞品语义翻译（name≡keyword、process_status=-1≡status=all）'],
+  ['GET /df/script_project/info', 'GET /projects/{}', '竞品用 query ?sp_id= 传主键；我方把 id 放路径段'],
+  ['GET /df/script_project/resource_lib_list', 'GET /projects/{}/assets', '竞品的资源库列表是项目下资产；我方独立端点 GET /projects/{}/assets（角色/场景/道具同表按 kind 分隔）'],
+  ['POST /df/script_project/delete', 'DELETE /projects/{}', '竞品 POST + 空体删除；我方 DELETE（且是软删：写 status=2/archived_at，历史分集与任务保留）'],
+  ['GET /df/script_project/export-log', 'GET /projects/{}/exports', '第 92 批补：竞品项目级导出日志；我方做只读投影（分镜导出按 episode 反查 + 成片合成自带的 project_id 合并），不建新表'],
+  ['GET /df/script_project/export-log/{}', 'GET /projects/{}/exports/{}', '第 92 批补：单条导出记录；两张表 id 撞号时返回 400101 要求 ?kind=storyboard|timeline，不猜'],
+  ['GET /df/script_project/{}/split-list', 'GET /projects/{}', '竞品单列分集清单；我方项目详情 GET /projects/{} 已内含 episodes 数组（另有 GET /projects/{}/matrix 做跨集矩阵），不另开重复端点'],
+  ['POST /df/script_project/split', 'POST /projects/{}/episodes/split', '拆集入口语义相同；我方带「已有确认集则 400101」与 source_text 不超 5 万字两道闸'],
+  ['POST /df/script_project/{}/split-delete', 'POST /projects/{}/episodes/batch-delete', '第 91 批补的批量删集：竞品是「按项目批量删」，我方收显式 id 列表（任一 id 不属于该项目整批 400102，不半删）'],
+  ['POST /df/script_project/{}/group/edit', 'POST /projects/{}/group', '归档到分组是项目级动作；竞品把 group_id 放路径，我方放 body'],
+];
+
+const PROJECT_WAIVED: Record<string, string> = {
+  'POST /df/script_project/export-log/{}/edit': 'B 类：竞品给导出记录可写备注/场景字段；我方 exports 与 timeline_exports 只有 status/file_uri/error/expires_at 等产物列，没有备注列',
+  'POST /df/script_project/process-status/edit': 'B 类：竞品有独立的制作流水状态实体；我方 script_projects 只有 status(1 进行中 / 2 已归档)，没有可写的流水节点',
+  'POST /df/script_project/ai-short-film/agent-start': '外部：竞品广告剧 agent 的启动入口；我方创作 agent 在 /agent/* 域，广告剧模板属另一产品的编排，不在项目域承接',
+  'POST /df/script_project/{}/source-scripts': 'B 类：竞品有独立「原稿」实体（source_script）；我方拆集直接落 episodes，没有 source_scripts 表，没有原稿记录可建',
+  'GET /df/script_project/{}/source-scripts': 'B 类：同上——无 source_scripts 表，没有原稿版本可列；分集本身用 GET /projects/{} 读',
+  'GET /df/script_project/{}/source-scripts/{}/splits': 'B 类：原稿的「拆分产物」在我方就是 episodes 行，没有原稿 id 这一层，也就没有按原稿查其拆分的路径',
+  'PATCH /df/script_project/{}/source-scripts/{}': 'B 类：无原稿实体（拆集直接写 episodes），没有原稿正文可改；要改文本走 PATCH /projects/{} 的 source_text',
+  'DELETE /df/script_project/{}/source-scripts/{}': 'B 类：无 source_scripts 表；重复导入的原稿在竞品可单独删，我方以「重新拆集」覆盖，没有原稿记录可删',
+  'GET /df/script_project/{}/source-scripts/{}/split-contents': 'B 类：竞品按 split_ids 取原稿拆出的正文块；我方正文直接存 episodes.script_text，没有「原稿-拆分块」两层表',
+};
+
+// 本批按竞品形状补的 2 条我方路由（断言真实存在，防止改名后覆盖数虚高）
+const PROJECT_IMPLEMENTED: string[] = ['GET /projects/{}/exports', 'GET /projects/{}/exports/{}'];
+
+const PROJECT_SHAPES: string[] = [
+  ...PROJECT_PAIRS.map(([shape]) => shape),
+  ...Object.keys(PROJECT_WAIVED),
+];
+
+// ── #7 团队：竞品 `/cam/team/*` 29 条 ──────────────────────────────────────
+// 本组是唯一「同形率很高」的域（10 条完全同形）：双方都把团队挂在 `cam` 下、
+// 都用 `team/*` 子路径。剩下 17 条是「team_id 谁给」的问题——竞品放在路径里，
+// 我方从 token 取（一个用户只有一个团队，路径段是冗余的），另有 4 条方法偏离（POST↔PATCH/DELETE）。
+const TEAM_EXACT: string[] = [
+  'POST /cam/team/points-allocation',
+  'POST /cam/team/points-recovery',
+  'GET /cam/team/points-flow/list',
+  'GET /cam/team/points-flow/export',
+  'GET /cam/team/project-points-flow/list',
+  'GET /cam/team/project-points-flow/export',
+  'POST /cam/team/project-points-ranking',
+  'POST /cam/team/member/batch/status',
+  'POST /cam/team/batch-points-allocation',
+  'POST /cam/team/member/change-group',
+];
+
+const TEAM_PAIRS: Array<[string, string, string]> = [
+  ['GET /cam/team/temp-info', 'GET /cam/temp-info', '临时会话信息（团队上下文 + 未读）；我方挂在 cam 根下，语义同一份'],
+  ['GET /cam/team/{}/info', 'GET /cam/team/info', '团队信息按 token 里的 team_id 取，路径不再带 team 段（同一用户无多团队可选）'],
+  ['POST /cam/team/{}/edit', 'PATCH /cam/team/info', '竞品 POST 改团队信息；我方 PATCH，字段同名'],
+  ['POST /cam/team/{}/member/batch', 'POST /cam/team/member/batch', '批量加成员；team_id 从 token 取，不重复放在路径里'],
+  ['GET /cam/team/{}/members', 'GET /cam/team/members', '成员列表；query（role_ids/nick/status/page/page_size/group_id/has_group）按竞品语义翻译到同一端点'],
+  ['POST /cam/team/{}/member/{}/delete', 'DELETE /cam/team/member/{}', '删成员；竞品 POST、我方 DELETE，都是移出团队（不动真实用户）'],
+  ['PUT /cam/team/{}/member/{}', 'PATCH /cam/team/member/{}', '改成员角色/分组；竞品 PUT 全量、我方 PATCH 局部，字段同名'],
+  ['GET /cam/team/{}/member/{}', 'GET /cam/team/member/{}', '成员详情；team 段从 token 取'],
+  ['POST /cam/team/account-points-ranking', 'GET /cam/team/account-points-ranking', '积分排行是只读查询，竞品用 POST 传筛选体；我方 GET + query（同样支持 group_id/period）'],
+  ['GET /cam/team/{}/member/export', 'GET /cam/team/member/export', '成员导出；team 段从 token 取，返回现签 1h 的 CSV 链接'],
+  ['PUT /cam/team/{}/member/{}/name', 'PATCH /cam/team/member/{}/name', '改成员备注名；竞品 PUT、我方 PATCH'],
+  ['POST /cam/team/{}/group', 'POST /cam/team/group', '建分组；team_id 从 token 取'],
+  ['POST /cam/team/{}/group/{}/delete', 'DELETE /cam/team/group/{}', '删分组；竞品 POST、我方 DELETE；组内成员回到未分组而不是被删'],
+  ['GET /cam/team/{}/groups', 'GET /cam/team/groups', '分组列表；竞品的 ?view= 在本域没有第二种视图，参数忽略（不影响返回形状）'],
+  ['POST /cam/team/{}/group/{}/edit', 'PATCH /cam/team/group/{}', '改分组名/配额；竞品 POST、我方 PATCH'],
+  ['GET /cam/team/{}/group/{}/stats', 'GET /cam/team/group/{}/stats', '分组统计（人数/积分余额）；数值字段同名'],
+  ['GET /cam/team/{}/member/{}/credential', 'GET /cam/team/member/{}/credential', '成员登录凭据（给客户端拉起登录用）；team 段从 token 取'],
+];
+
+const TEAM_WAIVED: Record<string, string> = {
+  'PUT /cam/team/{}/member/{}/password': 'B 类：竞品团队是「子账号」体系（管理员设密码、下属用账号密码登录）；我方团队是手机号邀请的真实用户，没有子账号也没有本地密码登录路径，只存哈希就是死代码',
+  'POST /cam/team/member/batch/change-password': 'B 类：同上——无子账号密码体系，批量改密无对象；等产品口径（是否引入子账号）再定',
+};
+
+const TEAM_SHAPES: string[] = [
+  ...TEAM_EXACT,
+  ...TEAM_PAIRS.map(([shape]) => shape),
+  ...Object.keys(TEAM_WAIVED),
+];
+
+for (const [shape, ours, reason] of PROJECT_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(PROJECT_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+for (const [shape, ours, reason] of TEAM_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(TEAM_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -1583,6 +1682,8 @@ const EXPECTED_COUNTS: Record<string, number> = {
   asset: ASSET_SHAPES.length,
   novel: NOVEL_SHAPES.length,
   episode: EPISODE_SHAPES.length,
+  project: PROJECT_SHAPES.length,
+  team: TEAM_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -1734,9 +1835,24 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("GET /projects/{}/episodes/{}/storyboards/{}")).toBe(true);
     expect(ROUTES.has("POST /projects/{}/episodes/batch-delete")).toBe(true);
     expect(ROUTES.has("POST /projects/{}/episodes/{}/storyboards/batch-add")).toBe(true);
+    // 第 92 批：#5 项目级导出日志两条（读取型投影，不建新表）
+    expect(ROUTES.has("GET /projects/{}/exports")).toBe(true);
+    expect(ROUTES.has("GET /projects/{}/exports/{}")).toBe(true);
+    // #7 团队的 10 条同形形状：这几条是本组唯一「路径与竞品逐字相同」的部分，
+    // 任何一条被挪走都会让 team 组的 exact 数从 10 掉下来
+    expect(ROUTES.has("POST /cam/team/points-allocation")).toBe(true);
+    expect(ROUTES.has("POST /cam/team/points-recovery")).toBe(true);
+    expect(ROUTES.has("GET /cam/team/points-flow/list")).toBe(true);
+    expect(ROUTES.has("GET /cam/team/points-flow/export")).toBe(true);
+    expect(ROUTES.has("GET /cam/team/project-points-flow/list")).toBe(true);
+    expect(ROUTES.has("GET /cam/team/project-points-flow/export")).toBe(true);
+    expect(ROUTES.has("POST /cam/team/project-points-ranking")).toBe(true);
+    expect(ROUTES.has("POST /cam/team/member/batch/status")).toBe(true);
+    expect(ROUTES.has("POST /cam/team/batch-points-allocation")).toBe(true);
+    expect(ROUTES.has("POST /cam/team/member/change-group")).toBe(true);
   });
 
-  it("竞品十七组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36 / novel 102 / episode 72）", () => {
+  it("竞品十九组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36 / novel 102 / episode 72 / project 21 / team 29）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -1755,6 +1871,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       asset: 36,
       novel: 102,
       episode: 72,
+      project: 21,
+      team: 29,
     });
     expect(
       FILM_SHAPES.length +
@@ -1773,8 +1891,10 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         CANVAS_SHAPES.length +
         ASSET_SHAPES.length +
         NOVEL_SHAPES.length +
-        EPISODE_SHAPES.length,
-    ).toBe(635);
+        EPISODE_SHAPES.length +
+        PROJECT_SHAPES.length +
+        TEAM_SHAPES.length,
+    ).toBe(685);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -1794,6 +1914,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       asset: ASSET_SHAPES,
       novel: NOVEL_SHAPES,
       episode: EPISODE_SHAPES,
+      project: PROJECT_SHAPES,
+      team: TEAM_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -2085,6 +2207,53 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  it("#5 全部项目：21 条竞品形状 = 0 同形 + 12 结构性偏离 + 9 条无模型/外部豁免（本批补 2 条导出日志）", () => {
+    expect(PROJECT_SHAPES.length).toBe(21);
+    // `/df` 前缀使同形必然为 0；这条断言是防止有人给 normalize() 加 `s|^/df||`
+    // 把 21 条静默变成「全覆盖」——那样 #5 会凭空满分，而代码一行没动
+    expect(PROJECT_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)))).toEqual([]);
+    expect(missing(PROJECT_SHAPES)).toEqual([]);
+    const deviated = PROJECT_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = PROJECT_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    expect(deviated.length).toBe(12);
+    expect(waived.length).toBe(9);
+    // 本批补的两条必须在路由表里（不是只写在登记表里）
+    for (const ours of PROJECT_IMPLEMENTED) {
+      expect(ROUTES.has(ours), `implemented route missing: ${ours}`).toBe(true);
+    }
+    // 9 条豁免里有 6 条同一个根因（没有 source_scripts 原稿表），
+    // 这条断言保证理由都点名了缺的模型，而不是「同上」两个字
+    for (const raw of waived) {
+      const reason = WAIVED[shapeOf(raw)]!;
+      expect(reason.length, `waiver reason too short: ${raw}`).toBeGreaterThan(20);
+      expect(reason).toMatch(/^(B 类|外部)：/);
+    }
+  });
+
+  it("#7 团队：29 条竞品形状 = 10 同形 + 17 结构性偏离（team_id 由 token 提供）+ 2 条子账号豁免", () => {
+    expect(TEAM_SHAPES.length).toBe(29);
+    expect(missing(TEAM_SHAPES)).toEqual([]);
+    const exact = TEAM_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = TEAM_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = TEAM_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    // 三条数加起来正好 29：漏一条或重复登记都会红
+    expect(exact.length).toBe(10);
+    expect(deviated.length).toBe(17);
+    expect(waived.length).toBe(2);
+    // 同形的 10 条必须与 TEAM_EXACT 完全一致（顺序无关），
+    // 否则说明「同形」是碰巧命中的，而不是真的逐字相同
+    expect(exact.map(shapeOf).sort()).toEqual(TEAM_EXACT.map(shapeOf).sort());
+    // 17 条偏离的理由都要说清「team_id 谁给」或方法差异，不能只写「前缀不同」
+    for (const raw of deviated) {
+      const reason = DEVIATIONS[shapeOf(raw)]!.reason;
+      expect(reason.length, `deviation reason too short: ${raw}`).toBeGreaterThan(15);
+    }
+    // 2 条豁免是本域唯一的真缺口（子账号密码体系），必须点名「子账号」
+    for (const raw of waived) {
+      expect(WAIVED[shapeOf(raw)]!).toContain("子账号");
+    }
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -2105,14 +2274,18 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...ASSET_SHAPES,
         ...NOVEL_SHAPES,
         ...EPISODE_SHAPES,
+        ...PROJECT_SHAPES,
+        ...TEAM_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只在六个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
+    // 豁免只在八个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
     // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）、
     // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）、#2 小说（买断授权 7 + 本子级协作/权限/分发 5）、
-    // #3 剧集与分镜（评论 3 + 标签组 5 + 剧本草稿 6 + 制作流程 2 + 扩展字段 2 + 异步解析 2 + 跨集批量 2 + 合成重试 1）。
+    // #3 剧集与分镜（评论 3 + 标签组 5 + 剧本草稿 6 + 制作流程 2 + 扩展字段 2 + 异步解析 2 + 跨集批量 2 + 合成重试 1）、
+    // #5 全部项目（原稿 source-scripts 一族 6 + 导出备注 1 + 制作流水 1 + 广告剧 agent 1）、
+    // #7 团队（子账号密码 2：我方是手机号邀请的真实用户，无子账号体系）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
     const waiverScope = new Set(
       [
@@ -2124,6 +2297,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...ASSET_SHAPES,
         ...NOVEL_SHAPES,
         ...EPISODE_SHAPES,
+        ...PROJECT_SHAPES,
+        ...TEAM_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);

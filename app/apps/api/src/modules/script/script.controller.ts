@@ -230,6 +230,28 @@ const worksQuerySchema = z.object({
   page_size: z.coerce.number().int().min(1).max(60).optional(),
 });
 
+/**
+ * 项目级导出日志查询（对齐竞品 `GET /df/script_project/export-log` 的
+ * `page / page_size / sp_id / scene_type / scene_id`）。
+ *
+ * `scene_type` 只收 `storyboard`（分镜导出）与 `timeline`（成片合成）—— 竞品这两个枚举
+ * 没有响应体证据，我方按「两条导出链」给最小可判定口径；其它取值直接 400101 而不是忽略。
+ * 竞品的 `sp_id` 等价于路径里的 `:id`，作为 query 传入时也接受（前端把 id 放 query 的情况）。
+ */
+const projectExportsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  page_size: z.coerce.number().int().min(1).max(60).optional(),
+  sp_id: z.string().max(20).optional(),
+  scene_type: z.enum(["storyboard", "timeline"]).optional(),
+  scene_id: z.string().max(20).optional(),
+  kind: z.enum(["storyboard", "timeline"]).optional(),
+});
+
+/** 项目级导出日志单条：`kind` 用于拆开两张表撞号的情况 */
+const projectExportDetailQuerySchema = z.object({
+  kind: z.enum(["storyboard", "timeline"]).optional(),
+});
+
 @Controller()
 export class ScriptController {
   constructor(
@@ -1037,6 +1059,45 @@ export class ScriptController {
     @Param("pubId") pubId: string,
   ) {
     return this.publish.unpublish(req.auth?.spaceId ?? "", id, eid, pubId);
+  }
+
+  /**
+   * 项目级导出日志（竞品 `GET /df/script_project/export-log`）。
+   *
+   * 竞品把导出日志挂在**项目**下（query 带 `sp_id` / `scene_type` / `scene_id`），我方原先
+   * 只有 episode 级的 `GET …/episodes/:eid/exports/:xid`，运营在项目页看不到跨集导出历史
+   * → 这是形状缺口而不是命名差异，本批补上（读取型投影，不改表）。
+   */
+  @Get("projects/:id/exports")
+  async listExports(@Req() req: AuthedRequest, @Param("id") id: string, @Query() query: unknown) {
+    const q = parseOrThrow(projectExportsQuerySchema, query ?? {});
+    // 竞品把项目 id 放 query（`sp_id`），前端两种写法都可能出现；两处都给且不一致就是调用方
+    // bug —— 静默采用其中一边会让「查 A 项目的导出」悄悄变成「查 B 项目的导出」
+    if (q.sp_id && q.sp_id !== id) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "sp_id conflicts with path id", { field: "sp_id" });
+    }
+    return this.script.listProjectExports(req.auth?.spaceId ?? "", id, {
+      sceneType: q.scene_type,
+      sceneId: q.scene_id,
+      page: q.page ?? 1,
+      pageSize: q.page_size ?? 20,
+    });
+  }
+
+  /**
+   * 项目级导出日志单条（竞品 `GET /df/script_project/export-log/:export_id`）。
+   *
+   * 两张导出表的 id 撞号时返回 400101 `ambiguous_export_id`，要求带 `?kind=` —— 不猜。
+   */
+  @Get("projects/:id/exports/:xid")
+  async exportDetail(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("xid") xid: string,
+    @Query() query: unknown,
+  ) {
+    const q = parseOrThrow(projectExportDetailQuerySchema, query ?? {});
+    return this.script.getProjectExport(req.auth?.spaceId ?? "", id, xid, q.kind);
   }
 
   /**

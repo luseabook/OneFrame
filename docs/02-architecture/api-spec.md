@@ -4480,3 +4480,76 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 3. 批量删不重排 `ep_no`，也不清理对象存储里的物理文件。
 4. `status=2` 不阻断写操作（竞品是否用它当闸门无证据）。
 5. 23 条豁免没有硬造：评论表、标签组表、草稿版本表、扩展字段表都不存在，造空壳比缺接口更坏。
+
+## 17.49 项目级导出日志（第 92 批，#5 全部项目）
+
+竞品 `/web/v1/df/script_project/export-log`（list）与 `/export-log/:export_id`（单条）是**项目级**视图 —— query 带 `sp_id`（项目）、`scene_type`、`scene_id`（集）三个维度。我方此前只有集级 `GET /v1/projects/{id}/episodes/{eid}/exports/{xid}`，项目详情页没有「这个项目导过什么」的入口。
+
+### 49.1 `GET /v1/projects/{id}/exports`
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `page` | int ≥1，默认 1 | — |
+| `page_size` | int 1–60，默认 20 | 超过 60 → `400101` |
+| `scene_type` | `storyboard` \| `timeline` | 只取分镜 zip 或只取成片 |
+| `scene_id` | string | 集 id；不属于本项目 → `400102 episode not found` |
+| `sp_id` | string | 竞品参数别名（竞品把项目 id 放 query）。与路径 `id` 不一致 → `400101 sp_id conflicts with path id` —— 静默取一边会把「查 A 项目」变成「查 B 项目」 |
+
+响应：
+
+```json
+{
+  "list": [
+    { "export_id": "1001", "kind": "timeline", "episode_id": "900", "episode_no": 3,
+      "status": 3, "download_url": "https://…/files/local?key=…", "error": null,
+      "expires_at": null, "created_at": "2026-10-28T10:00:00.000Z",
+      "clip_count": 12, "skipped": 0, "duration_s": 48, "watermarked": true },
+    { "export_id": "1002", "kind": "storyboard", "episode_id": "900", "episode_no": 3,
+      "status": 3, "download_url": "https://…", "error": null,
+      "expires_at": "2026-10-28T11:00:00.000Z", "created_at": "2026-10-28T09:59:00.000Z" }
+  ],
+  "total": 2, "page": 1, "page_size": 20,
+  "scene_types": ["storyboard", "timeline"], "truncated": false
+}
+```
+
+排序：`created_at` 倒序；同毫秒按 `kind` 再 `export_id` 兜底，保证翻页稳定。
+
+`download_url` 只在 `status === 3` 且有 `file_uri` 时非空（签 1 小时）；失败行的 `error` 原样透出。
+
+### 49.2 `GET /v1/projects/{id}/exports/{export_id}`
+
+`?kind=storyboard|timeline` 可选。**两张导出表的 id 各自自增，会撞号**：
+
+- 两边都没命中 → `400102 export not found`
+- 两边都命中且未传 `kind` → `400101 export id is ambiguous; pass kind`
+
+```json
+{ "code": 400101, "msg": "export id is ambiguous; pass kind", "data": null }
+```
+
+**为什么不在撞号时猜**：`exports` 与 `timeline_exports` 的 id 空间独立，猜一条会让排查导出失败的人拿到**别人的**记录。`?kind=` 是显式消歧，代价只是调用方多传一个参数。
+
+### 49.3 与竞品 21 条形状的对应
+
+| 归类 | 条数 | 守卫位置 |
+| --- | ---: | --- |
+| 纯前缀偏离（`/df/script_project/*` → `/projects/*` 等） | 9 | `PROJECT_PAIRS` |
+| 方法/入口偏离 | 3 | `PROJECT_PAIRS` |
+| 本批补齐（`export-log` list/单条） | 2 | `PROJECT_IMPLEMENTED`（同时在 `PROJECT_PAIRS` 里指向自己） |
+| 无模型 / 外部依赖 | 9 | `PROJECT_WAIVED` |
+
+同形 = 0 是结构性的（`/df` 前缀，`normalize()` 不剥），测试断言「21 条里同形的恰好 0 条」。
+
+### 49.4 守卫与测试
+
+- 守卫：`app/apps/api/test/competitor-route-parity.spec.ts` 第十八组（#5，21 条）与第十九组（#7 团队，29 条），合计 **685 条 / 22 例**。
+- 功能：`app/apps/api/test/project-exports.spec.ts` **9 例**（混排倒序 / `scene_type` 过滤 / `scene_id` 本集与跨项目 / 分页与越界 / 单条双链 / 撞号消歧 / `sp_id` 冲突 / 空项目与跨空间）。
+- 反向验证：把 `GET …/exports/:xid` 改名 `-BROKEN` → 4 例红（2 守卫 + 2 功能），恢复后 31 例绿（22 守卫 + 9 功能）。
+
+### 49.5 边界
+
+1. 500 行上限、未做 SQL 层分页：两表各取 500 行后内存合并，超限时 `total` 是下界、`truncated: true`。
+2. 两个 `status` 枚举语义不同（分镜 PENDING…/成片 排队…），原样输出，靠 `kind` 区分，不做归一化。
+3. `POST /df/script_project/export-log/:export_id/edit`（竞品能改导出记录的场景/备注）没有对应列 → `PROJECT_WAIVED`，不造空壳。
+4. `source_scripts` 一族 6 条没补：我方拆集直接落 `episodes`，没有原稿版本表；造一张只写不读的表比缺接口更坏。

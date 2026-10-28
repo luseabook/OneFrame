@@ -2603,6 +2603,259 @@ export class ScriptService {
     };
   }
 
+  /**
+   * 项目级导出日志（对齐竞品 `GET /df/script_project/export-log`，
+   * query 为 `page / page_size / sp_id / scene_type / scene_id`）。
+   *
+   * 为什么是「投影」而不是新表：我方导出分两条链——分镜导出落 `exports`（按 episode，
+   * 没有 project_id）、成片合成落 `timeline_exports`（有 project_id）。两张表都能反查到
+   * 项目（`exports` 经 `episodes.project_id`），所以日志可以是**只读视图**：既不需要迁移，
+   * 也不会出现「同一份导出两个状态」的写放大。
+   *
+   * 竞品的 `scene_type` / `scene_id` 语义没有响应体证据（两个 schema 都是 `{}`），本实现取
+   * 最小可判定口径：`scene_type` ∈ `storyboard`（分镜导出）/`timeline`（成片合成），
+   * `scene_id` = episode id（竞品用「场景」指代某一集产物，我方一集就是一条时间线）。
+   * 其它取值一律 400101 并说明待取证，不静默忽略。
+   *
+   * 上限：两条链各取最近 500 条后合并（导出是运营排查用的低频接口，不做全量分页的
+   * `offset` 扫描）；命中上限时返回 `truncated: true`，调用方据此知道「还有更旧的」。
+   */
+  async listProjectExports(
+    spaceId: string,
+    projectId: string,
+    opts: {
+      sceneType?: "storyboard" | "timeline";
+      sceneId?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const spaceIdBig = BigInt(spaceId);
+    const page = opts.page ?? 1;
+    const pageSize = opts.pageSize ?? 20;
+    // scene_id 先验证归属（不属于本项目 → 400102，而不是返回空列表让人以为「没有导出」）
+    const sceneEpisode = opts.sceneId ? await this.findEpisode(project.id, opts.sceneId) : null;
+    const episodeRows = await db
+      .select({ id: episodes.id, epNo: episodes.epNo })
+      .from(episodes)
+      .where(eq(episodes.projectId, project.id));
+    const epNoOf = new Map<string, number>();
+    for (const row of episodeRows) epNoOf.set(String(row.id), row.epNo);
+    const episodeIds = sceneEpisode
+      ? [sceneEpisode.id]
+      : episodeRows.map((row) => row.id);
+
+    const wantStoryboard = opts.sceneType !== "timeline";
+    const wantTimeline = opts.sceneType !== "storyboard";
+    const CAP = 500;
+
+    type Item = {
+      export_id: string;
+      kind: "storyboard" | "timeline";
+      episode_id: string;
+      episode_no: number | null;
+      status: number;
+      download_url: string | null;
+      error: unknown;
+      expires_at: string | null;
+      created_at: string;
+      clip_count?: number;
+      skipped?: number;
+      duration_s?: number;
+      watermarked?: boolean;
+    };
+    const items: Item[] = [];
+    let truncated = false;
+
+    if (wantStoryboard && episodeIds.length > 0) {
+      const rows = await db
+        .select()
+        .from(exportJobs)
+        .where(and(eq(exportJobs.spaceId, spaceIdBig), inArray(exportJobs.episodeId, episodeIds)))
+        .orderBy(desc(exportJobs.createdAt))
+        .limit(CAP);
+      if (rows.length >= CAP) truncated = true;
+      for (const row of rows) {
+        items.push({
+          export_id: String(row.id),
+          kind: "storyboard",
+          episode_id: String(row.episodeId),
+          episode_no: epNoOf.get(String(row.episodeId)) ?? null,
+          status: row.status,
+          download_url:
+            row.status === 3 && row.fileUri
+              ? await this.storage.signDownload(row.fileUri, 3600)
+              : null,
+          error: row.error,
+          expires_at: row.expiresAt?.toISOString() ?? null,
+          created_at: row.createdAt.toISOString(),
+        });
+      }
+    }
+
+    if (wantTimeline && episodeIds.length > 0) {
+      const rows = await db
+        .select()
+        .from(timelineExports)
+        .where(
+          and(
+            eq(timelineExports.spaceId, spaceIdBig),
+            eq(timelineExports.projectId, project.id),
+            inArray(timelineExports.episodeId, episodeIds),
+          ),
+        )
+        .orderBy(desc(timelineExports.createdAt))
+        .limit(CAP);
+      if (rows.length >= CAP) truncated = true;
+      for (const row of rows) {
+        items.push({
+          export_id: String(row.id),
+          kind: "timeline",
+          episode_id: String(row.episodeId),
+          episode_no: epNoOf.get(String(row.episodeId)) ?? null,
+          status: row.status,
+          download_url:
+            row.status === 3 && row.fileUri
+              ? await this.storage.signDownload(row.fileUri, 3600)
+              : null,
+          error: row.error,
+          expires_at: null,
+          created_at: row.createdAt.toISOString(),
+          clip_count: row.clipCount,
+          skipped: row.skipped,
+          duration_s: row.durationS,
+          watermarked: row.watermarked,
+        });
+      }
+    }
+
+    // 两条链混排：按创建时间倒序（同毫秒时用 kind + export_id 兜底，保证分页稳定可复现）
+    items.sort((a, b) => {
+      if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+      if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+      return a.export_id < b.export_id ? 1 : -1;
+    });
+    const start = (page - 1) * pageSize;
+    return {
+      list: items.slice(start, start + pageSize),
+      total: items.length,
+      page,
+      page_size: pageSize,
+      scene_types: ["storyboard", "timeline"] as const,
+      truncated,
+    };
+  }
+
+  /**
+   * 项目级导出日志单条（对齐竞品 `GET /df/script_project/export-log/{export_id}`）。
+   *
+   * 两张表的 id 各自独立自增，**同一个数字可能两边都有**：这时无法判定调用方问的是哪一条，
+   * 返回 400101 要求显式带 `kind`（`?kind=storyboard|timeline`）。乱猜一条会让排查的人
+   * 拿到别人的记录，比报错更坏。
+   */
+  async getProjectExport(
+    spaceId: string,
+    projectId: string,
+    exportId: string,
+    kind?: "storyboard" | "timeline",
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const spaceIdBig = BigInt(spaceId);
+    let id: bigint;
+    try {
+      id = BigInt(exportId);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid export id", { field: "xid" });
+    }
+    const episodeRows = await db
+      .select({ id: episodes.id, epNo: episodes.epNo })
+      .from(episodes)
+      .where(eq(episodes.projectId, project.id));
+    const epNoOf = new Map<string, number>();
+    for (const row of episodeRows) epNoOf.set(String(row.id), row.epNo);
+    const episodeIds = episodeRows.map((row) => row.id);
+    if (episodeIds.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
+
+    const storyboardRow =
+      kind === "timeline"
+        ? undefined
+        : (
+            await db
+              .select()
+              .from(exportJobs)
+              .where(
+                and(
+                  eq(exportJobs.id, id),
+                  eq(exportJobs.spaceId, spaceIdBig),
+                  inArray(exportJobs.episodeId, episodeIds),
+                ),
+              )
+          )[0];
+    const timelineRow =
+      kind === "storyboard"
+        ? undefined
+        : (
+            await db
+              .select()
+              .from(timelineExports)
+              .where(
+                and(
+                  eq(timelineExports.id, id),
+                  eq(timelineExports.spaceId, spaceIdBig),
+                  eq(timelineExports.projectId, project.id),
+                  inArray(timelineExports.episodeId, episodeIds),
+                ),
+              )
+          )[0];
+
+    if (storyboardRow && timelineRow) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "export id is ambiguous; pass kind", {
+        field: "kind",
+        reason: "ambiguous_export_id",
+      });
+    }
+    if (!storyboardRow && !timelineRow) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
+
+    if (storyboardRow) {
+      return {
+        export: {
+          export_id: String(storyboardRow.id),
+          kind: "storyboard" as const,
+          episode_id: String(storyboardRow.episodeId),
+          episode_no: epNoOf.get(String(storyboardRow.episodeId)) ?? null,
+          status: storyboardRow.status,
+          download_url:
+            storyboardRow.status === 3 && storyboardRow.fileUri
+              ? await this.storage.signDownload(storyboardRow.fileUri, 3600)
+              : null,
+          error: storyboardRow.error,
+          expires_at: storyboardRow.expiresAt?.toISOString() ?? null,
+          created_at: storyboardRow.createdAt.toISOString(),
+        },
+      };
+    }
+    const row = timelineRow!;
+    return {
+      export: {
+        export_id: String(row.id),
+        kind: "timeline" as const,
+        episode_id: String(row.episodeId),
+        episode_no: epNoOf.get(String(row.episodeId)) ?? null,
+        status: row.status,
+        download_url:
+          row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null,
+        error: row.error,
+        expires_at: null,
+        created_at: row.createdAt.toISOString(),
+        clip_count: row.clipCount,
+        skipped: row.skipped,
+        duration_s: row.durationS,
+        watermarked: row.watermarked,
+      },
+    };
+  }
+
   async getExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
