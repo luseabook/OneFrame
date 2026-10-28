@@ -1996,7 +1996,21 @@
     "withdrawSubmitted": "出金申請を送信しました。運営の審査をお待ちください",
     "withdrawFailed": "出金申請に失敗しました",
     "revoked": "取り消しました",
-    "revokeFailed": "取り消しに失敗しました"
+    "revokeFailed": "取り消しに失敗しました",
+    "worksSearchPlaceholder": "タイトルまたは概要で自分の作品を検索",
+    "worksSearch": "検索",
+    "worksSearching": "検索中…",
+    "worksReset": "フィルタをリセット",
+    "worksStatusAll": "すべてのステータス",
+    "worksNoMatch": "条件に合う作品がありません。フィルタを緩めてみてください。",
+    "worksTruncated": "現在 {shown} / 全 {total} 件を表示中。検索やステータスで絞り込んでください。",
+    "worksLoadFailed": "自分の作品の読み込みに失敗しました",
+    "statusDraft": "下書き",
+    "statusPending": "審査待ち",
+    "statusOnSale": "販売中",
+    "statusRejected": "却下",
+    "statusOffline": "非公開",
+    "statusPreorder": "予約受付中"
   },
   "editor": {
     "metaTitle": "タイムライン書き出し · OneFrame",

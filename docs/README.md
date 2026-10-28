@@ -127,6 +127,121 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.48 · 第 94 批：审计 #12 剧本广场 —— 29 条路由一条不缺，但 4 处 query 参数被静默丢弃 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+#12 剧本广场是全站两个 92% 模块之一（权重 8、剩余 0.64），也是**台账可信度最低的一块**：第 84 批已经查出它那句「竞品 29+12 全覆盖」是重复记账（管理侧 18 行其实归 #27）。它的缺口栏从那以后只写两句话 —— 「真实打款（商户资质）」与「买断后二次改编许可范围」——**两句都没被竞品全集验过**。
+
+所以这批做两件事：先验那两句话，再换一层验 **路由栏看不见的东西**。
+
+### 二、竞品面：57 行切成 29 + 18 + 10
+
+`_r94_slice.py` 从 TSV 切出含 `novel_market` 的 47 行，`_r94_audit.py` 按前缀拆开：
+
+| 归属 | 条数 | 前缀 | 本批是否处理 |
+| --- | ---: | --- | --- |
+| **#12 消费侧** | **29** | `/web/v1/df/novel_market/*` | 逐条对 |
+| #27 运营后台 | 18 | `/v1/rmadminsrv/novel_market/*` | 第 83 批已对过，只做归属确认（管理侧另有 3 处 query 缺口，见第五节，**代码已修但归 #27 记账**） |
+
+**路由层结论：29/29 全部 PAIR，0 缺口。** 归一化只剥 `/web/v1`、不剥 `/df`（剥了会把前缀差异抹平成假同形），所以这 29 条全部走 `DEVIATIONS` 登记 —— 方法全一致、尾段一一对应，另多 5 条自建能力（`buy`、`parse`、`creator/withdraw`、`creator/withdrawals`、`withdrawals/{}/cancel`）。
+
+也就是说：#12 的 0.64 **不是缺端点**，第 84 批的结论在全集复核下依然成立。
+
+### 三、换一层：端点收了参数，但静默丢掉
+
+路由全在，不代表能力在。TSV 有 `QUERY` 列，29 条里只有 **4 条**带 query；`_r94_query_all.py` 把每个参数对我方 zod schema：
+
+| 竞品端点 | 竞品 query | 我方 schema | 结果 |
+| --- | --- | --- | --- |
+| `GET /scripts` | `tag_ids/category_id/keyword/page/page_size` | 全有 | ✅ |
+| `GET /scripts/{nm_id}/episodes` | `start_episode_no/end_episode_no` | 全有 | ✅ |
+| `GET /creator/works` | `status/**keyword**/page/page_size` | **缺 `keyword`** | ❌ |
+| `GET /creator/revenues` | `status/page/page_size` | 全有 | ✅ |
+
+**为什么「缺一个参数」比「400」更坏**：zod 默认 `strip` 未知键，所以带 `keyword` 的请求不会报错，而是返回 **200 + code 0 + 未过滤的全集**。实测（临时 spec，验证完即删）：
+
+```
+GET /v1/market/creator/works?keyword=Alpha   →  200, code 0, titles = ["BetaScript","AlphaScript"]
+```
+
+客户端以为搜过了。这类故障，**守卫（只比 METHOD + path）看不见，端点存在性检查也看不见** —— 它是"字段级"的。
+
+管理侧连带查出 3 处同类问题（引号内为实测后果）：
+
+| 端点 | 被丢弃的参数 | 后果 |
+| --- | --- | --- |
+| `GET /ops/market/categories` | `keyword` | 运营搜分类，拿到全量 |
+| `GET /ops/market/tags` | `keyword` | 同上 |
+| `GET /ops/market/promotions` | `enabled` | 勾了"只看启用的"，仍拿到含停用的全量 |
+| `GET /ops/market/promotions` | `slot` **缺省时硬编码 `?? "market"`** | 运营根本查不到别的位（如 `home`） |
+
+### 四、补了什么，以及**有意不补**什么
+
+补齐的 4 处都在 service 层落成真 SQL，不是只在 schema 里挂个名字：
+
+| 位置 | 改动 | 落点 |
+| --- | --- | --- |
+| `creator/works` | 补 `keyword` | 标题 + 简介 `ilike`（与集市列表 `listScripts` 同口径 —— 创作者"记得一句话、不记得标题"时也能搜到） |
+| `adminCategories` | 补 `keyword` + 返回 `total` | 名字模糊 |
+| `adminTags` | 补 `keyword` + 返回 `total` | 名字模糊 |
+| `adminPromotions` | 补 `enabled`，去掉隐式 `slot="market"` | `promo_slots.status` 过滤；不指定 slot = 全部位 |
+
+**明确不补的两处**（接了恒空过滤器比不接更坏，两条都写进注释并由守卫钉住）：
+
+1. **`categories` 的 `parent_id`**：`market_categories` 是平表，没有该列。竞品是树形分类，我方不是。造一个恒空的 `parent_id` 只会让客户端以为能筛层级。
+2. **`tags` 的 `status`**：`market_tags` 只有 `name` 一列（`schema.ts:3367-3375`），`listTags()` 返回的 `status: 1` 是**常量投影**。接 `?status=2` 会恒空。要做就得先加列 + 迁移 + 决定"停用标签是否还参与作品筛选"，那是产品口径。
+
+前端同时接线：「我的作品」此前一次性拉 `page_size=50` 全量、**没有任何筛选入口** —— 光有后端参数等于能力不可达（第 65/66 批踩过的坑）。补搜索框 + 状态下拉 + 重置 + 「显示 N / 共 M」截断提示，14 个新 key × 5 语种。
+
+### 五、守卫与反向验证
+
+守卫新增一例：**「#12 竞品 4 条带 query 的端点，参数必须被 schema 真接住（防静默丢弃）」**，纯读源码断言 + 行为侧由 `market.spec.ts` 兜底，两边都缺才会漏。
+
+写这一例时踩了个坑并修掉：`market.controller.ts` 里 `listScriptsQuery` **也有一个 `keyword`**（集市列表那条一直是对的），全局正则会撞上它而**假绿**。所以断言必须**限定在 `@Get("creator/works")` 到 `@Post("creator/works")` 之间**：
+
+```ts
+const worksHandler = marketCtrl.slice(
+  marketCtrl.indexOf('@Get("creator/works")'),
+  marketCtrl.indexOf('@Post("creator/works")'),
+);
+expect(worksHandler).toMatch(/keyword:\s*z\.string\(\)/);
+```
+
+反向验证 `_r94_break.py break|restore` 把 `keyword` 改名成 `keyword_BROKEN`：
+
+```
+BROKEN: creator/works 的 keyword 已改名为 keyword_BROKEN
+ ❯ test/competitor-route-parity.spec.ts (23 tests | 1 failed)
+ ❯ test/market.spec.ts (21 tests | 1 failed)
+ Tests  2 failed | 42 passed (44)
+```
+
+恢复后 **44 passed**。**2 红来自两个不同文件**，说明守卫测的是真东西、功能测试也测的是真东西。
+
+### 六、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| api 测试 | **89 文件 996 例全绿**（原 993：+2 `market.spec.ts`、+1 守卫） |
+| 总用例 | **1,408**（api 996 + adapters 164 + cli 128 + worker 61 + db 27 + shared 26 + storage 6） |
+| 端点 | **778 不变** —— 本批改的是**参数**，不是路由 |
+| 表 / 迁移 | 113 / 47 不变（没有新建表：命中的列全都已存在） |
+| 门禁 | `verify-round.ps1` **12/12 全绿**（`结论：全绿`） |
+| 竞品覆盖守卫 | 十九组 **685 条 / 23 例**（原 22 例，+1 字段级用例） |
+| 分数 | **202.58/206 = 98.3%**，剩余 **3.42**；**#12 仍 92%** |
+
+**为什么这批不加分**：#12 的 0.64 = 0.44（E 类，真实打款需商户资质与分账签约）+ 0.20（B 类，买断后二次改编许可范围）。29 条路由、4 个 query 参数里**没有任何一条能证明这两项缺的是代码** —— 补形状解决不了取证与资质问题。这批的产出是"把 92% 背后的字段事实钉住"，不是分数。
+
+### 七、诚实边界
+
+1. **27 条不带 query 的端点没有字段级证据**。TSV 的 `QUERY` 是空数组，这只说明**抓取时没记到参数**，不代表竞品真没有参数。所以"字段级已对齐"这句话的准确范围是：**4 条有证据的端点已对齐，其余 25 条无从比较**。
+2. **只比 query，body 一律未验**。`POST /creator/works/save` 到底收哪些字段、`preorder` 有没有附带参数，全都没有竞品请求体证据。
+3. **管理侧那 3 处的修复按 #27 记账**。代码改了、守卫没动 #27 那组（那组的断言只锁 METHOD+path），所以 #27 的 100% 与本批无关；如果将来要给它做字段级守卫，得单独开一例。
+4. **`total` 是新返回字段**，老客户端会忽略它，不构成破坏性变更；但**分页仍不发** —— 分类/标签/推广位都是运营维护的小目录，强行分页会让"一次拉全量建下拉框"这个唯一用法多一轮请求。量级变了再改（与第 93 批 `voice_favorites` 不做物化列同一判断）。
+5. **`keyword` 的匹配语义是 `ilike '%kw%'`**，用的是 PG 默认大小写不敏感。竞品是否支持分词、是否搜正文，无证据 —— 我方**不搜正文**（集市正文要购买后才可见，进搜索索引等于绕开内容闸门）。
+
+
 ## 变更登记（v6.47 · 第 93 批：审计 #4 创作 Agent + #6 工具箱 —— #4 一条端点都不缺，#6 那 0.10 是真的能补的 · 2026-10-28）
 
 ### 一、这批在回答什么问题

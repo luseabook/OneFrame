@@ -229,12 +229,25 @@ export class MarketController {
     return this.market.creatorProfile(requireAuth(req));
   }
 
-  /** 20. 我的作品列表（rt:604 GET） */
+  /** 20. 我的作品列表（rt:604 GET）
+   *
+   * 第 94 批：补 `keyword`。竞品该端点的 query 是 `status/keyword/page/page_size`
+   * （`competitor_endpoints.tsv`），我方此前 zod 只声明了 `status/page/page_size` ——
+   * zod 默认 **strip 未知键**，所以带 `keyword` 的请求会拿到**未过滤的全集**（200 + code 0），
+   * 客户端以为搜过了。这类"静默丢弃"比 400 更坏，故补齐并由守卫的
+   * `NOVEL_MARKET_QUERY` 用例钉住。
+   */
   @Get("creator/works")
   works(@Req() req: AuthedRequest, @Query() query: unknown) {
     return this.market.creatorWorks(
       requireAuth(req),
-      parseOrThrow(pageQuery.extend({ status: z.coerce.number().int().min(1).max(6).optional() }), query ?? {}),
+      parseOrThrow(
+        pageQuery.extend({
+          status: z.coerce.number().int().min(1).max(6).optional(),
+          keyword: z.string().max(100).optional(),
+        }),
+        query ?? {},
+      ),
     );
   }
 

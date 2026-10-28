@@ -1996,7 +1996,21 @@
     "withdrawSubmitted": "提现申请已提交，等待运营审核",
     "withdrawFailed": "提现申请失败",
     "revoked": "已撤销",
-    "revokeFailed": "撤销失败"
+    "revokeFailed": "撤销失败",
+    "worksSearchPlaceholder": "按标题或简介搜索我的作品",
+    "worksSearch": "搜索",
+    "worksSearching": "搜索中…",
+    "worksReset": "重置筛选",
+    "worksStatusAll": "全部状态",
+    "worksNoMatch": "没有符合条件的作品，试试放宽筛选。",
+    "worksTruncated": "当前显示 {shown} / 共 {total} 部，请用搜索或状态筛选缩小范围。",
+    "worksLoadFailed": "加载我的作品失败",
+    "statusDraft": "草稿",
+    "statusPending": "待审核",
+    "statusOnSale": "在售",
+    "statusRejected": "已驳回",
+    "statusOffline": "已下架",
+    "statusPreorder": "预售中"
   },
   "editor": {
     "metaTitle": "时间线导出 · 一帧",

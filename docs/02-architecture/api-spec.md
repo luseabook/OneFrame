@@ -4691,3 +4691,109 @@ if (refCap !== undefined && refs.length > refCap) {
 3. 目录合并分页是**内存分页**：克隆音色先全量取再与内置合并，音色数量级（每人几十条）撑得住；上千条时要下沉 SQL。
 4. `forbidden` 的语义有意合并：跨空间与「不是克隆任务」都返回 `400102 voice not found`，防止用 id 探测他人任务是否存在。
 5. `VoiceCloneAdapter` 的供应商协议未经实测。
+
+## 17.51 剧本广场的 4 个 query 参数：zod 静默丢弃与「有意不接」的口径（第 94 批 · #12）
+
+客户端契约级说明。本批**没有新增任何路由**（端点 778 不变），改的是 4 条既有端点的
+**query 参数处置**，以及其中 2 个参数**有意不接**的理由。
+
+### 51.1 为什么单列一节：静默丢弃不报错
+
+Fastify + zod 下，query 走 `parseOrThrow(schema, query)`，而 zod 对未声明的键**默认 `strip`**
+（不 `strict`、不 `passthrough`）—— 于是：
+
+```
+GET /v1/market/creator/works?keyword=Alpha
+→ HTTP 200, { code: 0, data: { list: [Beta, Alpha], total: 2 } }
+```
+
+**没有 400，没有 warning，返回的是未过滤的全集。** 客户端会以为搜索生效了。
+
+判定口径：竞品该端点的 `QUERY` 列有该参数、我方模型有对应列 ⇒ **必须接**；
+竞品有、我方无该列 ⇒ **不接并在注释写明**（接一个恒空过滤器比不接更坏）。
+
+### 51.2 本次补齐的 4 处
+
+| 端点 | 参数 | 语义 | 我方落点 |
+| --- | --- | --- | --- |
+| `GET /v1/market/creator/works` | `keyword` | 标题 **或** 简介模糊匹配（`ilike '%kw%'`） | `market_works.title` / `.summary` |
+| `GET /v1/ops/market/categories` | `keyword` | 分类名模糊匹配 | `market_categories.name` |
+| `GET /v1/ops/market/tags` | `keyword` | 标签名模糊匹配 | `market_tags.name` |
+| `GET /v1/ops/market/promotions` | `enabled`（1/2） | 只看启用/停用 | `promo_slots.status` |
+
+另修一处**隐式默认值**：`GET /v1/ops/market/promotions` 的 `slot` 缺省时，旧实现写死
+`?? "market"`，运营查不到 `home` 等别的位。**现在的口径是「不指定 slot = 返回全部位」**
+——调用方没指定就不该替它选。
+
+#### 请求 / 响应
+
+```http
+GET /v1/market/creator/works?keyword=雪夜&status=1&page=1&page_size=50
+Authorization: Bearer <token>
+X-Space-Id: <space_id>
+```
+
+```json
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "list": [
+      { "id": "1089…", "title": "雪夜追凶", "summary": "…", "status": 1, "status_name": "草稿",
+        "price_credits": 100, "preorder_price_credits": null, "sales_count": 0,
+        "revenue_credits": 0, "audit_note": null, "category_id": null, "tag_ids": [] }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 50
+  }
+}
+```
+
+分类 / 标签 / 推广位三个 admin 列表**新增 `total` 字段**（= `list.length`，因为它们不分页）。
+`total` 是纯增量字段，老客户端忽略即可，不构成破坏性变更。
+
+### 51.3 边界与错误码
+
+| 情形 | 行为 |
+| --- | --- |
+| `keyword` 为空串或全空格 | 按**未传**处理，返回全量（清空搜索框不该把列表搜空） |
+| `keyword` 超 100 字符 | `400101`（zod `.max(100)`） |
+| `enabled` 非 1/2 | `400101` |
+| 搜不到 | **空数组 + `total: 0`**，不报错、不回退全量 |
+| `status` 与 `keyword` 同时给 | **「且」语义**（两个条件都生效） |
+
+`keyword` 统一 `ilike`（PG 默认大小写不敏感），**不搜正文**：集市正文要购买后才可见，
+进搜索索引等于绕开内容闸门。
+
+### 51.4 有意不接的两个竞品参数
+
+| 竞品参数 | 为什么不接 |
+| --- | --- |
+| `GET /ops/market/categories` 的 `parent_id` | `market_categories` 是**平表**（无 `parent_id` 列），竞品是树形分类。造恒空过滤器 = 给客户端一个永远筛不出东西的参数 |
+| `GET /ops/market/tags` 的 `status` | `market_tags` 只有 `name` 一列，`listTags()` 返回的 `status: 1` 是**常量投影**。接 `?status=2` 恒空；要做须先加列 + 迁移 + 决定"停用标签是否还参与作品筛选"（产品口径） |
+
+两条都由 `competitor-route-parity.spec.ts` 的字段级用例断言注释存在，防止下一批误删。
+
+### 51.5 分页口径
+
+分类 / 标签 / 推广位**不发 `page`/`page_size`**：都是运营维护的小目录（十位数量级），
+唯一用法是"一次拉全量建下拉框"，强行分页只多一轮请求。故返回 `total` 让调用方自行判断，
+量级变了再下沉分页（与 `voice_favorites` 不做物化列同一判断）。
+
+### 51.6 测试与守卫
+
+- 功能：`app/apps/api/test/market.spec.ts` **+2 例**——
+  「`creator/works` 的 `keyword` 真过滤」（标题命中 / 简介命中 / 空串回落 / 与 `status` 组合 / 搜不到为空+total 0）、
+  「admin 分类/标签 `keyword` 与推广位 `enabled` 真生效」（含 `slot` 缺省能看到别的位、停用后 `enabled=1` 不命中而 `enabled=2` 命中）。
+- 守卫：`competitor-route-parity.spec.ts` **+1 例**（22→23）「#12 竞品 4 条带 query 的端点参数必须被 schema 真接住」，
+  用源码断言并**限定在 `@Get("creator/works")` 到 `@Post("creator/works")` 之间**匹配 ——
+  全局正则会撞上 `listScriptsQuery` 里同名的 `keyword` 而假绿。
+- 反向验证：`_r94_break.py break|restore` 把 `keyword` 改名 `keyword_BROKEN` → 守卫 1 红 + 功能 1 红（**2 个不同文件**），
+  恢复后 44 绿。
+
+### 51.7 边界（诚实说明）
+
+1. 竞品 29 条消费侧端点里**只有 4 条带 query 证据**，其余 25 条 `QUERY` 是空数组 —— 这只说明抓取时没记到参数，**不代表竞品没有参数**。所以"字段级已对齐"的范围是这 4 条。
+2. 只比 query，**body 一律未验**（`POST /creator/works/save`、`POST /scripts/{id}/preorder` 的请求体无竞品证据）。
+3. 管理侧那 3 处修复**按 #27 记账**，本批没动 #27 那组的守卫断言（它只锁 METHOD+path）。

@@ -182,10 +182,17 @@ export class MarketAdminController {
 
   // ── 分类 / 标签（rt:100-101、:110-111）────────────────────
 
-  /** 9. 分类列表 */
+  /**
+   * 9. 分类列表
+   *
+   * 第 94 批：补 `keyword`（竞品 query `parent_id/keyword/page/page_size`）。
+   * `parent_id` 有意不接 —— 我方 `market_categories` 是平表无该列，接了恒空（见 service 注释）。
+   */
   @Get("categories")
-  categories() {
-    return this.market.adminCategories();
+  categories(@Query() query: unknown) {
+    return this.market.adminCategories(
+      parseOrThrow(z.object({ keyword: z.string().max(100).optional() }), query ?? {}),
+    );
   }
 
   /** 10. 建分类 */
@@ -206,10 +213,15 @@ export class MarketAdminController {
     return this.market.adminDeleteCategory(id);
   }
 
-  /** 13. 标签列表 */
+  /**
+   * 13. 标签列表
+   *
+   * 第 94 批：补 `keyword`（竞品 query 是 `keyword/status/page/page_size`）。
+   * `status` 有意不接 —— `market_tags` 没有 status 列，接了只会恒空（见 service 注释）。
+   */
   @Get("tags")
-  tags() {
-    return this.market.adminTags();
+  tags(@Query() query: unknown) {
+    return this.market.adminTags(parseOrThrow(z.object({ keyword: z.string().max(100).optional() }), query ?? {}));
   }
 
   /** 14. 建标签 */
@@ -237,11 +249,22 @@ export class MarketAdminController {
 
   // ── 推广位（rt:103-104，写 promo_slots）───────────────────
 
-  /** 16. 推广位列表 */
+  /**
+   * 16. 推广位列表
+   *
+   * 第 94 批：补 `enabled`（竞品 query `enabled/page/page_size`），并去掉
+   * `slot` 缺省时硬编码 `"market"` 的隐式选择（不指定 = 全部位）。
+   */
   @Get("promotions")
   promotions(@Query() query: unknown) {
-    const q = parseOrThrow(z.object({ slot: z.string().max(32).optional() }), query ?? {});
-    return this.market.adminPromotions(q.slot ?? "market");
+    const q = parseOrThrow(
+      z.object({
+        slot: z.string().max(32).optional(),
+        enabled: z.coerce.number().int().min(1).max(2).optional(),
+      }),
+      query ?? {},
+    );
+    return this.market.adminPromotions(q);
   }
 
   /** 17. 建推广位 */

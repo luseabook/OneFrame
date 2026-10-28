@@ -1996,7 +1996,21 @@
     "withdrawSubmitted": "Solicitud de retirada enviada: pendiente de revisión de operaciones",
     "withdrawFailed": "Error en la solicitud de retirada",
     "revoked": "Cancelada",
-    "revokeFailed": "Error al cancelar"
+    "revokeFailed": "Error al cancelar",
+    "worksSearchPlaceholder": "Buscar mis obras por título o resumen",
+    "worksSearch": "Buscar",
+    "worksSearching": "Buscando…",
+    "worksReset": "Restablecer filtros",
+    "worksStatusAll": "Todos los estados",
+    "worksNoMatch": "Ninguna obra coincide con estos filtros. Prueba a ampliarlos.",
+    "worksTruncated": "Mostrando {shown} de {total}. Reduce el rango con la búsqueda o los filtros de estado.",
+    "worksLoadFailed": "No se pudieron cargar mis obras",
+    "statusDraft": "Borrador",
+    "statusPending": "Pendiente de revisión",
+    "statusOnSale": "En venta",
+    "statusRejected": "Rechazada",
+    "statusOffline": "Retirada",
+    "statusPreorder": "Preventa"
   },
   "editor": {
     "metaTitle": "Exportación de la línea de tiempo · OneFrame",

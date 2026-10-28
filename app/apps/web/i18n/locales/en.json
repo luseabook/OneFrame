@@ -1996,7 +1996,21 @@
     "withdrawSubmitted": "Withdrawal request submitted — awaiting operations review",
     "withdrawFailed": "Withdrawal request failed",
     "revoked": "Cancelled",
-    "revokeFailed": "Cancellation failed"
+    "revokeFailed": "Cancellation failed",
+    "worksSearchPlaceholder": "Search my works by title or summary",
+    "worksSearch": "Search",
+    "worksSearching": "Searching…",
+    "worksReset": "Reset filters",
+    "worksStatusAll": "All statuses",
+    "worksNoMatch": "No works match these filters. Try widening them.",
+    "worksTruncated": "Showing {shown} of {total}. Narrow the range with search or status filters.",
+    "worksLoadFailed": "Failed to load my works",
+    "statusDraft": "Draft",
+    "statusPending": "Pending review",
+    "statusOnSale": "On sale",
+    "statusRejected": "Rejected",
+    "statusOffline": "Offline",
+    "statusPreorder": "Preorder"
   },
   "editor": {
     "metaTitle": "Timeline export · OneFrame",

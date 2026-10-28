@@ -1996,7 +1996,21 @@
     "withdrawSubmitted": "Solicitação de saque enviada — aguardando revisão da operação",
     "withdrawFailed": "Falha na solicitação de saque",
     "revoked": "Cancelado",
-    "revokeFailed": "Falha ao cancelar"
+    "revokeFailed": "Falha ao cancelar",
+    "worksSearchPlaceholder": "Buscar minhas obras por título ou resumo",
+    "worksSearch": "Buscar",
+    "worksSearching": "Buscando…",
+    "worksReset": "Redefinir filtros",
+    "worksStatusAll": "Todos os status",
+    "worksNoMatch": "Nenhuma obra corresponde a esses filtros. Tente ampliá-los.",
+    "worksTruncated": "Mostrando {shown} de {total}. Reduza o intervalo com a busca ou os filtros de status.",
+    "worksLoadFailed": "Falha ao carregar minhas obras",
+    "statusDraft": "Rascunho",
+    "statusPending": "Aguardando revisão",
+    "statusOnSale": "À venda",
+    "statusRejected": "Rejeitada",
+    "statusOffline": "Fora do ar",
+    "statusPreorder": "Pré-venda"
   },
   "editor": {
     "metaTitle": "Exportação da linha do tempo · OneFrame",

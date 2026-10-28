@@ -2024,6 +2024,74 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(sameMethod.length).toBe(29);
   });
 
+  /**
+   * 第 94 批：**字段级**（query）对账。
+   *
+   * 为什么单列一例：本文件此前只比 METHOD + path，所以「端点全在、参数被静默丢弃」
+   * 这一类故障它一个字都看不见。真实证据是 `_r94_query_all.py` 把竞品
+   * `competitor_endpoints.tsv` 的 QUERY 列逐条对到我方 zod schema：
+   * 消费侧 29 条里只有 **4 条带 query**，其中 `creator/works` 的 `keyword`
+   * 竞品有、我方 zod 没声明 → zod 默认 strip → 返回 200 + code 0 + **未过滤全集**。
+   * 管理侧同病两处（`categories`/`tags` 的 `keyword`、`promotions` 的 `enabled`）。
+   *
+   * 这里用**源码断言**钉住 schema 声明（守卫是纯读源码的，不起服务），
+   * 行为侧由 `market.spec.ts` 的 2 例功能用例兜底 —— 两边都缺才会漏。
+   */
+  it("#12 剧本广场：竞品 4 条带 query 的端点，参数必须被 schema 真接住（防静默丢弃）", () => {
+    const marketCtrl = readFileSync(join(API_SRC, "modules", "market", "market.controller.ts"), "utf8");
+    const adminCtrl = readFileSync(join(API_SRC, "modules", "market", "market-admin.controller.ts"), "utf8");
+
+    // ── 消费侧：`GET /creator/works` 的 keyword（第 94 批补的那一条）──
+    // 注意要**限定在 works 处理器内**断言：`listScriptsQuery` 里也有一个 `keyword`，
+    // 全局正则会误判通过（集市列表的 keyword 一直是对的，坏的只有创作者侧这条）。
+    expect(marketCtrl).toContain("creatorWorks");
+    const worksHandler = marketCtrl.slice(
+      marketCtrl.indexOf("@Get(\"creator/works\")"),
+      marketCtrl.indexOf("@Post(\"creator/works\")"),
+    );
+    expect(worksHandler.length).toBeGreaterThan(0);
+    expect(worksHandler).toMatch(/keyword:\s*z\.string\(\)/);
+    // 服务层必须真的把它变成 SQL 条件，而不是收了不用
+    const marketSvc = readFileSync(join(API_SRC, "modules", "market", "market.service.ts"), "utf8");
+    const creatorWorksBlock = marketSvc.slice(
+      marketSvc.indexOf("async creatorWorks"),
+      marketSvc.indexOf("async creatorWorkDetail"),
+    );
+    expect(creatorWorksBlock.length).toBeGreaterThan(0);
+    expect(creatorWorksBlock).toContain("query.keyword");
+    expect(creatorWorksBlock).toContain("ilike");
+
+    // ── 管理侧：categories / tags 的 keyword、promotions 的 enabled ──
+    expect(adminCtrl).toMatch(/categories\(@Query\(\) query: unknown\)/);
+    expect(adminCtrl).toMatch(/tags\(@Query\(\) query: unknown\)/);
+    expect(adminCtrl).toMatch(/promotions\(@Query\(\) query: unknown\)/);
+    expect(adminCtrl).toMatch(/enabled:\s*z\.coerce\.number\(\)/);
+
+    // `slot` 缺省时**不许**再隐式选 "market"（旧实现 `?? "market"` 让别的位查不到）
+    const promotionsBlock = adminCtrl.slice(
+      adminCtrl.indexOf("promotions(@Query()"),
+      adminCtrl.indexOf("createPromotion("),
+    );
+    expect(promotionsBlock).not.toContain('"market"');
+
+    // 推广位服务层：两个过滤条件都得变成 SQL
+    const promotionsSvc = marketSvc.slice(
+      marketSvc.indexOf("async adminPromotions"),
+      marketSvc.indexOf("async adminCreatePromotion"),
+    );
+    expect(promotionsSvc).toContain("promoSlots.slot");
+    expect(promotionsSvc).toContain("promoSlots.status");
+    expect(promotionsSvc).toContain("query.enabled");
+
+    /**
+     * 有意**不接**的两个竞品参数，必须留在明面上（防止下一批误以为是漏接又删掉注释）：
+     * - `categories` 的 `parent_id`：`market_categories` 是平表，没有该列；
+     * - `tags` 的 `status`：`market_tags` 只有 name，`listTags()` 的 status 是常量投影。
+     */
+    expect(marketSvc).toContain("parent_id");
+    expect(marketSvc).toContain("没有 `status` 列");
+  });
+
   it("#4 创作 Agent：12 条里 8 条同形 + 1 条偏离 + 3 条豁免", () => {
     expect(AGENT_SHAPES.length).toBe(12);
     expect(missing(AGENT_SHAPES)).toEqual([]);

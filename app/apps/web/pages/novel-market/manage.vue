@@ -57,6 +57,46 @@ const withdrawChannel = ref<"alipay" | "wechat" | "bank">("alipay");
 const withdrawAccount = ref("");
 const withdrawing = ref(false);
 
+/**
+ * 我的作品列表的筛选（第 94 批）。
+ *
+ * 后端 `GET /market/creator/works` 支持 `status` + `keyword`（与竞品 query 对齐）；
+ * 此前前端一次性拉 `page_size=50` 全量、不在前端过滤，所以作品一多就只能靠肉眼找。
+ * 这里把两个参数真正接到 UI 上 —— 光有后端参数没有可点的入口，
+ * 等于「能力在但不可达」（第 65/66 批踩过的坑）。
+ */
+const worksKeyword = ref("");
+const worksStatus = ref<"" | number>("");
+const worksLoading = ref(false);
+/** 作品数超过后端单页上限（50）时提示还有未展示的，避免"列表看着像全量" */
+const worksTotal = ref(0);
+const WORKS_PAGE_SIZE = 50;
+
+async function loadWorks() {
+  worksLoading.value = true;
+  try {
+    const params = new URLSearchParams({ page_size: String(WORKS_PAGE_SIZE) });
+    const kw = worksKeyword.value.trim();
+    if (kw) params.set("keyword", kw);
+    if (worksStatus.value !== "") params.set("status", String(worksStatus.value));
+    const res = await api.get<{ list: MarketWorkDto[]; total: number }>(
+      `/market/creator/works?${params.toString()}`,
+    );
+    works.value = res.list;
+    worksTotal.value = res.total;
+  } catch (e) {
+    toast.error((e as Error).message || t("marketManage.worksLoadFailed"));
+  } finally {
+    worksLoading.value = false;
+  }
+}
+
+function resetWorksFilters() {
+  worksKeyword.value = "";
+  worksStatus.value = "";
+  void loadWorks();
+}
+
 /** 状态 → 可用动作（与后端状态机一一对应，前端不猜） */
 function actionsOf(work: MarketWorkDto): { submit: boolean; offline: boolean } {
   return {
@@ -71,7 +111,9 @@ async function load() {
   try {
     const [p, w, o, rev, wd, cfg] = await Promise.all([
       api.get<MarketCreatorProfileDto>("/market/creator/profile"),
-      api.get<{ list: MarketWorkDto[] }>("/market/creator/works?page_size=50"),
+      api.get<{ list: MarketWorkDto[]; total: number }>(
+        `/market/creator/works?page_size=${WORKS_PAGE_SIZE}`,
+      ),
       api.get<MarketRevenueOverviewDto>("/market/creator/revenues/overview"),
       api.get<{ list: MarketRevenueRowDto[] }>("/market/creator/revenues?page_size=20"),
       api.get<{ list: MarketWithdrawalDto[] }>("/market/creator/withdrawals?page_size=20"),
@@ -79,6 +121,7 @@ async function load() {
     ]);
     profile.value = p;
     works.value = w.list;
+    worksTotal.value = w.total;
     overview.value = o;
     revenues.value = rev.list;
     withdrawals.value = wd.list;
@@ -208,6 +251,18 @@ const commissionText = computed(() =>
   config.value ? `${config.value.commission_bps / 100}%` : "—",
 );
 
+/** 状态筛选项：与后端 `MARKET_WORK_STATUS`（1-6）一致，标签走 i18n */
+const workStatusOptions = computed(() =>
+  ([
+    { value: 1, key: "statusDraft" },
+    { value: 2, key: "statusPending" },
+    { value: 3, key: "statusOnSale" },
+    { value: 4, key: "statusRejected" },
+    { value: 5, key: "statusOffline" },
+    { value: 6, key: "statusPreorder" },
+  ] as const).map((s) => ({ value: s.value, label: t(`marketManage.${s.key}`) })),
+);
+
 onMounted(load);
 </script>
 
@@ -335,8 +390,39 @@ onMounted(load);
 
       <!-- 我的作品 -->
       <section class="mg-panel">
-        <h2 class="mg-h2">{{ t("marketManage.worksTitle", { count: works.length }) }}</h2>
-        <p v-if="works.length === 0" class="mg-state">{{ t("marketManage.worksEmpty") }}</p>
+        <h2 class="mg-h2">{{ t("marketManage.worksTitle", { count: worksTotal }) }}</h2>
+        <div class="mg-works-filters">
+          <input
+            v-model="worksKeyword"
+            class="mg-input"
+            type="search"
+            :placeholder="t('marketManage.worksSearchPlaceholder')"
+            @keyup.enter="loadWorks"
+          >
+          <select v-model="worksStatus" class="mg-input mg-select" @change="loadWorks">
+            <option value="">{{ t("marketManage.worksStatusAll") }}</option>
+            <option v-for="s in workStatusOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+          <button type="button" class="mg-btn" :disabled="worksLoading" @click="loadWorks">
+            {{ worksLoading ? t("marketManage.worksSearching") : t("marketManage.worksSearch") }}
+          </button>
+          <button
+            v-if="worksKeyword.trim() || worksStatus !== ''"
+            type="button"
+            class="mg-btn"
+            :disabled="worksLoading"
+            @click="resetWorksFilters"
+          >
+            {{ t("marketManage.worksReset") }}
+          </button>
+        </div>
+        <!-- 后端单页上限 50：超了要说清楚，否则列表看着像全量 -->
+        <p v-if="worksTotal > works.length" class="mg-note">
+          {{ t("marketManage.worksTruncated", { shown: works.length, total: worksTotal }) }}
+        </p>
+        <p v-if="works.length === 0" class="mg-state">
+          {{ worksKeyword.trim() || worksStatus !== "" ? t("marketManage.worksNoMatch") : t("marketManage.worksEmpty") }}
+        </p>
         <table v-else class="mg-table">
           <thead>
             <tr>
@@ -623,6 +709,18 @@ onMounted(load);
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+.mg-works-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.mg-works-filters .mg-input {
+  max-width: 260px;
+}
+.mg-select {
+  max-width: 160px;
 }
 .mg-btn {
   border: 1px solid var(--border-2);

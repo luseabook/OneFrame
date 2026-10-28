@@ -743,12 +743,25 @@ export class MarketService {
     };
   }
 
-  /** 我的作品列表（rt:604 `GET /creator/works`） */
-  async creatorWorks(auth: AuthContext, query: { status?: number; page?: number; page_size?: number }) {
+  /**
+   * 我的作品列表（rt:604 `GET /creator/works`）。
+   *
+   * 第 94 批补 `keyword`：竞品该端点的 query 是 `status/keyword/page/page_size`。
+   * 标题与简介都参与匹配（与集市列表 `listScripts` 同口径），否则创作者"记得一句话、
+   * 不记得标题"时搜不到自己的作品。空串/全空格按"未传"处理（前端清空搜索框时会带空串）。
+   */
+  async creatorWorks(
+    auth: AuthContext,
+    query: { status?: number; keyword?: string; page?: number; page_size?: number },
+  ) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(50, Math.max(1, query.page_size ?? 20));
     const conds = [eq(marketWorks.ownerUserId, BigInt(auth.userId)), isNull(marketWorks.deletedAt)];
     if (query.status !== undefined) conds.push(eq(marketWorks.status, query.status));
+    if (query.keyword && query.keyword.trim() !== "") {
+      const kw = `%${query.keyword.trim()}%`;
+      conds.push(or(ilike(marketWorks.title, kw), ilike(marketWorks.summary, kw))!);
+    }
     const where = and(...conds);
     const rows = await db
       .select()
@@ -1550,8 +1563,25 @@ export class MarketService {
   }
 
   // ── 分类 / 标签 ──────────────────────────────────────────
-  async adminCategories(): Promise<{ list: MarketCategory[] }> {
-    return { list: await this.taxonomy.listCategories() };
+
+  /**
+   * 运营侧分类列表（rt:100 `GET /v1/rmadminsrv/novel_market/categories`）。
+   *
+   * 第 94 批：竞品该端点带 `parent_id/keyword/page/page_size`，我方此前**一个都不收**。
+   * 逐个对照模型后只补两个（不补 `parent_id`/分页，理由见下）：
+   * - `keyword`：`market_categories.name` 存在 → 按名字模糊搜索，真能做。
+   * - 分页：分类是运营维护的**小目录**（十位数量级），`market_categories` 也只有
+   *   `(status, sort)` 索引、没有分页语义的调用方；强行分页会让「前端一次拉全量建下拉框」
+   *   这个唯一用法多一轮请求。故不发 `page/page_size`，而**返回 `total`** 让调用方能判断。
+   * - `parent_id`：**不补**。`market_categories` 是平表（无 `parent_id` 列），
+   *   竞品是树形分类；造一个恒为空的 `parent_id` 过滤器等于给客户端一个永远筛不出东西的参数
+   *   （比不接更坏）。层级化属产品口径变更，登记不改代码。
+   */
+  async adminCategories(query: { keyword?: string } = {}): Promise<{ list: MarketCategory[]; total: number }> {
+    const all = await this.taxonomy.listCategories();
+    const kw = query.keyword?.trim().toLowerCase() ?? "";
+    const list = kw === "" ? all : all.filter((c) => c.name.toLowerCase().includes(kw));
+    return { list, total: list.length };
   }
 
   async adminCreateCategory(input: { name: string; sort?: number }) {
@@ -1574,8 +1604,22 @@ export class MarketService {
     });
   }
 
-  async adminTags(): Promise<{ list: MarketTag[] }> {
-    return { list: await this.taxonomy.listTags() };
+  /**
+   * 运营侧标签列表（rt:110 `GET /v1/rmadminsrv/novel_market/tags`）。
+   *
+   * 第 94 批：竞品带 `keyword/status/page/page_size`。逐个对照模型：
+   * - `keyword`：`market_tags.name` 存在 → 补（运营按名字找标签建活动）。
+   * - `status`：**不补**。`market_tags` 只有 `name` 一列（schema.ts:3367-3375），
+   *   没有 `status` 列，`listTags()` 返回的 `status: 1` 是**常量投影**。接一个
+   *   `?status=2` 只会让调用方以为能筛出停用标签 —— 恒空结果比 400 更难排查。
+   *   要做就得先加列 + 迁移 + 决定停用标签是否还参与作品筛，属产品口径。
+   * - 分页：同分类（小目录），不发且返回 `total`。
+   */
+  async adminTags(query: { keyword?: string } = {}): Promise<{ list: MarketTag[]; total: number }> {
+    const all = await this.taxonomy.listTags();
+    const kw = query.keyword?.trim().toLowerCase() ?? "";
+    const list = kw === "" ? all : all.filter((t) => t.name.toLowerCase().includes(kw));
+    return { list, total: list.length };
   }
 
   async adminCreateTag(input: { name: string }) {
@@ -1596,12 +1640,26 @@ export class MarketService {
   }
 
   // ── 推广位（写 promo_slots）─────────────────────────────
-  async adminPromotions(slot = "market") {
+
+  /**
+   * 运营侧推广位列表（rt:103 `GET /v1/rmadminsrv/novel_market/promotions`）。
+   *
+   * 第 94 批：竞品带 `enabled/page/page_size`，我方此前只收 `slot` 并**硬编码
+   * `?? "market"`** —— 运营想查别的位（如 `home`）根本查不到，且 `enabled` 被静默丢弃
+   * （运营勾了"只看启用的"，拿到的还是全量含停用）。
+   * - `enabled`（1/2）→ `promo_slots.status` 存在，真能做，补。
+   * - `slot` 缺省时**返回全部位**而不是默认 `market`：调用方没指定就不该被替它选。
+   * - 分页仍不发（推广位是运营手工排的个位数~十位数），但返回 `total`。
+   */
+  async adminPromotions(query: { slot?: string; enabled?: number } = {}) {
+    const conds = [];
+    if (query.slot) conds.push(eq(promoSlots.slot, query.slot));
+    if (query.enabled !== undefined) conds.push(eq(promoSlots.status, query.enabled));
     const rows = await db
       .select()
       .from(promoSlots)
-      .where(eq(promoSlots.slot, slot))
-      .orderBy(promoSlots.sort);
+      .where(conds.length > 0 ? and(...conds) : undefined)
+      .orderBy(promoSlots.slot, promoSlots.sort);
     return {
       list: rows.map((r) => ({
         id: String(r.id),
@@ -1616,6 +1674,7 @@ export class MarketService {
         view_count: r.viewCount,
         click_count: r.clickCount,
       })),
+      total: rows.length,
     };
   }
 

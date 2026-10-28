@@ -971,4 +971,171 @@ describe("market e2e", () => {
     expect(file.headers["content-type"]).toContain("text/plain");
     expect(file.body).toContain("作品购买协议");
   });
+
+  /**
+   * 第 94 批：竞品 query 字段级对账补的四个参数。
+   *
+   * 为什么单列一例：这四条都不是"缺端点"，而是**端点收了请求却不生效**——
+   * zod 默认 strip 未知键，竞品传 `keyword`/`enabled` 时我方直接静默丢弃，
+   * 返回 **200 + code 0 + 未过滤的全集**。这类故障在守卫（只比 METHOD+path）
+   * 和"端点存在性"检查里都看不见，只有真发一次带参数的请求才能暴露。
+   */
+  it("竞品 query 字段级对账：creator/works 的 keyword 真过滤（不是静默丢弃）", async () => {
+    const owner = await loginNewUser("58");
+    const suffix = String(Date.now()).slice(-8);
+    const alpha = await saveDraft(owner, { title: `Alpha剧本-${suffix}`, price_credits: 100 });
+    const beta = await saveDraft(owner, { title: `Beta剧本-${suffix}`, price_credits: 100 });
+
+    // 标题命中：只回 alpha
+    const byTitle = await inject(
+      "GET",
+      `/market/creator/works?keyword=Alpha剧本-${suffix}&page_size=50`,
+      undefined,
+      owner.token,
+      owner.spaceId,
+    );
+    expect(byTitle.code).toBe(0);
+    expect((byTitle.data as { list: Array<{ id: string }> }).list.map((w) => w.id)).toEqual([alpha.id]);
+
+    // 简介命中（与集市列表同口径：标题 + 简介都查，否则"记得一句话忘了标题"就搜不到）
+    const patched = await inject(
+      "PATCH",
+      `/market/creator/works/${beta.id}`,
+      { summary: `雪夜追凶-${suffix}` },
+      owner.token,
+      owner.spaceId,
+    );
+    expect(patched.code).toBe(0);
+    const bySummary = await inject(
+      "GET",
+      `/market/creator/works?keyword=雪夜追凶-${suffix}&page_size=50`,
+      undefined,
+      owner.token,
+      owner.spaceId,
+    );
+    expect((bySummary.data as { list: Array<{ id: string }> }).list.map((w) => w.id)).toEqual([beta.id]);
+
+    // 空串/全空格按"未传"处理：清空搜索框不该把列表搜空
+    for (const blank of ["", "%20%20"]) {
+      const all = await inject(
+        "GET",
+        `/market/creator/works?keyword=${blank}&page_size=50`,
+        undefined,
+        owner.token,
+        owner.spaceId,
+      );
+      expect(all.code).toBe(0);
+      const ids = (all.data as { list: Array<{ id: string }> }).list.map((w) => w.id);
+      expect(ids).toContain(alpha.id);
+      expect(ids).toContain(beta.id);
+    }
+
+    // 与 status 组合仍是"且"：status=1（草稿）命中，status=3（在售）不命中
+    const draftOnly = await inject(
+      "GET",
+      `/market/creator/works?keyword=Alpha剧本-${suffix}&status=1`,
+      undefined,
+      owner.token,
+      owner.spaceId,
+    );
+    expect((draftOnly.data as { list: Array<{ id: string }> }).list.map((w) => w.id)).toEqual([alpha.id]);
+    const onSaleOnly = await inject(
+      "GET",
+      `/market/creator/works?keyword=Alpha剧本-${suffix}&status=3`,
+      undefined,
+      owner.token,
+      owner.spaceId,
+    );
+    expect((onSaleOnly.data as { list: unknown[] }).list).toEqual([]);
+
+    // 搜不到时是空列表 + total 0，不是"回退成全量"
+    const none = await inject(
+      "GET",
+      `/market/creator/works?keyword=绝无此剧本-${suffix}`,
+      undefined,
+      owner.token,
+      owner.spaceId,
+    );
+    expect(none.code).toBe(0);
+    expect((none.data as { list: unknown[]; total: number }).list).toEqual([]);
+    expect((none.data as { total: number }).total).toBe(0);
+  });
+
+  it("竞品 query 字段级对账：admin 分类/标签的 keyword 与推广位 enabled 真生效", async () => {
+    const suffix = String(Date.now()).slice(-8);
+
+    // ---- 分类：keyword 过滤 + total ----
+    const cat = await inject("POST", "/ops/market/categories", { name: `科幻-${suffix}` }, adminToken);
+    expect(cat.code).toBe(0);
+    const catId = (cat.data as { category: { id: string } }).category.id;
+    createdCategoryIds.push(BigInt(catId));
+    const otherCat = await inject("POST", "/ops/market/categories", { name: `古装-${suffix}` }, adminToken);
+    const otherCatId = (otherCat.data as { category: { id: string } }).category.id;
+    createdCategoryIds.push(BigInt(otherCatId));
+
+    const catHit = await inject("GET", `/ops/market/categories?keyword=科幻-${suffix}`, undefined, adminToken);
+    expect(catHit.code).toBe(0);
+    const catList = (catHit.data as { list: Array<{ id: string }>; total: number }).list;
+    expect(catList.map((c) => c.id)).toEqual([catId]);
+    expect((catHit.data as { total: number }).total).toBe(1);
+
+    // 不带 keyword → 全量（多选下拉框的唯一用法），且 total 与 list 长度一致
+    const catAll = await inject("GET", "/ops/market/categories", undefined, adminToken);
+    const catAllList = (catAll.data as { list: Array<{ id: string }>; total: number }).list;
+    expect(catAllList.length).toBeGreaterThanOrEqual(2);
+    expect((catAll.data as { total: number }).total).toBe(catAllList.length);
+
+    // ---- 标签：keyword 过滤 ----
+    const tag = await inject("POST", "/ops/market/tags", { name: `标签甲-${suffix}` }, adminToken);
+    const tagId = (tag.data as { tag: { id: string } }).tag.id;
+    createdTagIds.push(BigInt(tagId));
+    const tag2 = await inject("POST", "/ops/market/tags", { name: `标签乙-${suffix}` }, adminToken);
+    createdTagIds.push(BigInt((tag2.data as { tag: { id: string } }).tag.id));
+
+    const tagHit = await inject("GET", `/ops/market/tags?keyword=标签甲-${suffix}`, undefined, adminToken);
+    expect(tagHit.code).toBe(0);
+    expect((tagHit.data as { list: Array<{ id: string }> }).list.map((t) => t.id)).toEqual([tagId]);
+
+    // ---- 推广位：enabled 过滤 + slot 缺省不隐式选 "market" ----
+    const promo = await inject(
+      "POST",
+      "/ops/market/promotions",
+      { slot: "market", title: `集市位-${suffix}`, sort: 1 },
+      adminToken,
+    );
+    const promoId = (promo.data as { promotion: { id: string } }).promotion.id;
+    createdPromotionIds.push(BigInt(promoId));
+    // 另建一个**别的 slot** 的推广位：证明 slot 缺省时能看到它（旧实现硬编码只查 market）
+    const otherSlot = await inject(
+      "POST",
+      "/ops/market/promotions",
+      { slot: "home", title: `首页位-${suffix}`, sort: 1 },
+      adminToken,
+    );
+    const otherSlotId = (otherSlot.data as { promotion: { id: string } }).promotion.id;
+    createdPromotionIds.push(BigInt(otherSlotId));
+
+    const allSlots = await inject("GET", "/ops/market/promotions", undefined, adminToken);
+    expect(allSlots.code).toBe(0);
+    const allIds = (allSlots.data as { list: Array<{ id: string }> }).list.map((p) => p.id);
+    expect(allIds).toContain(promoId);
+    expect(allIds).toContain(otherSlotId);
+
+    // slot 显式指定时仍只回该位
+    const marketOnly = await inject("GET", "/ops/market/promotions?slot=market", undefined, adminToken);
+    const marketIds = (marketOnly.data as { list: Array<{ id: string }> }).list.map((p) => p.id);
+    expect(marketIds).toContain(promoId);
+    expect(marketIds).not.toContain(otherSlotId);
+
+    // enabled=1 命中启用态；停用后 enabled=1 不再命中、enabled=2 命中
+    const enabledOnly = await inject("GET", "/ops/market/promotions?enabled=1", undefined, adminToken);
+    expect((enabledOnly.data as { list: Array<{ id: string }> }).list.map((p) => p.id)).toContain(promoId);
+
+    const off = await inject("DELETE", `/ops/market/promotions/${promoId}`, undefined, adminToken);
+    expect(off.code).toBe(0);
+    const stillEnabled = await inject("GET", `/ops/market/promotions?enabled=1`, undefined, adminToken);
+    expect((stillEnabled.data as { list: Array<{ id: string }> }).list.map((p) => p.id)).not.toContain(promoId);
+    const disabledOnly = await inject("GET", `/ops/market/promotions?enabled=2`, undefined, adminToken);
+    expect((disabledOnly.data as { list: Array<{ id: string }> }).list.map((p) => p.id)).toContain(promoId);
+  });
 });
