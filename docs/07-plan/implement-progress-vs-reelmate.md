@@ -177,14 +177,14 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 6 | 工具箱 | 63 | XL(20) | **97%** | 19.40 | 19 卡全可点（目录驱动）+ 15 工具 mode 接线 + 通用工作台 + 11 个落地页；15 例 + 164 适配器例 + 19 项 E2E | 真实供应商 Key（全 mock，外部依赖）；其余已验：图片工具真实提交→worker→产物→现签 URL→浏览器可渲染 |
 | 7 | 团队 | 39 | XL(20) | **100%** | 20.00 | 33 端点：成员/分组/角色/积分池/流水导出 + **权限码目录 70 条（11 组）+ 角色权限矩阵读写（幂等）+ `temp-info` 模型开关矩阵**；`/team` 权限矩阵页签 | 无（6 个码已落拦截：team.edit / team.permission / member.create / member.remove / member.edit / member.points；默认放行策略保零回归） |
 | 8 | 影视版 | 37 | XL(20) | **100%** | 20.00 | 49 操作 + `/film`、`/film/[id]`；47 例 + 18 项 E2E | 无（xlsx 真导出 + 离线通知 webhook 投递均已完成；WS 真传输属网关部署项，不是功能缺口） |
-| 9 | CLI/MCP | 8 | L(8) | **97%** | 7.76 | **203 命令 / 38 组（161 可用 + 42 骨架）** + 退出码 0..11 + `workflow detect` 阶段机 + **`skill-path` 随包 Skill（43 文件，由 registry 渲染防漂移）**；**105 例**（含 2 例跨包「registry 路径 ↔ 后端路由」双向校验、4 例 ad/redraw 与后端 controller 对齐，全部反向验证过）；第 68 批把 `storyboard add`/`delete`/`batch-delete`/`num-update` 4 条由 `todo` 转 `http`（骨架 57→53）；第 70 批把 ad 组 3 条过期骨架 + redraw 2 条过期骨架接线并补齐 ad 到竞品同款 8 动词（骨架 53→48，命令 197→202）；第 71 批把 `episode delete`/`batch-create` 接到新增的 `DELETE …/episodes/:eid` 与 `POST …/episodes/batch`（骨架 48→46）；第 72 批把 `task delete`/`credits log` 接线（骨架 46→44、ready 156→158；当版误写成「48→46」，第 73 批校准）；第 73 批把 `resource get`/`batch-confirm` 接到新端点并新增 `resource batch-info`（骨架 44→42、ready 158→161、命令 202→203） | ~~MCP 0 行（需证据）~~ **第 61 批已据实修正**：竞品没有任何 MCP server 工具清单，其「MCP」= 侧栏 `menu.mcpCli` 入口（flag 门控）+ `integration_type=mcp` 归因参数 + `skill-path` 分发 Skill 包。我方 MCP 端点仍 0 行（无形状可对齐，不自造），缺口 0.24；~~浏览器 handoff 登录~~ **已实现**；~~36 条 ready 命令 path 缺 `canvas/` 前缀、实测全 404~~ **第 65 批已修**；~~ad/redraw 两组 reason 写着「当前无端点」但端点早已存在~~ **第 70 批已修**；剩余 42 条骨架命令（各自卡在后端未落地的端点，权重已计入对应模块） |
+| 9 | CLI/MCP | 8 | L(8) | **97%** | 7.76 | **203 命令 / 38 组（161 可用 + 42 骨架）** + 退出码 0..11 + `workflow detect` 阶段机 + **`skill-path` 随包 Skill（43 文件，由 registry 渲染防漂移）**；**105 例**（含 2 例跨包「registry 路径 ↔ 后端路由」双向校验、4 例 ad/redraw 与后端 controller 对齐，全部反向验证过）；第 68 批把 `storyboard add`/`delete`/`batch-delete`/`num-update` 4 条由 `todo` 转 `http`（骨架 57→53）；第 70 批把 ad 组 3 条过期骨架 + redraw 2 条过期骨架接线并补齐 ad 到竞品同款 8 动词（骨架 53→48，命令 197→202）；第 71 批把 `episode delete`/`batch-create` 接到新增的 `DELETE …/episodes/:eid` 与 `POST …/episodes/batch`（骨架 48→46）；第 72 批把 `task delete`/`credits log` 接线（骨架 46→44、ready 156→158；当版误写成「48→46」，第 73 批校准）；第 73 批把 `resource get`/`batch-confirm` 接到新端点并新增 `resource batch-info`（骨架 44→42、ready 158→161、命令 202→203） | ~~MCP 0 行（需证据）~~ **第 61 批已据实修正**：竞品没有任何 MCP server 工具清单，其「MCP」= 侧栏 `menu.mcpCli` 入口（flag 门控）+ `integration_type=mcp` 归因参数 + `skill-path` 分发 Skill 包。我方 MCP 端点仍 0 行（无形状可对齐，不自造），缺口 0.24；~~浏览器 handoff 登录~~ **已实现**；~~36 条 ready 命令 path 缺 `canvas/` 前缀、实测全 404~~ **第 65 批已修**；~~ad/redraw 两组 reason 写着「当前无端点」但端点早已存在~~ **第 70 批已修**；剩余 42 条骨架命令 —— **第 74 批逐条核账后不再写「权重已计入各模块」这种笼统说法**：42 条里 21 条的缺口确实在其它模块的缺口栏里（例：`material get`/`group execute` → #11、`novel config` → #2、`voice list` → #3 侧、xlsx 模板 4 条 → 各自主模块），另 21 条**只在这里记账**（`model price`、`subject batch-details`/`reset`、`asset-lib get`/`search`/`batch-delete`、`agent enter`/`run`、`file object`、`sync-fm` 等，见 §5.5 表 B）。故 0.24 不是重复计 |
 | 10 | 活动/创作者 | 67 | XL(20) | **100%** | 20.00 | **83 端点**（crc 32 + op 42 + campaign 9）+ 3 页面（创作者中心/活动/邀请）；审核状态机 / 点赞关注幂等 / 发分走账本 / 兑换码并发唯一键 / AB 一人一变体；41 例 | 无（平台运营审核队列已落：`GET/POST /ops/admin/creator-audits*` + 运营后台页签 + 浏览器 6/6） |
 
 ### 3.2 B 组：任务书额外模块
 
 | # | 模块 | 竞品端点 | 权重 | 完成 | 加权得分 | 我方现状 | 主要缺口 |
 |---:|---|---:|---:|---:|---:|---|---|
-| 11 | **无限画布** | 85 | XL(20) | **99%** | 19.80 | 86 端点 / 11 类节点 / 29 种 mode / **`nodes-recover`（快照只补缺失、不覆盖、软删不复活、不恢复悬挂边）**；82 单测 + 97 项 E2E | ~~无~~ **第 65 批判定**：竞品 `/df/canvas` 100 条 / 我方 87 条，但路径命名体系不同（我方集合式 `canvas/canvases/:id`、竞品把 id 挂域根），字符串比对无效；真实差是竞品有 `pinned-timelines` 4 条形状、我方没有，且**前端不消费该响应、无字段级证据** → 不凭空造，0.20 待外部证据（分数不变） |
+| 11 | **无限画布** | 85 | XL(20) | **99%** | 19.80 | 86 端点 / 11 类节点 / 29 种 mode / **`nodes-recover`（快照只补缺失、不覆盖、软删不复活、不恢复悬挂边）**；82 单测 + 97 项 E2E | ~~无~~ **第 65 批判定**：竞品 `/df/canvas` 100 条 / 我方 87 条，但路径命名体系不同（我方集合式 `canvas/canvases/:id`、竞品把 id 挂域根），字符串比对无效；**第 74 批核账后，这 0.20 对应的不是「无」，而是 4 个具名能力**（清单见 §5.5 表 B 的「只在 #9/#11 记账」列）：① 竞品 `pinned-timelines` 4 条形状（POST/GET/DELETE 单条/DELETE 全部）—— 前端不消费该响应、无字段级证据；② `group execute`（读「整组节点一起提交生成」，我方只有逐节点 `node generate`）；③ `group template-get`（读「单个组模板详情」，我方只有 `group-templates` 列表）；④ `material batch-add`（读「一次加多个素材」，我方只有逐条 `materials`）。四项都**没有竞品响应体证据**，按「不凭形状造语义」的既有规矩不实现 → 0.20 记在竞品证据上（分数不变） |
 | 12 | 剧本广场（novel_market） | 29 | L(8) | **92%** | 7.36 | **58 端点**（market 36 + admin 22，竞品 29+12 全覆盖）+ 3 页面；购买走 `creditOut(consume)` 事务内、提现状态机不可跳步（advisory lock 保唯一待审）、收益只累计、内容树购买后可读；32 例 | 真实打款（资质/合规）；买断后二次改编；作品解析是结构解析（竞品产出未取证） |
 | 13 | 广告剧（drama_ad） | 15 | M(3) | **97%** | 2.91 | **12 端点**（`/ad-drama/projects/*` 五段）+ 2 页面（create/workspace）+ 13 例；`project_mode=2` + `mode_meta`；每步回显消耗积分 | 竞品 STAGE/STATUS 值域未取证（我方定义）；真实出片依赖供应商 Key（浏览器五段 E2E 已通过 12/12） |
 | 14 | 视频转绘 | 8 | M(3) | **97%** | 2.91 | **9 端点**（竞品 8 + 1 列表）+ 2 页面 + 14 例；`project_mode=3`；`episode_ranges` 让分镜计划直接取切集区间 | 真实重绘能力（无 Key，mock）；`redraw_strength` 在 mock 下无可见差异（浏览器四段 E2E 已通过 11/11） |
@@ -292,7 +292,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ## 5. 缺口清单（按剩余加权工作量排序）
 
-剩余总权重 **3.55**（1.8%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径 / 排一轮工程"。
+剩余总权重 **3.55**（1.8%）。**没有整块未做**——全部是"补一个外部能力 / 补一条证据 / 补一个口径 / 排一轮工程"。第 74 批把这 19 行**逐条核了账**（判据 E 外部输入 / B 产品一句话 / I 内部可做，见 §5.5）：**E = 2.83、B = 0.635、I = 0.085、测量缺陷 = 0**。
 下表按**模块实际扣分**逐项列出（数字由各模块行 `权重 ×(1−完成度)` 直接得出，合计恰为 3.55）：
 
 | 排名 | 模块 | 权重 | 剩余 | 具体缺什么 | 卡在谁 |
@@ -346,11 +346,11 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 
 ### 5.2 排序修正建议
 
-剩下 3.55 里，**代码侧已无"整块"可独立推进**——A 类那 0.18（#5 项目分组与五档分类）已在第 63 批清掉；Agent 的 Skill 市场形状也在第 64 批补齐；
+剩下 3.55 里，**代码侧已无"整块"可独立推进**——A 类那 0.18（#5 项目分组与五档分类）已在第 63 批清掉；Agent 的 Skill 市场形状也在第 64 批补齐；第 74 批核账后又确认：不需要任何外部输入、只是没排期的只剩 **0.085**（§5.5 表 A 的 I 类）。
 全部 **3.55 卡在外部依赖、竞品取证或产品口径**。
 
 → 从第 46 批起已进入**外部依赖清单**阶段（见 §5.3）：需要产品/商务/法务一起提供东西，否则进度会长期停在 98.3%。
-代码侧仍可独立推进的收尾项只剩：① B 类里那 0.09（#5 剩余：影视版是否合流，产品一句话）；② §5.4 里你一句话能拍的口径（按口径实现即得分）。
+代码侧仍可独立推进的收尾项只剩三类：① **I 类 0.085**（#18 知识库条目级字段 `cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data` 0.015，证据已有；#19 双浏览器上下文 E2E 0.03；#3 真 ffmpeg 切片进 worker handler 0.02；#9 `agent enter`/`run` 的 REPL 与 SSE 流式 0.02）——我可以直接排期，不等人；② **B 类 0.635**（其中 §5.4 那四条 0.26 是一句话就能拍、拍完立刻能做的；其余是 #4 推荐位编排、#12 二次改编许可、#5 影视版合流这类长链路产品项）；③ **E 类 2.83 全部等外部输入**（凭据/资质/渠道测试号/竞品响应体证据/法务文案）。
 
 ### 5.3 外部依赖清单（剩余 3.55 到底卡在谁手上）
 
@@ -359,7 +359,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | # | 缺口 | 权重 | 卡在哪 | 需要谁提供什么 | 拿到后预计 |
 |---:|---|---:|---|---|---:|
 | 1 | **Agent**：真实 ASR + 运营位内容 | **0.80** | ASR 无语音服务凭据（现诚实返回 `available:false`，约 0.60）；~~Skill 档位与竞品对齐需竞品清单~~ **第 64 批已据实修正**：清单已取到（9 条端点 + 4 个 query 参数）并全部实现，剩下的 0.20 是**广场卡内容与首页推荐位编排**——竞品只暴露接口形状，没有数据证据，不自造。 | 商务：ASR 账号（阿里/讯飞/字节任一）；产品/运营：推荐位编排口径 | 0.60 全清 / 0.20 需口径 |
-| 2 | **CLI/MCP**：42 条骨架命令 + MCP 端 | 0.24 | ~~竞品证据缺位~~ **第 61 批已据实修正**：竞品从 606 个 js 里 `mcp` 仅 3 处命中（侧栏 `menu.mcpCli` 入口 + `integration_type=mcp`/`client_source=cli|web` 归因参数），**不存在 MCP server 工具清单**——"等竞品给清单"这个假设不成立；`skill-path` 分发通道已落地。第 68/70/71/72/73 批把 `storyboard`×4、ad×5、`episode`×2、`task delete`、`credits log`、`resource`×2 共 15 条转 ready（骨架 57→42），其余各自卡在对应后端端点未落地（权重已计入各模块），MCP 端因无形状可对齐**不实现** | 后端端点（各模块内）+ 竞品证据（若有） | 0.24 → 骨架随端点落地自然收敛 |
+| 2 | **CLI/MCP**：42 条骨架命令 + MCP 端 | 0.24 | ~~竞品证据缺位~~ **第 61 批已据实修正**：竞品从 606 个 js 里 `mcp` 仅 3 处命中（侧栏 `menu.mcpCli` 入口 + `integration_type=mcp`/`client_source=cli|web` 归因参数），**不存在 MCP server 工具清单**——"等竞品给清单"这个假设不成立；`skill-path` 分发通道已落地。第 68/70/71/72/73 批把 `storyboard`×4、ad×5、`episode`×2、`task delete`、`credits log`、`resource`×2 共 15 条转 ready（骨架 57→42），其余 42 条经第 74 批逐条核账：**21 条的缺口已在其它模块记账、21 条只在 #9 记账**（清单见 §5.5 表 B），所以 0.24 不是重复计；MCP 端因无形状可对齐**不实现** | 后端端点（各模块内）+ 竞品证据（若有） | 0.24 → 骨架随端点落地自然收敛 |
 | 3 | **剧本广场**：真实打款 | 0.64 | 商户资质：分账/代付需主体资质与支付通道签约 | 商务/财务：支付通道 + 分账权限 | 0.64 → 全清 |
 | 4 | **工具箱**：真实供应商 Key | 0.60 | 无凭据：`ADAPTER_MODE=mock` 下所有生成走占位字节 | 商务：至少 1 家真实供应商 Key + 额度预算 | 0.60 → 全清 |
 | 5 | **多模块"最后一项"** | **1.17** | 多数需**产品定义或凭据**：广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库条目级字段未落库（0.015）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07）。**（第 62 批移出"画布封面 0.30"、第 63 批移出"项目分组 0.18"，均已实现）** | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
@@ -394,6 +394,62 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
   **实测该前提不成立**：Nest 的 `FastifyAdapter` 自 v10 起默认注册了 `application/x-www-form-urlencoded` 解析器
   （`registerParserMiddleware`），本批新增的 e2e 用例（表单 POST + 真实 state → 登录成功）一次通过即证明了这一点。
   所以 `form_post` 从来不是缺口，只有验签是。这条已登记以免下轮再犯。
+
+### 5.5 逐项核账（第 74 批：每个未满 100% 的行都必须指到一个具名阻塞项）
+
+> **为什么做这次核账**：这份台账反复出现过三种「没有出处的扣分」——① 缺口栏写「~~无~~」但完成度是 99%；
+> ② 缺口栏写「权重已计入各模块」却不说是哪几条；③ 缺口栏写「待取证」但没写待哪一份证据。
+> 这类说法在 98% 以上时最危险：它让人以为「还有活没干」，实际可能是账错了，也可能是自己发明的缺口。
+> 本批把 **19 个未满 100% 的行**逐条对着代码/配置/竞品清单核了一遍，判据只有三类：
+>
+> - **E = 外部输入**：能指到具体凭据、资质、渠道测试号或竞品字段证据（不是「大概要等」）；
+> - **B = 产品一句话**：口径二选一，确认即可实现（已单列在 §5.4，合计 0.26）；
+> - **I = 内部可做**：不需要任何外部输入，只是还没排期。
+>
+> **核账结果：E = 2.83、B = 0.635、I = 0.085、测量缺陷 = 0**（合计 3.55，三个数由表 A 的逐行标签相加得出）。
+> 也就是说：**分数没有记错，错的是两处措辞**（#11 的「无」、#9 的「都计在别处」），本批已改。
+> 三个数由表 A 的逐行标签相加得出（不是按 §5.4 反推）。**B 的 0.635 比 §5.4 那 0.26 大**：
+> §5.4 只列「一句话就能拍、拍完我立刻能实现」的四条（0.26）；B 里还有 #4 的推荐位编排 0.20、
+> #12 的二次改编许可 0.20、#5 的影视版合流 0.09 这类**需要更长链路或内容输入**的产品项。
+
+**表 A：19 个未满 100% 的模块逐条核账**
+
+| 模块 | 剩余 | 判据 | 具名阻塞项（不写「待取证」这种没收货人的话） | 证据锚点 |
+|---|---:|---|---|---|
+| #2 小说改编链 | 0.16 | E | `characters/*` 5 条**有意不单列**（角色卡走既有 content-analysis，已登记理由）；结局分支字段无竞品证据 | `novel-original.controller.ts:25-33` 注释；`competitor_endpoints.tsv` 无分支字段 |
+| #3 剧集与分镜 | 0.15 | E 0.13 + I 0.02 | `quality-check` 评分口径自建（竞品只有路由、响应字段为空 schema）；真 ffmpeg 切片裁剪待 worker handler（I） | `ApiDfEpisodeEpIdQualityCheckPostRequestConfig` 的 `requestDataJsonSchema` 是 `{}`；#20 的 `ffmpeg-trim` 可复用 |
+| #4 创作 Agent | 0.80 | E 0.60 + B 0.20 | ASR 无语音服务凭据（`GET /agent/stt-token` 诚实返回 `available:false`）；广场卡内容与首页推荐位编排只有接口形状 | `agent-stt.service.ts:13-23` 注释；`competitor_endpoints.tsv` 的 `is_home_recommend` 无内容数据 |
+| #5 全部项目 | 0.09 | B | 影视版 FILM 档是否合流到 `/works`；五档 tab 是否替代形态 tab | §5.3 第 7 行 |
+| #6 工具箱 | 0.60 | E | 真实供应商 Key（`ADAPTER_MODE=mock` 下产物是占位字节） | `apps/api/src/config/env.ts` 的 `ADAPTER_MODE`；adapters 164 例 |
+| #9 CLI/MCP | 0.24 | E 0.22 + I 0.02 | 42 条骨架：21 条缺口在别的主模块记账、21 条只在这里（表 B）；`agent enter`/`run` 的 REPL 与 SSE 流式是 CLI 侧未接（I，API 已有） | `apps/cli/dist/registry.js` 实测 203 命令 / 161 ready / 42 骨架 |
+| #11 无限画布 | 0.20 | E | 4 个具名能力：`pinned-timelines` ×4 形状、`group execute`、`group template-get`、`material batch-add`（都无响应体证据） | §3.3 #11 缺口栏（本批改写）；`_r65_canvas_cmp.py` 的路径比对**不可用**（命名体系不同，已登记） |
+| #12 剧本广场 | 0.64 | E 0.44 + B 0.20 | 真实打款需商户资质与分账签约（`PAYMENT_LIVE=false` 时非 mock 渠道直接拒）；买断后二次改编许可范围（B） | `env.ts:58` 注释；§5.4 第 3 条 |
+| #13 广告剧 | 0.09 | E | 真实出片依赖供应商 Key；竞品 STAGE/STATUS 值域未取证（我方自定义） | `ad-drama.service.ts` 六处 `credits.price()`；`competitor_endpoints.tsv` 无值域 |
+| #14 视频转绘 | 0.09 | E | 真实重绘能力（无 Key，mock）；`redraw_strength` 在 mock 下无可见差异 | `redraw.service.ts:53` `REDRAW_STYLES`；E2E 11/11 只是链路 |
+| #15 后处理族 | 0.03 | E | 真实供应商 Key；多框区域需 provider 支持证据 | `video-upscale.vue` 已诚实标注「仅选中框生效」 |
+| #16 多语言 | 0.01 | E 0.01 | privacy/terms 两页法务文案（原则不机翻）；韩语未排期 | §2.2.1 残留中文说明 |
+| #17 资产/主体 | 0.08 | B | `prompt_inject_mode=replace` 是替换占位符还是整段（§5.4 第 2 条）；`prompt_blocked` 需竞品字段 | `asset-match.service.ts:632` 注释 |
+| #18 团队知识库 | 0.015 | I | 条目级字段未落库：`cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data`（**证据已有**，只是没排期） | §9 v8.3 的竞品字段清单 |
+| #19 3D 导演台 | 0.03 | I | 真实双人协同只验了「单浏览器 + Redis 造第二人」，缺双浏览器上下文 E2E | `director.spec.ts` 的 `shapeOf()` 结构等价断言 |
+| #20 ReelFlow | 0.08 | E | 切片业务语义的竞品字段证据（真 ffmpeg 裁剪与 worker 下沉都已落地） | §9 v8.0/v8.1 |
+| #22 账号/鉴权 | 0.15 | E 0.10 + B 0.05 | 真实渠道联调无测试账号（4 渠道未配置即 400101）；OAuth↔手机号账号合并（B） | `oauth.service.ts:11` 注释「未配置渠道绝不返回假成功」；`apple-id-token.ts:174` |
+| #23 计费/订阅 | 0.015 | B | 升级补差价按天折算还是按档补差（§5.4 第 1 条） | §5.4 第 1 条 |
+| #25 内容安全 | 0.08 | E | 真实审核供应商无 Key（现 `available:false` + 本地算术题，已诚实标注为弱门槛） | §3.3 #25 缺口栏 |
+
+**表 B：42 条 CLI 骨架的归属（决定 #9 的 0.24 是不是重复计）**
+
+| 归属 | 条数 | 例子 |
+|---|---:|---|
+| ① 能力缺口**已在其它模块**的缺口栏里（不重复扣） | 21 | `material get`/`material batch-add`/`group execute`/`group template-get`（→ #11）；`novel config`（→ #2）；xlsx 模板 4 条 `storyboard prompt-template`/`sheet-read`、`resource prompt-template`/`prompt-sheet-read`、`episode prompt-templates`（→ 各自主模块）；`subject from-resource`（→ #17）等 |
+| ② **只在 #9 记账**（其它模块没扣过） | 21 | `model price`、`subject batch-details`、`subject reset`、`asset-lib get`/`search`/`batch-delete`、`file object`、`agent enter`/`run`、`sync-fm`、`storyboard batch-add`、`clip create`/`crop`、`ai upscale`/`subtitle-erase`、`export download`、`voice list`、`material confirm`、`asset-lib resource-list`/`tag-add`/`move` 中未被组合覆盖的部分 |
+| ③ 组合可达（不是缺口，只是没有单命令） | 由 ① 内含 | `asset-lib tag-add`/`move` 可用 `PATCH /assets/:id` 的 `tags`/`folder_id`；`file metadata` 在 `task get` 的 results 里；`group execute` 可循环 `node generate` |
+
+> **结论**：42 条不是「42 个能力缺口」。①+③ 已在别处记账或根本不是缺口；②那 21 条才是 #9 自己的账，
+> 因此 **0.24 不构成重复计**。此前 §3.3 #9 与 §5.3 第 2 行写成「权重已计入各模块」是**过宽的说法**，
+> 本批已按 21/21 的分账改写。
+
+**这次核账之后可以明确的一句话**：98.3%（202.45/206）里，**代码侧只剩 0.085 是「不需要任何外部输入、只是没排期」**（#18 条目级字段 0.015 + #19 双浏览器 E2E 0.03 + #3 真 ffmpeg 切片 0.02 + #9 agent REPL/SSE 0.02）；**B 类 0.635 需要产品一句话**（其中 §5.4 那四条 0.26 拍完我立刻能做）；
+**其余 E 类 2.83 都必须等外部输入**（凭据 / 资质 / 渠道测试号 / 竞品响应体证据 / 法务文案）。
 
 ---
 
