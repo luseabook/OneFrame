@@ -4797,3 +4797,83 @@ X-Space-Id: <space_id>
 1. 竞品 29 条消费侧端点里**只有 4 条带 query 证据**，其余 25 条 `QUERY` 是空数组 —— 这只说明抓取时没记到参数，**不代表竞品没有参数**。所以"字段级已对齐"的范围是这 4 条。
 2. 只比 query，**body 一律未验**（`POST /creator/works/save`、`POST /scripts/{id}/preorder` 的请求体无竞品证据）。
 3. 管理侧那 3 处修复**按 #27 记账**，本批没动 #27 那组的守卫断言（它只锁 METHOD+path）。
+
+## 17.52 团队域（cam）的 query 参数：50 个竞品参数里 12 个有意不接（第 95 批 · #7）
+
+客户端契约级说明。本批**没有新增路由**（端点 778 不变），改的是 `/cam/*` 既有端点的
+**query 参数处置**：竞品 9 条端点共 **50 个参数**，我方此前只接 26 个，现在接 38 个。
+
+### 52.1 背景：静默丢弃不报错
+
+第 94 批在 `/market/*` 上确认过这个失效模式，本批把它做成全站扫描器后确认它在 cam 也存在：
+
+```
+GET /v1/cam/team/points-flow/list?op_user_name=张三
+→ HTTP 200, { code: 0, data: { list: [<全部流水>], total: <全部> } }
+```
+
+`@Query("x")` 未声明 ⇒ Fastify 不报错、zod 不校验 ⇒ 参数被丢弃。**客户端以为筛过了。**
+
+### 52.2 本次补齐的 12 个参数
+
+| 端点 | 新增参数 | 语义 |
+| --- | --- | --- |
+| `GET /v1/cam/team/points-flow/list` | `create_time_start`、`create_time_end`、`op_type`、`op_user_name`、`target_user_name` | 见 52.3 |
+| `GET /v1/cam/team/points-flow/export` | 同上 5 个 | 与 list **同一组**筛选（保证导出 = 屏幕上那批） |
+| `GET /v1/cam/team/members` | `nick`、`remark`、`role_ids`、`has_group`、`include_descendants` | 见 52.4 |
+| `GET /v1/cam/team/member/export` | 同上 5 个 | 与 members **同一组**（此前写死 100 行且忽略筛选） |
+| `GET /v1/cam/team/project-points-flow/export` | `page`、`page_size` | 对筛选后集合开窗；不传 = 全量（仍受 5000 行上限） |
+
+### 52.3 流水筛选的三个细节
+
+1. **`op_type` 就是 `kind`**，同一列（`credit_flows.kind`）的两个名字。两个都传且**不一致** → `400101`：
+   ```json
+   { "code": 400101, "msg": "kind and op_type disagree; they are the same field", "data": null }
+   ```
+   为什么不静默取其一：调用方若同时写了两个不同的值，说明它自己也不确定要筛什么，静默取其一会让返回结果看起来"对"。
+
+2. **`op_user_name` 与 `target_user_name` 来源不同**：
+   - `op_user_name` → join `users.nickname`（操作者的**当前**昵称）
+   - `target_user_name` → join `space_members.nickname`（目标成员的**成员快照**昵称）
+   两者可以是不同的字符串（成员改过昵称后不会回溯改 `users`）。测试里专门造了「users 昵称 ≠ 成员昵称」来钉住这一点。
+
+3. **时间范围是闭区间**（`created_at >= start` 且 `<= end`），解析失败的时间串按**未传**处理（不报错、不过滤）。
+
+### 52.4 成员筛选的两个细节
+
+1. **`include_descendants`**（`1`/`true`）：给了 `group_id` 时把该分组**整棵子树**展开。
+   不开时只命中直属分组。实现是 BFS + **10 层上限**（防人工改 `parent_id` 造出的环导致死循环）。
+   `total` 跟着展开后的结果走 —— 不会出现「列出 3 人、total 写 1」。
+
+2. **`has_group`**（`1`/`0`）：`group_id is not null` / `is null`。与 `group_id` 同时给时 `group_id` 优先。
+
+3. **`role_ids`**：逗号分隔或重复参数都接受，走 `space_members.role_id`（**自定义角色 id**，不是 `role_code`）。
+
+### 52.5 有意不接的 12 个参数
+
+| 参数 | 处数 | 理由 |
+| --- | ---: | --- |
+| `op_user_account`、`target_user_account`、`account` | 6 | **`space_members.account` 是死列**（两处 `insert(spaceMembers)` 都不写它），且手机号仅存 `phone_hash`(HMAC) + `phone_cipher`(AES-GCM)，**无法模糊检索** |
+| `sp_ids` | 2 | 需 join `team_member_projects` 再聚合，属跨表新口径 |
+| `team_id` | 1 | 一人一团队，team 从 token 取（第 92 批已登记） |
+| `view` | 1 | `groups?view=` 在我方只有一种视图 |
+
+**判据（与第 94 批 #12 的 `parent_id` 一致）**：接一个恒空过滤器比不接更坏 ——
+客户端会以为"筛了但没数据"，而不是"这个参数没实现"。
+
+### 52.6 测试与守卫
+
+- 功能：`app/apps/api/test/team-query-parity.spec.ts` **5 例**——
+  成员的 5 个新筛参、`include_descendants` 三级子树、导出与列表同口径（CSV 行数精确校验）、
+  流水的时间/`op_type`/人名筛选（含冲突 400101）、`target_user_name` 走成员快照而非 `users`。
+- 守卫：`competitor-route-parity.spec.ts` **+1 例**（23→24）「#7 的 50 个竞品 query 参数 = 38 已接 + 12 有意不接」，
+  逐 handler 切片断言 `@Query` 键 + service 层 SQL + **死列不许被接**（`not.toMatch`）。
+- 反向验证：`_r95_break.py break|restore` 把 `op_user_name` 改名 → 守卫 1 红 + 功能 1 红；恢复后 29 绿。
+
+### 52.7 边界（诚实说明）
+
+1. **扫描器只覆盖 55 条**映射成功的端点，另有 **98 条未映射**（`/df/*` 前缀族为主）——那部分字段级完全没查。
+2. **只比 query，body 未验**：`POST /cam/team/batch-points-allocation`、`POST /cam/team/member/batch/status` 等请求体无竞品证据。
+3. **「`account` 是死列」是读代码得出的**，非运行时验证；若邀请流程将来开始写它，这条豁免要立刻改为可做。
+4. **`include_descendants` 的 10 层上限、`op_type`/`kind` 的冲突 400101、导出分页语义**都是我方定的口径，竞品侧无证据。
+5. **成员导出上限 5000 行**（原写死 100）：团队是几十~几百人量级，超限时请用筛选分批导。

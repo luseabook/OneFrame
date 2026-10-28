@@ -384,9 +384,41 @@ export class TeamService {
     return { updated: input.user_ids.length };
   }
 
-  /** 成员 CSV 导出（对齐参照 member/export） */
-  async membersCsv(spaceId: string): Promise<string> {
-    const data = await this.listMembers(spaceId, 1, 100, undefined, undefined, undefined);
+  /**
+   * 成员 CSV 导出（对齐参照 member/export）。
+   *
+   * 第 95 批：改成**与列表同一组筛选**。此前它写死 `listMembers(spaceId, 1, 100)` ——
+   * 既忽略竞品那 11 个 query 参数，又硬截 100 行：导出的内容和列表看到的对不上，
+   * 而运营导表正是为了"把筛出来的这批人拿走"。现在按同一 `extra` 过滤，上限 5000 行。
+   */
+  async membersCsv(
+    spaceId: string,
+    extra: {
+      group_id?: string;
+      role_code?: string;
+      status?: string;
+      nick?: string;
+      remark?: string;
+      role_ids?: string;
+      has_group?: string;
+      include_descendants?: string;
+    } = {},
+  ): Promise<string> {
+    const data = await this.listMembers(
+      spaceId,
+      1,
+      5000,
+      extra.group_id,
+      extra.role_code,
+      extra.status === undefined || extra.status === "" ? undefined : Number(extra.status),
+      {
+        nick: extra.nick,
+        remark: extra.remark,
+        role_ids: extra.role_ids,
+        has_group: extra.has_group,
+        include_descendants: extra.include_descendants,
+      },
+    );
     const rows = data.list as Array<Record<string, unknown>>;
     const header = ["user_id", "nickname", "account", "role_code", "group_id", "credits_quota", "status", "remark"];
     const esc = (v: unknown): string => {
@@ -639,14 +671,62 @@ export class TeamService {
     status: r.status,
   });
 
-  // ── 成员 ────────────────────────────────────────────────
-  async listMembers(spaceId: string, page = 1, pageSize = 20, groupId?: string, roleCode?: string, status?: number) {
+  /**
+   * 成员列表。
+   *
+   * 第 95 批：竞品 `cam/team/:team_id/members` 的 QUERY 有 11 个参数，我方此前只收 5 个
+   * （page/page_size/group_id/role_code/status），其余被丢弃 → 「按昵称/按角色集/按是否分组」
+   * 筛选全部失效。补的判据：
+   * - `nick` / `remark`：`space_members.nickname` / `.remark` 明文列 → 模糊匹配，真能做；
+   * - `role_ids`（逗号分隔或重复）：`space_members.role_id` → `inArray`；
+   * - `has_group`（1/0）：`group_id is not null` / `is null`；
+   * - `include_descendants`：`team_groups.parent_id` 是树 → 给了 `group_id` 时把它整棵子树展开；
+   * - `account` / `sp_ids`：**有意不接**。`space_members.account` 是从未写入的死列
+   *   （两处 `insert(spaceMembers)` 都不带它），接了就恒空；`sp_ids`（成员参与的项目）
+   *   要 join `team_member_projects` 再聚合，属跨表新口径，留给产品确认后再做。
+   */
+  async listMembers(
+    spaceId: string,
+    page = 1,
+    pageSize = 20,
+    groupId?: string,
+    roleCode?: string,
+    status?: number,
+    extra: {
+      nick?: string;
+      remark?: string;
+      role_ids?: string;
+      has_group?: string;
+      include_descendants?: string;
+    } = {},
+  ) {
     const p = Math.max(1, page);
     const ps = Math.min(100, Math.max(1, pageSize));
     const cond = [eq(spaceMembers.spaceId, BigInt(spaceId))];
-    if (groupId) cond.push(eq(spaceMembers.groupId, BigInt(groupId)));
     if (roleCode) cond.push(eq(spaceMembers.roleCode, roleCode));
     if (status !== undefined) cond.push(eq(spaceMembers.status, status));
+
+    // 分组过滤：给了 group_id 且要含下级 → 展开整棵子树（否则只命中直属分组）
+    if (groupId) {
+      const ids = await this.groupSubtreeIds(spaceId, groupId, extra.include_descendants === "1" || extra.include_descendants === "true");
+      cond.push(inArray(spaceMembers.groupId, ids.map((id) => BigInt(id))));
+    } else if (extra.has_group === "1" || extra.has_group === "true") {
+      cond.push(sql`${spaceMembers.groupId} is not null`);
+    } else if (extra.has_group === "0" || extra.has_group === "false") {
+      cond.push(sql`${spaceMembers.groupId} is null`);
+    }
+
+    if (extra.nick) cond.push(ilike(spaceMembers.nickname, `%${extra.nick}%`));
+    if (extra.remark) cond.push(ilike(spaceMembers.remark, `%${extra.remark}%`));
+    if (extra.role_ids) {
+      const ids = extra.role_ids
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => BigInt(s));
+      if (ids.length > 0) cond.push(inArray(spaceMembers.roleId, ids));
+    }
+
     const where = and(...cond);
     const rows = await db
       .select()
@@ -662,6 +742,47 @@ export class TeamService {
       page: p,
       page_size: ps,
     };
+  }
+
+  /**
+   * 取一个分组及其（可选）所有后代的 id。
+   *
+   * 为什么要这个方法：`team_groups.parent_id` 是自引用树，而 `include_descendants`
+   * 是竞品 `members` 端点上的真实参数。用循环逐层展开而不是递归 CTE ——
+   * 团队分组是**人工维护的个位数~十位数层级**，循环上限（10 层）足够，
+   * 且不引入 PG 专属语法（本地/CI 换库不会炸）。
+   */
+  private async groupSubtreeIds(spaceId: string, rootGroupId: string, includeDescendants: boolean): Promise<string[]> {
+    const all = await db
+      .select({ id: teamGroups.id, parentId: teamGroups.parentId })
+      .from(teamGroups)
+      .where(eq(teamGroups.spaceId, BigInt(spaceId)));
+    const root = String(rootGroupId);
+    if (!includeDescendants) return [root];
+
+    const childrenOf = new Map<string, string[]>();
+    for (const g of all) {
+      const pid = g.parentId ? String(g.parentId) : null;
+      if (!pid) continue;
+      const arr = childrenOf.get(pid) ?? [];
+      arr.push(String(g.id));
+      childrenOf.set(pid, arr);
+    }
+    // BFS + 层级上限：即使数据里有环（人工改 parent 造出来的），也不会死循环
+    const out: string[] = [];
+    const seen = new Set<string>();
+    let frontier = [root];
+    for (let depth = 0; depth < 10 && frontier.length > 0; depth += 1) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+        next.push(...(childrenOf.get(id) ?? []));
+      }
+      frontier = next;
+    }
+    return out;
   }
 
   /** 成员行 → 契约 DTO（列表与详情共用，避免两处字段漂移） */
@@ -1018,53 +1139,143 @@ export class TeamService {
     return { items: results, succeeded, failed: results.length - succeeded };
   }
 
-  /** 流水筛选条件（列表与导出共用，避免两边筛选语义漂移） */
+  /**
+   * 流水筛选条件（列表与导出共用，避免两边筛选语义漂移）。
+   *
+   * 第 95 批扩了 4 个维度（竞品 `cam/team/points-flow/{list,export}` 的 QUERY 有、我方此前丢弃）：
+   * - `create_time_start` / `create_time_end`：`credit_flows.created_at` 范围（闭区间）；
+   * - `op_type`：竞品把流水类型叫 `op_type`，我方列是 `credit_flows.kind` → **同一列的两个名字**；
+   *   两个都给（`kind` 是老调用方，`op_type` 是照竞品写的调用方），同时给则必须一致；
+   * - `op_user_name`：操作者昵称模糊（`users.nickname` 明文）。**刻意不做 `op_user_account`**：
+   *   `space_members.account` 是一列从未被写入的**死列**（`insert(spaceMembers)` 两处都不带它），
+   *   手机号又以 `phone_hash`(HMAC) + `phone_cipher`(AES-GCM) 存储、无法模糊检索 ——
+   *   接一个恒空的账户搜索比不接更坏（这条判据与第 94 批 #12 的 `parent_id` 一致）。
+   * - `target_user_name`：目标成员昵称模糊。
+   *
+   * 名字筛选需要 join `users`，所以这里返回 `{where, needsUserJoin}`，
+   * 由调用方决定是否加 join（导出同样走这里，保证两边口径一致）。
+   */
   private pointsFlowWhere(
     spaceId: string,
-    opts: { kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+    opts: {
+      kind?: string;
+      target_user_id?: string;
+      group_id?: string;
+      op_user_id?: string;
+      create_time_start?: string;
+      create_time_end?: string;
+      op_type?: string;
+      op_user_name?: string;
+      target_user_name?: string;
+    } = {},
   ) {
     const cond = [
       eq(creditFlows.spaceId, BigInt(spaceId)),
       sql`${creditFlows.kind} in ('team_allocate_out','team_allocate_in','team_recover_out','team_recover_in')`,
     ];
-    if (opts.kind) cond.push(eq(creditFlows.kind, opts.kind));
+    // `kind` 与 `op_type` 是同一列的两个名字；两个都给时必须一致，否则是调用方自相矛盾
+    if (opts.kind && opts.op_type && opts.kind !== opts.op_type) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "kind and op_type disagree; they are the same field", {
+        field: "op_type",
+      });
+    }
+    const kind = opts.kind ?? opts.op_type;
+    if (kind) cond.push(eq(creditFlows.kind, kind));
     if (opts.target_user_id) cond.push(eq(creditFlows.refUserId, BigInt(opts.target_user_id)));
     if (opts.group_id) cond.push(eq(creditFlows.groupId, BigInt(opts.group_id)));
     if (opts.op_user_id) cond.push(eq(creditFlows.opUserId, BigInt(opts.op_user_id)));
-    return and(...cond);
+
+    const from = this.timeOrNull(opts.create_time_start);
+    const to = this.timeOrNull(opts.create_time_end);
+    if (from) cond.push(gte(creditFlows.createdAt, from));
+    if (to) cond.push(lte(creditFlows.createdAt, to));
+
+    // 名字筛选走 `users`（操作者）与 `spaceMembers`（目标成员的昵称快照）
+    let needsUserJoin = false;
+    let needsMemberJoin = false;
+    if (opts.op_user_name) {
+      cond.push(ilike(users.nickname, `%${opts.op_user_name}%`));
+      needsUserJoin = true;
+    }
+    if (opts.target_user_name) {
+      cond.push(ilike(spaceMembers.nickname, `%${opts.target_user_name}%`));
+      needsMemberJoin = true;
+    }
+    return { where: and(...cond), needsUserJoin, needsMemberJoin };
   }
 
   /**
-   * 团队积分流水（含 8 个筛选维度，对应参照 points-flow/list）
+   * 团队积分流水（对应参照 points-flow/list）。
+   *
+   * 第 95 批筛选维度从 6 个补到 10 个（竞品 QUERY 里被丢弃的 4 个）。
+   * 名字筛选要 join，**列表与导出必须走同一组 join**，否则 `total` 与 `list` 会对不上
+   * （`where` 用了 users 而 count 没 join，count 会直接报 SQL 错）。
    */
   async listPointsFlows(
     spaceId: string,
-    opts: { page?: number; page_size?: number; kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+    opts: {
+      page?: number;
+      page_size?: number;
+      kind?: string;
+      target_user_id?: string;
+      group_id?: string;
+      op_user_id?: string;
+      create_time_start?: string;
+      create_time_end?: string;
+      op_type?: string;
+      op_user_name?: string;
+      target_user_name?: string;
+    } = {},
   ) {
     const p = Math.max(1, opts.page ?? 1);
     const ps = Math.min(100, Math.max(1, opts.page_size ?? 20));
-    const where = this.pointsFlowWhere(spaceId, opts);
-    const rows = await db
-      .select()
-      .from(creditFlows)
+    const { where, needsUserJoin, needsMemberJoin } = this.pointsFlowWhere(spaceId, opts);
+    const base = () => {
+      // 一律显式 `select({ creditFlows })`：`select()` 在**无 join** 时返回扁平行、
+      // 有 join 时返回 `{creditFlows: …}` —— 两种形状混用会让 map 静默拿到 undefined。
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- drizzle 的 builder 在条件 join 下类型会退化成 any
+      let q: any = db.select({ creditFlows }).from(creditFlows);
+      if (needsUserJoin) q = q.leftJoin(users, eq(users.id, creditFlows.opUserId));
+      if (needsMemberJoin) {
+        q = q.leftJoin(
+          spaceMembers,
+          and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, creditFlows.refUserId)),
+        );
+      }
+      return q;
+    };
+    const rows = await base()
       .where(where)
       .orderBy(desc(creditFlows.createdAt))
       .limit(ps)
       .offset((p - 1) * ps);
-    const [cnt] = await db.select({ n: sql<number>`count(*)::int` }).from(creditFlows).where(where);
+
+    // count 用同一条 join 链，只换 select 列
+    let cntQ: any = db.select({ n: sql<number>`count(*)::int` }).from(creditFlows);
+    if (needsUserJoin) cntQ = cntQ.leftJoin(users, eq(users.id, creditFlows.opUserId));
+    if (needsMemberJoin) {
+      cntQ = cntQ.leftJoin(
+        spaceMembers,
+        and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, creditFlows.refUserId)),
+      );
+    }
+    const [cnt] = await cntQ.where(where);
+
     return {
-      list: rows.map((r) => ({
-        id: String(r.id),
-        kind: r.kind,
-        delta: r.delta,
-        balance_after: r.balanceAfter,
-        target_user_id: r.refUserId ? String(r.refUserId) : null,
-        from_space_id: String(r.spaceId),
-        to_space_id: r.refSpaceId ? String(r.refSpaceId) : null,
-        op_user_id: r.opUserId ? String(r.opUserId) : null,
-        group_id: r.groupId ? String(r.groupId) : null,
-        memo: r.memo,
-        created_at: r.createdAt.toISOString(),
+      // join 之后行形状是 `{credit_flows: row, users?: …, space_members?: …}`；
+      // 这里取 `creditFlows` 那一层，保证**返回形状与不带 join 时完全一致**
+      list: rows.map((r: { creditFlows: typeof creditFlows.$inferSelect }) => ({
+        id: String(r.creditFlows.id),
+        kind: r.creditFlows.kind,
+        delta: r.creditFlows.delta,
+        balance_after: r.creditFlows.balanceAfter,
+        target_user_id: r.creditFlows.refUserId ? String(r.creditFlows.refUserId) : null,
+        from_space_id: String(r.creditFlows.spaceId),
+        to_space_id: r.creditFlows.refSpaceId ? String(r.creditFlows.refSpaceId) : null,
+        op_user_id: r.creditFlows.opUserId ? String(r.creditFlows.opUserId) : null,
+        group_id: r.creditFlows.groupId ? String(r.creditFlows.groupId) : null,
+        memo: r.creditFlows.memo,
+        created_at: r.creditFlows.createdAt.toISOString(),
       })),
       total: cnt?.n ?? 0,
       page: p,
@@ -1081,15 +1292,33 @@ export class TeamService {
    */
   async exportPointsFlows(
     spaceId: string,
-    opts: { kind?: string; target_user_id?: string; group_id?: string; op_user_id?: string } = {},
+    opts: {
+      kind?: string;
+      target_user_id?: string;
+      group_id?: string;
+      op_user_id?: string;
+      create_time_start?: string;
+      create_time_end?: string;
+      op_type?: string;
+      op_user_name?: string;
+      target_user_name?: string;
+    } = {},
   ) {
-    const where = this.pointsFlowWhere(spaceId, opts);
-    const rows = await db
-      .select()
-      .from(creditFlows)
-      .where(where)
-      .orderBy(desc(creditFlows.createdAt))
-      .limit(5000);
+    const { where, needsUserJoin, needsMemberJoin } = this.pointsFlowWhere(spaceId, opts);
+    // 导出与列表必须同一组 join / 同一个 where，否则「导出的行数 ≠ 列表 total」
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 同 listPointsFlows：条件 join 使 builder 类型退化
+    let q: any = db.select({ creditFlows }).from(creditFlows);
+    if (needsUserJoin) q = q.leftJoin(users, eq(users.id, creditFlows.opUserId));
+    if (needsMemberJoin) {
+      q = q.leftJoin(
+        spaceMembers,
+        and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, creditFlows.refUserId)),
+      );
+    }
+    const joined = await q.where(where).orderBy(desc(creditFlows.createdAt)).limit(5000);
+    const rows: Array<typeof creditFlows.$inferSelect> = joined.map(
+      (r: { creditFlows: typeof creditFlows.$inferSelect }) => r.creditFlows,
+    );
     const esc = (v: unknown): string => {
       const s = v === null || v === undefined ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -1526,12 +1755,27 @@ export class TeamService {
     };
   }
 
-  /** 项目消耗流水导出（CSV；上限 5000 行，理由同 `exportPointsFlows`） */
+  /**
+   * 项目消耗流水导出（CSV；上限 5000 行，理由同 `exportPointsFlows`）。
+   *
+   * 第 95 批补 `page` / `page_size`：竞品该端点确实带这两个参数（导出也分页）。
+   * 语义按「对**筛选后**的集合开窗」实现 —— 不传 = 全量（仍受 5000 行上限）；
+   * 传了就只导出那一窗。**不能忽略它们**：调用方按竞品写 `?page=2&page_size=100`
+   * 时，若被静默丢掉会拿到第 1 页的数据却以为是第 2 页，导出的账直接错位。
+   */
   async exportProjectPointsFlows(
     spaceId: string,
-    opts: { create_time_start?: string; create_time_end?: string; op_user_name?: string } = {},
+    opts: {
+      create_time_start?: string;
+      create_time_end?: string;
+      op_user_name?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
   ) {
     const where = this.projectPointsCond(spaceId, opts);
+    const pageSize = Math.min(5000, Math.max(1, opts.page_size ?? 5000));
+    const page = Math.max(1, opts.page ?? 1);
     const rows = await db
       .select({
         id: creditFlows.id,
@@ -1553,7 +1797,8 @@ export class TeamService {
       .leftJoin(users, eq(users.id, creditFlows.opUserId))
       .where(where)
       .orderBy(desc(creditFlows.createdAt))
-      .limit(5000);
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
     const esc = (v: unknown): string => {
       const s = v === null || v === undefined ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

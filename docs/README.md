@@ -127,6 +127,115 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.49 · 第 95 批：把「query 字段级对账」做成全站扫描器，先落 #7 团队 —— 50 个竞品参数接上 12 个 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 94 批在 #12 上发现一类守卫**看不见**的缺口：端点全在、方法全对，但 query 参数被 zod 静默 strip —— 请求返回 **200 + code 0 + 未过滤全集**，客户端以为筛选生效了。
+
+一个问题随之而来：**这是 #12 的个案，还是全站现象？**
+
+与其一个模块一个模块手动查，这批先把方法**通用化**，然后只落一个模块（#7 团队，因为它凑巧是参数最多、且模型全都支持的那一块）。
+
+### 二、扫描器怎么做的（`_r95_scan.py`）
+
+| 步骤 | 做法 |
+| --- | --- |
+| 1. 取有证据的行 | TSV 的 `QUERY` 列非空 → 904 条里有 **153 条**带参数 |
+| 2. 映射到我方路由 | 复用守卫已登记的 **223 条 `PAIRS`**（竞品形状 → 我方形状），没登记的走「剥 `/web/v1` 后同形」直配 |
+| 3. 抽我方实际接受的键 | 从 controller 源码取 `z.object({…})` 顶层键 + `@Query("x")` + 顶层 schema 常量（`pageQuery`/`listScriptsQuery` 等 169 个） |
+| 4. 差集 | 竞品有、我方没接 ⇒ **静默丢弃** |
+
+**结果：全站 28 条静默丢弃**，分布是 cam 5 / op 6 / kds 4 / df 3 / v1 3 / asset 2 / crc 2 / ai 1 / callback 1 / trade-order 1。
+
+这批只落 **#7 团队**（一个模块一批），其余 23 条登记给后续批次。
+
+### 三、#7 团队：50 个参数，26 → 38
+
+竞品 `/web/v1/cam/*` 有 9 条端点带 QUERY、合计 **50 个参数**。我方此前只接 **26 个**。
+
+| 端点 | 竞品参数 | 此前接 | 现在接 |
+| --- | ---: | ---: | ---: |
+| `team/points-flow/list` | 10 | 6 | **8** |
+| `team/points-flow/export` | 8 | 4 | **6** |
+| `project-points-flow/list` | 5 | 4 | 4 |
+| `project-points-flow/export` | 5 | 2 | **4** |
+| `team/:id/members` | 11 | 5 | **9** |
+| `team/:id/member/export` | 9 | 5 | **7** |
+| `role/list`、`team/:id/groups` | 2 | 0 | 0（结构性偏离） |
+| **合计** | **50** | **26（52%）** | **38（76%）** |
+
+补的 12 个：
+
+- **时间范围** `create_time_start/end` → `gte/lte(credit_flows.created_at)`（原来只能拉全量再自己筛）
+- **`op_type`** → 它就是 `credit_flows.kind` 的**第二个名字**；两个都给且冲突时 `400101`，不静默取其一
+- **人名** `op_user_name`（join `users.nickname`）、`target_user_name`（join `space_members.nickname` 快照 —— 两者是不同来源，测试里专门造了「users 昵称 ≠ 成员快照昵称」来钉住）
+- **成员** `nick` / `remark` / `role_ids` / `has_group`
+- **`include_descendants`** → BFS 展开分组子树，10 层上限防环
+- **`page`/`page_size`**（项目流水导出）
+
+### 四、顺带修好一个更坏的缺陷
+
+**成员导出此前写死了 `listMembers(spaceId, 1, 100)`** —— 既忽略竞品那 11 个参数，又硬截 100 行。
+
+后果：运营「筛出这批人 → 点导出」拿到的是**和屏幕上不一样的文件**（要么超 100 人被截，要么筛选根本没生效）。现在导出与列表走同一组筛选、上限 5000 行，并由测试断言「列表 total=1 ⇒ CSV 恰好 1 行数据 + 表头」。
+
+### 五、明确不接的 12 个参数（每条都有理由）
+
+| 参数 | 处数 | 为什么不接 |
+| --- | ---: | --- |
+| `op_user_account` / `target_user_account` / `account` | 6 | **`space_members.account` 是一列从未被写入的死列** —— 两处 `insert(spaceMembers)` 都不带它；且手机号只存 `phone_hash`(HMAC) + `phone_cipher`(AES-GCM)，**无法模糊检索** |
+| `sp_ids` | 2 | 要 join `team_member_projects` 再聚合，属跨表新口径 |
+| `team_id` | 1 | 我方一人一团队，team 从 token 取（第 92 批已登记的结构性偏离） |
+| `view` | 1 | `groups?view=` 在我方只有一种视图 |
+
+接一个恒空的账号搜索，比不接更坏 —— 这条判据与第 94 批 #12 的 `parent_id` 完全一致。
+
+### 六、守卫与反向验证
+
+守卫生成 23 → **24 例**：「#7 的 50 个竞品 query 参数 = 38 已接 + 12 有意不接」，断言三件事：
+
+1. 每个 handler 真的 `@Query("x")` 到那些键（**逐 handler 切片断言**，不是全文 grep）；
+2. service 层把参数落成真 SQL（`ilike(users.nickname`、`gte(creditFlows.createdAt`…）；
+3. 死列**不许**被接 —— `expect(teamSvc).not.toMatch(/insert\(spaceMembers\)\.values\(\{[^}]*account:/)`。
+
+反向验证 `_r95_break.py break|restore` 把 `op_user_name` 改名：
+
+```
+BROKEN: points-flow/list 的 op_user_name 已改名为 op_user_name_BROKEN
+ ❯ test/competitor-route-parity.spec.ts (24 tests | 1 failed)
+ ❯ test/team-query-parity.spec.ts (5 tests | 1 failed)
+ Tests  2 failed | 27 passed (29)
+```
+
+恢复后 **29 passed**。两个红来自不同文件（守卫 + 功能各一）。
+
+### 七、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| api 测试 | **90 文件 1002 例全绿**（原 996：+5 `team-query-parity.spec.ts`、+1 守卫） |
+| 总用例 | **1,414**（api 1002 + adapters 164 + cli 128 + worker 61 + db 27 + shared 26 + storage 6） |
+| 端点 | **778 不变** —— 改的是参数，不是路由 |
+| 表 / 迁移 | 113 / 47 不变（用到的列全都已存在） |
+| 门禁 | `verify-round.ps1` **12/12 全绿**（`结论：全绿`） |
+| 竞品覆盖守卫 | 十九组 685 条 / **24 例**（原 23） |
+| 分数 | **202.58/206 = 98.3%**，剩余 **3.42**；**#7 仍 99.5%** |
+
+**为什么这批不加分**：#7 的 0.10 一直是「子账号密码 2 条端点未实现」，而我方团队是**手机号邀请的真实用户**，没有子账号体系 —— 只存哈希而无登录路径就是死代码。50 个 query 参数里没有任何一条能让这 0.10 变成代码活。
+
+### 八、诚实边界
+
+1. **扫描器只覆盖了 55 条映射成功的**，另有 **98 条未映射**（`/df/*` 前缀族为主，因为它们的等价物没登记在 `PAIRS` 里）。那部分字段级**完全没查** —— 所以「全站只有 28 条」这个数字只对映射成功的那 55 条成立。
+2. **只比 query，body 一律未验**。`POST` 系列（`batch-points-allocation`、`member/batch/status` 等）的请求体没有任何竞品证据。
+3. **`account` 是死列这个结论是读代码得出的**（两处 `insert(spaceMembers)` 都不带它），不是运行时验证；如果将来邀请流程开始写这一列，这条豁免要立刻改成「可做」并补实现。
+4. **`include_descendants` 的 10 层上限是我方口径**。竞品是否限制层级、超深树怎么处理，无证据。
+5. **`op_type` 与 `kind` 的冲突策略（400101）是我方定的**。竞品只有一个名字，不存在冲突场景；我选择显式报错而不是静默取其一，理由是静默会让调用方以为筛的是另一个类型。
+6. **导出分页（`page/page_size`）语义是我方定的**：对筛选后的集合开窗，不传 = 全量（仍受 5000 上限）。
+
+**下一步**：剩下 23 条静默丢弃里，`op` 6 条与 `kds` 4 条最多，且都在非满分模块周边；但**是否值得补要看模型支不支持**（本批证明：模型不支持时正确做法是登记，不是硬接）。
+
+
 ## 变更登记（v6.48 · 第 94 批：审计 #12 剧本广场 —— 29 条路由一条不缺，但 4 处 query 参数被静默丢弃 · 2026-10-28）
 
 ### 一、这批在回答什么问题

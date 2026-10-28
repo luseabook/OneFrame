@@ -2333,6 +2333,85 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  /**
+   * 第 95 批：#7 团队的**字段级**（query）对账。
+   *
+   * 竞品 `/web/v1/cam/*` 有 9 条端点带 QUERY、合计 50 个参数。我方此前只接 26 个，
+   * 被丢弃的 `create_time_start/end`、`op_type`、`op_user_name`、`target_user_name`、
+   * `nick`、`remark`、`role_ids`、`has_group`、`include_descendants`、`page/page_size`
+   * 让「按时间/按人/按分组」筛选全部静默失效（200 + code 0 + 未过滤全集）。
+   *
+   * 本批补到 38/50；剩下 12 个**全部是有意不接**，且每条都要有登记理由 ——
+   * 这个用例的作用是：下一批想「顺手补上」时，必须先删掉这里的登记，
+   * 逼一次显式决策，而不是悄悄接一个恒空过滤器。
+   */
+  it("#7 团队的 50 个竞品 query 参数：38 已接 + 12 有意不接（每条都有理由）", () => {
+    const teamCtrl = readFileSync(join(API_SRC, "modules", "team", "team.controller.ts"), "utf8");
+    const teamSvc = readFileSync(join(API_SRC, "modules", "team", "team.service.ts"), "utf8");
+
+    // ── 已接的：每个端点必须显式 @Query 到那些键 ──
+    const REQUIRED: Array<[handler: string, keys: string[]]> = [
+      [
+        "@Get(\"team/members\")",
+        ["nick", "remark", "role_ids", "has_group", "include_descendants"],
+      ],
+      [
+        "@Get(\"team/member/export\")",
+        ["nick", "remark", "role_ids", "has_group", "include_descendants"],
+      ],
+      [
+        "@Get(\"team/points-flow/list\")",
+        ["op_type", "create_time_start", "create_time_end", "op_user_name", "target_user_name"],
+      ],
+      [
+        "@Get(\"team/points-flow/export\")",
+        ["op_type", "create_time_start", "create_time_end", "op_user_name", "target_user_name"],
+      ],
+      [
+        "@Get(\"team/project-points-flow/export\")",
+        ["page", "page_size"],
+      ],
+    ];
+    for (const [marker, keys] of REQUIRED) {
+      const start = teamCtrl.indexOf(marker);
+      expect(start, `handler not found: ${marker}`).toBeGreaterThan(-1);
+      // handler 体到下一个路由装饰器为止
+      const rest = teamCtrl.slice(start + marker.length);
+      const nextRoute = rest.search(/@(Get|Post|Put|Patch|Delete)\(/);
+      const body = nextRoute === -1 ? rest : rest.slice(0, nextRoute);
+      for (const k of keys) {
+        expect(body, `${marker} 未接 @Query("${k}")`).toContain(`@Query("${k}")`);
+      }
+    }
+
+    // ── 服务层必须真的把参数变成 SQL（不是只在 controller 里接了名）──
+    expect(teamSvc).toContain("ilike(users.nickname");
+    expect(teamSvc).toContain("ilike(spaceMembers.nickname");
+    expect(teamSvc).toContain("ilike(spaceMembers.remark");
+    expect(teamSvc).toContain("inArray(spaceMembers.roleId");
+    expect(teamSvc).toContain("gte(creditFlows.createdAt");
+    expect(teamSvc).toContain("lte(creditFlows.createdAt");
+    // op_type 与 kind 是同一列的两个名字：冲突必须拒绝，不能静默取其一
+    expect(teamSvc).toContain("kind and op_type disagree");
+    // include_descendants 必须真的展开子树
+    expect(teamSvc).toContain("groupSubtreeIds");
+
+    /**
+     * ── 12 条有意不接的：理由必须写在源码里 ──
+     * 分三类，每类在 service 注释里点过名：
+     *  1. `op_user_account` / `target_user_account` / `account`（6 处）——`space_members.account`
+     *     是**从未写入的死列**（`insert(spaceMembers)` 两处都不带它），且手机号只存
+     *     `phone_hash`(HMAC) + `phone_cipher`(AES-GCM)，无法模糊检索；
+     *  2. `sp_ids`（2 处）—— 要 join `team_member_projects` 再聚合，属跨表新口径；
+     *  3. `team_id` / `view`（2 处）—— 第 92 批已登记为结构性偏离（一人一团队 / 单一视图）。
+     */
+    expect(teamSvc).toContain("从未写入的死列");
+    expect(teamSvc).toContain("phone_cipher");
+    expect(teamSvc).toContain("team_member_projects");
+    // 死列判据：account 一列在 insert 里确实没被写入
+    expect(teamSvc).not.toMatch(/insert\(spaceMembers\)\.values\(\{[^}]*account:/);
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [

@@ -286,6 +286,12 @@ export class TeamController {
   }
 
   // ── 成员 ────────────────────────────────────────────────
+  /**
+   * 成员列表。
+   *
+   * 第 95 批：竞品 QUERY 有 11 个参数，我方此前只收 5 个 —— 补 `nick`/`remark`/`role_ids`/
+   * `has_group`/`include_descendants`；`account`/`sp_ids` 有意不接（见 service 注释）。
+   */
   @Get("team/members")
   async members(
     @Req() req: AuthedRequest,
@@ -294,6 +300,11 @@ export class TeamController {
     @Query("group_id") groupId?: string,
     @Query("role_code") roleCode?: string,
     @Query("status") status?: string,
+    @Query("nick") nick?: string,
+    @Query("remark") remark?: string,
+    @Query("role_ids") roleIds?: string,
+    @Query("has_group") hasGroup?: string,
+    @Query("include_descendants") includeDescendants?: string,
   ) {
     const c = await this.ctx(req);
     return this.team.listMembers(
@@ -303,6 +314,7 @@ export class TeamController {
       groupId,
       roleCode,
       status === undefined ? undefined : Number(status),
+      { nick, remark, role_ids: roleIds, has_group: hasGroup, include_descendants: includeDescendants },
     );
   }
 
@@ -363,12 +375,37 @@ export class TeamController {
     return this.team.changeGroup(c.spaceId, parseOrThrow(changeGroupBody, body));
   }
 
-  /** 成员 CSV 导出（对齐参照 member/export） */
+  /**
+   * 成员 CSV 导出（对齐参照 member/export）。
+   *
+   * 第 95 批：筛参与 `/cam/team/members` 完全一致（竞品这两条端点的 QUERY 也是同一组）。
+   * 此前写死导 100 行且忽略所有筛选 —— 运营"筛完导出"会拿到一份和屏幕上不一样的文件。
+   */
   @Get("team/member/export")
-  async exportMembers(@Req() req: AuthedRequest, @Res() res: FastifyReply) {
+  async exportMembers(
+    @Req() req: AuthedRequest,
+    @Res() res: FastifyReply,
+    @Query("group_id") groupId?: string,
+    @Query("role_code") roleCode?: string,
+    @Query("status") status?: string,
+    @Query("nick") nick?: string,
+    @Query("remark") remark?: string,
+    @Query("role_ids") roleIds?: string,
+    @Query("has_group") hasGroup?: string,
+    @Query("include_descendants") includeDescendants?: string,
+  ) {
     const c = await this.ctx(req);
     this.team.requirePrivilege(c, "export members");
-    const csv = await this.team.membersCsv(c.spaceId);
+    const csv = await this.team.membersCsv(c.spaceId, {
+      group_id: groupId,
+      role_code: roleCode,
+      status,
+      nick,
+      remark,
+      role_ids: roleIds,
+      has_group: hasGroup,
+      include_descendants: includeDescendants,
+    });
     res
       .header("content-type", "text/csv; charset=utf-8")
       .header("content-disposition", 'attachment; filename="team-members.csv"')
@@ -400,6 +437,14 @@ export class TeamController {
     return this.team.batchAllocate(c.spaceId, c.userId, parseOrThrow(batchAllocateBody, body));
   }
 
+  /**
+   * 团队积分流水。
+   *
+   * 第 95 批：竞品该端点 QUERY 有 10 个参数，我方此前只收 6 个 —— 被丢弃的
+   * `create_time_start/end`、`op_type`、`op_user_name`、`target_user_name`
+   * 会让「按时间/按人筛流水」整个失效（返回未过滤全集，200 + code 0）。
+   * `op_user_account` / `target_user_account` **有意不接**：见 service 注释。
+   */
   @Get("team/points-flow/list")
   async pointsFlows(
     @Req() req: AuthedRequest,
@@ -409,6 +454,11 @@ export class TeamController {
     @Query("target_user_id") targetUserId?: string,
     @Query("group_id") groupId?: string,
     @Query("op_user_id") opUserId?: string,
+    @Query("op_type") opType?: string,
+    @Query("create_time_start") createTimeStart?: string,
+    @Query("create_time_end") createTimeEnd?: string,
+    @Query("op_user_name") opUserName?: string,
+    @Query("target_user_name") targetUserName?: string,
   ) {
     const c = await this.ctx(req);
     return this.team.listPointsFlows(c.spaceId, {
@@ -418,6 +468,11 @@ export class TeamController {
       target_user_id: targetUserId,
       group_id: groupId,
       op_user_id: opUserId,
+      op_type: opType,
+      create_time_start: createTimeStart,
+      create_time_end: createTimeEnd,
+      op_user_name: opUserName,
+      target_user_name: targetUserName,
     });
   }
 
@@ -429,7 +484,7 @@ export class TeamController {
 
   /**
    * 流水导出（CSV，对齐参照 points-flow/export）：返回现签链接，1h 有效。
-   * 筛选参数与 list 完全一致（`kind`/`target_user_id`/`group_id`/`op_user_id`）。
+   * 筛选参数与 list 完全一致（第 95 批起共 10 个，含时间范围与人名模糊）。
    */
   @Get("team/points-flow/export")
   async exportPointsFlows(
@@ -438,6 +493,11 @@ export class TeamController {
     @Query("target_user_id") targetUserId?: string,
     @Query("group_id") groupId?: string,
     @Query("op_user_id") opUserId?: string,
+    @Query("op_type") opType?: string,
+    @Query("create_time_start") createTimeStart?: string,
+    @Query("create_time_end") createTimeEnd?: string,
+    @Query("op_user_name") opUserName?: string,
+    @Query("target_user_name") targetUserName?: string,
   ) {
     const c = await this.ctx(req);
     return this.team.exportPointsFlows(c.spaceId, {
@@ -445,6 +505,11 @@ export class TeamController {
       target_user_id: targetUserId,
       group_id: groupId,
       op_user_id: opUserId,
+      op_type: opType,
+      create_time_start: createTimeStart,
+      create_time_end: createTimeEnd,
+      op_user_name: opUserName,
+      target_user_name: targetUserName,
     });
   }
 
@@ -515,19 +580,28 @@ export class TeamController {
     });
   }
 
-  /** 项目消耗流水导出（CSV，返回现签链接，1h 有效；上限 5000 行） */
+  /**
+   * 项目消耗流水导出（CSV，返回现签链接，1h 有效）。
+   *
+   * 第 95 批补 `page` / `page_size`：竞品该端点带这两个参数，此前被静默丢弃 ——
+   * 按竞品写 `?page=2` 会拿到第 1 页的数据却当成第 2 页。
+   */
   @Get("team/project-points-flow/export")
   async exportProjectPointsFlows(
     @Req() req: AuthedRequest,
     @Query("create_time_start") start?: string,
     @Query("create_time_end") end?: string,
     @Query("op_user_name") opUserName?: string,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
   ) {
     const c = await this.ctx(req);
     return this.team.exportProjectPointsFlows(c.spaceId, {
       create_time_start: start,
       create_time_end: end,
       op_user_name: opUserName,
+      page: page === undefined ? undefined : Number(page),
+      page_size: pageSize === undefined ? undefined : Number(pageSize),
     });
   }
 
