@@ -3183,3 +3183,72 @@ CLI 的 `credits log` 打到 `GET /v1/credits/flows`（我方唯一真相：带�
 - `task delete` 未实现竞品的 `--dry-run` / `--idempotency-key`：我方写接口没有幂等键体系，只给单个端点造假幂等键会与其余写接口不一致。
 - `credits log` 派生只覆盖旧口径三字段；`section` 与 `income/consume/transfer` tab 属新接口语义，未派生。
 
+---
+
+## 17.31 项目资产的详情 / 批量详情 / 批量定稿：批量接口的「读宽松、写严格」（第 73 批）
+
+### 31.1 为什么现在才做
+
+`apps/cli/src/registry.ts` 里 `resource get` 与 `resource batch-confirm` 一直是骨架命令，reason 原文分别写着
+「我方无单资源详情端点」「我方无批量确认端点」。但竞品两条端点都在册，而且竞品 CLI 给了三个动词：
+
+| 竞品端点 | 竞品 CLI | 我方 CLI（改前） |
+|---|---|---|
+| `GET /web/v1/df/resources/:sp_id/:resource_id/info` | `resource get`（`commands/resource.md:92`） | 骨架，reason「我方无单资源详情端点」 |
+| `POST /web/v1/df/resources/batch-info` | `resource batch-info`（`:96`） | **命令不存在** |
+| `POST /web/v1/df/resources/batch-confirm` | `resource batch-confirm`（`:100`） | 骨架，reason「我方无批量确认端点」 |
+
+注意骨架命令没有 `path`，所以第 65/66/67 批那两道「CLI 路径 ↔ 后端路由」的门禁**看不见它们**——
+这类「宣称没有」的账只能靠人对着竞品文档读出来。
+
+### 31.2 三个端点
+
+| 方法 | 路径 | 入参 | 成功返回 | 错误 |
+|---|---|---|---|---|
+| GET | `/v1/projects/:id/assets/:assetId` | — | 单个资产 DTO（含 `finalized_at`、`bound_shot_count`、`ref_image_url`） | 400101 `invalid asset id`（非数字）；400102 `asset not found`（不存在 / 不属于本项目 / 跨空间 / 项目不存在） |
+| POST | `/v1/projects/:id/assets/batch-info` | `{asset_ids: ["<id>", …]}`，1..100 | `{list: [DTO…], missing: ["<id>", …]}` | 400101（空数组 / 超 100 / 非数字 id）；400102（项目不存在或跨空间） |
+| POST | `/v1/projects/:id/assets/batch-confirm` | 同上 | `{confirmed: <n>, asset_ids: ["<id>", …]}` | 400101（同上）；**400102 `asset not found in this project: <ids>`**（任一 id 不属于本项目 → 整批失败） |
+
+**与竞品的契约差异（登记，不改）**：竞品是 `resources/{sp_id}/{resource_id}/info`，把项目 id 也放路径里；
+我方沿用既有集合风格 `projects/:id/assets/:assetId`（与 `PATCH`/`DELETE` 同形）。
+
+### 31.3 读宽松、写严格
+
+同样一组 `asset_ids`，两个批量端点对「混入不存在的 id」必须相反：
+
+| | `batch-info`（读） | `batch-confirm`（写） |
+|---|---|---|
+| 行为 | 不报错；命中进 `list`，差集进 `missing` | 整批 400102，**一条都不落库** |
+| 理由 | 用途是「一次渲染一屏」：一个失效 id 不该让整屏变错误页，用户要看的是「这些还在、那个没了」 | 部分成功会让调用方无法从一次响应判断改了哪些，且拿不到失败原因；写操作要么全成要么全不成 |
+| 实现 | 查命中行 → DTO 列表；`入参 − 命中` = `missing` | 先查命中数，`命中数 ≠ 入参长度` 直接抛；校验发生在 UPDATE 之前 |
+
+后续再加批量接口（竞品还有 `batch-delete`/`batch-unconfirm`/`batch-update`）时**沿用这条判据**：读操作容忍缺失，
+写操作不容忍部分成功。
+
+### 31.4 定稿幂等与 `finalized_at`
+
+`batch-confirm` 只写 `status = 2`（定稿）与 `finalized_at = coalesce(finalized_at, now())`：
+
+- **重复定稿不刷新时间戳**——与既有 `PATCH /projects/:id/assets/:assetId {status: 2}` 完全同一规则
+  （`script.service.ts` 的 `patchProjectAsset` 里写的是 `asset.finalizedAt ?? new Date()`）。
+- 如果每次都刷成 `now()`，`finalized_at` 就变成「最后一次点按钮的时刻」，任何按定稿时间做的对账/统计都会漂。
+- 不做「批量取消定稿」：竞品的 `batch-unconfirm` 我方没有证据说明它是否同时清 `finalized_at`，不凭形状造语义。
+
+### 31.5 测试
+
+`apps/api/test/project-asset-batch.spec.ts`，5 例：
+
+| # | 覆盖 |
+|---|---|
+| 1 | 准备项目 + 三类资产（scene/prop/other），新建即 `status=1`、`finalized_at=null` |
+| 2 | 详情：本项目内可读、`bound_shot_count=0`；`abc` → 400101、不存在 → 400102、跨空间 → 400102、项目不存在 → 400102 |
+| 3 | 批量详情：三条全命中 / 缺一条进 `missing` / 空数组、非数字、101 条 → 400101（且 message 带 `asset_ids`）/ 跨空间 → 400102 |
+| 4 | 批量定稿：`confirmed=2` 且 `finalized_at` 落值、重复定稿时间戳不变、混入不存在 id → 整批 400102 且合法的那个**仍是草稿**（无部分成功） |
+| 5 | 跨项目串号：拿别的项目的资产 id 做批量读 → `list=[]`+`missing`；做批量确认 → 400102；外项目资产本身未被改 |
+
+### 31.6 诚实边界
+
+- **不加分**：这一批减少 2 条骨架（44→42），但 #9 的扣分是 1% 整数粒度（0.24 = 8×3%），表达不出来。
+- 竞品还有 `resources/batch-delete` / `batch-unconfirm` / `batch-update` / `batch-download`，本批未做（见 31.4 末条与 §5）。
+- `bound_shot_count` 是自建口径（数 `storyboard_assets` 绑定行），与竞品语义是否一致**未取证**。
+- 本批顺带把第 72 批文档里写错的骨架数（「48→46」，实际 46→44）校准为 46→44→42。

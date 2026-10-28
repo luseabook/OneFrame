@@ -126,6 +126,74 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.27 · 第 73 批：批量接口的「读宽松 / 写严格」—— 同一组 id，两个端点必须有两种反应 · 2026-10-28）
+
+> 这一批的起点还是同一种账：**CLI 骨架命令的 reason 写着「我方没有」，而竞品不但有，还给了 CLI 动词**。
+
+### 一、缺口长什么样
+
+`apps/cli/src/registry.ts` 里有两条 `todo(...)`：
+
+| 命令 | reason 原文 | 竞品事实 |
+|---|---|---|
+| `resource get`（`:532`） | 我方无单资源详情端点；用 `resource generate-list`（候选）或 `resource list --set kind=scene` | `GET /web/v1/df/resources/:sp_id/:resource_id/info`（单条详情）；`commands/resource.md:92` `reelmate resource get` |
+| `resource batch-confirm`（`:554`） | 我方无批量确认端点；逐条 `resource confirm <SP> <RES>`（PATCH status=2） | `POST /web/v1/df/resources/batch-confirm`；`commands/resource.md:100` `reelmate resource batch-confirm` |
+
+还有一条我方**连命令都没有**：竞品 `commands/resource.md:96` 有 `resource batch-info`（批量查详情），
+后端是 `POST /web/v1/df/resources/batch-info`。
+
+这三条都落在「项目资产」上（角色/场景/道具，`projects/{id}/assets`）——我方原本只有列表、创建、按 id 的
+`PATCH`/`DELETE`、以及候选图三条，**没有单条读、也没有任何批量读/批量写**。
+
+### 二、这一批最核心的一个设计：同样一组 id，两个批量端点必须有两种反应
+
+`batch-info`（读）与 `batch-confirm`（写）接收的是同一个 `asset_ids` 数组，但对「数组里混了个不存在的 id」
+必须**相反**处理：
+
+| | `POST …/assets/batch-info`（读） | `POST …/assets/batch-confirm`（写） |
+|---|---|---|
+| 遇到不存在的 id | **不报错**，进 `missing: ["<id>"]`，其余正常返回 | **整批 400102**，一条都不落库 |
+| 理由 | 批量查询的用途是「一次渲染一屏」。一个已失效的 id 不该让整屏变成错误页——用户想看到的是「这 7 条还在、那 1 条没了」 | 批量写若部分成功，调用方无法从一次响应里判断到底改了哪些，只能重新查一遍；而且它拿不到「失败的为什么失败」 |
+| 实现 | 查出来的行映射成 `list`，入参与命中的差集即 `missing` | 先按 `project_id + id in (…)` 查命中数，`命中 ≠ 入参` 就抛，校验在写之前 |
+
+这不是「一致性」问题，是**两种操作对失败的正确反应本就不同**。把它写进 `api-spec §17.31.3`，因为下一次再有人
+加批量接口（竞品还有 `batch-delete`/`batch-unconfirm`/`batch-update`），会直接沿用这个判据。
+
+### 三、四个不显然的决定
+
+| 决定 | 为什么不能反过来 |
+|---|---|
+| 定稿**幂等**：重复 `batch-confirm` 不刷新 `finalized_at`（`coalesce(finalized_at, now)`） | 与既有 `PATCH …/assets/:assetId {status:2}` 同一条规则：`finalized_at` 是「第一次定稿的时刻」，被重复调用冲掉就成了「最后一次点了按钮的时刻」，对账口径立刻变形 |
+| `asset_ids` 上限 **100**、空数组**不是**「全部」 | 空数组当「全部」是危险的隐含语义：调用方漏传一个变量就会批量改掉整个项目。上限 100 与竞品批量接口的分片习惯一致 |
+| zod 的 `min/max` **自写 message** | zod 默认文案是 `Array must contain at least 1 element(s)`，不带字段名；CLI/agent 收到 400101 后无法判断是哪个参数错。改成 `asset_ids must contain at least 1 id` |
+| 竞品是 `resources/{sp_id}/{resource_id}/info`，我方是 `assets/:assetId`（`project_id` 在路径里） | 沿用我方既有集合风格（`projects/:id/assets/:assetId` 与 `PATCH`/`DELETE` 同形）；契约差异登记在 `api-spec §17.31.2` |
+
+### 四、顺手校准了一条自己写错的数字
+
+第 72 批把骨架数从 46 减到 44，文档里却写成「48→46」。这一批对着 `dist/registry.js` 数出来才发现：
+**202 命令 / 158 ready / 44 骨架**（不是 46）。本批变更后是 **203 / 161 / 42**。
+已把 §2.1、§3.3 #9、§3.4 分布解读、§5、§5.3、§7 口径表里所有「46 骨架」「48→46」改成 46→44→42 的真实序列。
+**教训**：骨架数这类「从产物读出来的数字」每批都要重读一次产物，不能从上一版文档往下减。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| 新 spec `test/project-asset-batch.spec.ts` | **5 例全绿**（详情/跨空间/批量读的 missing/批量写的整批失败/跨项目串号） |
+| api | 82 文件 **913 例**（原 908，+5）；typecheck / `npx eslint src` 干净 |
+| cli | 15 文件 **105 例**；`dist/registry.js` = 203 命令 / 38 组 / 161 ready / 42 骨架；`[gen-skill]` 重写 3 个文件 |
+| 跨包守卫 | `registry-routes.spec.ts` 通过（新路径都被后端路由接住）；`_r65_cli_audit.py` → ready 161 条里 **0 条**缺路由；`_r66_web_audit.py` → 408/408 ok |
+| 12 项总闸 | **全绿**（结论「全绿」） |
+| 规模 | 端点 709→**712**、用例 1,287→**1,292**、迁移 43 / 表 112 / 页面 64 不变 |
+
+### 六、诚实边界
+
+- **不加分**：这两条骨架的减少落在 #9 的 1% 粒度以下（0.24 = 8×3%），分数仍 202.45/206 = 98.3%。
+- 竞品还有 `resources/batch-delete`、`batch-unconfirm`、`batch-update`、`batch-download` —— 我方这一批**没做**：
+  删除侧我方是单条硬删（`DELETE …/assets/:assetId` 还要先解 `storyboard_assets` 绑定），批量删要先定「部分成功怎么算」，
+  没有竞品字段级证据前不凭形状造语义。仍记在 #9 的 42 条骨架里。
+- `bound_shot_count` 是自建口径（数 `storyboard_assets` 绑定行），与竞品「被多少分镜引用」是否同义**未取证**。
+
 ## 变更登记（v6.26 · 第 72 批：任务「删了但还在跑」不能发生 —— 软删 + 五条读路径同时收口 · 2026-10-28）
 
 > 这一批补的是 CLI 骨架里两条「reason 写着没有、其实竞品有」的记录（第 70 批的 ad/redraw 是同一类），

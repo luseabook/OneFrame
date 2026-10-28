@@ -7,7 +7,7 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 
 发布态只依赖三样东西：当前二进制的 `--help`、本文件、以及随包文档（`manual/`、`commands/`）。不要引用任何外部文档站或截图。
 
-本包版本 **0.1.0**（`VERSION`），命令 202 条、可用 158 条。
+本包版本 **0.1.0**（`VERSION`），命令 203 条、可用 161 条。
 
 ## <HARD-GATE>
 
@@ -54,7 +54,7 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 | `episode` | 15 | 13 | 2 | `commands/episode.md` |
 | `storyboard` | 18 | 9 | 9 | `commands/storyboard.md` |
 | `upload` | 1 | 1 | 0 | `commands/upload.md` |
-| `resource` | 16 | 11 | 5 | `commands/resource.md` |
+| `resource` | 17 | 14 | 3 | `commands/resource.md` |
 | `subject` | 10 | 7 | 3 | `commands/subject.md` |
 | `asset-lib` | 12 | 6 | 6 | `commands/asset-lib.md` |
 | `file` | 3 | 0 | 3 | `commands/file.md` |

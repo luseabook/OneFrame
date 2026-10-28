@@ -1385,6 +1385,75 @@ export class ScriptService {
   }
 
   /**
+   * GET /projects/{id}/assets/{assetId}：单个资产详情。
+   * 竞品是 GET /web/v1/df/resources/{sp_id}/{resource_id}/info；我方沿用集合风格把 id 放路径尾，
+   * 与 PATCH/DELETE projects/:id/assets/:assetId 同形。
+   */
+  async getProjectAsset(spaceId: string, projectId: string, assetId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const asset = await this.findProjectAsset(project.id, assetId);
+    return this.projectAssetDtoOf(asset);
+  }
+
+  /**
+   * POST /projects/{id}/assets/batch-info：批量查详情（只读，对应竞品 resources/batch-info）。
+   *
+   * 刻意**不**因为某个 id 找不到就整体报错：批量查询的用途是「一次渲染一屏」，
+   * 一个已失效的 id 不该让整屏变成错误页。缺的那些进 `missing`，由调用方决定怎么显示。
+   * 与 batch-confirm（写）的严格校验刻意相反，见下。
+   */
+  async batchInfoProjectAssets(spaceId: string, projectId: string, assetIds: string[]) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = this.parseIdList(assetIds, "asset_ids");
+    const rows = await db
+      .select()
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), inArray(projectAssets.id, ids)))
+      .orderBy(projectAssets.createdAt, projectAssets.id);
+    const counts = await this.boundShotCounts(rows.map((row) => row.id));
+    const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(row, counts)));
+    const found = new Set(rows.map((row) => String(row.id)));
+    const missing = ids.map((id) => String(id)).filter((id) => !found.has(id));
+    return { list, missing };
+  }
+
+  /**
+   * POST /projects/{id}/assets/batch-confirm：批量定稿（对应竞品 resources/batch-confirm）。
+   *
+   * 与 batch-info 相反，写操作**严格**：若部分成功、部分失败，调用方无法从一次响应里判断
+   * 到底改了哪些，只能重新查一遍；所以任一 id 不属于本项目即整批 400102 且一条都不落库。
+   */
+  async batchConfirmProjectAssets(spaceId: string, projectId: string, assetIds: string[]) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = this.parseIdList(assetIds, "asset_ids");
+    const rows = await db
+      .select({ id: projectAssets.id })
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, project.id), inArray(projectAssets.id, ids)));
+    const found = new Set(rows.map((row) => String(row.id)));
+    const missing = ids.map((id) => String(id)).filter((id) => !found.has(id));
+    if (missing.length > 0) {
+      throw new AppError(
+        ErrorCode.NOT_FOUND,
+        `asset not found in this project: ${missing.join(",")}`,
+        { field: "asset_ids" },
+      );
+    }
+    const now = new Date();
+    const updated = await db
+      .update(projectAssets)
+      .set({
+        status: ProjectAssetStatus.FINALIZED,
+        // 定稿幂等：已定稿的行保留原 finalized_at（与 patchProjectAsset 同一规则）
+        finalizedAt: sql`coalesce(${projectAssets.finalizedAt}, ${now})`,
+        updatedAt: now,
+      })
+      .where(and(eq(projectAssets.projectId, project.id), inArray(projectAssets.id, ids)))
+      .returning({ id: projectAssets.id });
+    return { confirmed: updated.length, asset_ids: updated.map((row) => String(row.id)) };
+  }
+
+  /**
    * PUT /projects/{id}/episodes/{eid}/storyboards/{sid}/assets：
    * 整体替换该分镜的绑定（同事务 delete + insert），返回落库后的 id 顺序（=入参顺序，去重）。
    */

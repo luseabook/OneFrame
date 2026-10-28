@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 16 条命令：可用 11 条、骨架 5 条。
+共 17 条命令：可用 14 条、骨架 3 条。
 
 ## `resource list`
 
@@ -93,14 +93,14 @@ oneframe resource generate-list <RESOURCE_ID> [--json]
 
 ## `resource get`
 
-查看单个资源
+查看单个资源（项目资产详情）
 
 ```text
-oneframe resource get [--json]
+oneframe resource get <RESOURCE_ID> [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无单资源详情端点；用 `resource generate-list <SP> <RES>`（候选）或 `resource list --workspace <SP> --set kind=scene`
+- 状态：可用（HTTP 端点已存在）
+- 端点：`GET projects/{project_id}/assets/{asset_id}`
 - 契约证据：`commands/resource.md:223`
 
 ## `resource add`
@@ -154,15 +154,27 @@ oneframe resource unconfirm <RESOURCE_ID> [--set KEY=VALUE]... [--dry-run] [--id
 
 ## `resource batch-confirm`
 
-批量确认
+批量确认（`--set asset_ids=[id,id]` 定稿；任一 id 不属于本项目则整批失败）
 
 ```text
-oneframe resource batch-confirm [--json]
+oneframe resource batch-confirm [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无批量确认端点；逐条 `resource confirm <SP> <RES>`（PATCH status=2）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/assets/batch-confirm`
 - 契约证据：`commands/resource.md:422`
+
+## `resource batch-info`
+
+批量查询资产详情（`--set asset_ids=[id,id]`；查不到的进 missing，不整体报错）
+
+```text
+oneframe resource batch-info [--json]
+```
+
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/assets/batch-info`
+- 契约证据：`commands/resource.md:96`
 
 ## `resource extract-wait`
 

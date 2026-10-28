@@ -529,7 +529,10 @@ const resourceCommands: CommandSpec[] = [
   todo("subject", "batch-details", "批量主体详情", "commands/subject.md:156", "我方无批量详情端点；用 `subject status --set 'subject_ids=[…]'` 拿逐条审核态，或 `subject get` 逐条"),
   todo("subject", "from-resource", "从资源创建主体（含 confirm 流程）", "commands/subject.md:172", "我方只有 `subject save-from-resource`（POST /subjects/from-asset，从项目资产保存、同资产幂等）；无 type+confirm 二次流程"),
   todo("subject", "reset", "重置解析/匹配状态", "commands/subject.md:228", "我方无 reset 端点（ep_id+kind 维度状态重置未实现）；重跑解析用 `episode parse-retry`"),
-  todo("resource", "get", "查看单个资源", "commands/resource.md:223", "我方无单资源详情端点；用 `resource generate-list <SP> <RES>`（候选）或 `resource list --workspace <SP> --set kind=scene`"),
+  http("resource", "get", "GET", "projects/{project_id}/assets/{asset_id}", "查看单个资源（项目资产详情）", "commands/resource.md:223", {
+    slots: ["asset_id"],
+    positionals: [{ display: "RESOURCE_ID", desc: "项目资产 ID", required: true }],
+  }),
   http("resource", "add", "POST", "projects/{project_id}/assets", "新增项目资产（kind=scene|prop|other，角色走 characters）", "commands/resource.md:255", {
     write: true,
     }),
@@ -551,7 +554,11 @@ const resourceCommands: CommandSpec[] = [
     write: true,
     fixedBody: { status: 1 },
     }),
-  todo("resource", "batch-confirm", "批量确认", "commands/resource.md:422", "我方无批量确认端点；逐条 `resource confirm <SP> <RES>`（PATCH status=2）"),
+  http("resource", "batch-confirm", "POST", "projects/{project_id}/assets/batch-confirm", "批量确认（`--set asset_ids=[id,id]` 定稿；任一 id 不属于本项目则整批失败）", "commands/resource.md:422", {
+    write: true,
+  }),
+  http("resource", "batch-info", "POST", "projects/{project_id}/assets/batch-info", "批量查询资产详情（`--set asset_ids=[id,id]`；查不到的进 missing，不整体报错）", "commands/resource.md:96", {
+  }),
   todo("resource", "extract-wait", "阻塞等待提取任务", "commands/resource.md:586", "组合即可：`resource extract-status <ET_ID>` 轮询，或 `task wait <TASK_ID>`（提取任务也落 tasks）"),
   todo("resource", "prompt-template", "生成官方资产提示词空表", "commands/resource.md:145", "xlsx 模板导出端点未落地（待取证）；当前 `--set` 直接提交 JSON"),
   todo("resource", "prompt-sheet-read", "回读资产提示词表", "commands/resource.md:163", "xlsx 回读端点未落地（待取证）；批量导入用 `resource draft-import --set @assets.json`"),

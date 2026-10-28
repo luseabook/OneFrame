@@ -48,6 +48,19 @@ const parseScriptSchema = z.object({
 const projectAssetsQuerySchema = z.object({ kind: projectAssetKindSchema.optional() });
 
 /**
+ * 批量资产操作的 id 列表（batch-info / batch-confirm 共用）。
+ * 上限 100 与竞品批量接口的常见分片一致；空数组无意义（zod 报 400101）而不是当「全部」。
+ */
+const batchAssetIdsSchema = z.object({
+  // 自写 message：zod 默认文案是「Array must contain at least 1 element(s)」，
+  // 不带字段名，调用方（CLI/agent）无法从 400101 里看出是哪个参数错了。
+  asset_ids: z
+    .array(z.string().min(1).max(20))
+    .min(1, "asset_ids must contain at least 1 id")
+    .max(100, "asset_ids must contain at most 100 ids"),
+});
+
+/**
  * 拆集来源（completion-plan §3.3 衔接契约）：传了 `source.kind=novel` 就走小说链，
  * 只接受已定稿（status=16）的本子，由 `NovelService.assertSplittable` 判定；
  * 不传则保持原有行为（用脚本正文/项目原文拆集）。
@@ -715,6 +728,38 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(projectAssetCreateSchema, body);
     return this.script.createProjectAsset(req.auth?.spaceId ?? "", id, input);
+  }
+
+  /** 资产详情：GET /projects/:id/assets/:assetId（竞品 resources/{sp_id}/{resource_id}/info） */
+  @Get("projects/:id/assets/:assetId")
+  async getProjectAsset(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("assetId") assetId: string,
+  ) {
+    return this.script.getProjectAsset(req.auth?.spaceId ?? "", id, assetId);
+  }
+
+  /** 批量查详情：body `{asset_ids:[…]}`，只读；找不到的进 `missing` 而不是整体报错 */
+  @Post("projects/:id/assets/batch-info")
+  async batchInfoProjectAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(batchAssetIdsSchema, body ?? {});
+    return this.script.batchInfoProjectAssets(req.auth?.spaceId ?? "", id, input.asset_ids);
+  }
+
+  /** 批量定稿：body `{asset_ids:[…]}`；严格——任一 id 不在本项目即整批 400102、一条都不落库 */
+  @Post("projects/:id/assets/batch-confirm")
+  async batchConfirmProjectAssets(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(batchAssetIdsSchema, body ?? {});
+    return this.script.batchConfirmProjectAssets(req.auth?.spaceId ?? "", id, input.asset_ids);
   }
 
   /** P3 AI 提取资产：从分集/项目文本抽取场景/道具（可选角色）落库为草稿 */

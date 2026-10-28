@@ -1,6 +1,6 @@
 # OneFrame × ReelMate 实现进度对照（以竞品为标准）
 
-> 评估对象：工作区 `E:\wanxing`（43 个迁移 / 112 张表 / **709 端点 / 52 controller** / 64 页面 / 1,287 用例）
+> 评估对象：工作区 `E:\wanxing`（43 个迁移 / 112 张表 / **712 端点 / 52 controller** / 64 页面 / 1,292 用例）
 > 评估时间：… · 19:10（v2.4）· 19:40（v2.5）· 20:10（v2.6）· 20:40（v2.7）· 21:10（v2.8）· 21:40（v2.9）· 22:10（v3.0）· 22:40（v3.1）· 23:20（v3.2）· 23:55（v3.3）· 00:35（v3.4）· 01:10（v3.5）· 01:45（v3.6）· 02:20（v3.7）· 02:55（v3.8）· 03:30（v3.9）· 04:05（v4.0）· 04:40（v4.1）· 05:15（v4.2）· 05:55（v4.3）· 06:45（v4.4）· 07:20（v4.5）· 08:05（v4.6）· 08:45（v4.7）· 09:20（v4.8）· 09:55（v4.9）· 10:35（v5.0）· 11:10（v5.1）· 12:00（v5.2）· 12:40（v5.3）· 13:25（v5.4）· 14:10（v5.5）· 15:00（v5.6）· 15:45（v5.7）· 16:25（v5.8）· 17:05（v5.9）· 17:55（v6.0）· 18:40（v6.1）· 19:30（v6.2）· 20:15（v6.3）· 20:55（v6.4）· 21:40（v6.5）· 22:20（v6.6）· 22:55（v6.7 缺口复核）· 23:45（v6.8）· 00:30（v6.9）· 01:15（v7.0）· 02:00（v7.1）· 02:45（v7.2）· 03:30（v7.3）· 04:35（v7.4）· **2026-10-29 04:50 重算（v7.5）** · 05:20（v7.6）· 06:05（v7.7）
 > 竞品基准：万兴剧厂 ReelMate（`www.reelmate.cn`），功能地图见 [reelmate-feature-map.md](../01-product/reelmate-feature-map.md)，分域附录见 [_parts/](../01-product/_parts/)
 > 本文用途：**排期与投入优先级的事实基线**。不是验收报告，不含主观评价。
@@ -11,7 +11,7 @@
 
 **以竞品为基准，OneFrame 全站实现进度 ≈ 98.3%（202.45/206，剩余 3.55；v1.0 基线 35.4%）；首发口径 ≈ 98.1%（130.53/133，基线 54.4%）。**
 
-最近一批（第 72 批）做的是**把两条「reason 写着没有、其实竞品有」的 CLI 骨架接到真能力上**：`task delete` 的 reason 原文是「我方无删除任务端点；结果按 `tasks.expire_at`（90 天）自动过期」，而竞品有 `DELETE /web/v1/task/{task_id}`（`commands/task.md:195`，支持 `--dry-run`/`--idempotency-key`）；`credits log` 的 reason 原文是「我方只有一套带符号 `points` 的口径，没有 log 的无符号口径」，而竞品 `commands/credits.md:68` 逐字写明 `credits log`（旧接口，`event_type` 1/2 + **无符号** `val`）与 `credits flows`（新接口，带符号 `points` + `section` + task id）**语义不同、不能混用**。落地方案是：**任务改软删**（迁移 0042 加 `tasks.deleted_at`，读路径全部收口，运行中/仍冻结积分两条 400101，分享随之失效）；**`credits log` 不为旧接口再造一份真相**（两份真相同步必然漂移），由 CLI 从带符号 `delta` 派生 `event_type`/`val`。端点 708 → **709**、迁移 42 → **43**、用例 1,281 → **1,287**（api 903 → **908**、cli 104 → **105**）；分数**不动**：这两条能力此前只记在 #9 的「骨架命令」缺口里，而 #9 台账是 1% 整数粒度（0.24 = 8×3%），48→46 表达不出来。
+最近一批（第 73 批）做的是**把 `resource` 组三条骨架补成真能力，并顺手校准一条自己写错的规模数字**：`resource get` 的 reason 原文是「我方无单资源详情端点」、`batch-confirm` 是「我方无批量确认端点」，而竞品 `GET /web/v1/df/resources/:sp_id/:resource_id/info`、`POST /web/v1/df/resources/batch-info`、`POST /web/v1/df/resources/batch-confirm` 三条都在册（CLI `commands/resource.md:92/96/100` 也给了三个动词）→ 落地项目资产「单条详情 / 批量详情 / 批量定稿」：批量**读**宽松（查不到的 id 进 `missing`，不让一屏变错误页）、批量**写**严格（任一 id 不属于本项目即整批 400102、一条都不落库）、定稿幂等（重复定稿不刷新 `finalized_at`）；CLI `resource get`/`batch-confirm` 转 ready 并新增 `resource batch-info`（命令 202→203、ready 158→161、骨架 44→42）。同时**查出文档把骨架数写成 46（实际 44）**——第 72 批从 46 减到 44 时误写成「48→46」，本批一并校准为 46→44→42。
 剩余 **3.55** 权重里已无「从零开发」，全部是外部输入与取证：
 
 | 拆分 | 模块 | 权重 | 进度 | v2.1 | v2.0 | v1.0 | 含义 |
@@ -24,7 +24,7 @@
 **五个必须说清的事实：**
 
 1. **没有 0% 模块，也没有"整块未做"**。28 个模块里 **9 个 100%、8 个 99–99.9%、6 个 97–98%、3 个 95–96%、2 个 92%**；最低的是 #12 集市 92、#25 内容安全 92，次低 #3 剧集分镜 95、#4 Agent 96、#22 账号 95，全部卡在"外部资质"或"待外部证据"。
-2. **剩余 3.55 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、真实渠道联调、升级补差价下单、知识库条目级字段（竞品有证据但属扩展能力）、CLI 46 条骨架命令（卡在后端未落地的端点）、Skill 市场的运营位内容（竞品只给接口形状，没有广场卡内容与首页推荐编排的证据，约 0.20）。**没有一块是"从零开发"**。
+2. **剩余 3.55 权重全是"非功能实现"性质**：真实供应商 Key、真实打款、真实渠道联调、升级补差价下单、知识库条目级字段（竞品有证据但属扩展能力）、CLI 42 条骨架命令（卡在后端未落地的端点）、Skill 市场的运营位内容（竞品只给接口形状，没有广场卡内容与首页推荐编排的证据，约 0.20）。**没有一块是"从零开发"**。
 3. **核心与生态两条线都已过 97%**：核心创作闭环 **97.8%**、生态与规模化 **98.9%**。首发口径（剔除 8 个非阻塞模块）**98.1%**，意味着"Beta 可对外收钱出片"这条线已经走完；剩余 3.55 权重**基本都卡在外部输入**（真实渠道密钥、竞品接口取证、产品口径确认、法务审核）。
 4. **每一轮的进度都有可复跑的证据**：`_acceptance/verify-round.ps1`（12 个任务全绿）+ 8 套真实浏览器 E2E（导演台/广告剧 12 项/转绘 11 项/创作者/分享/模板 UI/运营审核）+ 各类 smoke 脚本，命令与结论都登记在 §8。
 5. **本轮（第 72 批）做了什么**：① 竞品证据：`task delete` 对应 `DELETE /web/v1/task/{task_id}`（单数 `task`）、`credits.md:68` 明确两个积分明细接口「语义不同、不能混用」；② **软删而不是物理删**——`canvas_nodes.task_id`、`assets.source_task_id` 有外键、`credit_flows.ref_task_id` 是对账依据，物理删会被库拒绝或剪断对账链，所以迁移 0042 只加 `deleted_at`；③ 读路径**全部**收口（列表 / `?ids=` / 详情 / `/task/result` / 批量下载 / 分享与公开下载），并对「仍在跑（PENDING/RUNNING/REVIEWING）」与「仍冻结积分」两种状态给 400101 而不是静默删；④ CLI：`task delete` 接 `DELETE tasks/{task_id}`，`credits log` 接 `GET credits/flows` 但由 `transforms.ts` 的 `creditsLog` 派生旧口径字段（`Math.abs(delta)` + `delta>=0?1:2`）；⑤ 新 `task-delete.spec.ts` 5 例 + transforms 1 例，api 81 文件 908 例、cli 105 例。
@@ -68,14 +68,14 @@
 | 维度 | ReelMate | OneFrame（v2.1） | 覆盖 | v1.0 |
 |---|---|---:|---:|---:|
 | 页面路由 | 102（可比 93） | **64** | 61%（full）/ 69%（含 partial） | 29 |
-| API 端点 | 821 路径常量 | **709**（52 个 controller） | 85% | 236 |
+| API 端点 | 821 路径常量 | **712**（52 个 controller） | 85% | 236 |
 | 后端域 | 12 个服务前缀 | **30 个模块目录** | — | 14 |
 | 数据表 | 未知 | **112 张**（迁移 0000–0042） | — | 49 |
 | 模型目录 | 46 条 / 8 生成端点 | **46 条 seed + 15 条内部能力行**（目录 100%） | 100% | 10 条占位 |
 | 单点工具 | 22（17 有路由 + 5 报告点名） | **19 张卡 / 19 个落地页** | 100% | 18 卡 / 8 落地 |
-| CLI/MCP | 38 命令组 | **202 命令 / 38 组**（158 可用 + 46 骨架；`skill-path` 分发随包 Skill 已落地，MCP 侧无工具清单可对齐） | 85% | 0 |
+| CLI/MCP | 38 命令组 | **203 命令 / 38 组**（161 可用 + 42 骨架；`skill-path` 分发随包 Skill 已落地，MCP 侧无工具清单可对齐） | 85% | 0 |
 | 源码规模 | — | **api 217 个 `.ts` + web 54,678 行 `.vue` + cli 20 文件 + 4 个 packages** | — | — |
-| 测试 | — | **1,287 用例全绿**（api 908 / adapters 164 / cli 105 / worker 52 / db 26 / shared 26 / storage 6）＋ 浏览器 E2E 8 套（_acceptance 下 26 个 e2e/smoke 脚本） | — | 482 |
+| 测试 | — | **1,292 用例全绿**（api 913 / adapters 164 / cli 105 / worker 52 / db 26 / shared 26 / storage 6）＋ 浏览器 E2E 8 套（_acceptance 下 26 个 e2e/smoke 脚本） | — | 482 |
 
 ### 2.2 我方逐域端点（精确，可直接核对）
 
@@ -83,7 +83,7 @@
 |---|---|---:|
 | **novel（小说改编链）** | novel 45 + original 20 + agent 16 + variant 16 | **97** |
 | **canvas（画布）** | canvas 27 + material 15 + node-tasks 13 + group 8 + template 7 + download 3 + table 2 + chat 11 | **86** |
-| **script（剧本工厂/剧集/时间线）** | script.controller（含 quality-check / film-synthesis / parse / publish / works / storyboards CRUD） | **65** |
+| **script（剧本工厂/剧集/时间线）** | script.controller（含 quality-check / film-synthesis / parse / publish / works / storyboards CRUD） | **68** |
 | **market（集市 + Admin）** | market 36 + market-admin 22 | **58** |
 | **film（影视版）** | film 50 + func-whitelist 1 | **51** |
 | **op（运营增长）** | op.controller | **42** |
@@ -171,13 +171,13 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 |---:|---|---:|---:|---:|---:|---|---|
 | 1 | 首页工作台 | 5 | S(1) | **100%** | 1.00 | `/home` + **`/home/config` 配置驱动（sections 显隐/排序）** + **可中断长轮询未读（≤200ms 释放、超时不跳读）** + **AB 位（一人一变体）** + **`home_configs` 后台写入口（白名单 + 去重 + 乐观锁 746002）**；17 例 + 5 例 | 运营位曝光/点击打点口径待竞品取证（端点已实现，仅口径未对齐） |
 | 2 | **小说改编链** | 86 | L(8) | **98%** | 7.84 | **90 路由**：主链 38 + **原创链 20** + 编辑 Agent 16 + 裂变 16；`reopen` 两级引用判据（`source_novel_id` 精确 + 快照回落）；会话锁 Redis（多副本安全）；40 例 + 51 项 E2E | `original_script/characters/*` 5 条**有意不单列**（角色卡走既有 content-analysis，`novel-original.controller.ts:25-33` 已登记理由：不造第二份"角色卡怎么生成"的真相）；~~原创 `idea/:ni_id` 详情/编辑~~ **已实现**（`NovelOriginalChain.vue:143-170` 调 `GET/PATCH /novel/original/idea/:ni_id`） |
-| 3 | 剧集与分镜 | 73 | M(3) | **95%** | 2.85 | `quality-check`（只读，五维加权）+ `film-synthesis-export`（同步 80% 闸门 → 400106 + zip/mp4 双通道）+ `parse`/`parse-reset`/`parse-retry`（先备份再覆盖）+ **分镜手动增删改（第 68 批：`storyboard-add` 三形状 + 批量删除，迁移不需要——`shot_no` 唯一索引已存在，改号走两段式）** + **剧集删除 / 批量建集（第 71 批：`DELETE …/episodes/:eid` 在事务内清 8 张 RESTRICT 引用 `episodes.id` 的子表；`POST …/episodes/batch` 逐集给标题/集号，撞号 400101、空洞不回收、不重排）**；24 + 14 例 | quality-check 评分口径**自建**（竞品只有路由、无字段证据）；真 ffmpeg 切片裁剪待 worker handler；~~分镜增删改~~ **第 68 批已做**；~~剧集删除 / 批量建集~~ **第 71 批已做**（不动分数：这两条此前只记在 #9 的骨架缺口里，未计入 #3） |
+| 3 | 剧集与分镜 | 76 | M(3) | **95%** | 2.85 | `quality-check`（只读，五维加权）+ `film-synthesis-export`（同步 80% 闸门 → 400106 + zip/mp4 双通道）+ `parse`/`parse-reset`/`parse-retry`（先备份再覆盖）+ **分镜手动增删改（第 68 批：`storyboard-add` 三形状 + 批量删除，迁移不需要——`shot_no` 唯一索引已存在，改号走两段式）** + **剧集删除 / 批量建集（第 71 批：`DELETE …/episodes/:eid` 在事务内清 8 张 RESTRICT 引用 `episodes.id` 的子表；`POST …/episodes/batch` 逐集给标题/集号，撞号 400101、空洞不回收、不重排）**；24 + 14 例 | quality-check 评分口径**自建**（竞品只有路由、无字段证据）；真 ffmpeg 切片裁剪待 worker handler；~~分镜增删改~~ **第 68 批已做**；~~剧集删除 / 批量建集~~ **第 71 批已做**（不动分数：这两条此前只记在 #9 的骨架缺口里，未计入 #3） |
 | 4 | 创作 Agent | 12 | XL(20) | **96%** | 19.20 | 30 端点（第 64 批 +`PUT /agent-skills`） + `/agent` 对话页 + 33 张平台 Skill 卡 + SSE 续传/降级轮询 + **Skill 市场 9 条竞品形状全对齐**（`plaza` 的 `category`/`name`/`is_home_recommend`、`mine` 的 `status`、`details` 的 `owner_type`；卡片新增 `name_en`/`owner_type`/`is_home_recommend` 三字段，迁移 0041）；24 例 + 29 项 E2E | ~~分享侧实时流~~ **已实现（自建口径）**：`GET /share/:token/stream` 只读 SSE（六类帧，撤销/过期即断，终态自关，不推 storage key/积分/space）；~~`/agent/home/resource/*`~~ **有意不做**（见 `api-spec.md §14.9.3`：竞品只有端点名、无响应体，依赖内容运营表，为"可能不存在的内容模型"设计表 = 凭空造数据）；真实 ASR（需语音服务凭据 → 现 `available:false`，同样已登记"不暴露空壳"）；Skill 市场运营位内容（竞品只给了接口形状，没有广场卡内容/首页推荐位编排的证据 → 推荐位策略按自建口径，`is_home_recommend` 默认全 false） |
 | 5 | 全部项目 | 65 | M(3) | **97%** | 2.91 | `GET /works` 扩展：`tab=workshop\|canvas\|all` + 6 种筛选 + **竞品参数别名**（`name` ≡ `keyword`、`process_status=-1` ≡ `status=all`）+ **竞品两级分类投影**（`project_category`/`project_subcategory`/`project_categories` → 我方 `kind`/`project_mode`，反向也下发） + **项目归属组**（`group_id`/`group_name` + list 过滤 + `POST /script/projects/:id/group` 换组，复用 `team_groups`，迁移 0040） + `has_more` + `tabs{}`；画布侧跨域只读投影 + **画布封面三档**（人工 `asset_id`/节点 `node_id`/自动取"画布内最近一次图片节点产物"，迁移 0039） + `covers[]`/`creator_nick`/`last_edited_at` + `POST /canvas/canvases/:id/cover`；**11 例** | 剩 0.09：**影视版 FILM 档**（竞品 `project_category=3`）我方由独立影视模块承接、未合流到 `/works`（明确 400101 拒收，不假装支持）；分类只做到**参数层**，没有照着竞品的五档 tab 重排列表 UI（我方 tab 是形态维度：工坊/画布/全部）；工坊项目无创建人字段，`creator_nick` 返 `null` 而不拿空间 owner 冒充 |
 | 6 | 工具箱 | 63 | XL(20) | **97%** | 19.40 | 19 卡全可点（目录驱动）+ 15 工具 mode 接线 + 通用工作台 + 11 个落地页；15 例 + 164 适配器例 + 19 项 E2E | 真实供应商 Key（全 mock，外部依赖）；其余已验：图片工具真实提交→worker→产物→现签 URL→浏览器可渲染 |
 | 7 | 团队 | 39 | XL(20) | **100%** | 20.00 | 33 端点：成员/分组/角色/积分池/流水导出 + **权限码目录 70 条（11 组）+ 角色权限矩阵读写（幂等）+ `temp-info` 模型开关矩阵**；`/team` 权限矩阵页签 | 无（6 个码已落拦截：team.edit / team.permission / member.create / member.remove / member.edit / member.points；默认放行策略保零回归） |
 | 8 | 影视版 | 37 | XL(20) | **100%** | 20.00 | 49 操作 + `/film`、`/film/[id]`；47 例 + 18 项 E2E | 无（xlsx 真导出 + 离线通知 webhook 投递均已完成；WS 真传输属网关部署项，不是功能缺口） |
-| 9 | CLI/MCP | 8 | L(8) | **97%** | 7.76 | **202 命令 / 38 组（158 可用 + 46 骨架）** + 退出码 0..11 + `workflow detect` 阶段机 + **`skill-path` 随包 Skill（43 文件，由 registry 渲染防漂移）**；**105 例**（含 2 例跨包「registry 路径 ↔ 后端路由」双向校验、4 例 ad/redraw 与后端 controller 对齐，全部反向验证过）；第 68 批把 `storyboard add`/`delete`/`batch-delete`/`num-update` 4 条由 `todo` 转 `http`（骨架 57→53）；**第 70 批把 ad 组 3 条过期骨架 + redraw 2 条过期骨架接线并补齐 ad 到竞品同款 8 动词（骨架 53→48，命令 197→202）**；**第 71 批把 `episode delete`/`batch-create` 两条骨架接到新增的 `DELETE …/episodes/:eid` 与 `POST …/episodes/batch`（骨架 48→46，命令 202 不变）；**第 72 批把 `task delete`/`credits log` 两条骨架接线（骨架仍 46，ready 156→158）** | ~~MCP 0 行（需证据）~~ **第 61 批已据实修正**：竞品没有任何 MCP server 工具清单，其「MCP」= 侧栏 `menu.mcpCli` 入口（flag 门控）+ `integration_type=mcp` 归因参数 + `skill-path` 分发 Skill 包。我方 MCP 端点仍 0 行（无形状可对齐，不自造），缺口 0.24；~~浏览器 handoff 登录~~ **已实现**；~~36 条 ready 命令 path 缺 `canvas/` 前缀、实测全 404~~ **第 65 批已修**；~~ad/redraw 两组 reason 写着「当前无端点」但端点早已存在~~ **第 70 批已修**（5 条转 ready + ad 补齐 8 动词）；剩余 46 条骨架命令（各自卡在后端未落地的端点，权重已计入对应模块） |
+| 9 | CLI/MCP | 8 | L(8) | **97%** | 7.76 | **203 命令 / 38 组（161 可用 + 42 骨架）** + 退出码 0..11 + `workflow detect` 阶段机 + **`skill-path` 随包 Skill（43 文件，由 registry 渲染防漂移）**；**105 例**（含 2 例跨包「registry 路径 ↔ 后端路由」双向校验、4 例 ad/redraw 与后端 controller 对齐，全部反向验证过）；第 68 批把 `storyboard add`/`delete`/`batch-delete`/`num-update` 4 条由 `todo` 转 `http`（骨架 57→53）；第 70 批把 ad 组 3 条过期骨架 + redraw 2 条过期骨架接线并补齐 ad 到竞品同款 8 动词（骨架 53→48，命令 197→202）；第 71 批把 `episode delete`/`batch-create` 接到新增的 `DELETE …/episodes/:eid` 与 `POST …/episodes/batch`（骨架 48→46）；第 72 批把 `task delete`/`credits log` 接线（骨架 46→44、ready 156→158；当版误写成「48→46」，第 73 批校准）；第 73 批把 `resource get`/`batch-confirm` 接到新端点并新增 `resource batch-info`（骨架 44→42、ready 158→161、命令 202→203） | ~~MCP 0 行（需证据）~~ **第 61 批已据实修正**：竞品没有任何 MCP server 工具清单，其「MCP」= 侧栏 `menu.mcpCli` 入口（flag 门控）+ `integration_type=mcp` 归因参数 + `skill-path` 分发 Skill 包。我方 MCP 端点仍 0 行（无形状可对齐，不自造），缺口 0.24；~~浏览器 handoff 登录~~ **已实现**；~~36 条 ready 命令 path 缺 `canvas/` 前缀、实测全 404~~ **第 65 批已修**；~~ad/redraw 两组 reason 写着「当前无端点」但端点早已存在~~ **第 70 批已修**；剩余 42 条骨架命令（各自卡在后端未落地的端点，权重已计入对应模块） |
 | 10 | 活动/创作者 | 67 | XL(20) | **100%** | 20.00 | **83 端点**（crc 32 + op 42 + campaign 9）+ 3 页面（创作者中心/活动/邀请）；审核状态机 / 点赞关注幂等 / 发分走账本 / 兑换码并发唯一键 / AB 一人一变体；41 例 | 无（平台运营审核队列已落：`GET/POST /ops/admin/creator-audits*` + 运营后台页签 + 浏览器 6/6） |
 
 ### 3.2 B 组：任务书额外模块
@@ -232,7 +232,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 95–96% | **3** | #3 剧集分镜 95 · #4 Agent 96 · #22 账号 95 |
 | 92% | **2** | #12 集市 92 · #25 内容安全 92 |
 
-**分布解读**：**28 个模块全部 ≥92%，中位数 99%，9 个满分**。剩下两个 92% 的模块，缺口都不是"没写代码"：集市差的是打款资质、内容安全差的是审核供应商；全部项目（97%）只剩影视版 FILM 档是否合流到 `/works` 与五档 tab UI，账号（95%）差真实渠道联调与账号合并口径，Agent（96%）差真实 ASR 凭据与 Skill 市场的运营位内容，CLI/MCP（96%）差 57 条骨架命令背后尚未落地的后端端点与"竞品无形状可对齐"的 MCP 端。逐项"卡在谁"见 §5。
+**分布解读**：**28 个模块全部 ≥92%，中位数 99%，9 个满分**。剩下两个 92% 的模块，缺口都不是"没写代码"：集市差的是打款资质、内容安全差的是审核供应商；全部项目（97%）只剩影视版 FILM 档是否合流到 `/works` 与五档 tab UI，账号（95%）差真实渠道联调与账号合并口径，Agent（96%）差真实 ASR 凭据与 Skill 市场的运营位内容，CLI/MCP（97%）差 42 条骨架命令背后尚未落地的后端端点与"竞品无形状可对齐"的 MCP 端。逐项"卡在谁"见 §5。
 
 ### 3.5 缺口分类（2026-10-28 逐条按代码复核后）
 
@@ -300,7 +300,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 1 | **Agent（#4）** | 20 | **0.80** | 真实 ASR 凭据（现 `available:false`，约 0.60）；Skill 市场运营位内容与首页推荐编排（竞品只有接口形状、无数据证据，约 0.20） | 商务（ASR 账号）+ 产品/运营（推荐位口径） |
 | 2 | **剧本广场（#12）** | 8 | **0.64** | 真实打款（商户资质）；买断后二次改编许可范围 | 财务/商务 + 产品口径 |
 | 3 | **工具箱（#6）** | 20 | **0.60** | 真实供应商 Key（现全 mock 占位字节） | 商务 |
-| 4 | **CLI/MCP（#9）** | 8 | **0.24** | ~~MCP 0 行（竞品无工具清单，待取证）~~ **第 61 批已据实修正**：竞品无 MCP server 工具清单（606 个 js 里 `mcp` 仅 3 处：侧栏 `menu.mcpCli` 入口 + `integration_type=mcp` 归因参数），无形状可对齐；`skill-path` 分发通道已落地。~~53 条骨架命令~~ **第 70 批降到 48 条**：其中 ad×3、redraw×2 的 reason 原文写「当前无端点」属**过期记录**（两个模块端点数 12+9 早已在册），已全部接线，ad 组还补齐到竞品同款 8 动词（命令 197→202）；剩下 48 条各自卡在后端未落地的端点（见各模块扣分），MCP 端因无形状可对齐**不实现**；**第 71 批把 `episode delete`/`batch-create` 两条接线（骨架 48→46）**，46 条仍各自卡在后端端点（1% 粒度表达不出来，故 0.24 不动） | 后端端点（各模块内）+ 竞品证据（若有） | **第 72 批**：`task delete` / `credits log` 两条骨架接线（骨架 48→46，46 条仍各自卡在后端端点）。
+| 4 | **CLI/MCP（#9）** | 8 | **0.24** | ~~MCP 0 行（竞品无工具清单，待取证）~~ **第 61 批已据实修正**：竞品无 MCP server 工具清单（606 个 js 里 `mcp` 仅 3 处：侧栏 `menu.mcpCli` 入口 + `integration_type=mcp` 归因参数），无形状可对齐；`skill-path` 分发通道已落地。骨架命令 53→48（第 70 批修 5 条过期 reason）→48→46（第 71 批 `episode delete`/`batch-create`）→46→44（第 72 批 `task delete`/`credits log`；当版误写成 48→46，第 73 批校准）→44→42（第 73 批 `resource get`/`batch-confirm` + 新增 `batch-info`）；剩余 42 条各自卡在后端未落地的端点（权重已计入各模块），MCP 端因无形状可对齐**不实现**；1% 粒度表达不出「少 2 条」，故 0.24 不动 | 后端端点（各模块内）+ 竞品证据（若有） | 骨架随端点落地自然收敛（42 条） |
 | 5 | **全部项目（#5）** | 3 | **0.09** | ~~画布封面 + 画布元信息~~ **第 62 批已做**；~~项目分组（`group_id`/`group_name` + 换组）与五档分类投影~~ **第 63 批已做**（迁移 0040 + `POST /script/projects/:id/group` + 双向分类映射 + 分组筛选/就地换组）；剩**影视版 FILM 档**（竞品 `project_category=3`，我方由独立影视模块承接、未合流，明确 400101 拒收）与**五档 tab UI**（我方 tab 是形态维度） | 产品口径 + 工程量 |
 | 6 | **广告剧 / 转绘 / 内容安全** | 3+3+1 | **0.26** | 真实出片与真实重绘依赖供应商 Key；真实审核供应商（0.08） | 商务 |
 | 7 | **无限画布（#11）** | 20 | **0.20** | 竞品 85 端点中最后几条的响应字段取证 | 竞品证据 |
@@ -342,6 +342,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | 第 70 批（v9.3） | 98.3% | **98.3%** | **ad/redraw 两组从「过期骨架」接到真端点 + `--set` 大整数 id 保真**：`registry.ts:834-838` 的 5 条 `todo` 的 reason 原文是「ad/redraw 域本轮由队友落地、CLI 接线放下一轮，当前无端点」，但 `@Controller("ad-drama")`（12 条）与 `@Controller("video-redraw")`（9 条）早已上线——**骨架命令让 agent 以为能力不存在，比缺能力更有害**；按竞品 `commands/ad.md:22-31` 的 8 动词清单接线（5 条生成类标 `paid:true`，逐个对过 `credits.price()`），命令 197→202、骨架 53→48；顺手修 `--set brief_id=108760275629637632` 被 `JSON.parse` 变浮点、尾数被改掉导致的 400101（`coerceScalar` 对超 `MAX_SAFE_INTEGER` 的裸整数保留字符串）；真 CLI 打真 API 跑通 ad 全链与 redraw。**不加分**（骨架 48 仍卡后端端点；命令层修复属实现质量） |
 | 第 71 批（v9.4） | 98.3% | **98.3%** | **剧集删除 + 批量建集**：`episode delete`/`batch-create` 两条 CLI 骨架的 reason 原文是「我方无 DELETE episodes」「只支持按数量新增」，而竞品两个端点（`ApiDfEpisodeDeletePOST`、`ApiDfEpisodeBatchCreatePOST`）都在册且 CLI 给了用法 → 落地 `DELETE …/episodes/:eid`（事务内清 8 张 RESTRICT 引用 `episodes.id` 的子表，漏一张就是 500）与 `POST …/episodes/batch`（逐集给标题/集号，撞号 400101、空洞不回收、不重排）；端点 706→708、骨架 48→46、用例 1,275→1,281；分数不动（这两条只记在 #9 的骨架计数里） |
 | 第 72 批（v9.5） | 98.3% | **98.3%** | **任务软删 + `credits log` 客户端派生**：`task delete` 的 reason 原文「我方无删除任务端点；结果按 `tasks.expire_at`（90 天）自动过期」，竞品有 `DELETE /web/v1/task/{task_id}`（`commands/task.md:195`）→ 迁移 0042 加 `tasks.deleted_at` 软删（物理删会撞 `canvas_nodes.task_id`/`assets.source_task_id` 外键、剪断 `credit_flows.ref_task_id` 对账链），读路径全部收口 + 运行中/仍冻结积分两条 400101 + 分享自毁；`credits log` 不为旧接口再造第二份真相（`credits.md:68` 明说两接口语义不同、不能混用），由 CLI `transforms.ts` 从带符号 `delta` 派生 `event_type`/`val`。骨架 48→46、ready 156→158、用例 1,281→1,287；**不加分**（两条此前只记在 #9 骨架缺口，1% 粒度表达不出来） |
+| 第 73 批（v9.6） | 98.3% | **98.3%** | **资源组三条骨架接到真端点 + 校准跑偏的骨架计数**：`resource get`/`batch-confirm` 的 reason 原文分别是「我方无单资源详情端点」「我方无批量确认端点」，而竞品 `resources/…/info`、`resources/batch-info`、`resources/batch-confirm` 三条都在册（CLI 三动词）→ 落地项目资产「单条详情 / 批量详情 / 批量定稿」；**读宽松写严格**（读：查不到的进 `missing`；写：任一 id 不属于本项目即整批 400102、一条不落库）+ 定稿幂等（重复定稿不刷新 `finalized_at`）；CLI `get`/`batch-confirm` 转 ready 并新增 `batch-info`，命令 202→203、ready 158→161、骨架 44→42、端点 709→712、用例 1,287→1,292；**不加分**（两条骨架的减少同样落在 1% 粒度以下）。顺带修掉第 72 批把「46→44」误写成「48→46」的数字事实错误 |
 
 ### 5.2 排序修正建议
 
@@ -358,7 +359,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | # | 缺口 | 权重 | 卡在哪 | 需要谁提供什么 | 拿到后预计 |
 |---:|---|---:|---|---|---:|
 | 1 | **Agent**：真实 ASR + 运营位内容 | **0.80** | ASR 无语音服务凭据（现诚实返回 `available:false`，约 0.60）；~~Skill 档位与竞品对齐需竞品清单~~ **第 64 批已据实修正**：清单已取到（9 条端点 + 4 个 query 参数）并全部实现，剩下的 0.20 是**广场卡内容与首页推荐位编排**——竞品只暴露接口形状，没有数据证据，不自造。 | 商务：ASR 账号（阿里/讯飞/字节任一）；产品/运营：推荐位编排口径 | 0.60 全清 / 0.20 需口径 |
-| 2 | **CLI/MCP**：46 条骨架命令 + MCP 端 | 0.24 | ~~竞品证据缺位~~ **第 61 批已据实修正**：竞品从 606 个 js 里 `mcp` 仅 3 处命中（侧栏 `menu.mcpCli` 入口 + `integration_type=mcp`/`client_source=cli|web` 归因参数），**不存在 MCP server 工具清单**——"等竞品给清单"这个假设不成立；`skill-path` 分发通道已落地。第 68 批把 `storyboard add`/`delete`/`batch-delete`/`num-update` 4 条转 ready（57→53），其余各自卡在对应后端端点未落地（权重已计入各模块），MCP 端因无形状可对齐**不实现** | 后端端点（各模块内）+ 竞品证据（若有） | 0.24 → 骨架随端点落地自然收敛 |
+| 2 | **CLI/MCP**：42 条骨架命令 + MCP 端 | 0.24 | ~~竞品证据缺位~~ **第 61 批已据实修正**：竞品从 606 个 js 里 `mcp` 仅 3 处命中（侧栏 `menu.mcpCli` 入口 + `integration_type=mcp`/`client_source=cli|web` 归因参数），**不存在 MCP server 工具清单**——"等竞品给清单"这个假设不成立；`skill-path` 分发通道已落地。第 68/70/71/72/73 批把 `storyboard`×4、ad×5、`episode`×2、`task delete`、`credits log`、`resource`×2 共 15 条转 ready（骨架 57→42），其余各自卡在对应后端端点未落地（权重已计入各模块），MCP 端因无形状可对齐**不实现** | 后端端点（各模块内）+ 竞品证据（若有） | 0.24 → 骨架随端点落地自然收敛 |
 | 3 | **剧本广场**：真实打款 | 0.64 | 商户资质：分账/代付需主体资质与支付通道签约 | 商务/财务：支付通道 + 分账权限 | 0.64 → 全清 |
 | 4 | **工具箱**：真实供应商 Key | 0.60 | 无凭据：`ADAPTER_MODE=mock` 下所有生成走占位字节 | 商务：至少 1 家真实供应商 Key + 额度预算 | 0.60 → 全清 |
 | 5 | **多模块"最后一项"** | **1.17** | 多数需**产品定义或凭据**：广告剧+转绘真实出片/重绘与内容审核供应商（0.26）、画布末几条字段取证（0.20）、`characters/*` 与结局分支（0.16）、OAuth 账号合并（0.15）、`quality-check` 细则（0.15）、`replace` 语义（0.08）、ReelFlow 切片业务语义取证（0.08）、知识库条目级字段未落库（0.015）、后处理真实 Key + 3D 真实双人 + 计费补差价口径（0.07）。**（第 62 批移出"画布封面 0.30"、第 63 批移出"项目分组 0.18"，均已实现）** | 产品（定义）/ 商务（账号）/ 法务（合规）分别认领 | 分 5–6 轮清 |
@@ -399,7 +400,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 ## 6. 两个必须澄清的判断
 
 ### 6.1 「35%」不等于「做完了 35% 的工作量」
-> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（98.3%，剩余 3.55；第 68/70/71/72 批补的是能力与 CLI/后端一致性，不改分数）。
+> **时点说明**：本节是 **v1.0 基线（35.4%）时**的拆解，保留作为「为什么百分比不等于工作量」的论证；现状见 §0 / §3.4（98.3%，剩余 3.55；第 68/70/71/72/73 批补的是能力与 CLI/后端一致性，不改分数）。
 
 剩余 131.0 权重（64%）的构成：
 
@@ -423,7 +424,7 @@ reelflow(edit[id]) / team(index) / projects([id]) / canvas([id] + 13 组件) / a
 | novel | 86 | **64** | 竞品把 `df/novel` 单列；我方独立 `/v1/novel/*`，差 `original_script` 14 + 其它 8 |
 | script | 219 | **51** | 竞品把 novel 链单独算 86、script_project 41、creation 23；我方合并，并把 novel 链拆出独立模块 |
 | film | 37 路径/48 操作 | **49 操作** | 契约逐条对齐 + 1 条我方扩展（`GET /film/projects`） |
-| cli | 38 命令组 | **38 组 / 202 命令**（158 可用 + 46 骨架） | 组数相同但**构成不同**：我方把 `edge` 并入 `node`（−1）、新增 `skill` 组（+1），属口径差异不是缺口；命令数按竞品 38 篇 `commands/*.md` 逐条展开 |
+| cli | 38 命令组 | **38 组 / 203 命令**（161 可用 + 42 骨架） | 组数相同但**构成不同**：我方把 `edge` 并入 `node`（−1）、新增 `skill` 组（+1），属口径差异不是缺口；命令数按竞品 38 篇 `commands/*.md` 逐条展开 |
 | team | 39 | 29 | 我方 29 覆盖核心 9 组，缺模型开关矩阵与 58 个权限码 |
 | admin | 12 | **20** | 我方更全 |
 
@@ -479,7 +480,7 @@ pwsh _acceptance/verify-round.ps1 -ScaleOnly # 只出规模口径（秒级）
 # ① 我方端点总数（含无参 @Get() 写法）
 $f = @(Get-ChildItem 'app\apps\api\src' -Recurse -File -Filter '*.controller.ts')
 $s = 0; foreach ($x in $f) { $s += ([regex]::Matches((Get-Content -LiteralPath $x.FullName -Raw), '@(Get|Post|Put|Patch|Delete)\s*\(')).Count }
-"controllers=$($f.Count) endpoints=$s"                  # 52 / 709
+"controllers=$($f.Count) endpoints=$s"                  # 52 / 712
 
 # ② 页面数
 @(Get-ChildItem 'app\apps\web\pages' -Recurse -File -Filter '*.vue').Count   # 64
@@ -545,6 +546,7 @@ $l = Get-Content 'rea-reelmate\routes.txt' | ForEach-Object { $_.Trim() } | Wher
 
 | 日期 | 版本 | 变更 | 基线 HEAD |
 |---|---|---|---|
+| 2026-10-28 | **v9.6** | **资源组三条骨架接到真端点（详情 / 批量详情 / 批量定稿）+ 校准跑偏的骨架计数（第 73 批 · 不加分）**：① 缺口性质：`apps/cli/src/registry.ts:532` 的 `resource get` reason 原文「我方无单资源详情端点」、`:554` 的 `batch-confirm`「我方无批量确认端点；逐条 `resource confirm`」——而竞品 `GET /web/v1/df/resources/:sp_id/:resource_id/info`、`POST /web/v1/df/resources/batch-info`、`POST /web/v1/df/resources/batch-confirm` 三条都在册，CLI `commands/resource.md:92/96/100` 也给了 `get`/`batch-info`/`batch-confirm` 三个动词（我方连 `batch-info` 这个命令都没有）。② 三个端点落在项目资产上（`projects/:id/assets`）：`GET …/assets/:assetId`（含 `bound_shot_count`）、`POST …/assets/batch-info`、`POST …/assets/batch-confirm`；③ 两个刻意相反的语义：**批量读宽松**（查不到的 id 进 `missing`，一个失效 id 不该让一屏变错误页）、**批量写严格**（任一 id 不属于本项目即整批 400102 且一条都不落库——部分成功会让调用方无法判断到底改了什么）；④ 定稿幂等：重复定稿不刷新 `finalized_at`（与 `PATCH …/assets/:assetId {status:2}` 同一规则），zod 的 `min/max` 也补了带字段名的 message（默认文案是「Array must contain at least 1 element(s)」，CLI/agent 看不出是哪个参数）；⑤ 顺带校准数字：第 72 批文档把骨架数写成「48→46」，实际是 46→44（命令 202 时 ready 156→158），本批再降到 42——§2.1/§3.3/§3.4/§5/§5.3/§7 全部对齐；⑥ 端点 709→712、命令 202→203、ready 158→161、骨架 44→42、用例 1,287→1,292（新 spec 5 例）、api 82 文件 913 例、12/12 全绿；分数不动 202.45/98.3%（1% 粒度表达不出少 2 条骨架）。基线 `474e16f`。 |
 | 2026-10-28 | **v9.5** | **任务软删 + `credits log` 客户端派生（第 72 批 · 不加分）**：① 缺口性质：`apps/cli/src/registry.ts` 的 `task delete` reason 原文「我方无删除任务端点；结果按 `tasks.expire_at`（90 天）自动过期」、`credits log` reason 原文「我方只有一套带符号 `points` 的口径 `GET /credits/flows`，没有 log 的无符号口径」；竞品证据是 `commands/task.md:195`（`DELETE /web/v1/task/{task_id}`）与 `commands/credits.md:68`（两个接口语义不同、不能混用）。② 为什么软删：`tasks` 被 `canvas_nodes.task_id`、`assets.source_task_id` 外键引用，`credit_flows.ref_task_id` 是对账依据，物理删会被拒或剪断链；迁移 `0042_worthless_mentor.sql` 只加 `deleted_at`，不加 partial index（`idx_tasks_space_status` 已按 space 领先）。③ 读路径收口：`getMany`/`list`/`batchDownload`/`resultMany`/`findTask`/`cancel`/`publicShare`/`publicShareDownload` 全部加 `isNull(tasks.deletedAt)`；`remove()` 对活跃态与 `creditsFrozen>0` 抛 400101（否则「删了记录但后台还在跑」「那笔钱永远悬着」）。④ CLI：`task delete` → `DELETE tasks/{task_id}`（write）；`credits log` → `GET credits/flows` + 新增 `creditsLog` transform 派生旧口径。⑤ 测试：新 `test/task-delete.spec.ts` 5 例（软删后行/结果/对账字段仍在但 5 条读路径全失效、分享自毁、运行中三态、冻结积分、坏 id/跨空间）+ `transforms.spec.ts` 1 例；api 81 文件 908 例、cli 15 文件 105 例、12/12 全绿。数字：端点 709、迁移 43、用例 1,287；**不加分**（18 条 500 那批同理：修的是「宣称没有」的记录，不是新能力口径），全站仍 **98.3%（202.45/206，剩余 3.55）**。基线 `ebaa65b` |
 | 2026-10-28 | **v9.4** | **剧集删除 + 批量建集：删掉一集要连带清 8 张子表（第 71 批 · 不加分）**：① 缺口性质：`apps/cli/src/registry.ts` 里 `episode delete` 的 reason 原文「我方无 DELETE episodes；不要的集用 PATCH 清空内容」、`episode batch-create`「我方只支持按数量新增」—— 竞品 `ApiDfEpisodeDeletePOST`（path 无 `:ep_id`，id 在 body）与 `ApiDfEpisodeBatchCreatePOST` 都在册，CLI `commands/episode.md:21-22` 给了完整用法（`delete EPISODE_ID`、`batch-create --set @episodes.json`，items 每项 `{"sort","name","s_script_id"}`，返回 `succeeded/failed/unconfirmed`）；② 级联面：指向 `episodes.id` 的外键共 **8 张表**（`storyboards`/`exportJobs`/`projectTimelines`/`timelineExports`/`extractionTasks`/`directorScenes`/`timelinePublications`/`episodeResources`），全部 RESTRICT，此前没有任何删除路径 → `deleteEpisode` 在一个事务里按依赖顺序清；`storyboard_assets` 引用的是 `storyboards.id`，要先按本集分镜 id 删；③ 两个不显然决定：**不重排 `ep_no`**（竞品文档只说删除该集、无重排证据，重排还会让外部引用的「第 N 集」漂移）、**建集不回收空洞**（与前者同一套口径，`sort` 撞号 400101 而非静默改号）；④ 竞品的 `s_script_id` 与 `unconfirmed[]` 我方没有对应实体与异步中间态，故 `batchCreateEpisodes` 只接收 `name`/`sort`/`synopsis` 并同步返回 `created`，差异写进 `api-spec §17.29`；⑤ 端点 706→708、CLI ready 154→156 / 骨架 48→46、用例 1,275→1,281（新 spec 6 例）、api 80 文件 903 例、12/12 全绿；分数不动 202.45/98.3%。基线 `f9beed8`。 |
 | 2026-10-28 | **v9.3** | **ad/redraw 命脉从「过期骨架」接到真端点 + `--set` 大整数 id 保真（第 70 批 · 不加分）**：① 缺口性质纠正：`registry.ts:834-838` 的 5 条 `todo` reason 原文写「ad 域本轮由队友落地（modules/ad）；CLI 接线放下一轮，当前无端点」，但 `@Controller("ad-drama")`（12 条）与 `@Controller("video-redraw")`（9 条）早已在册——**骨架命令会让 agent 以为能力不存在，比缺能力更有害**。② 接线：ad 8 动词对齐竞品 `commands/ad.md:22-31` 同款清单（`info`/`save`/`selling-point`/`plot`/`script`/`asset`/`plan`/`reset`，其中 5 条生成类标 `paid:true`，依据 `ad-drama.service.ts:225/272/340/442/515/569` 逐个 `credits.price()`）+ redraw `info`/`create`；命令 197→202、ready 144→154、骨架 53→48。③ 顺手修真缺陷：`--set brief_id=108760275629637632` 被 `JSON.parse` 变成 float、尾数被 IEEE-754 改成 …590，服务端 400101 `Expected string, received number`；`args.ts` 的 `coerceScalar` 改为「只有超过 `MAX_SAFE_INTEGER` 的裸整数按字符串保留」（短数字与安全整数仍是数字，已带引号不二次加引号，数组内同样生效）。④ 验证：真 CLI 打真 API 跑通 ad 全链（`save`→`info`→`selling-point`/`plot`/`script`/`asset`/`plan`→`reset`→`info`，末态 `stage=4`/`shots=3`）与 redraw 两条（`create` 回 `project_mode:3`、`info` 回 `video_redraw_stage:"episode"`/`stage_status:1`）；cli 用例 99→104（`args.spec.ts` +1、新增 `ad-redraw-parity.spec.ts` 4 例把 method+path 与 paid 标记逐条钉死）；总闸 12/12。**不加分**（#9 的 0.24 是整数格点，骨架 48 仍卡后端未落地端点） | `afae6d1` |
