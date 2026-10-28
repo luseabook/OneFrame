@@ -47,6 +47,18 @@ export class AssetsController {
     return this.assets.createFolder(req.auth?.spaceId ?? "", input.name, input.parent_id);
   }
 
+  /**
+   * 单个素材详情（第 88 批）。
+   *
+   * 竞品是 `GET /web/v1/asset/resource/:category/:res_id`（category 只是前端分栏，不改变语义）。
+   * 我方的 key 就是 asset id，所以只收一个 `:id`；`category` 那种「一个 id 两套分类」的分栏
+   * 在我方由 `kind` + 文件夹表达，不额外编一个假参数。
+   */
+  @Get("assets/:id")
+  async detail(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.assets.detail(req.auth?.spaceId ?? "", id);
+  }
+
   @Patch("assets/:id")
   async patchAsset(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
     const input = parseOrThrow(

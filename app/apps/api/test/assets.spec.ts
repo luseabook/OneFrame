@@ -197,10 +197,32 @@ describe("assets upload/list/delete", () => {
     }
   });
 
+  it("竞品形状：单资源详情 GET /assets/:id（与列表同一形状，软删后不可见）", async () => {
+    const detail = await inject("GET", `/assets/${assetId}`);
+    expect(detail.code).toBe(0);
+    expect(detail.data.id).toBe(assetId);
+    expect(detail.data.kind).toBe("image");
+    expect(detail.data.url).toContain("/files/local");
+
+    // 与列表里同一行「同一形状」：不是详情多几个字段，也不是少几个
+    const list = await inject("GET", "/assets");
+    const row = list.data.list.find((item: { id: string }) => item.id === assetId);
+    expect(row).toBeTruthy();
+    expect(Object.keys(detail.data).sort()).toEqual(Object.keys(row).sort());
+
+    expect((await inject("GET", "/assets/abc")).code).toBe(400101);
+    const missing = await inject("GET", "/assets/999999999999999999");
+    expect(missing.code).toBe(400102);
+    expect(missing.msg).toContain("asset not found");
+  });
+
   it("soft-deletes the asset", async () => {
     const removed = await inject("DELETE", `/assets/${assetId}`);
     expect(removed.code).toBe(0);
     const list = await inject("GET", "/assets");
     expect(list.data.list.some((a: { id: string }) => a.id === assetId)).toBe(false);
+    // 软删后详情同样不可见（详情页拿到已删素材会让人以为它还能用）
+    const detail = await inject("GET", `/assets/${assetId}`);
+    expect(detail.code).toBe(400102);
   });
 });

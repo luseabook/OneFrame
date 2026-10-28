@@ -4260,3 +4260,48 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 - 只比 METHOD + path，不比 query/body 语义。
 - 4 条豁免（画布内剪辑/裁剪、组回收站、模板元素批量建）是「要先建模型」的产品口径，不是外部依赖。
 - 竞品那 4 条的两个 schema 都是 `{}`，我们没有字段可照抄——这既是「不实现」的理由，也是「以后实现时形状自定」的前提。
+
+## 17.45 资产/主体的客户端契约：单素材详情与四类资产库的命名映射（第 88 批）
+
+### 45.1 为什么进 API 文档
+
+竞品把「资产」拆成四个库：`asset/resource`（通用素材）、`asset/prompts`（提示词）、`asset/actor`（演员）、`asset/workflows`（资产工作流）。我方是三个入口：`/assets`（素材 + 文件夹）、`agent-skills`（提示词）、`/subjects`（角色/演员）、加画布模板族（工作流）。
+
+**照竞品路径移植的客户端，第一步就会打在 `/asset/*` 上，我方一条都没有** —— 这属于「ADR-003 差异在参数不在端点」造成的结构性偏离，必须在文档里讲清楚，否则读代码的人会以为是漏实现。
+
+### 45.2 新端点：`GET /assets/:id`
+
+| 项 | 值 |
+| --- | --- |
+| 路径 | `GET /v1/assets/:id` |
+| 鉴权 | 需要 `Authorization`；空间按 token（或 `X-Space-Id`） |
+| 响应 | 与 `GET /v1/assets` 列表项**完全同形**（同一个 `toDto`，`url` 为 1 小时预签名） |
+| 400101 | 路径参数不是数字 |
+| 400102 | 不存在 / 不属于本空间 / 已软删 |
+
+三条契约约束：
+
+1. **详情不可比列表多字段**：测试用 `Object.keys(a).sort()` 深等锁住，避免两个入口漂移。
+2. **软删不可见**：`isNull(deletedAt)` 是过滤条件；要看已删的走 `GET /assets?deleted=true` 列表（那里有 restore 动作）。
+3. **不实现 `category`**：竞品 `GET /asset/resource/:category/:res_id` 的 `category` 是前端分栏，我方用 `kind`（image/video/audio）+ 文件夹；造一个被忽略的路径段比不造更坏。
+
+### 45.3 四类资产库的命名映射
+
+| 竞品 | 我方 | 语义差异 |
+| --- | --- | --- |
+| `asset/resource/*`（7） | `/assets` 家族 | 只差单资源详情（本批补齐） |
+| `asset/prompts/*`（4） | `/agent-skills` | 我方是「可带参数 / 可收藏 / 可分享」的 Skill 卡 |
+| `asset/actor/*`（4） | `/subjects`（`kind=character`） | 我方把角色/演员合流为 subject |
+| `asset/workflows/*`（13） | 画布模板族 + 节点任务族 | 模板=快照，改=另存（没有 PUT 模板） |
+| `subject/resource/*`（8） | `/subjects` | 方法体系不同：竞品查询/删除/更新都用 POST |
+
+### 45.4 守卫里的表达
+
+`competitor-route-parity.spec.ts` 的 `ASSET_SHAPES`（36 条）里，**exact 为 0**：34 条走 `DEVIATIONS`（每条给出 `ours`，且断言 `ours` 真实存在）、2 条走 `WAIVED`（reason 以「外部」开头，指 vidu 供应商凭据）。这意味着这个模块的「对齐」不是靠同名路径，而是靠一张显式的映射表 —— 任何一条映射的目标端点被改名/删除，测试立刻红。
+
+### 45.5 边界
+
+1. 竞品 `asset/resource` 的 `category`/`res_id` 真实语义无证据（只有方法+路径）。
+2. `/asset/workflows` 的 13 条里，「删除」「改名」翻译成模板快照语义是推断。
+3. 本批不触碰 #17 的两条字段级缺口（`prompt_blocked` 列、`prompt_inject_mode` 语义）。
+4. 分数不变：#17 仍 99%（0.08 归 B 类）。

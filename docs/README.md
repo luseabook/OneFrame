@@ -127,6 +127,85 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.42 · 第 88 批：审计 #17 资产/主体 —— 36 条竞品形状里 0 条同形，但只有 1 条是真缺口 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 79–87 批把一个个「自证 100%（或 99%）」的模块用竞品路由钉了一遍。剩下没被钉过的里面，#17 资产/主体（99%，缺 0.08）最可疑：它的缺口栏写的全是**字段级**问题（`prompt_blocked` 没有列、`prompt_inject_mode=replace` 语义待确认），从没有人验过「竞品那些资产库/角色库/工作流路由，在我方到底有没有可打的路径」。
+
+竞品 `/asset/*` 与 `/subject/*` 家族在 905 行端点表里共 62 行。逐条分域后属 #17 的是 **36 条**：
+
+| 竞品路径族 | 条数 | 我方等价物 |
+| --- | --- | --- |
+| `/web/v1/asset/resource/*` | 7 | `/assets` 家族（1 条真缺：单资源详情） |
+| `/web/v1/asset/prompts/*` | 4 | `/agent-skills`（可带参数/可收藏/可分享的 Skill 卡） |
+| `/web/v1/asset/actor/*` | 4 | `/subjects`（kind=character 就是演员） |
+| `/web/v1/asset/workflows/*` | 13 | 画布模板族 + 节点任务族 |
+| `/web/v1/subject/resource/*` | 8 | `/subjects` |
+
+另 26 行不属 #17：知识库资产 11 条（#18）、抽取/剧集资产 9 条（#3）、广告剧与转绘 3 条（#13/#14）、资源目录 batch-move 1 条。
+
+### 二、逐条归属：0 同形 + 34 结构性偏离 + 2 外部输入豁免，0 缺口
+
+- **`/asset/prompts` 4 条 → `agent-skills`**：我方把提示词库做成「Skill 卡」——可声明参数、可收藏、可分享给团队；竞品是「提示词标签 + 文本块」。同一件事，两种建模。
+- **`/asset/actor` 4 条 → `/subjects`**：`subjects.controller.ts` 头注释早就写明「竞品用 `df/subject/resource*` 与 `asset/actor/list` 两套 ID，不混用」，我方把角色/演员合流为 subject（`kind=character`）。
+- **`/asset/workflows` 13 条 → 画布模板族**：list→`GET /canvas/templates`、detail→`GET /canvas/templates/:id`、create/PUT→`POST /canvas/canvases/:id/tpls`、copy→`GET /canvas/templates/:id/instantiate`、runs→`POST /canvas/canvases/:id/batch-node-tasks`、run-list→`GET …/running-nodes`、node-runs→`POST …/nodes/:id/generate`、run→`GET …/nodes/:id/task/:task_id`、node-point-calc→`POST /credits/quote`。**模板=快照，改=另存**，所以没有「PUT 模板」。
+- **`/subject/resource` 8 条 → `/subjects`**：竞品连查询/删除/更新都做 POST，我方是 GET/DELETE/PATCH。
+- **2 条外部输入豁免**：`vidu-subjects` 的注册与反查需要供应商凭据。
+
+### 三、唯一一条真缺口：单素材详情
+
+竞品有 `GET /web/v1/asset/resource/:category/:res_id`，我方只有列表 `GET /assets` —— 想按「点开一张图」的调用习惯打过来，是 404。本批补：
+
+```text
+GET /assets/:id            （复用列表的 toDto，形状完全一致）
+  → 200 { id, kind, url, thumbnail_url, width, height, bytes, task_id, folder_id, created_at, … }
+  → 400101 invalid asset id          （路径参数不是数字）
+  → 400102 asset not found           （不存在 / 不属于本空间 / 已软删）
+```
+
+`category` 参数**没有实现**：竞品用 `category` 做前端分栏（图片/视频/音频），我方用 `kind` + 文件夹表达；造一个被忽略的参数比不造更坏。
+
+测试里有一条不太一样的断言：**详情与列表同一行的 `Object.keys()` 深等** —— 保证「同一个资源从两个入口看到的是同一个形状」，以后谁给详情加字段就会红。
+
+### 四、为什么本批不加分
+
+那 0.08 的两条缺口是：
+
+1. `prompt_blocked` 没有列 —— 需要竞品的字段证据（我们连字段名都只有 `cmd/` 里的转述）；
+2. `prompt_inject_mode=replace` 是「替换占位符」还是「整段替换」—— 需要产品一句话。
+
+两者都与路由形状无关。把「路由对过账」当成「缺口已消失」是不诚实的，所以 #17 仍是 **99% / 7.92**。
+
+### 五、守卫：十五组 461 条
+
+`apps/api/test/competitor-route-parity.spec.ts` 新增 `ASSET_SHAPES`（36）、`ASSET_PAIRS`（34 条登记，reason 按 prompts/actor/workflows/subject/resource 五类复用）、`ASSET_WAIVED`（2 条外部输入），并把总形状数从 **425 推到 461**。新用例断言：exact 0、deviated 34、waived 2、三者相加 36；`GET /asset/resource/:category/:res_id` 的 ours 必须是 `GET /assets/{}`；两条豁免 reason 必须以「外部」开头。
+
+反向验证（把 `@Get("assets/:id")` 改名成 `-BROKEN`）：parity 2 例红（`deviation target missing: GET /asset/resource/{}/{} → GET /assets/{}`）+ assets 1 例红，共 3 红；恢复后 26 绿。
+
+一个踩坑值得记：给求和断言加项时写成 `CANVAS_SHAPES.length, ASSET_SHAPES.length` —— 第二个参数被当成 `expect()` 的 message，报错是 `36: expected 425 to be 461`（数字跑到前面去了）。改成 `+` 才对。
+
+### 六、验证与数字
+
+| 项目 | 结果 |
+| --- | --- |
+| `test/assets.spec.ts` | 7 → **8 例** |
+| `test/competitor-route-parity.spec.ts` | 17 → **18 例**（十五组 461 条） |
+| api 全量 | **85 文件 956 例**（原 954） |
+| 门禁 | **12/12 全绿** |
+| 端点 | 751 → **752** |
+| 迁移 / 表 | 46 / 112（不变） |
+| 用例总数 | 1,355 → **1,357** |
+| 全站 / 剩余 | **202.52 / 206 = 98.3% / 3.48**（不变） |
+
+### 七、诚实边界
+
+1. 只比 METHOD+path，不比 query/body 语义；`/asset/resource` 的 `category` 与 `res_id` 的真实语义（是资产 id 还是「分类下的序号」）没有证据。
+2. 「提示词库 = 可带参数 Skill 卡」是我方自建口径，与竞品字段形状可能不一致。
+3. `/asset/workflows` 13 条里的删除/改名，翻译成模板快照语义是合理推断，不是逐字等价。
+4. 两条 `vidu-subjects` 豁免是因为缺供应商凭据，不是判定「不需要」。
+5. 本批没有触碰 #17 那 0.08 的两条字段级缺口 —— 它们仍然是 B 类。
+
 ## 变更登记（v6.41 · 第 87 批：审计 #11 无限画布 —— 台账那句「4 个具名能力无证据」大半是记账错误 · 2026-10-28）
 
 ### 一、这批在回答什么问题

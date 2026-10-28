@@ -218,6 +218,26 @@ export class AssetsService {
     };
   }
 
+  /**
+   * 单个素材详情（第 88 批）。
+   *
+   * 竞品形状：`GET /web/v1/asset/resource/:category/:res_id`（`_acceptance/competitor_endpoints.tsv`，
+   * 只有方法+路径，两个 schema 都是 `{}`）。我方此前只有列表与 PATCH/DELETE，没有「按 id 取一个」——
+   * 客户端按竞品形状拿详情只能 404。这里按 id 直取，形状与列表里同一行**完全一致**（同一个 `toDto`、
+   * 同样的签 URL）：详情比列表多字段最容易让前端分叉。
+   *
+   * 已软删的不返回（要看得走回收站列表 `?deleted=true`）：详情页拿到已删素材会让人以为它还能用。
+   */
+  async detail(spaceId: string, id: string) {
+    const bigId = this.parseId(id);
+    const [row] = await db
+      .select()
+      .from(assets)
+      .where(and(eq(assets.id, bigId), eq(assets.spaceId, BigInt(spaceId)), isNull(assets.deletedAt)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+    return this.toDto(row);
+  }
+
   async remove(spaceId: string, id: string) {
     const bigId = this.parseId(id);
     const [row] = await db

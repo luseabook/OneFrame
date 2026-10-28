@@ -1053,6 +1053,99 @@ for (const [shape, reason] of Object.entries(CANVAS_WAIVED)) {
   WAIVED[shapeOf(shape)] = reason;
 }
 
+// ── #17 资产/主体（第 88 批）──────────────────────────────────────────────
+// 竞品面 = `/asset/*` 28 条 + `/subject/*` 8 条 = 36 条（`_acceptance/competitor_endpoints.tsv`）。
+// 我方一条 `/asset/*`、`/subject/*` 都没有：素材在 `/assets`，主体在 `/subjects`，
+// 提示词库做成 Agent Skill 卡，工作流 = 画布模板 + 画布节点任务。所以这里全是「结构性偏离」，
+// 只有 2 条 vidu 供应商主体注册属外部输入。
+const ASSET_SHAPES = [
+  "POST /asset/resource",
+  "POST /asset/resource/list",
+  "POST /asset/resource/delete",
+  "PUT /asset/resource/{}",
+  "POST /asset/resource/vidu-subjects/add",
+  "GET /asset/resource/{}/{}",
+  "GET /asset/resource/vidu-subjects/{}",
+  "POST /asset/prompts",
+  "POST /asset/prompts/list",
+  "POST /asset/prompts/delete",
+  "PUT /asset/prompts/{}",
+  "POST /asset/actor",
+  "POST /asset/actor/list",
+  "POST /asset/actor/delete",
+  "PUT /asset/actor/{}",
+  "GET /asset/workflows",
+  "POST /asset/workflows",
+  "POST /asset/workflows/rename-check",
+  "GET /asset/workflows/{}",
+  "PUT /asset/workflows/{}",
+  "DELETE /asset/workflows/{}",
+  "POST /asset/workflows/{}/copy",
+  "POST /asset/workflows/{}/runs",
+  "GET /asset/workflows/{}/runs",
+  "POST /asset/workflows/{}/nodes/{}/runs",
+  "GET /asset/workflows/{}/runs/{}",
+  "GET /asset/workflows/{}/runs/{}/nodes/{}/output",
+  "POST /asset/workflows/node-point-calc",
+  "POST /subject/resource",
+  "PUT /subject/resource/{}",
+  "POST /subject/resource/list",
+  "POST /subject/resource/delete",
+  "GET /subject/resource/{}",
+  "POST /subject/resource/batch",
+  "POST /subject/resource/update",
+  "POST /subject/resource/batch-details",
+];
+
+const ASSET_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  ["POST /asset/resource", "POST /assets/upload", "竞品把素材放在 /asset/resource，我方在 /assets（ADR-009 已登记的前缀偏离）；竞品的 `category` 只是前端分栏，我方用 kind + 文件夹表达，不额外造一个假路径参数"],
+  ["POST /asset/resource/list", "GET /assets", "竞品把素材放在 /asset/resource，我方在 /assets（ADR-009 已登记的前缀偏离）；竞品的 `category` 只是前端分栏，我方用 kind + 文件夹表达，不额外造一个假路径参数"],
+  ["POST /asset/resource/delete", "DELETE /assets/{}", "竞品把素材放在 /asset/resource，我方在 /assets（ADR-009 已登记的前缀偏离）；竞品的 `category` 只是前端分栏，我方用 kind + 文件夹表达，不额外造一个假路径参数"],
+  ["PUT /asset/resource/{}", "PATCH /assets/{}", "竞品把素材放在 /asset/resource，我方在 /assets（ADR-009 已登记的前缀偏离）；竞品的 `category` 只是前端分栏，我方用 kind + 文件夹表达，不额外造一个假路径参数"],
+  ["GET /asset/resource/{}/{}", "GET /assets/{}", "竞品把素材放在 /asset/resource，我方在 /assets（ADR-009 已登记的前缀偏离）；竞品的 `category` 只是前端分栏，我方用 kind + 文件夹表达，不额外造一个假路径参数"],
+  ["POST /asset/prompts", "POST /agent-skills", "竞品的「提示词库」是纯 title+content 的 CRUD；我方把它做成可带参数、可分享、可收藏的 Agent Skill 卡（agent_skills.prompt_template + config），四个形状都落在 /agent-skills 上"],
+  ["POST /asset/prompts/list", "GET /agent-skills", "竞品的「提示词库」是纯 title+content 的 CRUD；我方把它做成可带参数、可分享、可收藏的 Agent Skill 卡（agent_skills.prompt_template + config），四个形状都落在 /agent-skills 上"],
+  ["POST /asset/prompts/delete", "DELETE /agent-skills/{}", "竞品的「提示词库」是纯 title+content 的 CRUD；我方把它做成可带参数、可分享、可收藏的 Agent Skill 卡（agent_skills.prompt_template + config），四个形状都落在 /agent-skills 上"],
+  ["PUT /asset/prompts/{}", "PUT /agent-skills", "竞品的「提示词库」是纯 title+content 的 CRUD；我方把它做成可带参数、可分享、可收藏的 Agent Skill 卡（agent_skills.prompt_template + config），四个形状都落在 /agent-skills 上"],
+  ["POST /asset/actor", "POST /subjects", "竞品把「演员」单独做成 /asset/actor，我方与主体库合流：/subjects 的 kind=character 就是演员，files 里带角色参考图；两套 ID 不混用这一条在 subjects.controller.ts 头注释里已写明"],
+  ["POST /asset/actor/list", "GET /subjects", "竞品把「演员」单独做成 /asset/actor，我方与主体库合流：/subjects 的 kind=character 就是演员，files 里带角色参考图；两套 ID 不混用这一条在 subjects.controller.ts 头注释里已写明"],
+  ["POST /asset/actor/delete", "DELETE /subjects/{}", "竞品把「演员」单独做成 /asset/actor，我方与主体库合流：/subjects 的 kind=character 就是演员，files 里带角色参考图；两套 ID 不混用这一条在 subjects.controller.ts 头注释里已写明"],
+  ["PUT /asset/actor/{}", "PATCH /subjects/{}", "竞品把「演员」单独做成 /asset/actor，我方与主体库合流：/subjects 的 kind=character 就是演员，files 里带角色参考图；两套 ID 不混用这一条在 subjects.controller.ts 头注释里已写明"],
+  ["GET /asset/workflows", "GET /canvas/templates", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows", "POST /canvas/canvases/{}/tpls", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows/rename-check", "GET /canvas/templates", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["GET /asset/workflows/{}", "GET /canvas/templates/{}", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["PUT /asset/workflows/{}", "POST /canvas/canvases/{}/tpls", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["DELETE /asset/workflows/{}", "DELETE /canvas/templates/personal/{}", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows/{}/copy", "GET /canvas/templates/{}/instantiate", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows/{}/runs", "POST /canvas/canvases/{}/batch-node-tasks", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["GET /asset/workflows/{}/runs", "GET /canvas/canvases/{}/running-nodes", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows/{}/nodes/{}/runs", "POST /canvas/canvases/{}/nodes/{}/generate", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["GET /asset/workflows/{}/runs/{}", "GET /canvas/canvases/{}/nodes/{}/task/{}", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["GET /asset/workflows/{}/runs/{}/nodes/{}/output", "GET /canvas/canvases/{}/nodes/{}/task/{}", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /asset/workflows/node-point-calc", "POST /credits/quote", "我方没有独立的「工作流资产」表：工作流 = 画布模板（/canvas/templates 快照）+ 画布节点任务（/canvas/canvases/:id/nodes/:node_id/generate 等就是一次节点运行，输出在任务结果里）"],
+  ["POST /subject/resource", "POST /subjects", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["PUT /subject/resource/{}", "PATCH /subjects/{}", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["POST /subject/resource/list", "GET /subjects", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["POST /subject/resource/delete", "DELETE /subjects/{}", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["GET /subject/resource/{}", "GET /subjects/{}", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["POST /subject/resource/update", "PATCH /subjects/{}", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["POST /subject/resource/batch", "POST /subjects", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+  ["POST /subject/resource/batch-details", "GET /subjects", "竞品主体库在 /subject/resource，我方在 /subjects（ADR-009 前缀 + 方法偏离：竞品把 list/delete/update 都做成 POST，我方用 GET/DELETE/PATCH）"],
+];
+
+const ASSET_WAIVED: Record<string, string> = {
+  "POST /asset/resource/vidu-subjects/add": "外部：Vidu 主体注册（把本地主体登记到供应商换 business_id），我方适配器全 mock、不产生真 business_id，造这个端点只能返回假 id",
+  "GET /asset/resource/vidu-subjects/{}": "外部：同上——按供应商 business_id 反查主体，没有真实供应商就没有可查的对象",
+};
+
+for (const [shape, ours, reason] of ASSET_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(ASSET_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -1068,6 +1161,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   account: ACCOUNT_SHAPES.length,
   ai: AI_SHAPES.length,
   canvas: CANVAS_SHAPES.length,
+  asset: ASSET_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -1196,9 +1290,14 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // 固定组是 pinned-timelines 的等价物（7 槽位、整体替换）
     expect(ROUTES.has("GET /canvas/canvases/{}/pin-groups")).toBe(true);
     expect(ROUTES.has("PUT /canvas/canvases/{}/pin-groups/{}")).toBe(true);
+    // 第 88 批：#17 资产/主体按竞品形状补的单资源详情（其余 35 条都是结构性偏离）
+    expect(ROUTES.has("GET /assets/{}")).toBe(true);
+    expect(ROUTES.has("GET /subjects")).toBe(true);
+    expect(ROUTES.has("GET /agent-skills")).toBe(true);
+    expect(ROUTES.has("GET /canvas/templates")).toBe(true);
   });
 
-  it("竞品十四组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114）", () => {
+  it("竞品十五组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -1214,6 +1313,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       account: 28,
       ai: 64,
       canvas: 114,
+      asset: 36,
     });
     expect(
       FILM_SHAPES.length +
@@ -1229,8 +1329,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         AGENT_SHAPES.length +
         ACCOUNT_SHAPES.length +
         AI_SHAPES.length +
-        CANVAS_SHAPES.length,
-    ).toBe(425);
+        CANVAS_SHAPES.length +
+        ASSET_SHAPES.length,
+    ).toBe(461);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -1247,6 +1348,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       account: ACCOUNT_SHAPES,
       ai: AI_SHAPES,
       canvas: CANVAS_SHAPES,
+      asset: ASSET_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -1474,6 +1576,26 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     );
   });
 
+  it("#17 资产/主体：36 条里 34 条结构性偏离 + 2 条外部输入豁免（0 缺口）", () => {
+    expect(ASSET_SHAPES.length).toBe(36);
+    expect(missing(ASSET_SHAPES)).toEqual([]);
+    expect(ASSET_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw))).length).toBe(34);
+    expect(ASSET_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw))).length).toBe(2);
+    // 本批唯一真的「按竞品形状补」的一条：单素材详情
+    expect(DEVIATIONS[shapeOf("GET /asset/resource/{}/{}")]!.ours).toBe("GET /assets/{}");
+    expect(ROUTES.has("GET /assets/{}")).toBe(true);
+    // 两条豁免必须说清是外部输入，不能含混成「不做了」
+    for (const raw of [
+      "POST /asset/resource/vidu-subjects/add",
+      "GET /asset/resource/vidu-subjects/{}",
+    ]) {
+      expect(WAIVED[shapeOf(raw)]!.startsWith("外部"), `must say external: ${raw}`).toBe(true);
+    }
+    // 提示词库/工作流资产这两块都不在新造端点，而是显式指向既有子系统
+    expect(DEVIATIONS[shapeOf("POST /asset/prompts")]!.ours).toBe("POST /agent-skills");
+    expect(DEVIATIONS[shapeOf("GET /asset/workflows")]!.ours).toBe("GET /canvas/templates");
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -1491,6 +1613,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...ACCOUNT_SHAPES,
         ...AI_SHAPES,
         ...CANVAS_SHAPES,
+        ...ASSET_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
@@ -1500,7 +1623,14 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
     const waiverScope = new Set(
-      [...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES, ...AI_SHAPES, ...CANVAS_SHAPES].map(shapeOf),
+      [
+        ...TASK_SHAPES,
+        ...AGENT_SHAPES,
+        ...ACCOUNT_SHAPES,
+        ...AI_SHAPES,
+        ...CANVAS_SHAPES,
+        ...ASSET_SHAPES,
+      ].map(shapeOf),
     );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);
   });
