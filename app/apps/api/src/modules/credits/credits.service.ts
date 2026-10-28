@@ -449,8 +449,13 @@ export class CreditsService {
         field: "input.reference_uris",
       });
     }
-    if (limits && refs.length > (limits.image ?? 0)) {
-      throw new AppError(ErrorCode.INVALID_PARAM, `too many reference images (max ${limits.image})`, {
+    // `media_limits` 的键是"这种能力要吃几个参考输入"，历史模式都把数值写在 `image` 上；
+    // 第 93 批的声音克隆只吃参考音频，声明的是 `{ audio: 1 }` —— 旧写法 `limits.image ?? 0`
+    // 会把它判成"上限 0"，连 1 条参考音频都拒掉（报 `max undefined`）。这里改成：只要声明了
+    // 任一上限就按它算，一个都没声明等于不设上限（与 `limits` 整个缺失时的语义一致）。
+    const refCap = limits?.image ?? limits?.reference ?? limits?.audio ?? limits?.video;
+    if (refCap !== undefined && refs.length > refCap) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `too many reference inputs (max ${refCap})`, {
         field: "input.reference_uris",
       });
     }

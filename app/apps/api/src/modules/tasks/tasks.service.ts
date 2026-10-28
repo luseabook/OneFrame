@@ -125,13 +125,20 @@ export class TasksService {
 
   async list(
     spaceId: string,
-    query: { page?: number; page_size?: number; status?: number; capability?: string },
+    query: { page?: number; page_size?: number; status?: number; capability?: string; mode?: string },
   ) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.page_size ?? 20));
     const conditions = [eq(tasks.spaceId, BigInt(spaceId)), isNull(tasks.deletedAt)];
     if (query.status !== undefined) conditions.push(eq(tasks.status, query.status));
     if (query.capability) conditions.push(eq(tasks.capability, query.capability));
+    /**
+     * `mode` 过滤（第 93 批加）：`capability=speech` 下面既有 tts 也有 voice_clone，
+     * 「我的音色」只认后者。做成服务级参数而**不**给 `GET /tasks` 开放 `mode` 查询参数：
+     * 对外暴露会让「按能力筛」和「按工具筛」两套语义在同一个端点上打架，
+     * 而这张表的读接口必须留在 TasksService 里（ADR：禁止跨模块直查 tasks）。
+     */
+    if (query.mode) conditions.push(eq(tasks.mode, query.mode));
     const where = and(...conditions);
 
     const rows = await db

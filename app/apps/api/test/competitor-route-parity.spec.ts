@@ -32,8 +32,13 @@ import { join } from "node:path";
  *
  * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
  * ADR-003「差异在参数不在端点」——只有 `GET /generations/tools`（目录）+ `POST /generations`
- * （body 里 `capability` + `mode`）。所以这一组的 47 条覆盖全部是**结构性偏离**（多条竞品形状
- * 指向同一个我方形状），剩下 17 条按「缺模型」或「产品范围外」豁免，逐条点名。
+ * （body 里 `capability` + `mode`）。所以这一组的 44 条覆盖是**结构性偏离**（多条竞品形状
+ * 指向同一个我方形状）。
+ *
+ * 第 93 批补齐了「我的音色」这一族：`/ai/voice-clone*` 4 条 + `/ai/timbre*` 3 条 +
+ * `/ai/text-to-speech/voice/list` 共 8 条**从豁免变成同形**（我方也长在 `/ai` 下 —— 这
+ * 8 条操作的对象是「用户自己的音色资产」，不是生成任务，硬塞进 `POST /generations`
+ * 反而会让「改名」「删除」两个动作无处表达）。剩下 12 条按「产品范围外」豁免。
  */
 
 const API_SRC = join(__dirname, "..", "src");
@@ -743,28 +748,18 @@ const AI_MODULE_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
   ["POST /web/v1/ai/ip-template/list", "GET /subjects/templates", "IP 模板 = 主体模板库（subjects.templates）"],
   ["POST /web/v1/ai/ip-template-to-video", "POST /subjects/{}/apply-template", "模板生视频 = 把模板套到主体上再走生成"],
   ["GET /web/v1/ai/task/strategy-info", "GET /tasks/{}", "任务详情里带 model/options/strategy —— 策略不是独立资源，是任务的字段"],
-  ["GET /web/v1/ai/text-to-speech/voice/list", "GET /models", "音色 = 模型目录里 capability=speech 的行（运营可热更）"],
-  ["GET /web/v1/ai/timbre-category/list", "GET /models", "音色分类复用模型目录的 mode/capability 维度"],
-  ["GET /web/v1/ai/timbre/list", "GET /models", "音色列表同上（GET /models?capability=speech）"],
 ];
 
 /**
- * 工具箱这一组里**没有等价物**的 17 条。分两类，写清楚哪类是哪类：
- *   - 5 条是「我方该有但没有」的支撑面（音色库/收藏）→ 记 B 类，已在台账里据实降分；
- *   - 12 条是竞品的**其它产品面**（人脸识别、世界模型、音频切片、视频处理会话…），
- *     不在我方「影视创作工具箱」范围内 → 属范围外，不计入缺口。
+ * 工具箱这一组里**没有等价物**的 12 条，全部是竞品的**其它产品面**
+ * （人脸识别、世界模型、音频切片、视频处理会话…），不在我方「影视创作工具箱」范围内
+ * → 属范围外，不计入缺口。
+ *
+ * 第 93 批之前这里还有 5 条「该有但没有」的音色库形状（记 B 类、台账据实降分）。
+ * 那 5 条已落地成本组的同形路由，于是不再豁免 —— 豁免表要随实现收缩，
+ * 否则「豁免」会变成「做过的事还挂在缺口里」，分数永远收不回来。
  */
 const AI_WAIVED: Record<string, string> = {
-  "GET /web/v1/ai/voice-clone-list":
-    "B 类：我的音色列表需要持久化用户克隆记录；我方 voice_clone 只把参数透传给供应商，没有落库，列表无处可查",
-  "GET /web/v1/ai/voice-clone/{task_id}":
-    "B 类：同上 —— 没有克隆记录表，单条详情没有查询对象",
-  "DELETE /web/v1/ai/voice-clone/{task_id}":
-    "B 类：同上 —— 没有克隆记录表，删除没有落点（只能在供应商侧删）",
-  "POST /web/v1/ai/voice-clone/rename":
-    "B 类：同上 —— 改名要改的是我方的克隆记录，供应商侧没有改名接口可透传",
-  "POST /web/v1/ai/timbre/collect":
-    "B 类：音色收藏需要 timbre_favorites 表（用户 × 音色）；我方音色来自 models 目录，没有收藏关系",
   "POST /web/v1/ai/video-subtitle-voice-edit":
     "范围外：逐句字幕配音重录需要字幕级时间轴编辑器；我方去字幕只做擦除（de_subtitle_auto/region），不做重配音",
   "POST /web/v1/ai/audio-slicing":
@@ -804,12 +799,24 @@ for (const [shape, reason] of Object.entries(AI_WAIVED)) {
   WAIVED[shapeOf(shape)] = reason;
 }
 
-/** 这 5 条是「我方该有但没有」的支撑面（其余 12 条是范围外）—— 台账据此把 #6 从 97% 降到 96.5% */
-const AI_IN_SCOPE_GAPS = [
+/**
+ * 第 93 批落地的 8 条音色库形状（#6 工具箱最后一块 B 类支撑面）。
+ *
+ * 为什么它们长在 `/ai/` 下而不是走 `POST /generations`：生成端点的语义是「投一个任务」，
+ * 而这 8 条操作的是**用户自己的音色资产**（列表 / 详情 / 改名 / 删除 / 收藏 / 目录）。
+ * 把「改名」表达成「投一个改名任务」是荒谬的，把「删除」表达成任务更是无处落库。
+ *
+ * 这 8 条全部是**同形**（不是偏离）：竞品的形状恰好就是「资产增删改查」的通用形状，
+ * 我方直接照形状实现，比另造一套路径更省沟通成本。
+ */
+const AI_IMPLEMENTED = [
+  "GET /web/v1/ai/text-to-speech/voice/list",
   "GET /web/v1/ai/voice-clone-list",
   "GET /web/v1/ai/voice-clone/{task_id}",
   "DELETE /web/v1/ai/voice-clone/{task_id}",
   "POST /web/v1/ai/voice-clone/rename",
+  "GET /web/v1/ai/timbre-category/list",
+  "GET /web/v1/ai/timbre/list",
   "POST /web/v1/ai/timbre/collect",
 ];
 
@@ -2066,16 +2073,18 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
   });
 
 
-  it("#6 工具箱：64 条里 47 条结构性偏离 + 17 条豁免（5 条该有、12 条范围外）", () => {
+  it("#6 工具箱：64 条里 8 条同形（第 93 批音色库）+ 44 条结构性偏离 + 12 条范围外", () => {
     expect(AI_SHAPES.length).toBe(64);
     expect(missing(AI_SHAPES)).toEqual([]);
     const exact = AI_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
     const deviated = AI_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
     const waived = AI_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
-    // 我方没有任何 `/ai/*` 路由（ADR-003 有意为之），所以同形必须是 0
-    expect(exact).toEqual([]);
-    expect(deviated.length).toBe(47);
-    expect(waived.length).toBe(17);
+    // 同形恰好是第 93 批落地的那 8 条音色库形状（其余 56 条仍然不是同形：
+    // 生成类收敛到 POST /generations，对话/画布类由别的模块承接）
+    expect(exact.map((raw) => shapeOf(raw)).sort()).toEqual(AI_IMPLEMENTED.map((raw) => shapeOf(raw)).sort());
+    expect(exact.length).toBe(8);
+    expect(deviated.length).toBe(44);
+    expect(waived.length).toBe(12);
     expect(exact.length + deviated.length + waived.length).toBe(AI_SHAPES.length);
     // 27 条「一个工具一条路由」全部收敛到同一条生成端点
     const generic = AI_SHAPES.filter((raw) => {
@@ -2083,25 +2092,27 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       return d?.ours === "POST /generations";
     });
     expect(generic.length).toBe(27);
-    // 其余 20 条由别的模块承接，且每条都要写清「为什么是那个模块」
+    // 其余 17 条由别的模块承接，且每条都要写清「为什么是那个模块」
+    // （第 93 批之前是 20 条 —— 其中 3 条音色目录条目现在已经是同形真路由，见 AI_IMPLEMENTED）
     const moduleCovered = AI_SHAPES.filter((raw) => {
       const d = DEVIATIONS[shapeOf(raw)];
       return d !== undefined && d.ours !== "POST /generations";
     });
-    expect(moduleCovered.length).toBe(20);
+    expect(moduleCovered.length).toBe(17);
     for (const raw of moduleCovered) {
       expect(DEVIATIONS[shapeOf(raw)]!.reason.length, `reason too short: ${raw}`).toBeGreaterThan(10);
     }
-    // 5 条「该有但没有」必须就是台账里记 B 类的那 5 条（音色库 + 音色收藏），不能悄悄多算
-    const inScope = AI_SHAPES.filter((raw) => AI_IN_SCOPE_GAPS.includes(raw));
-    expect(inScope.length).toBe(5);
-    for (const raw of AI_IN_SCOPE_GAPS) {
-      expect(WAIVED[shapeOf(raw)]!.startsWith("B 类"), `in-scope gap must be honest: ${raw}`).toBe(true);
+    // 第 93 批落地的 8 条必须**真的**在我方路由表里，且不能再挂在豁免表上 ——
+    // 只改豁免不改实现（或反之）都会让这里红
+    for (const raw of AI_IMPLEMENTED) {
+      expect(ROUTES.has(shapeOf(raw)), `implemented shape missing from routes: ${raw}`).toBe(true);
+      expect(WAIVED[shapeOf(raw)], `implemented shape still waived: ${raw}`).toBeUndefined();
+      expect(DEVIATIONS[shapeOf(raw)], `implemented shape still a deviation: ${raw}`).toBeUndefined();
     }
-    // 其余 12 条必须显式写「范围外」，而不是含糊的「暂未实现」
-    const outOfScope = waived.filter((raw) => !AI_IN_SCOPE_GAPS.includes(raw));
-    expect(outOfScope.length).toBe(12);
-    for (const raw of outOfScope) {
+    // 剩下 12 条必须显式写「范围外」，而不是含糊的「暂未实现」；
+    // 也不许再出现「B 类」（该我方做的都做完了，剩下的都是不该做的）
+    expect(waived.length).toBe(12);
+    for (const raw of waived) {
       expect(WAIVED[shapeOf(raw)]!.startsWith("范围外"), `out-of-scope gap must say so: ${raw}`).toBe(true);
     }
   });

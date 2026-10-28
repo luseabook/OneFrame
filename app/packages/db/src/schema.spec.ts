@@ -360,3 +360,23 @@ describe("db schema contract (第 0 批续：22 张域表)", () => {
   });
 });
 
+describe("db schema contract (第 93 批：音色收藏 1 张)", () => {
+  it("voice_favorites 按 (space,user,timbre_key) 唯一，且 timbre_key 不是外键", () => {
+    expect(cols(schema.voiceFavorites)).toEqual(
+      expect.arrayContaining(["space_id", "user_id", "timbre_key", "created_at"]),
+    );
+    const uq = indexes(schema.voiceFavorites).find((i) => i.name === "uq_voice_favorites");
+    expect(uq?.unique).toBe(true);
+    /**
+     * `timbre_key` 故意不带外键：它要同时表达「内置音色」（`builtin:<voice_id>`，
+     * 库里没有对应行）与「我的克隆音色」（`clone:<task_id>`）。加外键就只能表达后者，
+     * 内置音色的收藏会直接写不进去。
+     */
+    const fkCols = getTableConfig(schema.voiceFavorites).foreignKeys.flatMap((fk) =>
+      fk.reference().columns.map((c) => c.name),
+    );
+    expect(fkCols).not.toContain("timbre_key");
+    expect(fkCols).toEqual(expect.arrayContaining(["space_id", "user_id"]));
+  });
+});
+

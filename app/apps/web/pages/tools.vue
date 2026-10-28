@@ -6,10 +6,11 @@
 // 前端硬编码一份、后端再硬编码一份的话，每加一张卡都要改两处，而"卡能点但没人接"
 // 这类漂移在编译期发现不了（这正是本批之前 8/18 张卡只能置灰的成因）。
 //
-// 19 张卡的依据（逐条可追）：
+// 20 张卡的依据（逐条可追）：
 //   - 17 条 `/create/*`：`rea-reelmate/routes.txt:25-41`
 //   - 「灵感成片」：`routes.txt:42`（/creation-agent，报告点名无独立 /create 路由）
 //   - 「音色修改」：`reelmate-feature-map.md §3.5`（报告点名无独立路由的工具）
+//   - 「声音克隆」：`competitor_endpoints.tsv` 的 `ai/voice-clone*` 五条（第 93 批）
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 // i18n（第 8 批）：服务端目录返回的卡片标题/描述是**后端数据**，不翻译；
 // 本页只翻译界面骨架（标题/页签/提示/空态/错误），中文原文与改造前逐字一致。

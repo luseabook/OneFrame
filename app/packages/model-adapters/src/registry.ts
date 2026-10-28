@@ -16,7 +16,7 @@ import {
 } from "./postprocess-tools";
 import { SlicingAdapter, type SlicingConfig } from "./slicing";
 import { SubtitleEraseAdapter, type SubtitleEraseConfig } from "./subtitle-erase";
-import { TtsAdapter, type TtsConfig } from "./tts";
+import { TtsAdapter, VoiceCloneAdapter, type TtsConfig } from "./tts";
 import { UpscaleAdapter, type UpscaleConfig } from "./upscale";
 import type { PostprocessHttpConfig } from "./postprocess";
 import type { ModelAdapter } from "./types";
@@ -56,6 +56,8 @@ export interface PostprocessConfig {
   baseUrl?: string;
   /** 该能力在供应商侧是否用同一网关不同路径（默认按各自适配器内置路径） */
   tts?: TtsConfig;
+  /** 声音克隆（第 93 批）：与 TTS 共用 HTTP 骨架，路径与请求体不同 */
+  voiceClone?: TtsConfig;
   music?: MusicConfig;
   lipSync?: LipSyncConfig;
   upscale?: UpscaleConfig;
@@ -80,6 +82,8 @@ export interface PostprocessConfig {
  */
 export const POSTPROCESS_CODES = {
   tts: "tts",
+  /** 声音克隆（第 93 批）：输入参考音频 + 文本，产出用克隆音色朗读的音轨。 */
+  voiceClone: "voice-clone",
   music: "music:text2music",
   sfx: "music:text2sfx",
   lipSync: "lip-sync",
@@ -144,6 +148,9 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
   // 后处理/单点能力：缺 Key 硬失败（不静默 mock），配置项按能力独立覆盖
   if (code === POSTPROCESS_CODES.tts) {
     return new TtsAdapter(postprocessConfig(options, options.postprocess?.tts));
+  }
+  if (code === POSTPROCESS_CODES.voiceClone) {
+    return new VoiceCloneAdapter(postprocessConfig(options, options.postprocess?.voiceClone));
   }
   if (code === POSTPROCESS_CODES.music || code === POSTPROCESS_CODES.sfx) {
     return new MusicAdapter(
@@ -245,4 +252,5 @@ export {
   TtsAdapter,
   UpscaleAdapter,
   VideoEffectsAdapter,
+  VoiceCloneAdapter,
 };

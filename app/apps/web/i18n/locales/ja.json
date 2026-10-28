@@ -3355,6 +3355,7 @@
       "textRepaint": "テキストリペイント",
       "brushRepaint": "ブラシリペイント",
       "audioTimbre": "声質変更",
+      "voiceClone": "ボイスクローン",
       "autoBgm": "自動 BGM",
       "lipSync": "リップシンク",
       "textToMusic": "テキストから音楽",

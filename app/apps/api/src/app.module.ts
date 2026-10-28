@@ -39,6 +39,8 @@ import { RedrawModule } from "./modules/redraw/redraw.module";
 // 第 8 批「补充」：广告剧（复用 script_project 骨架，project_mode=2）
 import { AdModule } from "./modules/ad/ad.module";
 import { TasksModule } from "./modules/tasks/tasks.module";
+// 第 93 批「音色库」：我的音色（克隆任务投影）+ 音色目录 + 收藏
+import { VoiceModule } from "./modules/voice/voice.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
 import { StorageModule } from "./storage/storage.module";
@@ -85,6 +87,8 @@ import { StorageModule } from "./storage/storage.module";
     RedrawModule,
     // 广告剧（模块 #13）：竞品 12 端点
     AdModule,
+    // 音色库（模块 #6 补支撑面）：我的音色 4 条 + 音色目录 3 条 + 收藏 1 条
+    VoiceModule,
   ],
   controllers: [AppController, HealthController, MetricsController],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],

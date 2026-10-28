@@ -431,7 +431,7 @@ export interface TaskShareLink {
 
 // ── 工具箱目录（GET /generations/tools）─────────────────────────
 // 单一数据源在服务端 `apps/api/src/modules/generations/tool-catalog.ts`：
-// 19 张卡与工具 mode/参数面板都从这里来，前端不再硬编码卡清单。
+// 20 张卡与工具 mode/参数面板都从这里来，前端不再硬编码卡清单。
 
 export interface ToolParamOption {
   value: string;

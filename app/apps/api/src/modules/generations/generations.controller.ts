@@ -21,6 +21,12 @@ import { ensureToolCatalog, publicToolCatalog } from "./tool-catalog";
 const toolOptionsSchema = generationOptionsSchema.extend({
   // 语音 / 音乐
   voice: z.string().optional(),
+  /**
+   * 声音克隆（第 93 批）的产物名字。
+   * 为什么放在 options 而不是 input：它是**元数据**（保存到「我的音色」时显示什么），
+   * 不参与输入素材校验；放 input 会让 `assertToolInput` 把它当成必填槽位。
+   */
+  voice_name: z.string().optional(),
   speed: z.number().optional(),
   format: z.string().optional(),
   instrumental: z.boolean().optional(),
@@ -87,7 +93,7 @@ export class GenerationsController {
   /**
    * 工具箱目录（卡 + 工具 mode + 参数面板声明）。
    *
-   * 这是 `/tools` 页 19 张卡的**唯一数据源**：前端不硬编码卡清单，
+   * 这是 `/tools` 页 20 张卡的**唯一数据源**：前端不硬编码卡清单，
    * 后端也不另写一份 mode→模型映射（同一张表见 `tool-catalog.ts`）。
    * 顺带惰性 ensure 目录行，保证「新库/线上库都能报出价」。
    */

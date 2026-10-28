@@ -28,10 +28,10 @@ import {
 } from "../src/modules/generations/tool-catalog";
 
 /**
- * 第 3 批工具箱 e2e（19 卡 + 后处理族）。
+ * 第 3 批工具箱 e2e（20 卡 + 后处理族；第 93 批 +1 张「声音克隆」卡）。
  *
  * 这组用例锁的是**会静默腐化的四处接缝**：
- * 1. 目录（`tool-catalog.ts`）是 19 卡与工具 mode 的单一数据源——
+ * 1. 目录（`tool-catalog.ts`）是 20 卡与工具 mode 的单一数据源——
  *    卡与 mode 一旦漂移（卡能点但没人接），只能靠这里断言"每张卡都有 route、
  *    每个 mode 都在 GenerationMode 闭包内"来兜；
  * 2. 报价链路：工具模型/价目是**幂等 ensure** 进 `models`/`model_prices` 的，
@@ -140,20 +140,20 @@ afterAll(async () => {
   await app.close();
 });
 
-describe("工具箱目录：19 卡 + 15 个工具 mode 的单一数据源", () => {
-  it("目录端点返回 19 张卡 / 15 个工具，且每张卡都有落地页", async () => {
+describe("工具箱目录：20 卡 + 16 个工具 mode 的单一数据源", () => {
+  it("目录端点返回 20 张卡 / 16 个工具，且每张卡都有落地页", async () => {
     const res = await inject("GET", "/generations/tools");
     expect(res.code).toBe(0);
     const cards = res.data.cards as Array<{ key: string; route: string; surface: string; title: string }>;
     const tools = res.data.tools as Array<{ key: string; mode: string }>;
 
     /**
-     * 19 张卡的数量依据（ADR-013 以竞品证据为准，不凑数）：
+     * 20 张卡的数量依据（ADR-013 以竞品证据为准，不凑数）：
      * 17 条 `/create/*`（routes.txt:25-41）+ 灵感成片（routes.txt:42 /creation-agent）
      * + 音色修改（reelmate-feature-map §3.5 报告点名、无独立路由）。
      */
-    expect(cards.length).toBe(19);
-    expect(TOOL_CARDS.length).toBe(19);
+    expect(cards.length).toBe(20);
+    expect(TOOL_CARDS.length).toBe(20);
     expect(tools.length).toBe(TOOL_MODES.length);
 
     // 每张卡都必须有可点的落地页（本批 DoD：不允许"点了提示开发中"的静默态卡）
@@ -161,7 +161,7 @@ describe("工具箱目录：19 卡 + 15 个工具 mode 的单一数据源", () =
       expect(card.route.startsWith("/create/"), `card ${card.key} route=${card.route}`).toBe(true);
       expect(card.title.length).toBeGreaterThan(0);
     }
-    expect(new Set(cards.map((card) => card.key)).size).toBe(19);
+    expect(new Set(cards.map((card) => card.key)).size).toBe(20);
     // 卡只有三种形态：复用既有工作台 / Agent 编排 / 目录驱动工具页
     for (const card of cards) expect(["legacy", "agent", "tool"]).toContain(card.surface);
   });
@@ -217,7 +217,7 @@ describe("工具箱目录：19 卡 + 15 个工具 mode 的单一数据源", () =
 });
 
 describe("工具箱报价：每个 mode 都能报出目录价", () => {
-  it("15 个工具 mode 逐个报价，金额等于目录里的初始价", async () => {
+  it("16 个工具 mode 逐个报价，金额等于目录里的初始价", async () => {
     for (const tool of TOOL_MODES) {
       const res = await inject("POST", "/credits/quote", quoteBody(tool.key));
       expect(res.code, `${tool.mode} quote: ${res.msg}`).toBe(0);

@@ -9,13 +9,13 @@ import { POSTPROCESS_CODES } from "@app/model-adapters";
  *
  * ## 为什么这张表要既管后端又管前端
  *
- * 工具箱的 19 张卡与 15 个工具 mode 是**同一份事实**的两种视图：卡是给用户看的入口，
+ * 工具箱的 20 张卡与 16 个工具 mode 是**同一份事实**的两种视图：卡是给用户看的入口，
  * mode 是给任务脊柱用的枚举。如果前端硬编码一份卡清单、后端再硬编码一份 mode→模型映射，
  * 每加一张卡就要改两处，且"卡点进去 404 / 卡能点但 mode 没人接"这类漂移无法在编译期发现。
  * 因此这里只维护**一张表**：
- *   - `TOOL_CARDS`：19 张卡（文案逐字照参照站工具箱页；顺序即截图顺序）——
+ *   - `TOOL_CARDS`：20 张卡（文案逐字照参照站工具箱页；顺序即截图顺序；第 93 批 +声音克隆）——
  *     `GET /generations/tools` 直接吐给前端，`pages/tools.vue` 不再写死任何卡；
- *   - `TOOL_MODES`：15 个工具 mode（本批 14 个 + 涂抹重绘的 inpaint）——每个 mode 声明
+ *   - `TOOL_MODES`：16 个工具 mode（第 3 批 14 个 + 涂抹重绘的 inpaint + 第 93 批声音克隆）——每个 mode 声明
  *     它用哪个模型、什么价、参数面板长什么样、吃什么输入；
  *   - `ensureToolCatalog()`：把 `TOOL_MODES` 幂等落成 `models` / `model_prices` 行，
  *     让「报价」这条既有链路（`credits.price()` 读目录）不需要为本批开特例。
@@ -159,7 +159,7 @@ const AUDIO_INPUT: ToolInputSlot = {
 };
 
 /**
- * 15 个工具 mode。
+ * 16 个工具 mode。
  *
  * 顺序无业务含义（卡顺序在 `TOOL_CARDS` 里定），但按「视频 → 图像 → 音频」分组便于阅读。
  */
@@ -749,6 +749,60 @@ export const TOOL_MODES: ToolModeDefinition[] = [
     inputs: [AUDIO_INPUT],
     evidence: "reelmate-feature-map.md §3.5（报告点名的「音色修改」无独立路由）；competition-plan §4.2",
   },
+  {
+    /**
+     * 声音克隆（第 93 批）。
+     *
+     * 这张卡的存在理由不是"再做一个音频工具"，而是**给「我的音色」列表一个生产者**：
+     * 竞品 `ai/voice-clone-list`、`ai/voice-clone/{task_id}`、`rename`、`DELETE` 这 4 条形状
+     * 都是围绕"克隆出来的音色"做增删改查。若只有查询端点、没有发起克隆的入口，
+     * 列表永远是空的 —— 那种"端点齐全但无内容"的实现比不做更糟（用户点进去只看到空白）。
+     * 因此本批把「克隆入口」与「音色库 CRUD」放在同一批交付。
+     *
+     * 计价口径：按次（`per_call`）。克隆是一次训练 + 一次试听合成，成本落在训练上，
+     * 与朗读文本长度无关 → 不给 `durations`，否则 `credits.price()` 会按秒档找不到价目。
+     */
+    key: "voice-clone",
+    mode: "voice_clone",
+    title: "声音克隆",
+    category: "audio",
+    capability: "speech",
+    resultMedia: "audio",
+    model: {
+      name: "toolbox-voice-clone",
+      displayName: "声音克隆",
+      vendor: "self",
+      adapterCode: POSTPROCESS_CODES.voiceClone,
+      description: "上传一段参考音频，用这个声音朗读任意文本",
+    },
+    modeConfig: {
+      endpoint: "/web/v1/ai/voice-clone",
+      resolution_options: RES_PER_CALL,
+      default_resolution: PER_CALL,
+      // 参考音频 1 条（不写 `image` 键：这个 mode 没有图像输入，
+      // 写了会让 `normalizeToolOptions` 给不存在的槽位留位）
+      media_limits: { audio: 1 },
+      counts: [1],
+      default_count: 1,
+    },
+    prices: [{ resolution: PER_CALL, credits: 12, strikeCredits: 15 }],
+    params: [
+      {
+        key: "voice_name",
+        label: "音色名称",
+        type: "text",
+        default: "",
+        hint: "保存到「我的音色」时显示的名字，留空则用「我的音色」",
+      },
+      { key: "speed", label: "语速", type: "number", default: 1, min: 0.25, max: 4, step: 0.05 },
+    ],
+    inputs: [
+      AUDIO_INPUT,
+      { key: "prompt", label: "朗读文本", required: true, placeholder: "输入要让这个声音朗读的文本（≤2000 字）" },
+    ],
+    evidence:
+      "competitor_endpoints.tsv〔ai/voice-clone、ai/voice-clone-list、ai/voice-clone/{task_id}（GET/DELETE）、ai/voice-clone/rename〕；competition-plan §4.1",
+  },
 ];
 
 /** 卡片顺序（逐字照 `tools.png` / 参照站工具箱页的顺序；文案见 reference-alignment-spec §5.3） */
@@ -966,6 +1020,18 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     pageToolKeys: ["audio-timbre"],
     evidence:
       "reelmate-feature-map.md §3.5（报告点名的「音色修改」，无独立 /create 路由，本批以 mode=audio_timbre_modify 承载）",
+  },
+  {
+    key: "voice-clone",
+    title: "声音克隆",
+    desc: "上传参考音频，克隆一个专属音色",
+    category: "audio",
+    sort: 200,
+    route: "/create/voice-clone",
+    surface: "tool",
+    pageToolKeys: ["voice-clone"],
+    evidence:
+      "competitor_endpoints.tsv〔ai/voice-clone、ai/voice-clone-list、ai/voice-clone/{task_id}（GET/DELETE）、ai/voice-clone/rename〕——克隆产物即「我的音色」的实体",
   },
 ];
 

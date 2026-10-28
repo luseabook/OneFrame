@@ -4553,3 +4553,141 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 2. 两个 `status` 枚举语义不同（分镜 PENDING…/成片 排队…），原样输出，靠 `kind` 区分，不做归一化。
 3. `POST /df/script_project/export-log/:export_id/edit`（竞品能改导出记录的场景/备注）没有对应列 → `PROJECT_WAIVED`，不造空壳。
 4. `source_scripts` 一族 6 条没补：我方拆集直接落 `episodes`，没有原稿版本表；造一张只写不读的表比缺接口更坏。
+
+## 17.50 音色库的 8 条形状：把「克隆记录」定义成 `tasks` 的投影（第 93 批 · #6 工具箱）
+
+竞品 `/web/v1/ai/*` 里与音色相关的 9 条形状（`text-to-speech/voice/list` 1 + `voice-clone*` 5 + `timbre*` 3）此前在守卫里是「B 类豁免：无落库表」。本批复核后判定该理由不成立，8 条同形落地（第 9 条 `POST /ai/voice-clone` 走 `POST /generations`，见 50.1）。
+
+模块：`app/apps/api/src/modules/voice/`（`voice.controller.ts` / `voice.service.ts` / `voice.module.ts`），`@Controller("ai")`。
+
+### 50.1 提交侧：不新开路由
+
+`POST /v1/ai/voice-clone`（竞品）→ **`POST /v1/generations`，`mode="voice_clone"`、`model="toolbox-voice-clone"`**（ADR-003：差异在参数不在端点）。
+
+```json
+{
+  "mode": "voice_clone",
+  "model": "toolbox-voice-clone",
+  "input": { "prompt": "要朗读的文本", "reference_uris": ["<参考音频，必填 1 条>"] },
+  "options": { "resolution": "per_call", "count": 1, "voice_name": "我的音色", "speed": 1 }
+}
+```
+
+- `reference_uris` 必填 ≥1 条，缺了在**冻结积分之前**就报错（`input.reference_uris`）。
+- `voice_name` 放在 `options` 而不是 `input`：`assertToolInput()` 会把 `input` 里未声明的键当必填槽位校，塞进 `input` 会导致「不填名字就投不进去」。
+- 按次计价 **12 积分**（目录价 `strikeCredits: 15`）。
+
+### 50.2 我的音色：`tasks` 的只读投影
+
+一次克隆 = 一条 `tasks`（`capability='speech' AND mode='voice_clone'`）。**不建 `voice_clones` 表** —— 建了就要在改名/软删/重试三处同步两份状态。
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /v1/ai/voice-clone-list` | query `page`(≥1) / `page_size`(1–100) / `status`(1–6) |
+| `GET /v1/ai/voice-clone/{task_id}` | 单条；`mode !== "voice_clone"` 或跨空间一律 `400102 voice not found`（不区分「类型不对」与「不存在」，避免拿 id 探测别人任务） |
+| `POST /v1/ai/voice-clone/rename` | body `{ task_id, name }`，写 **`tasks.title`**（截 40 字）；空名 `400101 name must not be empty` |
+| `DELETE /v1/ai/voice-clone/{task_id}` | 走 `tasks.deletedAt` 软删，与 `DELETE /tasks/{id}` **同一套前置**：运行中 → `400101 task is still running…`；有冻结积分 → `400101 still holds frozen credits` |
+
+列表行：
+
+```json
+{ "task_id": "...", "name": "我的音色", "status": 3, "preview_url": "<1h 现签或 null>",
+  "created_at": "...", "finished_at": "...", "is_collected": false }
+```
+
+- `name` 取 `tasks.title`，为空时回落 `"我的音色"`。
+- `preview_url` 只在 `status === 3`（成功）且首个产物存在时签发；否则 `null`，不给假链接。
+- `is_collected` 由 `voice_favorites` 反查（见 50.4）。
+
+详情比列表多 `reference_uri`（参考音频）与 `result_count`。
+
+### 50.3 音色目录与分类
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /v1/ai/timbre-category/list` | 按 `female` / `male` / `english` / `preset` 分组计数；有克隆时多一组 `clone` |
+| `GET /v1/ai/timbre/list` | query `page` / `page_size` / `category` / `lang` / `only_collected`(1\|0\|true\|false)；内置音色 + 我的克隆合并后**在全集上过滤再分页**（否则 `total` 与 `list` 对不上） |
+| `GET /v1/ai/text-to-speech/voice/list` | query `lang_code` / `platform_id`；**只出 `TTS_VOICES` 那 5 条**（能直接塞进 TTS 的 `voice` 参数），不含改造预设与克隆 |
+
+内置音色两组来源（都在 `@app/model-adapters`）：
+
+- `TTS_VOICES`（`tts.ts`）：`zh_female_shuangkuaisisi` / `zh_female_tianmeixiaoyuan` / `zh_male_yuanboxiaoshu` / `zh_male_jieshuoxingger` / `en_female_sarah` → 归 `female` / `male` / `english`
+- `TIMBRE_PRESETS`（`postprocess-tools.ts`）：`warm_female` / `warm_male` / `narrator` / `child` / `robot` → 归 `preset`（音色改造预设，**不能当 TTS 的 voice 用**）
+
+`timbre_key` 的两种形状：`builtin:<voice_id>` / `clone:<task_id>`。
+
+### 50.4 收藏：唯一需要建表的一块
+
+```sql
+voice_favorites(
+  id bigint pk, space_id bigint → spaces.id, user_id bigint → users.id,
+  timbre_key text not null, created_at timestamp not null default now()
+);
+create unique index uq_voice_favorites on voice_favorites (space_id, user_id, timbre_key);
+create index idx_voice_favorites_user on voice_favorites (user_id, created_at desc);
+```
+
+迁移 `app/apps/api/drizzle/0046_uneven_prodigy.sql`。
+
+`POST /v1/ai/timbre/collect`，body `{ timbre_key, collect? }`：
+
+- `collect` 省略 = **取反**（已有则取消、没有则收藏）。
+- `builtin:` 必须命中内置音色表，否则 `400101 unknown builtin timbre: <id>`；`clone:` 必须是纯数字且校验归属（跨空间 `400102`）；其它形状 `400101 timbre_key must be builtin:<id> or clone:<task_id>`。
+- 返回 `{ timbre_key, collected, collect_count }`，`collect_count` 每次 `count(*)` 重算（不做物化列）。
+
+**为什么 `timbre_key` 不设外键**：内置音色在数据库里没有行，设了外键就写不进去。**为什么不拆成两列**：PG 的 `unique` 默认 `NULLS DISTINCT`，「只有一边非空」的行不会互相冲突，同一个人能把同一个内置音色收藏无数次。**为什么不复用 `agent_skill_favorites`**：它的 `skill_id` 外键指向 `agent_skills`，且音色不该进 Skill 广场的 `favorite_count`。
+
+### 50.5 工具目录：第 16 个 mode + 第 20 张卡
+
+只补列表不补生产者，列表永远是空的 —— 所以同批加了 `mode: "voice_clone"`：
+
+| 字段 | 值 |
+| --- | --- |
+| `key` / `mode` | `voice-clone` / `voice_clone` |
+| `capability` / `resultMedia` | `speech` / `audio` |
+| `model.name` | `toolbox-voice-clone` |
+| `adapterCode` | `POSTPROCESS_CODES.voiceClone` = `"voice-clone"` |
+| `modeConfig.endpoint` | `/web/v1/ai/voice-clone` |
+| `media_limits` | `{ audio: 1 }` |
+| `prices` | `[{ per_call, 12, 15 }]` |
+| `params` | `voice_name`（text）/ `speed`（number 0.25–4，step 0.05） |
+| `inputs` | `AUDIO_INPUT`（参考音频）+ `prompt`（朗读文本） |
+
+卡片：`key: "voice-clone"`、`route: "/create/voice-clone"`、`sort: 200`、`pageToolKeys: ["voice-clone"]`。前端 `<ToolWorkspace :tools="['voice-clone']" />`，目录驱动，零额外逻辑。
+
+适配器：`VoiceCloneAdapter extends HttpPostprocessAdapter`（`vendor="voice-clone"`、`resultMedia="audio"`、`/v1/voice/clone/tasks` + `POST {model, text, reference_audio, voice_name, speed, format, sample_rate}`、mock 下产 `.mp3`）。**协议字段是推断的**，与其它 15 个后处理适配器同性质（全 mock，等真实 Key）。
+
+### 50.6 顺手修的计价 bug
+
+`credits.service.ts` 的 `validateOptions()` 原本只读 `media_limits.image`：
+
+```ts
+// 改前 —— 声明 { audio: 1 } 的模式被当成「上限 0」
+if (limits && refs.length > (limits.image ?? 0)) { throw ... }
+```
+
+这正是本批新 mode 踩到的坑（报 `too many reference images (max undefined)`）。改成：
+
+```ts
+const refCap = limits?.image ?? limits?.reference ?? limits?.audio ?? limits?.video;
+if (refCap !== undefined && refs.length > refCap) {
+  throw new AppError(ErrorCode.INVALID_PARAM, `too many reference inputs (max ${refCap})`, { field: "input.reference_uris" });
+}
+```
+
+语义：只要声明了任一上限就按它算；一个都没声明等于不设上限（与 `limits` 整体缺失一致）。
+
+### 50.7 测试与守卫
+
+- 功能：`app/apps/api/test/voice-library.spec.ts` **11 例**（提交侧缺参考音频被拦在冻结前 / 列表空间隔离 / 详情与列表同源 / 改名与 `GET /tasks/:id` 同源 / 收藏幂等与取反与键校验 / 目录合并分页与三种过滤 / 分类 / TTS 清单 / 软删 / 运行中拒删）。
+- db 契约：`app/packages/db/src/schema.spec.ts` +1 例（`voice_favorites` 按 `(space,user,timbre_key)` 唯一、`timbre_key` 不是外键）。
+- 守卫：`AI_WAIVED` 17→12、`AI_MODULE_PAIRS` 19→16、`AI_IN_SCOPE_GAPS` → `AI_IMPLEMENTED`(8)；#6 用例改断言「8 同形 + 44 偏离 + 12 范围外」。
+- 反向验证：`@Get("timbre/list")` 改名 → 守卫 1 红 + 功能 1 红；恢复后 48 绿。
+
+### 50.8 边界
+
+1. `preview_url` 只在任务成功时签发，排队/处理中为 `null`。
+2. `collect_count` 是 `count(*)` 实时值，不做物化（量级远低于 Skill 广场）。
+3. 目录合并分页是**内存分页**：克隆音色先全量取再与内置合并，音色数量级（每人几十条）撑得住；上千条时要下沉 SQL。
+4. `forbidden` 的语义有意合并：跨空间与「不是克隆任务」都返回 `400102 voice not found`，防止用 id 探测他人任务是否存在。
+5. `VoiceCloneAdapter` 的供应商协议未经实测。

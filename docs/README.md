@@ -127,6 +127,147 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.47 · 第 93 批：审计 #4 创作 Agent + #6 工具箱 —— #4 一条端点都不缺，#6 那 0.10 是真的能补的 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 92 批结束后，剩余权重表（3.42）最靠前的两项是 **#4 创作 Agent（0.80）** 与 **#6 工具箱（0.70）** —— 合计 1.50，占剩余的 43%。但看两块缺口栏，性质完全不同：
+
+- **#4**：只写着两句话 —— 「真实 ASR 凭据（现 `available:false`）」与「Skill 市场运营位内容」。两句听起来都像外部依赖，但**都没被竞品全集验过**（前十三批已反复证明缺口栏自己会写错）。
+- **#6**：缺口栏里混着一条「音色库 5 条形状无落点（B 类）」—— 那是**工程能补的**，却被和「真实供应商 Key」写在一起。
+
+所以这批先做一件分类的事：**把「确实补不了的」和「只是没做的」分开**。否则下一轮还会把 #4 当工程缺口重查一遍、把 #6 那 0.10 当产品口径继续挂着。
+
+### 二、#4 创作 Agent：一条端点都不缺
+
+竞品 `/web/v1/agent/*` 在 TSV 里共 25 行命中，先排掉不属于 #4 的：
+
+| 归属 | 条数 | 举例 |
+| --- | ---: | --- |
+| 属 #11 无限画布 | 10 | `/df/canvas/agent-skills/*` 9 条、`/df/canvas/agent-recommend-cards` |
+| 属 workflow 组 | 2 | `wf/agent-task`、`wf/agent-project` |
+| 属 #5 全部项目 | 1 | `/df/script_project/ai-short-film/agent-start` |
+| **属 #4** | **12** | 见下表 |
+
+12 条与我方 31 条 agent 路由逐条比：
+
+| 归类 | 条数 | 明细 |
+| --- | ---: | --- |
+| 同形 | **10** | `task/create`、`task/create-check`、`task/chat`、`task/chat-end`、`task/stream`（GET + POST 两条形状）、`task/batch-download`、`PUT task/{id}`、`GET task/{id}`、`stt-token` |
+| 无响应体证据豁免 | 3 | `/agent/home/resource/recommend`、`/info`、`/sse` —— 第 84 批已登记，竞品只给端点名，`requestDataJsonSchema`/`responseDataJsonSchema` 均为 `{}` |
+
+**结论：#4 那 0.80 的构成是「真实 ASR 凭据 0.60（E 类）+ Skill 市场运营位内容 0.20（产品口径）」，没有任何一条是「端点没做」。** 这也解释了为什么它连续 60 多批都停在 96% —— 不是没动，是动不了。
+
+顺带核清一处容易混淆的相邻项：`GET /agent/stt-token`（我方已有，无 Key 时返回 200 + `available:false`）与 `POST /agent/stt/transcribe`（`@Public()`，凭 token 换转写）**代码侧是完整的**，缺的只是一个真实的语音服务账号 —— 这属于商务，不属于本批。
+
+### 三、#6 工具箱：音色库 8 条形状怎么落
+
+竞品音色相关 9 条形状（`text-to-speech/voice/list` 1 + `voice-clone*` 5 + `timbre*` 3），此前全在守卫的 `AI_WAIVED` 里，理由是「无 `voice_clones` / `timbre_favorites` 表」。本批复核后判定**这个理由不成立**。
+
+#### 3.1 克隆记录不该新建表，它就是 `tasks` 的投影
+
+一次声音克隆的产物就是一条生成任务：`tasks` 里已有 `mode`、`title`、`deletedAt`、`results`、`capability='speech'`，还带冻结/结算的账。再建一张 `voice_clones` 就是把同一份状态写两处 —— 改名要写两处、软删要写两处、任务重试会产生「表里有行但任务已换 id」的悬空记录。
+
+所以「我的音色」= `tasks WHERE capability='speech' AND mode='voice_clone' AND deleted_at IS NULL`：
+
+| 竞品形状 | 落点 |
+| --- | --- |
+| `GET /ai/voice-clone-list` | `GET /v1/ai/voice-clone-list`（投影 `tasks` + 收藏标记） |
+| `GET /ai/voice-clone/{task_id}` | `GET /v1/ai/voice-clone/{task_id}`（复用 `TasksService.detail`，只多一层 `mode` 校验） |
+| `POST /ai/voice-clone/rename` | `POST /v1/ai/voice-clone/rename` → 写 **`tasks.title`**（与 `PUT /agent/task/:id` 同一列） |
+| `DELETE /ai/voice-clone/{task_id}` | `DELETE /v1/ai/voice-clone/{task_id}` → 走 **`tasks.deletedAt` 软删**（与 `DELETE /tasks/:id` 同一套前置：运行中拒删、有冻结积分拒删） |
+| `POST /ai/voice-clone`（提交） | **不新开路由**：走 `POST /v1/generations` 的 `mode=voice_clone`（ADR-003：差异在参数不在端点） |
+
+#### 3.2 只有「收藏」需要一张新表
+
+收藏对象既可能是内置音色（`TTS_VOICES` / `TIMBRE_PRESETS`，在数据库里没有行），也可能是别人的克隆（`tasks` 里的行）。所以：
+
+```
+voice_favorites(
+  id, space_id, user_id,
+  timbre_key,      -- 'builtin:<voice_id>' 或 'clone:<task_id>'
+  created_at
+) — unique(space_id, user_id, timbre_key)
+```
+
+三个决定：
+
+1. **`timbre_key` 用字符串、不设外键**。设外键就写不进内置音色（库里没有那一行）。
+2. **不拆成 `builtin_key` + `task_id` 两列**。PG 的 `unique` 默认 `NULLS DISTINCT`，两列拼键在「只有一边非空」时形同虚设 —— 同一个人能把同一个内置音色收藏无限次。
+3. **不复用 `agent_skill_favorites`**。它的 `skill_id` 外键指向 `agent_skills`，音色既没有那一行、也不该进 Skill 广场的 `favorite_count` 统计。
+
+#### 3.3 只补列表不补生产者，列表永远是空的
+
+这是**竞品证据逼出来的判断**：它同时有 `/ai/voice-clone`（提交）与 `/ai/voice-clone-list`（列表）。如果我方只加列表，`mode=voice_clone` 在工具目录里没有任何一张卡 —— 用户根本发不起克隆，列表将永远为空，四条端点全是空壳。
+
+所以同批补：第 16 个工具 mode `voice_clone`（`toolbox-voice-clone`、按次计价 12 积分、参考音频 + 朗读文本两个槽位）、第 20 张卡「声音克隆」（`/create/voice-clone`）、`VoiceCloneAdapter`（`/v1/voice/clone/tasks` 提交、`/v1/voice/clone/tasks/{id}` 轮询，mock 下产 `.mp3`）、以及 5 个语种的页面标题。
+
+### 四、顺手修掉一个被新能力暴露的真 bug
+
+`app/apps/api/src/modules/credits/credits.service.ts` 的 `validateOptions` 里，参考输入上限是这么写的：
+
+```ts
+if (limits && refs.length > (limits.image ?? 0)) { ... }
+```
+
+历史所有模式都把上限写在 `media_limits.image` 上，所以这个写法一直没出问题。但声音克隆声明的是 `{ audio: 1 }` —— `limits.image` 是 `undefined`，`?? 0` 把它变成「上限 0」，于是**任何一条参考音频都投不进来**，报错还写着 `too many reference images (max undefined)`。
+
+改成按 `image → reference → audio → video` 取首个声明值，报错文案从「reference images」改成「reference inputs」。
+
+**这个 bug 值得单独写一笔**：它由「新增一个用法不同的能力」暴露出来，而旧测试永远测不到（因为旧模式从没声明过非 `image` 的键）。盲点不在被测代码里，在**测试的用例分布**里。
+
+### 五、守卫：#6 那组从「0 同形」变成「8 同形」
+
+`AI_WAIVED` 17 → **12**（音色 5 条迁出）、`AI_MODULE_PAIRS` 19 → **16**（三条音色不再「由 `GET /models` 承接」—— 那本来就是权宜说法）、`AI_IN_SCOPE_GAPS` 整段换成 `AI_IMPLEMENTED`（8 条）。
+
+新用例断言：
+
+```
+#6 工具箱：64 条里 8 条同形（第 93 批音色库）+ 44 条结构性偏离 + 12 条范围外
+  ✓ exact.length === 8，且与 AI_IMPLEMENTED 逐条深等
+  ✓ 8 条都真在 ROUTES 里
+  ✓ 8 条不能同时挂在 WAIVED 或 DEVIATIONS 上
+  ✓ deviated === 44 / waived === 12
+  ✓ 12 条豁免必须以「范围外」开头，不许再出现「B 类」
+```
+
+最后一条是**防回归的关键**：豁免表要随实现收缩，否则做过的事还挂在缺口里，分数永远收不回来 —— 第 87 批 #11 就是这么被坑的（措辞是「无证据」，其实大半是记账错误）。
+
+反向验证 `_acceptance/_r93_break.py` 把 `@Get("timbre/list")` 改名成 `timbre/list-BROKEN`：
+
+```
+FAIL  test/competitor-route-parity.spec.ts > #6 工具箱（64 条）
+FAIL  test/voice-library.spec.ts > 音色目录：内置 + 我的克隆合并分页
+  AssertionError: Cannot GET /v1/ai/timbre/list?page=1&page_size=100: expected 400102 to be +0
+Tests  2 failed | 31 passed
+```
+
+恢复后 **22 parity + 11 voice-library + 15 tools = 48 passed**。
+
+### 六、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| api 测试 | **89 文件 993 例全绿**（原 88/982：+11 `voice-library.spec.ts`） |
+| db 契约 | **27 例**（原 26：+1 `voice_favorites`） |
+| 总用例 | **1,405**（api 993 + adapters 164 + cli 128 + worker 61 + db 27 + shared 26 + storage 6） |
+| 端点 | 770 → **778**（新 `voice` 模块 8 条） |
+| 表 / 迁移 | 112 → **113** / 46 → **47**（`0046_uneven_prodigy.sql`） |
+| 门禁 | `verify-round.ps1` **12/12 全绿** |
+| 竞品覆盖守卫 | 十九组 **685 条 / 22 例**（#6 那组口径重划，总数不变） |
+| 分数 | **202.58/206 = 98.3%**，剩余 **3.42**；**#6 96.5% → 97%** |
+
+**为什么这批能加分而上一批不能**：#6 的 0.10 在缺口栏里的写法是「音色库 5 条形状无落点」，落点补上了就是补上了 —— 8 条竞品形状全部同形，不靠任何外部输入。而 #5/#7/#4 剩的都是「要不要做某个东西」的产品决定。**判断标准只有一条：能不能只靠代码 + 竞品证据做完。能，就是工程缺口；不能，才是外部依赖。**
+
+### 七、诚实边界
+
+1. **#4 的 3 条运营位豁免没有响应体证据**，只是「竞品有这个端点名」。所以「一条都不缺」这句话的准确含义是：**在现有证据下没有一条能证明我方缺**。要是哪天拿到竞品的首页推荐编排结构，这 0.20 还得重算。
+2. **`voice_favorites` 没有做「收藏数」的物化列**。`collect_count` 每次 `count(*)` 重算 —— 音色收藏的量级远低于 Skill 广场，物化列带来的「计数漂移」风险不值得。量级变了再改。
+3. **`VoiceCloneAdapter` 的供应商协议是推断的**，不是实测：`/v1/voice/clone/tasks` + `POST {model, text, reference_audio, voice_name, speed, format, sample_rate}`。真实供应商的字段名几乎肯定不同 —— 但这与其它 15 个后处理适配器同性质（全 mock，等 Key）。**`ADAPTER_MODE=mock` 下不校验协议，所以本批没有引入新的「假通过」。**
+4. **音色目录把两组内置音色拼在一起**：`TTS_VOICES`（5 条，能直接塞进 TTS 的 `voice` 参数）与 `TIMBRE_PRESETS`（5 条，是「音色改造」的预设，塞进 TTS 会被供应商拒）。目录里都展示，但 `GET /ai/text-to-speech/voice/list` **只出前者** —— 这是刻意的，不能让前端拿到一个用不了的值。
+5. **克隆音色的「试听」只在任务成功时才有**，排队/处理中一律 `preview_url: null`，不做假链接。
+
+
 ## 变更登记（v6.46 · 第 92 批：审计 #5 全部项目 + #7 团队 —— 两个「只差一句话」的缺口栏都没有竞品证据，补 2 条项目级导出日志 · 2026-10-28）
 
 ### 一、这批在回答什么问题

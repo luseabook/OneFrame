@@ -3355,6 +3355,7 @@
       "textRepaint": "Text repaint",
       "brushRepaint": "Brush repaint",
       "audioTimbre": "Voice timbre",
+      "voiceClone": "Voice clone",
       "autoBgm": "Auto soundtrack",
       "lipSync": "Lip sync",
       "textToMusic": "Text to music",

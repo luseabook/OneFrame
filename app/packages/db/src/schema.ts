@@ -2372,6 +2372,42 @@ export const agentSkillFavorites = pgTable(
   (t) => [uniqueIndex("uq_agent_skill_favorites").on(t.skillId, t.userId)],
 );
 
+/**
+ * 音色收藏（第 93 批）—— 对照竞品 `ai/timbre/collect`、`ai/timbre/list`（`only_collected`）。
+ *
+ * ## 为什么收藏目标是一个字符串而不是外键
+ * 可收藏的音色有两类来源：**内置音色**（`TTS_VOICES` 那 5 个 id，纯常量、库里没有行）
+ * 与**我的克隆音色**（一次 `mode=voice_clone` 的生成任务，id 就是 `tasks.id`）。
+ * 想要一条唯一键同时去重这两类，只能把目标压成一个稳定字符串：
+ *   内置 → `builtin:zh_female_shuangkuaisisi`；克隆 → `clone:<task_id>`。
+ * 反过来若拆成两列（`builtin_key` + `task_id`）就必须写一条 `check` 约束保证恰好一列非空，
+ * 而 `NULL` 参与唯一索引时两侧都能重复插入（PG 默认 NULLS DISTINCT），去重会失效。
+ *
+ * ## 为什么不复用 `agent_skill_favorites`
+ * 那张表的 `skill_id` 是 `agent_skills` 的外键。音色既没有 `agent_skills` 行，
+ * 也不该在「Skill 广场」的统计口径里被计数。
+ */
+export const voiceFavorites = pgTable(
+  "voice_favorites",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** `builtin:<voice_id>` 或 `clone:<task_id>`；不设外键（内置音色无行可指） */
+    timbreKey: text("timbre_key").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // 同一用户对同一音色只能收藏一次（重复收藏是幂等的，不该长出第二行）
+    uniqueIndex("uq_voice_favorites").on(t.spaceId, t.userId, t.timbreKey),
+    index("idx_voice_favorites_user").on(t.userId, t.createdAt.desc()),
+  ],
+);
+
 // ── 团队知识库（第 6 批）：知识库实体 / 目录 / 标签 / 资产 ────────────
 /**
  * 知识库实体（第 59 批）—— 对照竞品 `user_knowledge/create`(:739)、`delete`(:740)、

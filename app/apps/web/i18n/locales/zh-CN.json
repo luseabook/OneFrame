@@ -3355,6 +3355,7 @@
       "textRepaint": "文字重绘",
       "brushRepaint": "涂抹重绘",
       "audioTimbre": "音色修改",
+      "voiceClone": "声音克隆",
       "autoBgm": "自动配乐",
       "lipSync": "视频对口型",
       "textToMusic": "文生音乐",
