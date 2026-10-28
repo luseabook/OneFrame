@@ -685,4 +685,101 @@ describe("agent skills / stt / recommend e2e", () => {
     expect(downPage.list.every((item) => item.status === 2)).toBe(true);
     expect((await inject("GET", "/agent-skills/mine?status=3")).code).toBe(400101);
   });
+
+  /**
+   * 第 102 批：**运营编排首页推荐位**（`/ops/agent-skills/*`）。
+   *
+   * 为什么这条用例必须存在：`agent_skills.is_home_recommend` 此前**没有任何写入路径**。
+   * 上面「竞品形状」那条用例就能证明 —— 它标记推荐位用的是
+   *   `db.update(agentSkills).set({ isHomeRecommend: true })`
+   * **直接写库**，因为当时没有 API 可调。后果是：真实部署里 33 张平台卡的该列
+   * 永远是建表默认 `false`，`GET /agent-skills/plaza?is_home_recommend=1`
+   * 是一条**永远返回空**的死分支，运营没有任何手段把卡放到首页。
+   *
+   * 这条用例走 API 完成同样的编排，并锁住三条边界：
+   * 1. 只有**平台卡**（`space_id IS NULL`）可编排 —— 团队自建卡一律 400101；
+   * 2. 幂等 —— 重复设置同一个值返回 `changed:false` 而不是报错；
+   * 3. 编排结果对 **C 端广场真的可见**（不是只写了库就完事）。
+   */
+  it("运营编排推荐位：/ops/agent-skills 可标记平台卡，广场 is_home_recommend=1 立刻可见", async () => {
+    // 管理端登录（与 /ops/market 同一套 AdminGuard）
+    const adminLogin = await inject("POST", "/ops/admin/login", { username: "admin", password: "admin12345" }, "");
+    expect(adminLogin.code).toBe(0);
+    const adminToken = (adminLogin.data as { token: string }).token;
+    expect(adminToken.length).toBeGreaterThan(0);
+
+    // 先取一张平台卡（owner_type=1），并记下它原本的推荐位状态
+    const plaza = await inject("GET", "/agent-skills/plaza?page_size=100");
+    const platform = (plaza.data as { list: Array<{ skill_id: string; owner_type: number; is_home_recommend: boolean }> })
+      .list.find((item) => item.owner_type === 1);
+    expect(platform, "no platform skill found").toBeTruthy();
+    const skillId = platform!.skill_id;
+    const original = platform!.is_home_recommend;
+
+    // 基线：此刻若原来是 false，则推荐位筛选不含它
+    const before = await inject("GET", "/agent-skills/plaza?is_home_recommend=1&page_size=100");
+    const beforeIds = (before.data as { list: Array<{ skill_id: string }> }).list.map((i) => i.skill_id);
+    expect(beforeIds.includes(skillId)).toBe(original);
+
+    try {
+      // ── 1. 运营上新推荐位 ──
+      const on = await inject("PATCH", `/ops/agent-skills/${skillId}`, { is_home_recommend: true }, adminToken);
+      expect(on.code).toBe(0);
+      const onData = on.data as { skill: { skill_id: string; is_home_recommend: boolean }; changed: boolean };
+      expect(onData.skill.is_home_recommend).toBe(true);
+      expect(onData.skill.skill_id).toBe(skillId);
+      expect(onData.changed).toBe(true);
+
+      // ── 2. C 端广场立刻可见（编排不是"只写了库"）──
+      const listed = await inject("GET", "/agent-skills/plaza?is_home_recommend=1&page_size=100");
+      const listedIds = (listed.data as { list: Array<{ skill_id: string; is_home_recommend: boolean }> }).list;
+      const hit = listedIds.find((i) => i.skill_id === skillId);
+      expect(hit, "curated skill not visible in plaza?is_home_recommend=1").toBeTruthy();
+      expect(hit!.is_home_recommend).toBe(true);
+      expect(listedIds.every((i) => i.is_home_recommend)).toBe(true);
+
+      // ── 3. 幂等：重复设置同一值 changed=false，不报错 ──
+      const again = await inject("PATCH", `/ops/agent-skills/${skillId}`, { is_home_recommend: true }, adminToken);
+      expect(again.code).toBe(0);
+      expect((again.data as { changed: boolean }).changed).toBe(false);
+
+      // ── 4. 运营端列表能看到当前推荐阵容，且推荐位排在前面 ──
+      const opsList = await inject("GET", "/ops/agent-skills?is_home_recommend=1&page_size=100", undefined, adminToken);
+      expect(opsList.code).toBe(0);
+      const opsItems = (opsList.data as { list: Array<{ skill_id: string; is_home_recommend: boolean }> }).list;
+      expect(opsItems.map((i) => i.skill_id)).toContain(skillId);
+      expect(opsItems.every((i) => i.is_home_recommend)).toBe(true);
+
+      // ── 5. 下架推荐位：广场立刻不再返回它 ──
+      const off = await inject("PATCH", `/ops/agent-skills/${skillId}`, { is_home_recommend: false }, adminToken);
+      expect(off.code).toBe(0);
+      expect((off.data as { changed: boolean }).changed).toBe(true);
+      const afterOff = await inject("GET", "/agent-skills/plaza?is_home_recommend=1&page_size=100");
+      expect(
+        (afterOff.data as { list: Array<{ skill_id: string }> }).list.map((i) => i.skill_id),
+      ).not.toContain(skillId);
+    } finally {
+      // 复原，避免污染同文件其它用例（它们断言"推荐位默认 0 张"）
+      await db.update(agentSkills).set({ isHomeRecommend: original }).where(eq(agentSkills.id, BigInt(skillId)));
+    }
+  });
+
+  it("运营编排只允许平台卡：团队自建卡一律 400101（运营不能把别人的卡推上首页）", async () => {
+    const adminLogin = await inject("POST", "/ops/admin/login", { username: "admin", password: "admin12345" }, "");
+    const adminToken = (adminLogin.data as { token: string }).token;
+
+    // 造一张本空间自建卡
+    const created = await inject("POST", "/agent-skills", { name: "运营越权探针卡", category: "script" });
+    expect(created.code).toBe(0);
+    const cardId = (created.data as { skill_id: string }).skill_id;
+    createdSkillIds.push(cardId);
+
+    const denied = await inject("PATCH", `/ops/agent-skills/${cardId}`, { is_home_recommend: true }, adminToken);
+    expect(denied.code).toBe(400101);
+    expect(denied.msg).toContain("platform skill");
+
+    // 不存在的 id → 400102（不是 400101，避免把"没这张卡"和"这不是平台卡"混为一谈）
+    const missing = await inject("PATCH", "/ops/agent-skills/999999999999999999", { is_home_recommend: true }, adminToken);
+    expect(missing.code).toBe(400102);
+  });
 });

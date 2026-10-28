@@ -127,6 +127,97 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.56 · 第 102 批：#4 的「运营位内容」里藏着一个工程缺口 —— `is_home_recommend` 有读无写 · 2026-10-29）
+
+### 一、怎么发现的
+
+第 101 批我判断「剩余 3.33 里 B 0.88 都是真产品口径」。这批按「**谁生产数据**」逐条复核，核到 #4 的 0.20 时发现不对劲。
+
+全仓搜索 `isHomeRecommend`，只有**两处**：
+
+| 位置 | 作用 |
+| --- | --- |
+| `agent-skills.service.ts:296` | `page()` 里的**读过滤** |
+| `agent-skills.service.ts:691` | `toDto()` 里的**投影** |
+
+**没有任何赋值。** 也就是说这一列**有读无写**。
+
+### 二、后果是可验证的死分支
+
+1. 33 张平台卡的 `is_home_recommend` 永远是建表默认值 `false`；
+2. 所以 `GET /agent-skills/plaza?is_home_recommend=1` **永远返回空数组** —— 竞品这个筛选项在我方是一条死分支；
+3. 更关键：C 端的 `PUT /agent-skills` **也改不了它** —— 那条路要求 `requireOwned(spaceId, userId, id)`，而平台卡的 `space_id` / `owner_user_id` 都是 `NULL`（`seedCatalog()` 种入），**没有任何用户「拥有」平台卡**。
+
+### 三、铁证：测试自己记录了这个缺口
+
+既有用例 `agent-skills.spec.ts:650` 标记推荐位用的是：
+
+```ts
+await db.update(agentSkills).set({ isHomeRecommend: true }).where(...)
+```
+
+**直接写库** —— 因为当时确实没有 API 可调。而且 `:649` 还断言「推荐位默认 0 张」。
+
+**测试被迫绕过 API 直接改库，本身就是「缺一个写入口」的证据。**
+
+### 四、补了什么
+
+| 位置 | 改动 |
+| --- | --- |
+| `agent-skills-admin.controller.ts`（新） | `GET /ops/agent-skills`（平台卡列表）+ `PATCH /ops/agent-skills/:id`（设置推荐位），走 `AdminGuard`，与 `/ops/market/*` 同模式 |
+| `agent-skills.service.ts` | `adminListPlatformSkills` / `adminSetHomeRecommend`：**只允许平台卡**、幂等（重复设置返回 `changed:false`）、列表按 `is_home_recommend desc, use_count desc` 排序 |
+| `AgentSkillDrawer.vue` | 新增「★ 推荐位」筛选（只在广场页出现，切 tab 自动清除） |
+| `agent.module.ts` | `imports: [AdminModule]` —— 见下节 |
+
+### 五、踩了一个会让全仓 e2e 归零的坑
+
+新控制器注入 `AdminGuard`，而 `AdminGuard` 依赖 `AdminAuthService` —— **只有 `AdminModule` 才 `exports` 它**。
+
+`AgentModule` 没 import 它，于是 `NestFactory.create(AppModule)` **DI 失败**，vitest 表现为：
+
+```
+Error: Worker exited unexpectedly
+```
+
+**不是一条用例红，是全仓 e2e 归零。** 补 `imports: [AdminModule]` 后恢复。
+
+这个坑 `market.module.ts` 的注释里早就写过（「漏注册会直接让 DI 失败，不只是一个 spec 红」），我这次还是踩了 —— 说明注释救不了人，**降低踩坑成本的应该是测试**（这次 `Worker exited unexpectedly` 的报错信息确实足够定位）。
+
+### 六、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| `agent-skills.spec.ts` | 11 → **13 例**（新增：运营编排推荐位含幂等/广场可见/下架；只允许平台卡 + 不存在 400102） |
+| 反向验证 | 把写入注掉 → **1 红**；restore 后 13 绿 |
+| 门禁 | **12/12 全绿** |
+| 端点 / controller | 778 → **780** / 53 → **54** |
+| 用例 | 1,425 → **1,427**（api 1013 → **1015**） |
+| 分数 | **202.67 / 剩余 3.33 不变** |
+
+### 七、为什么分数不动（以及我改了什么）
+
+**#4 那 0.20 原记「Skill 市场运营位内容（产品口径 B）」。**
+
+我补的是**机制**，不是**内容**：
+
+- ✅ 运营现在可以编排推荐位了（此前完全不能）
+- ✅ 用户可以在抽屉里按推荐位筛选了（此前这个筛选永远空）
+- ❌ **首页至今没有推荐区** —— `is_home_recommend` 只在抽屉里当筛选项
+
+所以「首页推荐位」这个能力**没有闭环**，我不认领分数。
+
+但**分类改了**：那 0.20 从 **B（产品口径）改为 E（运营内容）** —— 剩下的不再需要产品拍板，只需要运营在这个新入口里挑几张卡。
+
+> 顺带修正一个之前的判断：这项其实**不是 B 类**。B 的定义是「产品一句话就能做」，而这项在补之前**即使产品说了也做不了**（没有写入口）。它本该是 **I 类（内部可做、只是没排期）** —— 而台账一直声称「I 类 = 0」。这说明那句「代码侧已无不需要外部输入的项」是**过于乐观**的。
+
+### 八、诚实边界
+
+1. **首页仍无推荐区**，能力未闭环，这是不认领分数的直接原因。
+2. **「只允许平台卡」是我方判断**：运营不给团队自建卡背书（既越权又不可控质量）。竞品侧无对应证据 —— 竞品可能允许运营推任何卡。
+3. **不做「推荐位人工排序」**：现在按 `is_home_recommend desc, use_count desc` 排。真要做人工排序应加独立列，而不是复用 `use_count`（那是真实使用量，当权重会失真）。
+4. **`is_home_recommend` 的默认值仍是 `false`**：33 张卡出厂都不推荐，需要运营显式挑。这是刻意的（不替运营做决定），但也意味着**上线后首页推荐位是空的**，直到有人填。
+
+
 ## 变更登记（v6.55 · 第 101 批：用更严格方法复核第 99 批的 4 个方向 —— 全部仍成立，并补上一条缺守卫的隐式约定 · 2026-10-29）
 
 ### 一、为什么重做第 99 批

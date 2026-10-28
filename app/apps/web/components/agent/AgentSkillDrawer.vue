@@ -38,6 +38,14 @@ const CATEGORIES: Array<{ key: string; label: string }> = [
 const tab = ref<TabKey>("plaza");
 const category = ref("");
 const keyword = ref("");
+/**
+ * 第 102 批：只看首页推荐位（仅广场页有效）。
+ *
+ * 为什么是前端状态而不是新 tab：后端没有 `recommend` 列表端点，
+ * 推荐位就是 `plaza` 的一个筛选参数（`is_home_recommend=1`）。
+ * 造第四个 tab 会让人以为有第四个端点。
+ */
+const homeOnly = ref(false);
 const list = ref<AgentSkill[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -66,6 +74,8 @@ async function load(reset = true): Promise<void> {
     const params = new URLSearchParams({ page: String(page.value), page_size: String(pageSize) });
     if (category.value) params.set("category", category.value);
     if (keyword.value.trim()) params.set("q", keyword.value.trim());
+    // 推荐位筛选只对广场有意义（my/favorites 里的卡不一定出现在广场）
+    if (homeOnly.value && tab.value === "plaza") params.set("is_home_recommend", "1");
     const res = await api.get<AgentSkillPage>(`/agent-skills/${tab.value}?${params.toString()}`);
     const incoming = res.list ?? [];
     // 去重：分类/搜索切换太快时两次响应可能乱序到达，按 skill_id 合并避免重复卡
@@ -82,6 +92,14 @@ async function load(reset = true): Promise<void> {
 function switchTab(next: TabKey): void {
   if (tab.value === next) return;
   tab.value = next;
+  // 推荐位只属于广场：切到「我的/收藏」时清掉，避免用户以为收藏里也能只看推荐
+  if (next !== "plaza") homeOnly.value = false;
+  void load();
+}
+
+/** 推荐位开关（第 102 批）：切换后重置分页重新拉 */
+function toggleHomeOnly(): void {
+  homeOnly.value = !homeOnly.value;
   void load();
 }
 
@@ -225,6 +243,21 @@ watch(
             @click="switchCategory(item.key)"
           >
             {{ item.label }}
+          </button>
+          <!--
+            第 102 批：首页推荐位筛选（只在广场页出现）。
+            后端 `GET /agent-skills/plaza?is_home_recommend=1` 早就支持这个筛选，
+            但前端一直没有入口 —— 加上运营侧编排端点后，这里才有内容可筛。
+          -->
+          <button
+            v-if="tab === 'plaza'"
+            class="chip chip--home"
+            :class="{ 'chip--active': homeOnly }"
+            type="button"
+            :title="'运营在后台标记的首页推荐卡'"
+            @click="toggleHomeOnly"
+          >
+            ★ 推荐位
           </button>
         </div>
       </div>
@@ -393,6 +426,17 @@ watch(
 .chip--active {
   background: var(--brand-soft);
   border-color: var(--brand-border);
+  color: var(--text-1);
+}
+/* 第 102 批：首页推荐位开关。用金色描边与普通分类 chip 区分 ——
+   它筛的不是内容分类，而是"运营是否把它放上首页" */
+.chip--home {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.chip--home.chip--active {
+  background: var(--warning);
+  border-color: var(--warning);
   color: var(--text-1);
 }
 .drawer__error {

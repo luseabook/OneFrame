@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AdminModule } from "../admin/admin.module";
 import { CanvasModule } from "../canvas/canvas.module";
 import { CreditsModule } from "../credits/credits.module";
 import { GenerationsModule } from "../generations/generations.module";
@@ -14,6 +15,7 @@ import { AgentRecommendController } from "./agent-recommend.controller";
 import { AgentRecommendService } from "./agent-recommend.service";
 import { AgentReplyService } from "./agent-reply.service";
 import { AgentSessionsService } from "./agent-sessions.service";
+import { AgentSkillsAdminController } from "./agent-skills-admin.controller";
 import { AgentSkillsController } from "./agent-skills.controller";
 import { AgentSkillsService } from "./agent-skills.service";
 import { AgentSttController, AgentSttRelayController } from "./agent-stt.controller";
@@ -41,12 +43,26 @@ import { CanvasChatController } from "./canvas-chat.controller";
  * - `AgentConversationsController`：独立创作会话（scope=1）的 CRUD / 消息 / SSE / 已读。
  */
 @Module({
-  imports: [CreditsModule, GenerationsModule, ModelsModule, TasksModule, CanvasModule, ScriptModule],
+  imports: [
+    CreditsModule,
+    GenerationsModule,
+    ModelsModule,
+    TasksModule,
+    CanvasModule,
+    ScriptModule,
+    // 第 102 批：`AgentSkillsAdminController` 用 `AdminGuard`，它注入 `AdminAuthService`
+    // （`AdminModule` 才 exports 它）。漏了这句会让 `NestFactory.create(AppModule)` DI 失败
+    // —— 不是一个 spec 红，而是全仓 e2e 归零（与 market.module.ts 同一条注释）。
+    AdminModule,
+  ],
   controllers: [
     AgentController,
     CanvasChatController,
     AgentConversationsController,
     AgentSkillsController,
+    // 第 102 批：Skill 卡运营编排（首页推荐位）。平台卡 space_id 为 NULL、无用户拥有，
+    // 所以 C 端的 PUT /agent-skills 永远改不了它 —— 必须另开一个 AdminGuard 入口。
+    AgentSkillsAdminController,
     AgentSttController,
     AgentSttRelayController,
     AgentRecommendController,

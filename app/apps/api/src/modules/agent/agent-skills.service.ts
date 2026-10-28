@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { and, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { agentSkillFavorites, agentSkills } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
+import { toBigId } from "../../common/bigid";
 import { db } from "../../db/database";
 import {
   SKILL_CATALOG,
@@ -657,6 +658,109 @@ export class AgentSkillsService {
       .update(agentSkills)
       .set({ useCount: sql`${agentSkills.useCount} + 1`, updatedAt: new Date() })
       .where(and(inArray(agentSkills.id, ids), isNull(agentSkills.deletedAt), or(eq(agentSkills.visibility, 2), eq(agentSkills.spaceId, BigInt(spaceId)))));
+  }
+
+  // ── 运营编排：首页推荐位（第 102 批）────────────────────
+  /**
+   * 运营侧 Skill 卡列表（**只含平台卡**，即 `space_id IS NULL`）。
+   *
+   * ## 为什么需要它
+   * `agent_skills.is_home_recommend` 这一列**此前没有任何写入路径** ——
+   * 全仓只在两处出现：`page()` 的读过滤（`:296`）与 `toDto()` 的投影（`:691`）。
+   * 于是 33 张平台卡的该列永远是建表默认值 `false`，而
+   * `GET /agent-skills/plaza?is_home_recommend=1` **永远返回空数组**：
+   * 竞品这个筛选项在我方是一条**死分支**，运营也没有任何手段把某张卡放到首页。
+   *
+   * 这不是「内容没填」（E 类），而是「编排机制不存在」（工程缺口）：
+   * 即使产品说「把这三张卡放首页」，也没有入口能执行。
+   *
+   * ## 为什么不走 `update()`
+   * `update()` 要求 `requireOwned(spaceId, userId, id)` —— 平台卡的
+   * `space_id` / `owner_user_id` 都是 `NULL`（由 `seedCatalog()` 种入），
+   * **没有任何用户「拥有」它**，所以 C 端更新接口永远碰不到这些卡。
+   * 运营侧必须走独立入口 + AdminGuard。
+   */
+  async adminListPlatformSkills(query: {
+    is_home_recommend?: boolean;
+    category?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<SkillPage> {
+    const page = Math.max(1, query.page ?? 1);
+    const size = Math.min(100, Math.max(1, query.page_size ?? 50));
+    const conds = [
+      isNull(agentSkills.spaceId),
+      isNull(agentSkills.deletedAt),
+    ];
+    if (query.is_home_recommend !== undefined) {
+      conds.push(eq(agentSkills.isHomeRecommend, query.is_home_recommend));
+    }
+    if (query.category) conds.push(eq(agentSkills.category, query.category));
+    const where = and(...conds);
+
+    const rows = await db
+      .select()
+      .from(agentSkills)
+      .where(where)
+      // 推荐位优先、再按使用量：运营打开页面时先看到当前的推荐阵容
+      .orderBy(desc(agentSkills.isHomeRecommend), desc(agentSkills.useCount), asc(agentSkills.id))
+      .limit(size)
+      .offset((page - 1) * size);
+    const [counted] = await db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(agentSkills)
+      .where(where);
+
+    return {
+      list: rows.map((row) => this.toDto(row, false, "", "")),
+      total: counted?.total ?? 0,
+      page,
+      page_size: size,
+    };
+  }
+
+  /**
+   * 运营设置某张平台卡的首页推荐位。
+   *
+   * 三条约束（都不接受「顺手」放宽）：
+   * 1. **只允许平台卡**（`space_id IS NULL`）：团队自建卡由创建者自己管理，
+   *    运营不能把别人的私有卡推上首页（既越权又不可控质量）；
+   * 2. **只改 `is_home_recommend`**（可选 `sort` 权重不做，现在排序用 `use_count`，
+   *    真要做推荐位排序应加独立列而不是复用使用量）；
+   * 3. 返回更新后的整卡，便于运营端就地刷新而不必二次拉列表。
+   *
+   * 幂等：重复设置同一值返回同一结果（`changed: false`），不报错 ——
+   * 运营双击或脚本重放都不该失败。
+   */
+  async adminSetHomeRecommend(
+    skillId: string,
+    input: { is_home_recommend: boolean },
+  ): Promise<{ skill: AgentSkillDto; changed: boolean }> {
+    const id = toBigId(skillId);
+    const [row] = await db
+      .select()
+      .from(agentSkills)
+      .where(and(eq(agentSkills.id, id), isNull(agentSkills.deletedAt)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: skillId });
+    if (row.spaceId !== null) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        "only platform skills (space_id is null) can be curated; team-owned cards are managed by their creator",
+        { field: "skill_id", space_id: String(row.spaceId) },
+      );
+    }
+    if (row.isHomeRecommend === input.is_home_recommend) {
+      return { skill: this.toDto(row, false, "", ""), changed: false };
+    }
+    const [after] = await db
+      .update(agentSkills)
+      .set({ isHomeRecommend: input.is_home_recommend, updatedAt: new Date() })
+      .where(and(eq(agentSkills.id, id), isNull(agentSkills.spaceId)))
+      .returning();
+    if (!after) {
+      throw new AppError(ErrorCode.NOT_FOUND, "skill not found", { skill_id: skillId });
+    }
+    return { skill: this.toDto(after, false, "", ""), changed: true };
   }
 
   // ── DTO ────────────────────────────────────────────────

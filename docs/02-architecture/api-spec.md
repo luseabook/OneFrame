@@ -5331,3 +5331,127 @@ worker **只消费队列**（不扫表按 status 取任务），所以 `RUNNING`
 2. `ad-drama` 是**同步**执行 + 结算 —— 若 API 进程在 freeze 与 settle 之间崩溃，冻结会悬空
    （现有 `catch` 分支会 `unfreezeCredits` 补偿，但进程被 kill 时补偿不会执行）。
    这是已知的、与本节互斥性无关的独立风险，登记在此不解决。
+
+## 17.59 Skill 首页推荐位的运营编排（第 102 批 · #4 · 新增 2 端点）
+
+本批**新增 2 个端点**（778 → 780），并修正一个存在已久的能力缺口。
+
+### 59.1 背景：`is_home_recommend` 此前有读无写
+
+`agent_skills.is_home_recommend` 这一列此前在**全仓只有两处出现**：
+
+| 位置 | 作用 |
+| --- | --- |
+| `agent-skills.service.ts:296` | `plaza` 查询的**读过滤** |
+| `agent-skills.service.ts:691` | `toDto` 的**投影** |
+
+**零赋值。** 后果：
+
+1. 33 张平台卡该列恒为建表默认 `false`；
+2. `GET /agent-skills/plaza?is_home_recommend=1` **永远返回空数组** —— 竞品这个筛选项是死分支；
+3. C 端 `PUT /agent-skills` 也改不了：它要求 `requireOwned(spaceId, userId, id)`，
+   而平台卡的 `space_id` / `owner_user_id` 均为 `NULL`（`seedCatalog()` 种入），**无用户拥有**。
+
+> 既有用例 `agent-skills.spec.ts:650` 标记推荐位时用的是 `db.update(...)` **直接写库**，
+> 因为当时确实没有 API 可调 —— 测试自己记录了这个缺口。
+
+### 59.2 新增端点 1：`GET /v1/ops/agent-skills`
+
+**运营侧**平台卡列表（只含 `space_id IS NULL`），用于挑选推荐位。
+
+```http
+GET /v1/ops/agent-skills?is_home_recommend=1&category=script&page=1&page_size=50
+Authorization: Bearer <admin_token>
+```
+
+| query | 说明 |
+| --- | --- |
+| `is_home_recommend` | `1`/`0`/`true`/`false`，只列已上/未上首页的卡（不传 = 全部） |
+| `category` | 分类过滤 |
+| `page` / `page_size` | 分页，`page_size ≤ 100`，默认 50 |
+
+响应：`{ list, total, page, page_size }`，`list[]` 与 C 端 `plaza` **同一份 DTO**。
+排序：`is_home_recommend DESC, use_count DESC, id ASC` —— 运营打开页面先看到当前推荐阵容。
+
+**鉴权**：`@Public() + AdminGuard`（与 `/ops/market/*` 同模式），**不接受普通用户 token**。
+
+### 59.3 新增端点 2：`PATCH /v1/ops/agent-skills/:id`
+
+设置/取消某张**平台卡**的首页推荐位。
+
+```http
+PATCH /v1/ops/agent-skills/1089…
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{ "is_home_recommend": true }
+```
+
+```json
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "skill": { "skill_id": "1089…", "name": "批量生图", "is_home_recommend": true, "..." : "..." },
+    "changed": true
+  }
+}
+```
+
+| 情形 | 行为 |
+| --- | --- |
+| 平台卡 + 值不同 | 更新，`changed: true` |
+| 平台卡 + 值相同 | **幂等**，`changed: false`，不报错 |
+| **团队自建卡**（`space_id` 非空） | `400101` `only platform skills (space_id is null) can be curated` |
+| id 不存在 / 已软删 | `400102` |
+| body 缺 `is_home_recommend` | `400101` |
+
+**为什么只允许平台卡**：团队自建卡由创建者管理，运营把别人的私有卡推上首页既越权、
+质量也不可控。这是**我方判断**，竞品侧无对应证据。
+
+**为什么用 PATCH 而不是两个动作端点**：这是「局部更新一个资源字段」，
+`{is_home_recommend: true|false}` 显式表达意图，比 `POST .../recommend` +
+`POST .../unrecommend` 少一条路由，也不会出现两个动作端点各改一次的漂移。
+
+### 59.4 C 端：`plaza?is_home_recommend=1` 现在真的有内容
+
+```http
+GET /v1/agent-skills/plaza?is_home_recommend=1&page_size=100
+```
+
+运营标记后**立即生效**（无缓存）。`is_home_recommend=0` 的语义是「**排除**推荐位」，
+不是「全部」—— 这条语义在既有用例里已锁定。
+
+前端入口：`AgentSkillDrawer.vue` 的「★ 推荐位」筛选（只在广场 tab 出现，切 tab 自动清除）。
+
+### 59.5 与 C 端 `PUT /agent-skills` 的分工
+
+| 端点 | 鉴权 | 能改什么 |
+| --- | --- | --- |
+| `PUT /agent-skills` | 创建者本人 | 名称/英文名/分类/摘要/prompt 模板（**改不了 `is_home_recommend`**） |
+| `PATCH /ops/agent-skills/:id` | 管理员 | **只能改 `is_home_recommend`** |
+
+两条路互不重叠：普通用户永远无法把自己或别人的卡推上首页。
+
+### 59.6 测试
+
+`app/apps/api/test/agent-skills.spec.ts` 11 → **13 例**：
+
+1. **运营编排推荐位**：管理端登录 → 标记 → `plaza?is_home_recommend=1` 立刻可见 →
+   重复设置 `changed:false` → 运营列表可见且排序 → 取消后广场不再返回（`try/finally` 复原）；
+2. **只允许平台卡**：团队自建卡 `400101`（msg 含 `platform skill`）、不存在的 id `400102`。
+
+反向验证：把写入改成只 `select` 不 `update` → **1 红**（`expected false to be true`），
+restore 后 13 绿。
+
+### 59.7 边界（诚实说明）
+
+1. **首页至今没有推荐区** —— `is_home_recommend` 目前只在抽屉里当筛选。
+   所以「首页推荐位」这个能力**没有闭环**，台账因此**不认领分数**（#4 仍 96%）。
+2. **不做人工排序**：现在按 `use_count` 次级排序。真要做运营手排应加独立列，
+   而不是复用 `use_count`（那是真实使用量）。
+3. **默认值仍是 `false`**：33 张卡出厂都不推荐，需要运营显式挑 —— 这意味着
+   **上线后推荐位是空的**，直到有人填。这是刻意不替运营做决定。
+4. **`AdminModule` 依赖**：本控制器用 `AdminGuard`，`AgentModule` 必须
+   `imports: [AdminModule]`。漏了会让 `NestFactory.create(AppModule)` DI 失败、
+   **全仓 e2e 归零**（vitest 表现为 `Worker exited unexpectedly`）。
