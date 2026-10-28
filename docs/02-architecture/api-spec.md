@@ -4877,3 +4877,98 @@ GET /v1/cam/team/points-flow/list?op_user_name=张三
 3. **「`account` 是死列」是读代码得出的**，非运行时验证；若邀请流程将来开始写它，这条豁免要立刻改为可做。
 4. **`include_descendants` 的 10 层上限、`op_type`/`kind` 的冲突 400101、导出分页语义**都是我方定的口径，竞品侧无证据。
 5. **成员导出上限 5000 行**（原写死 100）：团队是几十~几百人量级，超限时请用筛选分批导。
+
+## 17.53 章节列表的闭区间筛选：`start_chat_num` / `end_chat_num`（第 96 批 · #2）
+
+客户端契约级说明。本批**没有新增路由**（端点 778 不变），改的是
+`GET /v1/novel/:ntId/chapters` 的 query 参数处置。
+
+### 53.1 背景
+
+竞品 `GET /web/v1/df/novel/:nt_id/novel_chapters/list` 的 QUERY 是
+`start_chat_num` + `end_chat_num`（章节序号闭区间）。我方此前只收 `page`/`page_size` ——
+按竞品写的客户端传区间会被 **静默丢弃**，拿回整本 200 章（200 + code 0，看起来"成功"）。
+
+`/df/novel/*` 102 条竞品端点里只有 5 条带 QUERY，这是其中唯一一处真缺口；
+其余 4 条分别是「已接」/「映射到我方 POST body」/「无该资源」/「query 冗余」。
+
+### 53.2 参数
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `start_chat_num` | int ≥ 1 | 起始章序号（闭区间含首）。**竞品原名**，历史拼写是 `chat` 不是 `chapter` |
+| `end_chat_num` | int ≥ 1 | 结束章序号（闭区间含尾）。同上 |
+| `start_chapter_no` | int ≥ 1 | 上者的**我方别名**（给不照竞品写的调用方） |
+| `end_chapter_no` | int ≥ 1 | 同上 |
+| `page` / `page_size` | int | 既有分页，作用于**区间收窄之后**的集合 |
+
+竞品原名与我方别名同时给且不同值时，**以竞品原名为准**。
+
+### 53.3 请求 / 响应
+
+```http
+GET /v1/novel/1089…/chapters?start_chat_num=2&end_chat_num=3
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "list": [
+      { "id": "…", "chapter_no": 2, "title": "第二章 名单", "word_count": 41 },
+      { "id": "…", "chapter_no": 3, "title": "第三章 当票", "word_count": 24 }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 200,
+    "range": { "start": 2, "end": 3 }
+  }
+}
+```
+
+`range` 是**新增字段**，回显实际生效的区间（未传则为 `null`）。它的作用是让客户端
+确认筛选真的被接住了 —— 这正是本批要修的失效模式（参数被丢弃却返回 200）。
+
+`total` 是**区间内**的条数，不是全书章数。
+
+### 53.4 边界与错误码
+
+| 情形 | 行为 |
+| --- | --- |
+| 两端都不给 | 全书，`range = {start:null, end:null}` |
+| 只给 `start` | 从该章到末章 |
+| 只给 `end` | 从第 1 章到该章 |
+| `start > end` | **`400101`** `start_chat_num must not exceed end_chat_num` |
+| 区间超出全书（如 10–20 而只有 4 章） | 200 + **空 list + `total: 0`**（不是 404，不报错） |
+| 区间 + 分页 | 先按区间收窄，再开窗；`total` 是区间内总数 |
+| 非整数 / 小于 1 | `400101`（zod 校验） |
+
+**为什么 `start > end` 不返回空列表**：空列表会让调用方以为「这本书没有章节」，
+而实际是它自己的参数写反了 —— 与第 94/95 批「静默丢弃比 400 更坏」是同一条判据。
+
+### 53.5 有意**不**建 query 别名的 1 条
+
+竞品 `GET /df/novel/:nt_id/point?step=&episode_count=&chapter_start=&chapter_end=&is_retry=`
+在我方映射到 **`POST /v1/credits/quote`** —— 算价参数走 **body**，不是 query。
+
+因此**不**给它加 query 别名：那会造出第二套传参口径，且 body 与 query 的优先级
+还要再定一套规则。这是**映射口径差异**，不是漏接。
+
+### 53.6 测试与守卫
+
+- 功能：`app/apps/api/test/novel-query-parity.spec.ts` **2 例**——
+  区间筛选（基线/闭区间/单边/单章/别名/`start>end` 400101/越界空列表/区间+分页）、
+  `only_episodes` 导出行为回归（纯函数、只去章节段）。
+- 守卫：`competitor-route-parity.spec.ts` **+1 例**（24→25）。
+- 反向验证：`_r96_break.py break|restore` 把 `start_chat_num` 改名 → **2 红**，恢复后 27 绿。
+  **第一次跑出现假绿**：守卫用 `toContain("start_chat_num")` 时，`start_chat_num_BROKEN`
+  仍匹配子串 → 改成 `/^\s*start_chat_num\s*:\s*z\./m` 才红。这条教训已写进注释。
+
+### 53.7 边界（诚实说明）
+
+1. **`point` 那条的「body 不是 query」是读我方实现得出的**；竞品把 `step` 放哪，无请求体证据。
+2. **闭区间是推断**：竞品是否闭区间无证据，我方按「章节 1..N 的自然读法」定，并用 `range` 回显让调用方自证。
+3. **`start_chat_num` 保留了竞品的拼写**（`chat` 而非 `chapter`）—— 改漂亮会让照竞品写的客户端接不上，故只加别名。
+4. 扫描器只比 query，**body 一律未验**；剩下 47 条静默丢弃（df 19 条为主）仍未处理。

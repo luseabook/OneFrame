@@ -63,10 +63,27 @@ export const listQuerySchema = z.object({
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
 
-/** 章节分页（一本书最多 200 章，仍分页以防前端一次性渲染） */
+/**
+ * 章节列表（一本书最多 200 章，仍分页以防前端一次性渲染）。
+ *
+ * 第 96 批补 `start_chat_num` / `end_chat_num`：竞品 `GET /df/novel/:nt_id/novel_chapters/list`
+ * 的 QUERY 就是这两个（**闭区间**的章节序号范围），我方此前只收 page/page_size ——
+ * 按竞品写的调用方传了范围会被**静默丢弃**，拿回整本 200 章。
+ *
+ * 为什么没把名字改成 `start_chapter_no`：竞品叫 `chat_num`（历史拼写，不是 chapter），
+ * 但按竞品形状发请求的客户端只会用这个名字，改漂亮了就又接不上了。
+ * 我方另接受 `start_chapter_no` / `end_chapter_no` 作为**同义别名**（给不照竞品写的调用方）。
+ */
 export const chapterListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(200).default(200),
+  /** 起始章序号（闭区间，1 起）；竞品名 `start_chat_num` */
+  start_chat_num: z.coerce.number().int().min(1).optional(),
+  /** 结束章序号（闭区间，含）；竞品名 `end_chat_num` */
+  end_chat_num: z.coerce.number().int().min(1).optional(),
+  /** 同上两个的同义别名（我方命名口径） */
+  start_chapter_no: z.coerce.number().int().min(1).optional(),
+  end_chapter_no: z.coerce.number().int().min(1).optional(),
 });
 export type ChapterListQuery = z.infer<typeof chapterListQuerySchema>;
 

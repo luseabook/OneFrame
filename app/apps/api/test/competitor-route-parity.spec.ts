@@ -2268,6 +2268,60 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  /**
+   * 第 96 批：#2 小说改编链的**字段级**（query）对账。
+   *
+   * 竞品 `/df/novel/*` 102 条里只有 **5 条**带 QUERY（字段级证据本来就薄）。
+   * 逐条核完的结论：`download?only_episodes` 第 90 批已接；
+   * `novel_chapters/list?start_chat_num=&end_chat_num=` 此前被静默丢弃（本批补）；
+   * `point?step=…` 映射到我方 `POST /credits/quote`（body 不是 query）；
+   * `distribute/list?script_name=` 我方没有分发列表资源（B 类）；
+   * `sessions/{session_id}?id=` 的 id 已在路径里，query 冗余。
+   *
+   * 顺带修正第 95 批扫描器的一个 bug：PAIRS 有两种写法（双引号数组 / 单引号数组），
+   * 只匹配一种会把另一批的登记全算成「未映射」。修好后真实盲区从「98 条」变成 **77 条**。
+   */
+  it("#2 小说字段级：5 条带 query 的竞品端点里，章节区间必须被接住（`point` 是 body 不是 query）", () => {
+    const novelCtrl = readFileSync(join(API_SRC, "modules", "novel", "novel.controller.ts"), "utf8");
+    const novelSchemas = readFileSync(join(API_SRC, "modules", "novel", "novel.schemas.ts"), "utf8");
+    const novelSvc = readFileSync(join(API_SRC, "modules", "novel", "novel.service.ts"), "utf8");
+
+    // ── 已接的：`download?only_episodes`（第 90 批）+ 章节区间（第 96 批）──
+    expect(novelCtrl).toContain('@Query("only_episodes")');
+    // 章节区间走 schema（不是裸 @Query），所以断言 schema 定义 + service 里真变 SQL。
+    // 注意用**带冒号的正则**而不是 `toContain(key)`：后者会被 `start_chat_num_BROKEN`
+    // 这类改名蹭过去（第 96 批反向验证踩到的假绿）。
+    for (const key of ["start_chat_num", "end_chat_num"]) {
+      expect(novelSchemas, `chapterListQuerySchema 缺 ${key}`).toMatch(
+        new RegExp(`^\\s*${key}\\s*:\\s*z\\.`, "m"),
+      );
+    }
+    // 我方别名同义（给不照竞品写的调用方）
+    expect(novelSchemas).toMatch(/^\s*start_chapter_no\s*:\s*z\./m);
+    expect(novelSchemas).toMatch(/^\s*end_chapter_no\s*:\s*z\./m);
+
+    // service 层必须把区间变成 SQL 条件，而不是收了不用
+    const chaptersBlock = novelSvc.slice(
+      novelSvc.indexOf("async listChapters"),
+      novelSvc.indexOf("async getChapter"),
+    );
+    expect(chaptersBlock.length).toBeGreaterThan(0);
+    expect(chaptersBlock).toContain("gte(novelChapters.chapterNo");
+    expect(chaptersBlock).toContain("lte(novelChapters.chapterNo");
+    // start > end 必须拒绝（静默返回空列表会让调用方以为"这本书没章节"）
+    expect(chaptersBlock).toContain("must not exceed");
+    // total 必须是筛选后的条数：where 变量被 count 复用
+    expect(chaptersBlock).toContain(".where(where)");
+
+    /**
+     * ── 映射口径 ≠ 缺口的 3 条，必须留在明面上 ──
+     * `point` 在我方是 `POST /credits/quote`（**body** 传参），竞品的 query
+     * (`step`/`episode_count`/`chapter_start`) 没有 query 对应物 —— 不是漏接，
+     * 是两边的传参位置不同。这条断言防止下一批把它当缺口去"补 query 别名"。
+     */
+    expect(DEVIATIONS["GET /df/novel/{}/point"]!.ours).toBe("POST /credits/quote");
+  });
+
   it("#3 剧集与分镜：72 条竞品形状 = 0 同形 + 49 结构性偏离 + 23 条无模型/外部豁免（本批补 3 条形状）", () => {
     expect(EPISODE_SHAPES.length).toBe(72);
     // 竞品在 `/df/episode/*`、我方在 `/projects/*`：前缀差异本身就是显式偏离，不允许 normalize 掉

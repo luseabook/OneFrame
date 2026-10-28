@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, gt, ilike, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, ilike, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import {
   episodes as projectEpisodes,
   novelChapterOutlines,
@@ -477,9 +477,29 @@ export class NovelService {
     return { count: chunks.length };
   }
 
+  /**
+   * 章节列表（不含正文）。
+   *
+   * 第 96 批：补竞品的章节序号**闭区间**（`start_chat_num` / `end_chat_num`）。
+   * 语义与 `GET /novel/:ntId/episode?start/end`（分集区间）保持一致：
+   * - 两端都给且 start > end → `400101`（不静默返回空列表，那会让调用方以为"没有章节"）；
+   * - 只给一端 = 开区间到边界；
+   * - `total` 是**筛选后**的条数（不是全书章数），否则「共 200 章」与列出的 10 条对不上。
+   */
   async listChapters(spaceId: string, ntId: string, query: ChapterListQuery) {
     const novel = await this.requireNovel(spaceId, ntId);
-    const where = eq(novelChapters.novelId, novel.id);
+    // 竞品名与我方别名取先到的那个（同时给且不同值时以竞品名为准，并在注释里说明）
+    const start = query.start_chat_num ?? query.start_chapter_no;
+    const end = query.end_chat_num ?? query.end_chapter_no;
+    if (start !== undefined && end !== undefined && start > end) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "start_chat_num must not exceed end_chat_num", {
+        field: "start_chat_num",
+      });
+    }
+    const conds = [eq(novelChapters.novelId, novel.id)];
+    if (start !== undefined) conds.push(gte(novelChapters.chapterNo, start));
+    if (end !== undefined) conds.push(lte(novelChapters.chapterNo, end));
+    const where = and(...conds);
     const [rows, [counted]] = await Promise.all([
       db
         .select()
@@ -490,7 +510,14 @@ export class NovelService {
         .offset((query.page - 1) * query.page_size),
       db.select({ total: sql<number>`count(*)::int` }).from(novelChapters).where(where),
     ]);
-    return { list: rows.map(chapterSummaryDto), total: counted?.total ?? 0, page: query.page, page_size: query.page_size };
+    return {
+      list: rows.map(chapterSummaryDto),
+      total: counted?.total ?? 0,
+      page: query.page,
+      page_size: query.page_size,
+      /** 回显生效的区间，便于客户端确认筛选真的被接住了（而不是静默丢弃） */
+      range: { start: start ?? null, end: end ?? null },
+    };
   }
 
   async getChapter(spaceId: string, ntId: string, chapterNo: number) {
