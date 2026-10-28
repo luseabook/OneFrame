@@ -53,6 +53,11 @@ export default defineNuxtConfig({
     // `definePageMeta({ssr:false})` 对直接访问不足以保证首帧一致（/team 实测会 hydration mismatch）。
     // 这里按"页面 meta 已声明 ssr:false"的清单补齐，避免同类问题一处一处冒。
     "/team": { ssr: false },
+    // 第 105 批 QA 实测：只写 "/team" **不覆盖子路径** —— 未登录直接访问
+    // /team/dashboard 时，SSR 先渲染了团队页、客户端再跳登录页，于是报
+    // "Hydration completed but contains mismatches."。与上面 /admin/** 完全同因，
+    // 教训相同：凡是有子路由的前缀，`**` 必须单独列一行。
+    "/team/**": { ssr: false },
     "/login": { ssr: false },
     "/pricing": { ssr: false },
     "/report": { ssr: false },
