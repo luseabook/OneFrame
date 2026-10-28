@@ -53,6 +53,14 @@ export const episodePatchSchema = z.object({
   title: z.string().max(100).optional(),
   synopsis: z.string().max(1000).optional(),
   script_text: z.string().max(100_000).optional(),
+  /**
+   * 第 91 批：集状态（`episodes.status`：1 草稿 / 2 确认）。
+   *
+   * 证据：竞品 `POST /web/v1/df/episode/status`（`ApiDfEpisodeStatusPOST`，`requestDataJsonSchema` 为 `{}`）。
+   * 列本来就有、只是没有入口；竞品把改状态做成独立端点，我方按 REST 口径放进 PATCH。
+   * **只接受 1/2**：3 之后的号是生成流水的状态（分镜 side），集本身没有那些态。
+   */
+  status: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 export type EpisodePatchRequest = z.infer<typeof episodePatchSchema>;
 
@@ -121,6 +129,33 @@ export const storyboardBatchDeleteSchema = z.object({
   shot_ids: z.array(z.string().min(1).max(20)).min(1).max(200),
 });
 export type StoryboardBatchDeleteRequest = z.infer<typeof storyboardBatchDeleteSchema>;
+
+/**
+ * 第 91 批：批量追加分镜。
+ *
+ * 证据：竞品 `POST /web/v1/df/storyboard/:storyboard_id/info/batch-add`
+ * （`ApiDfStoryboardStoryboardIdInfoBatchAddPOST`，`paramNames:["storyboard_id"]`，
+ * `requestDataJsonSchema` 为 `{}`）。竞品是「给一个 storyboard 批量加 info 条目」；
+ * 我方没有 info 层（一行 `storyboards` 就是一个镜头），语义对齐为「给这一集按顺序追加若干镜头」。
+ *
+ * **不接受 `shot_no`/`insert_after`**：批量带序号插入一旦中途撞号，"部分成功"会污染后面所有序号；
+ * 要插中间请走单条 `POST …/storyboards`（它有显式的插位语义与重排）。
+ */
+export const storyboardBatchCreateSchema = z.object({
+  items: z.array(storyboardCreateSchema.omit({ shot_no: true, insert_after: true })).min(1).max(50),
+});
+export type StoryboardBatchCreateRequest = z.infer<typeof storyboardBatchCreateSchema>;
+
+/**
+ * 第 91 批：批量删集。
+ *
+ * 证据：竞品 `POST /web/v1/df/episode/batch-delete`（`ApiDfEpisodeBatchDeletePOST`，
+ * 无 paramNames；要删的集 id 只能放 body）。整批一个事务：要么全删、要么一条都不动。
+ */
+export const episodeBatchDeleteSchema = z.object({
+  episode_ids: z.array(z.string().min(1).max(20)).min(1).max(50),
+});
+export type EpisodeBatchDeleteRequest = z.infer<typeof episodeBatchDeleteSchema>;
 
 /**
  * 第 68 批：重排分镜号。

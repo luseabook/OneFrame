@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   charactersGenerateSchema,
   createProjectSchema,
+  episodeBatchDeleteSchema,
   episodePatchSchema,
   generateVideosBatchSchema,
   outlineConfirmSchema,
@@ -19,6 +20,7 @@ import {
   scriptDraftGenerateSchema,
   splitEpisodesRequestSchema,
   storyboardAssetsPutSchema,
+  storyboardBatchCreateSchema,
   storyboardBatchDeleteSchema,
   storyboardCreateSchema,
   storyboardRenumberSchema,
@@ -592,6 +594,35 @@ export class ScriptController {
     return this.script.deleteEpisode(req.auth?.spaceId ?? "", id, eid);
   }
 
+  /**
+   * 第 91 批：批量删集（竞品 `POST /web/v1/df/episode/batch-delete`）。
+   *
+   * 竞品没有 params、ids 只能在 body；我方给显式 `batch-delete` 子路径（与分镜的
+   * `storyboards/batch-delete` 同一命名口径）。必须先于 `:eid` 的读/改/删声明吗？——不必：
+   * 这里是 POST，而 `POST …/episodes/:eid` 不存在，不会被抢。
+   */
+  @Post("projects/:id/episodes/batch-delete")
+  async deleteEpisodes(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(episodeBatchDeleteSchema, body);
+    return this.script.deleteEpisodes(req.auth?.spaceId ?? "", id, input.episode_ids);
+  }
+
+  /**
+   * 第 91 批：读单条分镜（竞品 `GET /web/v1/df/episode/:ep_id/storyboard/:id/info`）。
+   *
+   * 与「整集详情」返回的同一行**完全同形**（含绑定顺序），只多一层 `{ storyboard }`；
+   * 前端编辑单镜不必再拉整集。
+   */
+  @Get("projects/:id/episodes/:eid/storyboards/:sid")
+  async storyboard(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Param("sid") sid: string,
+  ) {
+    return this.script.storyboardDetail(req.auth?.spaceId ?? "", id, eid, sid);
+  }
+
   @Patch("projects/:id/episodes/:eid/storyboards/:sid")
   async patchStoryboard(
     @Req() req: AuthedRequest,
@@ -617,6 +648,23 @@ export class ScriptController {
   ) {
     const input = parseOrThrow(storyboardCreateSchema, body ?? {});
     return this.script.createStoryboard(req.auth?.spaceId ?? "", id, eid, input);
+  }
+
+  /**
+   * 第 91 批：批量追加分镜（竞品 `POST /df/storyboard/:storyboard_id/info/batch-add`）。
+   *
+   * 只在末尾按给定顺序追加；不接受 `shot_no`/`insert_after`（要插中间走单条，避免撞号后的
+   * 部分成功污染整集序号）。声明在 `:sid` 之后、`batch-delete` 之前不影响匹配：全是静态段。
+   */
+  @Post("projects/:id/episodes/:eid/storyboards/batch-add")
+  async createStoryboards(
+    @Req() req: AuthedRequest,
+    @Param("id") id: string,
+    @Param("eid") eid: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(storyboardBatchCreateSchema, body);
+    return this.script.createStoryboards(req.auth?.spaceId ?? "", id, eid, input);
   }
 
   /** 第 68 批：删一条分镜（竞品把「删分镜」做成 body 里传 ids，我方才给单条路径） */

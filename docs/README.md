@@ -127,6 +127,99 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.45 · 第 91 批：审计 #3 剧集与分镜 —— 竞品 72 条 `/df/episode/*` 里 0 条同形，3 条单点/批量形状补上 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+`#3 剧集与分镜` 的台账分数是 **95.7%**、缺口 0.13，缺口栏从第 77 批起只有一句话：「`quality-check` 评分口径**自建**（竞品只有路由、无字段证据）」。这句话本身没问题——但它意味着**从来没有拿竞品全集来量过 #3**。
+
+所以这批做三件事：
+
+1. 从 905 行竞品端点表里把 **`#3` 的面**切出来：`^/web/v1/df//?episode/` 与 `^/web/v1/df/storyboard/` 共 **72 条**（另 34 行含 `episode`/`storyboard` 字样但属 `#2` 小说 8 行、`#17` 提取 7 行、`#11` 画布 4 行、`#12` 剧本广场 1 行、`#13/#14` 广告剧/转绘 3 行、`#18` 资源 1 行——**必须先按前缀排除**，否则计数虚高）。
+2. 与我方 `app/apps/api/src/modules/script/script.controller.ts` 的 **68 条**（现 71 条）`/projects/*` 路由双向 diff。
+3. 把「同能力缺单个对象形状」的补上，把「真没有模型」的如实记下来，然后把这个对账固化成守卫。
+
+### 二、72 条怎么归属
+
+| 归类 | 条数 | 例子 | 处理 |
+| --- | --- | --- | --- |
+| 纯前缀偏离 | 41 | `GET /df/episode/list` → `GET /projects/{project_id}`（项目详情里带 episodes） | 登记 `DEVIATIONS`，不补别名 |
+| 方法/入口偏离 | 8 | `POST /df/episode/batch-create` → `POST /projects/{project_id}/episodes/batch` | 同上 |
+| **同能力缺单点形状（本批补）** | **3** | 单条分镜、批量建分镜、批量删剧集 | 补真端点 |
+| 无模型 / 外部依赖 | 23 | 分镜评论 3、标签组 5、`script_draft` 6、`process-status` 2、`parse-result`/`result-sync` 2、`epext`/`storyboard-ext` 2、`info-confirm` 1、`batch resources`/`storyboard-export` 2 | 登记 `WAIVED`，理由点名缺哪张表 |
+
+**同形（完全一致）= 0**。原因和第 90 批的 `#2` 一样：竞品把剧集挂在 `/df/episode/*` 下，我方是 `/projects/{project_id}/episodes/*` —— 守卫的 `normalize()` 只剥 `/web/v1`、**不剥 `/df`**，所以这一组的「同形」在结构上必然为 0，覆盖只能靠显式登记（这也是为什么新用例里专门断言 `prefixOnly === 41`：如果哪天有人给 normalize 加了剥 `/df`，这个数字会跳，测试会红，提醒「把 72 条静默变成全覆盖」这件事不能被当成胜利）。
+
+### 三、补的 3 条形状 + 1 条补字段
+
+| 竞品形状 | 我方新端点 | 为什么这么定 |
+| --- | --- | --- |
+| `POST /df/storyboard/{storyboard_id}/info/batch-add` | `POST /projects/{project_id}/episodes/{episode_id}/storyboards/batch-add` | 竞品的「info」是分镜下的信息层（一条分镜挂多条 info），我方没有这一层 → 语义对齐为**按序追加镜头**；**不接受 `shot_no`/`insert_after`**（批量带序号中途撞号会造成部分成功污染整集序号），由服务端从 `max(shot_no)+1` 起连号 |
+| `POST /df/episode/batch-delete` | `POST /projects/{project_id}/episodes/batch-delete` | 整批一个事务：先按 `storyboards.episode_id in (...)` 取 shotIds 清 `storyboard_assets`，再清 storyboards / episode_resources / export_jobs / project_timelines / timeline_exports / extraction_tasks / director_scenes / timeline_publications → episodes；**任一条不存在就整批 400102**（不留部分成功），**且不重排 `ep_no`**（重排会让前端缓存的集号漂移） |
+| `GET /df/episode/{episode_id}/storyboard/{storyboard_id}/info` | `GET /projects/{project_id}/episodes/{episode_id}/storyboards/{storyboard_id}` | 单条分镜详情，**与整集详情里的同一行完全同形**（同一 `storyboardDtoWithUrls`，连 `Object.keys().sort()` 都相等），只多一个直属读取入口 |
+
+另外 `POST /df/episode/status`（竞品用于改「草稿/确认」）→ 我方没有新端点，而是给 `PATCH /projects/{id}/episodes/{episode_id}` 补了 `status` 字段：`episodes.status` 列第 71 批就存在（1 草稿 / 2 确认），只是 `episodePatchSchema` 一直只收 `title`/`synopsis`/`script_text`。**只接受 `1`/`2`**，因为 3 及以上是分镜侧的生成流水状态，由 worker 写，人不能改。
+
+### 四、23 条豁免：为什么硬补不了
+
+- **分镜评论 3 条**（`send-comment` / `edit-comment` / `comment-list`）：我方没有 `storyboard_comments` 表，评论也没有归属与已读模型。
+- **分镜标签组 5 条**：`storyboard_tag_groups` / `storyboard_tag_links` 不存在；`storyboards` 只有一个 `shot_desc` 文本。
+- **`script_draft` 6 条**（含 `link-draft`、`esd detail`）：我方剧本只有 `script_text` 一列，没有草稿版本表——第 82 批判 `#24` 时也是同一原因（`#24` 的 4 条里就有草稿）。
+- **`process-status` 2 条**：竞品把「解析/生成进度」做成独立可编辑实体，我方进度由 `extraction_tasks.status` 与 `storyboards.status` 表达，没有可编辑的进度记录。
+- **`parse-result` / `result-sync` 2 条**：我方 `parse` 是同步事务、先备份再覆盖，没有「解析结果暂存区」这一层。
+- **`epext` / `storyboard-ext` 2 条**：竞品有扩展字段（自定义列），我方没有扩展字段表。
+- **`info-confirm` 1 条**：竞品分镜 info 有「确认」态，我方分镜直接落库可用，没有中间确认态。
+- **`batch resources` / `storyboard-export` 2 条**：批量资源绑定在 `match-resources` 里已覆盖（`episode_resources` 整批替换），`storyboard-export` 与 `#3` 已有的 `film-synthesis-export` 是两件事（前者导出分镜表、后者合成视频）→ 记 B 类。
+
+**这 23 条一条都没有硬造。** 造一张没有写入方的评论表、或一个永远返回空数组的「解析结果暂存区」，比缺这个接口更坏——它会让调用方以为能力在，实际只是把「没有」包装成「有」。
+
+### 五、守卫十七组 635 条 + 反向验证
+
+`app/apps/api/test/competitor-route-parity.spec.ts` 从 **十六组 563 条**扩到 **十七组 635 条**（+72），新增 `EPISODE_SHAPES`(72) / `EPISODE_PAIRS`(49) / `EPISODE_WAIVED`(23) / `EPISODE_IMPLEMENTED`(3)，并加用例：
+
+```
+#3 剧集与分镜：72 条竞品形状 = 0 同形 + 49 结构性偏离 + 23 条无模型/外部豁免（本批补 3 条形状）
+  ✓ EPISODE_SHAPES.length === 72
+  ✓ 同形数组为 []（/df 前缀使同形必为 0）
+  ✓ missing() === []
+  ✓ deviated 49 / waived 23，两者相加 72
+  ✓ 3 条 EPISODE_IMPLEMENTED 都在 ROUTES 里
+  ✓ 23 条豁免理由都 > 20 字，且以「B 类：」/「外部：」开头
+```
+
+反向验证 `_acceptance/_r91_break.py` 把单条分镜路由改名成 `-BROKEN` 后：
+
+```
+FAIL  test/competitor-route-parity.spec.ts > 注册表与后端路由一致
+  deviation target missing: GET /df/episode/{}/storyboard/{}/info → GET /projects/{}/episodes/{}/storyboards/{}
+FAIL  test/competitor-route-parity.spec.ts > #3 剧集与分镜（72 条）
+FAIL  test/episode-shapes.spec.ts > 单条分镜详情
+Tests  3 failed | 22 passed
+```
+
+恢复后 **20 parity + 5 episode-shapes = 25 passed**。
+
+### 六、验证与数字
+
+| 项 | 数字 |
+| --- | --- |
+| api 测试 | **87 文件 971 例全绿**（原 86/965：+5 `episode-shapes.spec.ts` +1 parity） |
+| 总用例 | **1,382**（api 971 + adapters 164 + cli 128 + worker 61 + db 26 + shared 26 + storage 6） |
+| 端点 | 765 → **768** |
+| 门禁 | `verify-round.ps1` **12/12 全绿** |
+| 竞品覆盖守卫 | 十七组 **635 条** |
+| 分数 | **202.48/206 = 98.3%，剩余 3.52 不变**（本批不加分） |
+
+**为什么本批不加分**：`#3` 的 0.13 缺口是 `quality-check` 的**五维评分口径**——竞品 72 条里没有任何一条给出评分字段、权重或分级规则（`quality-check` 本身只在端点表里有一行 `POST /df/episode/:ep_id/quality-check`，`requestDataJsonSchema` 与 `responseDataJsonSchema` 都是 `{}`）。本批补的 3 条是「单点读取/批量写入」的**形状**，没有改变评分口径自建这件事，所以分数不动。
+
+### 七、诚实边界
+
+1. 只比了**方法 + 路径 + 参数名**。竞品 72 条的 `requestDataJsonSchema`/`responseDataJsonSchema` 全为 `{}`，字段级语义仍然没有证据。
+2. 「补 3 条」的判据是「同能力已有集合级入口、只缺单个对象入口」。若某条同时缺集合级和单点级（如评论），一律记豁免而不是补一半。
+3. 批量建分镜的 `shot_no` 由服务端连号，与竞品「客户端可指定序号」不同——这是有意收敛，理由写在 §17.48。
+4. 批量删剧集不回滚已删的分镜产物文件（对象存储里的物理文件不动），与单删一致。
+5. `episodes.status=2`（已确认）目前不阻断任何写操作；竞品是否用它做闸门没有证据，未擅自加锁。
+
 ## 变更登记（v6.44 · 第 90 批：#2 小说改编链 —— 竞品 102 条 `/df/novel/*` 里 0 条同形，13 条是「该有的单点形状」、12 条连模型都没有 · 2026-10-28）
 
 ### 一、这批在回答什么问题

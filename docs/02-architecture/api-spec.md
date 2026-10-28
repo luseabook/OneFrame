@@ -4424,3 +4424,59 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 3. 12 条豁免一旦产品决定建表，必须立刻改成偏离并补实现；
 4. 新增 13 条端点暂无前端页面消费（UI 接法留待页面批次），接口先立契约；
 5. `only_episodes` 只认 `1/true/yes`，其余按 false。
+
+## 17.48 剧集与分镜的三个单点/批量形状，与 `/df` 前缀偏离口径（第 91 批）
+
+### 48.1 为什么进 API 文档
+
+`#3` 的客户端此前只能用「整集详情 + 逐个调用」完成三件很常见的事：看一条分镜、一次加多条分镜、一次删多集。竞品这三件事都有独立端点，我方没有——照竞品路径移植的调用方会 404。这批把形状补齐，并把「为什么这一组同形数量永远是 0」写清楚。
+
+### 48.2 三个端点
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/v1/projects/{project_id}/episodes/{episode_id}/storyboards/{storyboard_id}` | 空间成员 | 单条分镜，返回 `{ storyboard }` |
+| `POST` | `/v1/projects/{project_id}/episodes/{episode_id}/storyboards/batch-add` | 空间成员（写） | 批量追加分镜，返回 `{ storyboards[], count }` |
+| `POST` | `/v1/projects/{project_id}/episodes/batch-delete` | 空间成员（写） | 批量删剧集，返回 `{ deleted, episode_ids, ep_nos, cleared }` |
+
+三条约束：
+
+1. **单条分镜与整集详情里的同一行完全同形**（同一个 `storyboardDtoWithUrls` 渲染，含签名后的 `images[]` 与 `assets[]`）。前端可以只替换数组里的一项，不需要两套渲染。
+2. **批量建分镜不接受 `shot_no` / `insert_after`**。这两个字段在单条创建（`POST .../storyboards`）里是支持的，批量里被 schema 剥掉，`shot_no` 由服务端从 `max(shot_no)+1` 起连号。理由：批内序号在事务里逐个 +1，若允许客户端指定，撞到唯一索引 `uq_storyboards_episode_shot` 会导致整批失败或部分成功——两种都不可接受。
+3. **批量删剧集是全有或全无**。任一 `episode_ids` 不属于该项目就整批 `400102`，并在 `msg` 里给出 `episode not found`；不做「删掉存在的、跳过不存在的」。删除在单事务里清 9 张表（`storyboard_assets` / `storyboards` / `episode_resources` / `export_jobs` / `project_timelines` / `timeline_exports` / `extraction_tasks` / `director_scenes` / `timeline_publications`），**且不重排剩余集的 `ep_no`**。
+
+### 48.3 `PATCH` 剧集新增 `status`
+
+竞品的 `POST /df/episode/status` 在我方没有对应端点，而是并进 `PATCH /v1/projects/{id}/episodes/{episode_id}` 的 body：
+
+```json
+{ "status": 2 }
+```
+
+- 只接受 `1`（草稿）与 `2`（确认）。`3` 及以上是分镜生成流水状态，由 worker 写，人不能改 → `400101`。
+- 该列从第 71 批就存在（`episodes.status`），此前 schema 只收 `title`/`synopsis`/`script_text`，属于「列在、入口不在」。
+
+### 48.4 与 72 条竞品形状的对应
+
+| 归类 | 条数 | 守卫里的位置 |
+| --- | --- | --- |
+| 纯前缀偏离（`/df/episode/*` → `/projects/{}/episodes/*`） | 41 | `EPISODE_PAIRS` |
+| 方法/入口偏离（如 `batch-create` → `/episodes/batch`） | 8 | `EPISODE_PAIRS` |
+| 本批补齐的单点/批量形状 | 3 | `EPISODE_IMPLEMENTED`（同时在 `EPISODE_PAIRS` 里指向自己） |
+| 无模型 / 外部依赖 | 23 | `EPISODE_WAIVED` |
+
+**同形 = 0 是结构性的**：竞品把剧集挂在 `/df/episode/*`，我方挂在 `/projects/{project_id}/episodes/*`；守卫的 `normalize()` 只剥 `/web/v1`、不剥 `/df`。测试里专门断言「剥掉 `/df` 后恰好 41 条会变成同形」，就是为了防止有人给 `normalize()` 加一条 `s|^/df||` 把 72 条静默变成「全覆盖」。
+
+### 48.5 守卫与测试
+
+- 守卫：`app/apps/api/test/competitor-route-parity.spec.ts` 第十七组，**635 条 / 20 例**。
+- 功能：`app/apps/api/test/episode-shapes.spec.ts` **5 例**（准备 / 单条分镜 / 批量建 / 改 status / 批量删），含「单条与列表同一行 `Object.keys().sort()` 深等」「借别集 storyboard_id 读 → 400102」「跨空间不泄漏存在性」。
+- 反向验证：把 `GET .../storyboards/:sid` 改名 `-BROKEN` → 3 例红（2 守卫 + 1 功能），恢复后 25 例绿。
+
+### 48.6 边界
+
+1. 只比方法/路径/参数名；竞品这 72 条的两个 schema 全为 `{}`，字段语义无证据。
+2. 批量建分镜的连号规则是我方收敛，不是竞品行为。
+3. 批量删不重排 `ep_no`，也不清理对象存储里的物理文件。
+4. `status=2` 不阻断写操作（竞品是否用它当闸门无证据）。
+5. 23 条豁免没有硬造：评论表、标签组表、草稿版本表、扩展字段表都不存在，造空壳比缺接口更坏。

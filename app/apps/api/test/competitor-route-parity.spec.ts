@@ -10,9 +10,9 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十六组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * 本文件把竞品的十七组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
  * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 /
- * asset 36 / novel 102，共 563 条，来自
+ * asset 36 / novel 102 / episode 72，共 635 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -25,9 +25,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十六组共 563 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十七组共 635 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #2 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十三行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #2 / #3 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十四行的
  * 「逐条对照」说法。
  *
  * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
@@ -1390,6 +1390,181 @@ for (const [shape, reason] of Object.entries(NOVEL_WAIVED)) {
   WAIVED[shapeOf(shape)] = reason;
 }
 
+// 72 条 = #3 剧集与分镜的竞品全集（`/df/episode/*` 与 `/df/storyboard/*`，来自 TSV 的 METHOD+path）。
+// 与 #2 小说同因：竞品带 `/df` 域分层、我方按 ADR-009 收敛到 `/projects/*`，所以这一组的「同形」必然为 0，
+// 覆盖必须靠显式登记（49 条偏离 + 23 条豁免），不允许靠 normalize 把 `/df` 抹掉凑数。
+const EPISODE_SHAPES: string[] = [
+  'POST /df/episode/{}/storyboard-add',
+  'POST /df/episode/{}/storyboard/{}/edit',
+  'POST /df/storyboard/{}/info-confirm',
+  'GET /df/episode/list',
+  'GET /df/episode/assets_list',
+  'POST /df/episode/add',
+  'POST /df/episode/{}/storyboard/num-update',
+  'GET /df/episode/info',
+  'GET /df/episode/{}/storyboard/{}/info',
+  'GET /df/episode/{}/storyboard-list',
+  'GET /df/storyboard/{}/info-list',
+  'POST /df/episode/{}/storyboard/delete',
+  'POST /df/episode/edit',
+  'POST /df/episode/delete',
+  'GET /df/episode/{}/material-list',
+  'POST /df/storyboard/{}/info-delete',
+  'GET /df/storyboard/{}/info/{}/detail',
+  'POST /df/episode/{}/storyboard-export',
+  'POST /df/storyboard/batch-ai-generate',
+  'POST /df/storyboard/batch-ai-generate-video',
+  'POST /df/episode/batch-create',
+  'POST /df/episode/edit-epext',
+  'GET /df/episode/storyboard-total-list',
+  'PUT /df/episode/{}/storyboard/storyboard-ext',
+  'POST /df/episode/{}/resources',
+  'GET /df/episode/{}/resources',
+  'PUT /df/episode/{}/resources',
+  'POST /df/episode/{}/parse',
+  'GET /df/episode/{}/parse-result',
+  'POST /df/episode/script_draft/batch_update',
+  'POST /df/episode/{}/script_draft/add',
+  'POST /df/episode/script_draft/{}/edit',
+  'POST /df/episode/script_draft/{}/delete',
+  'POST /df/storyboard/{}/info/add',
+  'GET /df/episode/{}/storyboard/{}/link-draft',
+  'POST /df/episode/{}/parse-reset',
+  'POST /df/episode/{}/parse-retry',
+  'POST /df/episode/{}/parse/result-sync',
+  'POST /df/episode/{}/storyboard-export-retry',
+  'POST /df/episode/batch/resources',
+  'POST /df/episode/batch-storyboard-export',
+  'POST /df/episode/process-status/edit',
+  'GET /df/episode/process-status/logs',
+  'POST /df/episode/{}/quality-check',
+  'POST /df/storyboard/send-comment',
+  'GET /df/storyboard/comment-list',
+  'POST /df/storyboard/edit-comment',
+  'GET /df/episode/{}/{}/detail',
+  'POST /df/episode/batch-delete',
+  'POST /df/episode/optimization',
+  'POST /df/episode/optimization_edit',
+  'POST /df/storyboard/{}/info/batch-add',
+  'POST /df/episode/{}/resources/match-reset',
+  'GET /df/episode/{}/storyboard-tag-groups',
+  'PUT /df/storyboard/{}/info/{}/tag-groups',
+  'PUT /df/episode/{}/storyboard-tag-groups/{}',
+  'DELETE /df/episode/{}/storyboard-tag-groups/{}/members',
+  'DELETE /df/episode/{}/storyboard-tag-groups/members',
+  'POST /df/episode/status',
+  'PUT /df/episode/edit-project',
+  'POST /df/episode/{}/film-synthesis-export',
+  'POST /df/episode/{}/film-synthesis-export-retry',
+  'POST /df/episode/{}/process/parse',
+  'GET /df/episode/{}/process/parse-list',
+  'POST /df/episode/{}/process/parse/delete',
+  'PUT /df/episode/{}/process/parse',
+  'POST /df/episode/{}/process/parse/info',
+  'POST /df/episode/{}/process/parse/generate',
+  'POST /df/episode/{}/process/parse/confirm',
+  'POST /df/episode/{}/process/parse/upload',
+  'PUT /df/episode/shot/delete',
+  'GET /df/episode/{}/shot',
+];
+
+// 49 条结构性偏离：41 条纯前缀差异（剥掉 `/df` 后尾段同构）+ 8 条方法/入口不同。
+// 其中 3 条是本批按竞品形状补的真端点（单条分镜、集批量删、分镜批量追加）+ 1 条是给 PATCH 补 `status`。
+const EPISODE_PAIRS: Array<[string, string, string]> = [
+  ['POST /df/episode/{}/storyboard-add', 'POST /projects/{}/episodes/{}/storyboards', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/storyboard/{}/edit', 'PATCH /projects/{}/episodes/{}/storyboards/{}', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/episode/list', 'GET /projects/{}', '竞品把 id 放 query（`sp_id`）列集；我方是「读项目详情，里面带 episodes[]」'],
+  ['GET /df/episode/assets_list', 'GET /projects/{}/assets', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/add', 'POST /projects/{}/episodes', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/storyboard/num-update', 'POST /projects/{}/episodes/{}/storyboards/num-update', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/episode/info', 'GET /projects/{}/episodes/{}', '竞品把 `ep_id` 放 query；我方放路径（REST）'],
+  ['GET /df/episode/{}/storyboard/{}/info', 'GET /projects/{}/episodes/{}/storyboards/{}', '第 91 批新增的单条分镜读；竞品路径里没有 `ep_id` 之外的定位'],
+  ['GET /df/episode/{}/storyboard-list', 'GET /projects/{}/episodes/{}', '我方整集详情直接带 `storyboards[]`，不需要单独列表端点'],
+  ['GET /df/storyboard/{}/info-list', 'GET /projects/{}/episodes/{}', '同上：竞品的 storyboard/info 两层在我方合并成「一集 → 分镜[]」'],
+  ['POST /df/episode/{}/storyboard/delete', 'POST /projects/{}/episodes/{}/storyboards/batch-delete', '竞品路径里有双斜杠笔误，且 id 只在 body'],
+  ['POST /df/episode/edit', 'PATCH /projects/{}/episodes/{}', '竞品用 POST 改集；我方用 PATCH'],
+  ['POST /df/episode/delete', 'DELETE /projects/{}/episodes/{}', '竞品把 id 放 body；我方按 REST 放路径'],
+  ['GET /df/episode/{}/material-list', 'GET /projects/{}/episodes/{}/match-result', '素材匹配结果在 `episode_resources`，按集读'],
+  ['POST /df/storyboard/{}/info-delete', 'DELETE /projects/{}/episodes/{}/storyboards/{}', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/storyboard/{}/info/{}/detail', 'GET /projects/{}/episodes/{}/storyboards/{}', '第 91 批新增的单条分镜读（同一行）'],
+  ['POST /df/episode/{}/storyboard-export', 'POST /projects/{}/episodes/{}/exports', '导出作业落 `export_jobs`，按集创建/查询/重试'],
+  ['POST /df/storyboard/batch-ai-generate', 'POST /projects/{}/episodes/{}/storyboards/generate', '竞品按 storyboard 批量出图；我方按集批量'],
+  ['POST /df/storyboard/batch-ai-generate-video', 'POST /projects/{}/episodes/{}/storyboards/generate-videos', '同上，出片通道'],
+  ['POST /df/episode/batch-create', 'POST /projects/{}/episodes/batch', '竞品 `batch-create`；我方 `batch`（第 71 批）'],
+  ['GET /df/episode/storyboard-total-list', 'GET /projects/{}/matrix', '跨集分镜总览 = 我方项目矩阵（episodes × storyboards）'],
+  ['POST /df/episode/{}/resources', 'POST /projects/{}/episodes/{}/match-resources', '触发素材匹配'],
+  ['GET /df/episode/{}/resources', 'GET /projects/{}/episodes/{}/match-result', '读匹配结果'],
+  ['PUT /df/episode/{}/resources', 'POST /projects/{}/episodes/{}/save-resource-matches', '写入人工选择；竞品用 PUT'],
+  ['POST /df/episode/{}/parse', 'POST /projects/{}/episodes/parse', '解析入口在项目级（可指定集），竞品在集级'],
+  ['POST /df/episode/{}/script_draft/add', 'POST /projects/{}/episodes/{}/script-draft/generate', '我方生成即落 episode（不做草稿表）'],
+  ['POST /df/storyboard/{}/info/add', 'POST /projects/{}/episodes/{}/storyboards', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/parse-reset', 'POST /projects/{}/episodes/parse-reset', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/parse-retry', 'POST /projects/{}/episodes/parse-retry', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/storyboard-export-retry', 'POST /projects/{}/episodes/{}/exports/{}/retry', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/quality-check', 'POST /projects/{}/episodes/{}/quality-check', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/batch-delete', 'POST /projects/{}/episodes/batch-delete', '第 91 批新增；竞品 ids 只在 body'],
+  ['POST /df/episode/optimization', 'POST /projects/{}/episodes/{}/script-draft/generate', '优化 = 带 instructions 重写剧本'],
+  ['POST /df/episode/optimization_edit', 'PATCH /projects/{}/episodes/{}', '采用优化结果 = 写回 `script_text`'],
+  ['POST /df/storyboard/{}/info/batch-add', 'POST /projects/{}/episodes/{}/storyboards/batch-add', '第 91 批新增；只在末尾追加'],
+  ['POST /df/episode/{}/resources/match-reset', 'POST /projects/{}/episodes/{}/match-reset', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/status', 'PATCH /projects/{}/episodes/{}', '第 91 批把 `status`(1|2) 加进 PATCH；竞品是独立端点'],
+  ['PUT /df/episode/edit-project', 'PATCH /projects/{}', '改项目属性；竞品用 PUT'],
+  ['POST /df/episode/{}/film-synthesis-export', 'POST /projects/{}/episodes/{}/film-synthesis-export', '前缀偏离：竞品把剧集/分镜挂在 `/df/episode/*` 与 `/df/storyboard/*`，我方按 ADR-009 收敛到 `/projects/{}/episodes/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/episode/{}/process/parse', 'POST /projects/{}/assets/extract', '竞品的「流程解析」= 我方从分镜/剧本抽资产'],
+  ['GET /df/episode/{}/process/parse-list', 'GET /projects/{}/assets', '解析产物列表 = 项目资产列表'],
+  ['POST /df/episode/{}/process/parse/delete', 'DELETE /projects/{}/assets/{}', '竞品把 id 放 body；我方放路径'],
+  ['PUT /df/episode/{}/process/parse', 'PATCH /projects/{}/assets/{}', '改资产；竞品用 PUT'],
+  ['POST /df/episode/{}/process/parse/info', 'GET /projects/{}/assets/{}', '单条资产详情；竞品用 POST 读'],
+  ['POST /df/episode/{}/process/parse/generate', 'POST /projects/{}/assets/extract', '生成 = 再跑一次抽取'],
+  ['POST /df/episode/{}/process/parse/confirm', 'POST /projects/{}/assets/batch-confirm', '确认 = 批量定稿资产'],
+  ['POST /df/episode/{}/process/parse/upload', 'POST /projects/{}/assets', '上传 = 手工建资产'],
+  ['PUT /df/episode/shot/delete', 'DELETE /projects/{}/episodes/{}/storyboards/{}', 'shot 与 storyboard 在我方是同一条记录；竞品用 PUT 删'],
+  ['GET /df/episode/{}/shot', 'GET /projects/{}/episodes/{}', '镜头列表 = 整集详情里的 `storyboards[]`'],
+];
+
+// 23 条豁免 = 缺模型/缺外部依赖（不是「没做」）：分镜评论 3、分镜标签组 5、剧本草稿 6、
+// 制作流程状态 2、集/分镜扩展字段 2、异步解析结果 2、跨集批量 2、成片合成重试 1。
+const EPISODE_WAIVED: Record<string, string> = {
+  'POST /df/storyboard/{}/info-confirm': 'B 类：竞品有「手动确认单条分镜」；我方 `storyboards.status` 由生成流水推进（image/video task + status 列），PATCH 不暴露 status，无竞品字段证据不敢造状态机',
+  'POST /df/episode/edit-epext': 'B 类：竞品有集级扩展字段桶（epext）；我方 `episodes` 是固定列（title/synopsis/script_text/status），未知字段一律 400101，不造空壳扩展字段',
+  'PUT /df/episode/{}/storyboard/storyboard-ext': 'B 类：同上，分镜也没有扩展字段桶；我方 `storyboards` 的列是固定契约',
+  'GET /df/episode/{}/parse-result': '外部：解析是同步事务（`parse.service` 在事务里落 episodes/storyboards 并直接返回结果），没有异步任务可拉；结果读 `GET …/episodes/{}` 即可',
+  'POST /df/episode/script_draft/batch_update': 'B 类：竞品有独立「剧本草稿」表（esd_id）；我方生成即写入 episode，没有草稿实体可批量更新',
+  'POST /df/episode/script_draft/{}/edit': 'B 类：同上，无草稿表（我方编辑走 PATCH episode 的 `script_text`）',
+  'POST /df/episode/script_draft/{}/delete': 'B 类：我方没有剧本草稿表（生成即落 `episodes.script_text`），没有草稿记录可删；要动剧本走 `PATCH …/episodes/{}`',
+  'GET /df/episode/{}/storyboard/{}/link-draft': 'B 类：草稿不存在（同脚本草稿三条），没有「分镜→草稿」的关联可查',
+  'POST /df/episode/{}/parse/result-sync': '外部：解析同步返回，不需要「把结果同步回来」这一步；先备份再覆盖由 `parse-retry` 承担',
+  'POST /df/episode/batch/resources': '外部：素材匹配按集触发；跨集批量由调用方循环，未做跨集批量端点（竞品也无入参形状证据）',
+  'POST /df/episode/batch-storyboard-export': '外部：导出按集创建作业；跨集批量由调用方循环，避免半批失败时的作业对账问题',
+  'POST /df/episode/process-status/edit': 'B 类：竞品有独立的制作流程状态实体与流水；我方没有 process 模型（集有 status 1/2，分镜有 1–5，没有「流程节点」）',
+  'GET /df/episode/process-status/logs': 'B 类：我方没有独立的制作流程状态实体与流水表（集只有 1/2 草稿-确认，分镜只有 1–5 生成状态），没有日志可读',
+  'POST /df/storyboard/send-comment': 'B 类：分镜评论模型不存在（画布侧有节点评论，但那是 canvas 域，不共用）',
+  'GET /df/storyboard/comment-list': 'B 类：分镜评论模型不存在（画布侧节点评论是 canvas 域的 `canvas_comment_nodes`，不跨域复用），没有评论可列',
+  'POST /df/storyboard/edit-comment': 'B 类：同上——分镜没有评论表，也就没有可编辑的评论；画布评论走 canvas 域自己的端点',
+  'GET /df/episode/{}/{}/detail': 'B 类：竞品第二段是剧本草稿 id（esd）；我方无草稿表，该 id 无对象可指',
+  'GET /df/episode/{}/storyboard-tag-groups': 'B 类：分镜标签组模型不存在（`storyboards` 只有 shot_no/描述/时长/比例/状态，无标签维度）',
+  'PUT /df/storyboard/{}/info/{}/tag-groups': 'B 类：分镜标签组模型不存在（`storyboards` 只有镜头序号/描述/时长/比例/状态，没有标签维度），没有组可写',
+  'PUT /df/episode/{}/storyboard-tag-groups/{}': 'B 类：同上——没有分镜标签组实体，写标签组只能造假表',
+  'DELETE /df/episode/{}/storyboard-tag-groups/{}/members': 'B 类：同上——没有分镜标签组，也没有成员关系表，删成员无对象可删',
+  'DELETE /df/episode/{}/storyboard-tag-groups/members': 'B 类：同上——没有分镜标签组与成员关系，批量删成员无对象',
+  'POST /df/episode/{}/film-synthesis-export-retry': '外部：成片合成是同步 80% 闸门（不足直接 400106），没有异步任务可重试；时间线导出才有 `exports/{}/retry`',
+};
+
+// 本批按竞品形状补的 3 条我方路由（断言真实存在，防止改名后覆盖数虚高）。
+// 第 4 条「改集状态」不是新路由，是给 `PATCH /projects/{}/episodes/{}` 加 `status`(1|2)。
+const EPISODE_IMPLEMENTED: string[] = [
+  'GET /projects/{}/episodes/{}/storyboards/{}',
+  'POST /projects/{}/episodes/batch-delete',
+  'POST /projects/{}/episodes/{}/storyboards/batch-add',
+];
+
+for (const [shape, ours, reason] of EPISODE_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(EPISODE_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -1407,6 +1582,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   canvas: CANVAS_SHAPES.length,
   asset: ASSET_SHAPES.length,
   novel: NOVEL_SHAPES.length,
+  episode: EPISODE_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -1554,9 +1730,13 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("PATCH /novel/{}/fission_script/idea/{}")).toBe(true);
     expect(ROUTES.has("PATCH /novel/{}/fission_script/characters/{}")).toBe(true);
     expect(ROUTES.has("PATCH /novel/{}/original_script/episodes_outline/{}")).toBe(true);
+    // 第 91 批：#3 剧集与分镜按竞品形状补的 3 条（其余 72 条里 49 条偏离、23 条无模型豁免）
+    expect(ROUTES.has("GET /projects/{}/episodes/{}/storyboards/{}")).toBe(true);
+    expect(ROUTES.has("POST /projects/{}/episodes/batch-delete")).toBe(true);
+    expect(ROUTES.has("POST /projects/{}/episodes/{}/storyboards/batch-add")).toBe(true);
   });
 
-  it("竞品十六组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36 / novel 102）", () => {
+  it("竞品十七组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36 / novel 102 / episode 72）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -1574,6 +1754,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       canvas: 114,
       asset: 36,
       novel: 102,
+      episode: 72,
     });
     expect(
       FILM_SHAPES.length +
@@ -1591,8 +1772,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         AI_SHAPES.length +
         CANVAS_SHAPES.length +
         ASSET_SHAPES.length +
-        NOVEL_SHAPES.length,
-    ).toBe(563);
+        NOVEL_SHAPES.length +
+        EPISODE_SHAPES.length,
+    ).toBe(635);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -1611,6 +1793,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       canvas: CANVAS_SHAPES,
       asset: ASSET_SHAPES,
       novel: NOVEL_SHAPES,
+      episode: EPISODE_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -1884,6 +2067,24 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+  it("#3 剧集与分镜：72 条竞品形状 = 0 同形 + 49 结构性偏离 + 23 条无模型/外部豁免（本批补 3 条形状）", () => {
+    expect(EPISODE_SHAPES.length).toBe(72);
+    // 竞品在 `/df/episode/*`、我方在 `/projects/*`：前缀差异本身就是显式偏离，不允许 normalize 掉
+    expect(EPISODE_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)))).toEqual([]);
+    expect(missing(EPISODE_SHAPES)).toEqual([]);
+    expect(EPISODE_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw))).length).toBe(49);
+    expect(EPISODE_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw))).length).toBe(23);
+    // 本批补的 3 条形状必须真的在路由表里
+    for (const ours of EPISODE_IMPLEMENTED) {
+      expect(ROUTES.has(ours), `implemented shape missing: ${ours}`).toBe(true);
+    }
+    // 豁免只能是「缺模型」或「缺外部依赖」，且要写清是哪一类
+    for (const [shape, reason] of Object.entries(EPISODE_WAIVED)) {
+      expect(WAIVED[shapeOf(shape)]!.length, `waiver too short: ${shape}`).toBeGreaterThan(20);
+      expect(/^(B 类|外部)：/.test(reason), `waiver must say B 类/外部: ${shape}`).toBe(true);
+    }
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -1903,13 +2104,15 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...CANVAS_SHAPES,
         ...ASSET_SHAPES,
         ...NOVEL_SHAPES,
+        ...EPISODE_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只在五个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
+    // 豁免只在六个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
     // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）、
-    // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）、#2 小说（买断授权 7 + 本子级协作/权限/分发 5）。
+    // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）、#2 小说（买断授权 7 + 本子级协作/权限/分发 5）、
+    // #3 剧集与分镜（评论 3 + 标签组 5 + 剧本草稿 6 + 制作流程 2 + 扩展字段 2 + 异步解析 2 + 跨集批量 2 + 合成重试 1）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
     const waiverScope = new Set(
       [
@@ -1920,6 +2123,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...CANVAS_SHAPES,
         ...ASSET_SHAPES,
         ...NOVEL_SHAPES,
+        ...EPISODE_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);

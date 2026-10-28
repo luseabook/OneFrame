@@ -44,6 +44,7 @@ import {
   type SplitEpisodesRequest,
   type StoryboardPatchRequest,
   type StoryboardCreateRequest,
+  type StoryboardBatchCreateRequest,
   type StoryboardRenumberRequest,
   type StoryboardsGenerateRequest,
   type StoryboardVideoMode,
@@ -669,7 +670,7 @@ export class ScriptService {
     spaceId: string,
     projectId: string,
     episodeId: string,
-    input: { title?: string; synopsis?: string; script_text?: string },
+    input: { title?: string; synopsis?: string; script_text?: string; status?: 1 | 2 },
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
@@ -679,6 +680,9 @@ export class ScriptService {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.synopsis !== undefined ? { synopsis: input.synopsis } : {}),
         ...(input.script_text !== undefined ? { scriptText: input.script_text } : {}),
+        // 第 91 批：竞品 `POST /df/episode/status` 就是改这一列（1 草稿 / 2 确认），
+        // 列早就有、只是没有入口；这里不额外做状态机校验 —— 竞品没有给出流转证据。
+        ...(input.status !== undefined ? { status: input.status } : {}),
         updatedAt: new Date(),
       })
       .where(eq(episodes.id, episode.id))
@@ -729,6 +733,63 @@ export class ScriptService {
       return { storyboards: shotIds.length };
     });
     return { deleted: true, episode_id: String(episode.id), ep_no: episode.epNo, cleared };
+  }
+
+  /**
+   * 第 91 批：批量删集（竞品 `POST /web/v1/df/episode/batch-delete`）。
+   *
+   * 竞品把 ids 放 body、一次删多集；我方此前只有单集 `DELETE …/episodes/:eid`。
+   * 清理口径与单集删除完全一致（8 张 RESTRICT 外键表 + 先按分镜 id 清 `storyboard_assets`），
+   * 但**整批一个事务**：要么全删、要么一条都不动 —— 半批成功比失败更难收拾。
+   *
+   * 先校验「每个 id 都属于本项目」再动手：否则会出现"删掉了 3 个、第 4 个不存在"的部分结果。
+   * 不重排 `ep_no`（理由同单集删除：竞品无重排证据，重排会让外部引用的「第 N 集」漂移）。
+   */
+  async deleteEpisodes(spaceId: string, projectId: string, episodeIds: string[]) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = this.parseIdList(episodeIds, "episode_ids");
+    const targets = await db
+      .select({ id: episodes.id, epNo: episodes.epNo })
+      .from(episodes)
+      .where(and(eq(episodes.projectId, project.id), inArray(episodes.id, ids)));
+    if (targets.length !== ids.length) {
+      const known = new Set(targets.map((row) => String(row.id)));
+      const missing = ids.filter((id) => !known.has(String(id))).map((id) => String(id));
+      throw new AppError(ErrorCode.NOT_FOUND, "episode not found in this project", {
+        reason: "episode_not_found",
+        ids: missing,
+      });
+    }
+    const cleared = await db.transaction(async (tx) => {
+      const shots = await tx
+        .select({ id: storyboards.id })
+        .from(storyboards)
+        .where(inArray(storyboards.episodeId, ids));
+      const shotIds = shots.map((row) => row.id);
+      if (shotIds.length > 0) {
+        await tx.delete(storyboardAssets).where(inArray(storyboardAssets.storyboardId, shotIds));
+      }
+      await tx.delete(storyboards).where(inArray(storyboards.episodeId, ids));
+      await tx.delete(episodeResources).where(inArray(episodeResources.episodeId, ids));
+      await tx.delete(exportJobs).where(inArray(exportJobs.episodeId, ids));
+      await tx.delete(projectTimelines).where(inArray(projectTimelines.episodeId, ids));
+      await tx.delete(timelineExports).where(inArray(timelineExports.episodeId, ids));
+      await tx.delete(extractionTasks).where(inArray(extractionTasks.episodeId, ids));
+      await tx.delete(directorScenes).where(inArray(directorScenes.episodeId, ids));
+      await tx.delete(timelinePublications).where(inArray(timelinePublications.episodeId, ids));
+      const removed = await tx.delete(episodes).where(inArray(episodes.id, ids)).returning({ id: episodes.id });
+      await tx
+        .update(scriptProjects)
+        .set({ updatedAt: new Date() })
+        .where(eq(scriptProjects.id, project.id));
+      return { storyboards: shotIds.length, episodes: removed.length };
+    });
+    return {
+      deleted: cleared.episodes,
+      episode_ids: targets.map((row) => String(row.id)),
+      ep_nos: targets.map((row) => row.epNo),
+      cleared,
+    };
   }
 
   /**
@@ -1052,6 +1113,77 @@ export class ScriptService {
         .returning({ id: storyboards.id });
       return { deleted: removed.length, shot_ids: removed.map((item) => String(item.id)) };
     });
+  }
+
+  /**
+   * 第 91 批：读单条分镜（竞品 `GET /web/v1/df/episode/:ep_id/storyboard/:id/info`）。
+   *
+   * 此前只有「整集详情（含全部分镜）」一个读口 —— 前端编辑单镜要拉整集，镜头多的集很浪费。
+   * 返回形状与 `episodeDetail().storyboards[]` 的**同一行完全一致**（含 `[[@imgN]]` 依赖的绑定顺序），
+   * 只多一层 `{ storyboard }` 包装：单条与列表必须能互换，否则前端要写两套渲染。
+   */
+  async storyboardDetail(spaceId: string, projectId: string, episodeId: string, storyboardId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const shotId = this.parseIdList([storyboardId], "storyboard_id")[0]!;
+    const [row] = await db
+      .select()
+      .from(storyboards)
+      .where(and(eq(storyboards.episodeId, episode.id), eq(storyboards.id, shotId)));
+    if (!row) {
+      throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found in this episode", {
+        reason: "storyboard_not_found",
+      });
+    }
+    const links = await db
+      .select({ assetId: storyboardAssets.projectAssetId })
+      .from(storyboardAssets)
+      .where(eq(storyboardAssets.storyboardId, row.id))
+      // 与 episodeDetail 同一顺序：绑定顺序是契约（images[] 的 [[@imgN]] 编号依赖它）
+      .orderBy(storyboardAssets.sort, storyboardAssets.projectAssetId);
+    return {
+      storyboard: await this.storyboardDtoWithUrls(row, links.map((link) => String(link.assetId))),
+    };
+  }
+
+  /**
+   * 第 91 批：批量追加分镜（竞品 `POST /web/v1/df/storyboard/:storyboard_id/info/batch-add`）。
+   *
+   * 竞品是「给一个 storyboard 批量加 info 条目」；我方没有 info 层（一行 `storyboards` 就是一个镜头），
+   * 语义对齐为「给这一集按给定顺序追加若干镜头」。**只在末尾追加**：带序号的批量插入一旦中途撞号，
+   * "部分成功"会让后面的序号全污染 —— 要插中间请走单条 `createStoryboard`（它有插位与重排）。
+   * 默认值口径与单条创建完全一致（空描述、描述兜底提示词、5 秒、项目比例）。
+   */
+  async createStoryboards(
+    spaceId: string,
+    projectId: string,
+    episodeId: string,
+    input: StoryboardBatchCreateRequest,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const rows = await db.transaction(async (tx) => {
+      const shots = await tx
+        .select({ shotNo: storyboards.shotNo })
+        .from(storyboards)
+        .where(eq(storyboards.episodeId, episode.id));
+      let nextNo = shots.reduce((max, shot) => Math.max(max, shot.shotNo), 0) + 1;
+      const values = input.items.map((item) => ({
+        id: newId(),
+        episodeId: episode.id,
+        shotNo: nextNo++,
+        shotDesc: item.shot_desc ?? "",
+        videoPrompt: item.video_prompt ?? item.shot_desc ?? "",
+        durationS: item.duration_s ?? 5,
+        ratio: item.ratio ?? project.ratio,
+        ...(item.resolution !== undefined ? { resolution: item.resolution } : {}),
+      }));
+      return tx.insert(storyboards).values(values).returning();
+    });
+    return {
+      storyboards: await Promise.all(rows.map((row) => this.storyboardDtoWithUrls(row, []))),
+      count: rows.length,
+    };
   }
 
   /**
