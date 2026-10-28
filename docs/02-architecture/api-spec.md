@@ -5194,3 +5194,81 @@ Content-Type: application/json
 
 **契约**：新增页面文案必须同步 5 个语言包（`zh-CN` / `en` / `ja` / `es` / `pt-BR`）；
 只加一个包会让 `t()` 回落成 key 字符串（用户可见的裸 key）。
+
+## 17.57 `GET /v1/cam/permissions` 的 `enforced` 契约：哪些码真的会 403（第 100 批）
+
+本批**不新增/不修改端点**（778 不变），但把这个端点的响应契约补全 ——
+它一直返回 `enforced` / `enforced_count`，**前端从未消费**，导致页面停在一句过期的
+「尚未接入接口级拦截」。
+
+### 57.1 响应（完整）
+
+```json
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "total": 70,
+    "list": [
+      { "code": "team.edit", "name": "改团队设置", "group": "team", "enforced": true },
+      { "code": "project.view", "name": "查看项目", "group": "project", "enforced": false }
+    ],
+    "groups": [{ "group": "team", "name": "团队管理", "codes": ["team.edit", "..."] }],
+    "enforced": [
+      {
+        "code": "team.edit",
+        "method": "PATCH",
+        "endpoint": "/v1/cam/team/info",
+        "note": "改团队设置（名称/席位/简介）"
+      }
+    ],
+    "enforced_count": 6
+  }
+}
+```
+
+**两种读法必须一致**：`list[].enforced`（逐条布尔位）与 `enforced`（顶层清单）
+指的是同一批码。任一改动都要同时改，否则前端标「已生效」与运维按清单排查会得出不同结论。
+
+### 57.2 `enforced` = 「取消勾选就真的 403」，其余码「只存不生效」
+
+这是本端点最重要的语义区分，前端必须展示：
+
+| 类别 | 行为 | 数量 |
+| --- | --- | --- |
+| **已生效** | 角色 `power_list` 显式配置后，缺该码的请求返回 **403101** | **6 个码** |
+| 只存不生效 | 勾选结果只落库，不改变任何接口可访问性 | 其余（约 64 个） |
+
+已知 6 个已生效码：
+
+| 码 | 端点 |
+| --- | --- |
+| `team.edit` | `PATCH /v1/cam/team/info` |
+| `team.permission` | `PUT /v1/cam/roles/:role_id/permissions` |
+| `member.create` | `POST /v1/cam/team/member/batch` |
+| `member.remove` | `DELETE /v1/cam/team/member/:user_id` |
+| `member.edit` | `PATCH /v1/cam/team/member/:user_id` |
+| `member.points` | `POST /v1/cam/team/points-allocation`（`batch-points-allocation` 同码） |
+
+**默认放行语义**（重要，别误读）：成员的 `power_list` **为空/NULL 时视为拥有全部权限**；
+只有角色被**显式配置过**、且码不在列表里才拒绝。理由是存量角色全都没有 `power_list`，
+"没配置=没权限"会一次性锁死所有人（见 `enforced-permissions.ts` 文件头）。
+
+### 57.3 `note` 字段的用途
+
+`note` 是**给前端 tooltip 的人类可读说明**（≤40 字），不是日志。前端逐码标「已生效」时
+用它做 `title`，让运营知道"这个码拦的是哪件事"。因此：
+
+- **不可为空**（否则 tooltip 空着，等于没提示）；
+- 不含换行（tooltip 单行展示）；
+- 新增声明时必须填。
+
+### 57.4 加新拦截时的三处同步
+
+1. `enforced-permissions.ts` 加一行（`code` / `method` / `endpoint` / `note`）；
+2. 对应 controller 方法体里调 `requirePermission(..., <同码>)`；
+3. `team-permissions.spec.ts` 加一条越权用例（取消勾选 → 403101，加回 → 200）。
+
+> **已知不一致（不影响拦截，待修）**：`POST /v1/cam/team/batch-points-allocation`
+> 调了 `requirePermission("member.points")` 但**未登记**在声明表 —— 所以它照拦，
+> 但 `GET /cam/permissions` 的清单里看不到这个端点。属后端自记账不完整。

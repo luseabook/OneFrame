@@ -465,6 +465,42 @@ describe("team permissions (cam) e2e", () => {
     });
   });
 
+  /**
+   * 第 100 批：只补「上一条没覆盖」的那一面 —— **note 字段**（前端 tooltip 依赖）
+   * 与「两种读法全量自洽」。
+   *
+   * 背景：`enforced` / `enforced_count` 后端一直返回，但**前端 DTO 里没有、模板从不渲染**，
+   * 页面还停在一句过期的「尚未接入接口级拦截」（实际 6 个码早就 403 了）。
+   * 本批把前端接上（逐码标「已生效」+ 用 note 做 tooltip）；这个用例守的是
+   * 「note 别哪天被删掉，导致 tooltip 空着」。
+   */
+  it("enforced 每条都要有可读 note（前端 tooltip 依赖），且两种读法全量自洽", async () => {
+    const { owner, teamSpaceId } = await setupTeamWithMember("51", "52", 3, "producer");
+
+    const res = await inject("GET", "/cam/permissions", undefined, owner.token, teamSpaceId);
+    expect(res.code).toBe(0);
+    const data = res.data as {
+      list: Array<{ code: string; enforced?: boolean }>;
+      enforced: Array<{ code: string; note: string }>;
+      enforced_count: number;
+    };
+
+    // 1) note 非空且人类可读（前端 `<span :title="enforcedNote(code)">` 直接用它）
+    for (const item of data.enforced) {
+      expect(item.note.trim().length, `note missing for ${item.code}`).toBeGreaterThanOrEqual(6);
+    }
+
+    // 2) 顶层清单与逐条布尔位**全量**一致（不是只抽查几个码）——
+    //    两种读法各说一套时，前端标「已生效」与运维按清单排查会得出不同结论
+    const enforcedSet = new Set(data.enforced.map((e) => e.code));
+    expect(enforcedSet.size).toBe(data.enforced_count);
+    const mismatched = data.list.filter((row) => Boolean(row.enforced) !== enforcedSet.has(row.code));
+    expect(mismatched.map((row) => row.code)).toEqual([]);
+
+    // 3) 「只存不生效」的码确实存在 —— 否则「部分生效」这个 UI 文案就不成立
+    expect(data.list.filter((row) => !row.enforced).length).toBeGreaterThan(0);
+  });
+
   it("显式收紧：power_list 缺 member.remove / member.edit / member.points → 三个端点都 403101", async () => {
     const { owner, member, teamSpaceId } = await setupTeamWithMember("45", "46", 3, "producer");
     // 只给 team.edit，缺这三码 → 三个端点都应拒绝

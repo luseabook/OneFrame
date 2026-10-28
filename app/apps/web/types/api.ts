@@ -1190,6 +1190,8 @@ export interface TeamPermissionItemDto {
   code: string;
   name: string;
   group: string;
+  /** 该码是否已落接口级拦截（后端逐条下发；第 100 批补进 DTO） */
+  enforced?: boolean;
 }
 
 export interface TeamPermissionGroupDto {
@@ -1202,6 +1204,16 @@ export interface TeamPermissionCatalogDto {
   list: TeamPermissionItemDto[];
   groups: TeamPermissionGroupDto[];
   total: number;
+  /**
+   * 已落**入口拦截**的权限码明细（第 100 批补：后端一直在返回，前端此前没接）。
+   *
+   * 为什么必须显示：矩阵本身是「存目录 + 绑定」，勾选**不必然**改变接口可访问性 ——
+   * 只有出现在这个列表里的码才真的会 403。不给运营标注，就会出现
+   * 「我以为收紧了，其实没生效」的假安全感。
+   */
+  enforced: Array<{ code: string; method: string; endpoint: string; note: string }>;
+  /** 已拦截码的个数（后端单独下发，用于交叉校验） */
+  enforced_count: number;
 }
 
 export interface TeamRolePermissionsDto {
