@@ -65,6 +65,35 @@ const tagsQuery = z
     return arr.map((s) => s.trim()).filter((s) => s.length > 0);
   });
 
+/**
+ * 第 75 批：竞品知识库列表请求里的 `sp_type` 是**数组**（`C-jRJshu.js` @10127：
+ * `sp_type: [-1, 1, 2, 3]`），故这里支持 `?sp_type=1&sp_type=2` 与 `?sp_type=1,2` 两种写法。
+ *
+ * 不校验取值集合（只校验整数范围）：竞品自己也在变（-1 是"通用"这一层语义也只在它前端出现），
+ * 我方把它当透传维度 —— 硬编码枚举会把竞品新增的类型直接打成 400。
+ */
+const spTypeQuery = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .transform((v, ctx) => {
+    if (v === undefined) return undefined;
+    const parts = (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter((s) => s.length > 0);
+    const out: number[] = [];
+    for (const part of parts) {
+      if (!/^-?\d{1,5}$/.test(part)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `invalid sp_type: ${part}` });
+        return z.NEVER;
+      }
+      const n = Number(part);
+      if (n < -1 || n > 32767) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `invalid sp_type: ${part}` });
+        return z.NEVER;
+      }
+      out.push(n);
+    }
+    return out;
+  });
+
 const dirCreateBody = z.object({
   name: z.string().trim().min(1).max(60),
   parent_id: z.string().min(1).max(32).optional(),
@@ -99,6 +128,27 @@ const assetCreateBody = z.object({
   scene: z.number().int().optional(),
   /** 1 文本 / 3 链接；2 资产引用必须走 import-from-asset */
   source_type: z.union([z.literal(1), z.literal(3)]).optional(),
+  // ── 第 75 批：竞品条目级字段（`ArT8U6Tg.js` 的 payload builder 逐字）──────
+  /** 竞品 `cover_file`；不传则读时回落 `image_asset_ids[0]` */
+  cover_asset_id: z.string().min(1).max(20).nullable().optional(),
+  /** 竞品 `image_files`；上限 20 与其它素材数组同量级（竞品未给上限）。
+   *  上限/下限都自写 message：zod 默认文案不含字段名，CLI/agent 看不出是哪个参数错。 */
+  image_asset_ids: z
+    .array(z.string().min(1).max(20), { invalid_type_error: "image_asset_ids must be an array of asset ids" })
+    .max(20, "image_asset_ids must contain at most 20 ids")
+    .optional(),
+  /** 1 官方 / 2 团队，默认 2 */
+  use_type: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** 1 启用 / 2 停用，默认 1 */
+  status: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** 竞品 `sp_type`（语义未取证，仅透传） */
+  sp_type: z.number().int().min(0).max(32767).optional(),
+  /** 竞品 `res_type`（语义未取证，仅透传；列表请求里当筛选用） */
+  res_type: z.number().int().min(0).max(32767).optional(),
+  /** 竞品 `meta_data`：竞品发 JSON 字符串，我方收对象（落 jsonb） */
+  meta_data: z.record(z.unknown()).nullable().optional(),
+  /** 竞品 `sort`，默认 0 */
+  sort: z.number().int().min(0).max(9999).optional(),
 });
 
 const assetPatchBody = z.object({
@@ -107,6 +157,19 @@ const assetPatchBody = z.object({
   dir_id: z.string().min(1).max(32).nullable().optional(),
   tags: z.array(z.string().min(1).max(40)).max(20).optional(),
   scene: z.number().int().optional(),
+  // 第 75 批：`undefined` 不动、`null` 清空（仅可空字段）；数组传 `[]` 表示清空
+  cover_asset_id: z.string().min(1).max(20).nullable().optional(),
+  image_asset_ids: z
+    .array(z.string().min(1).max(20), { invalid_type_error: "image_asset_ids must be an array of asset ids" })
+    .max(20, "image_asset_ids must contain at most 20 ids")
+    .optional(),
+  use_type: z.union([z.literal(1), z.literal(2)]).optional(),
+  status: z.union([z.literal(1), z.literal(2)]).optional(),
+  sp_type: z.number().int().min(0).max(32767).optional(),
+  /** 竞品 `res_type`（语义未取证；列表请求里当筛选用） */
+  res_type: z.number().int().min(0).max(32767).optional(),
+  meta_data: z.record(z.unknown()).nullable().optional(),
+  sort: z.number().int().min(0).max(9999).optional(),
 });
 
 const assetTagsBody = z.object({ tags: z.array(z.string().min(1).max(40)).max(20) });
@@ -238,6 +301,12 @@ export class KnowledgeController {
         tags: tagsQuery,
         source_type: z.coerce.number().int().min(1).max(3).optional(),
         scene: sceneQuery.shape.scene,
+        // 第 75 批：启停/归属/来源类型筛选（竞品列表有 status 列、`use_type` 区分官方/团队，
+        // `sp_type` 是多值、`res_type` 单值 —— 都取自 `C-jRJshu.js` @10127 的列表请求）
+        status: z.coerce.number().int().min(1).max(2).optional(),
+        use_type: z.coerce.number().int().min(1).max(2).optional(),
+        sp_type: spTypeQuery,
+        res_type: z.coerce.number().int().min(0).max(32767).optional(),
       }),
       query ?? {},
     );
@@ -254,6 +323,10 @@ export class KnowledgeController {
         dir_id: z.string().min(1).max(32).optional(),
         source_type: z.coerce.number().int().min(1).max(3).optional(),
         scene: sceneQuery.shape.scene,
+        status: z.coerce.number().int().min(1).max(2).optional(),
+        use_type: z.coerce.number().int().min(1).max(2).optional(),
+        sp_type: spTypeQuery,
+        res_type: z.coerce.number().int().min(0).max(32767).optional(),
       }),
       query ?? {},
     );

@@ -1850,7 +1850,9 @@
       "palette": "Paletas de cor",
       "expression": "Expressões",
       "audioLibrary": "Templates de áudio"
-    }
+    },
+    "useTypeOfficial": "Oficial",
+    "statusDisabled": "Desativado"
   },
   "workDetail": {
     "metaTitle": "Detalhes da obra · OneFrame",

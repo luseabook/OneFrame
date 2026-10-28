@@ -1,0 +1,1 @@
+ALTER TABLE "knowledge_assets" ADD COLUMN "res_type" smallint DEFAULT 0 NOT NULL;

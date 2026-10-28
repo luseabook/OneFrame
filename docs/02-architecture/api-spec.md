@@ -3252,3 +3252,113 @@ CLI 的 `credits log` 打到 `GET /v1/credits/flows`（我方唯一真相：带�
 - 竞品还有 `resources/batch-delete` / `batch-unconfirm` / `batch-update` / `batch-download`，本批未做（见 31.4 末条与 §5）。
 - `bound_shot_count` 是自建口径（数 `storyboard_assets` 绑定行），与竞品语义是否一致**未取证**。
 - 本批顺带把第 72 批文档里写错的骨架数（「48→46」，实际 46→44）校准为 46→44→42。
+
+## 17.32 知识库模板条目的「条目级字段」：8 加入库与封面回落（第 75 批）
+
+### 32.1 为什么现在才做
+
+`knowledge_assets`（#18 团队知识库的条目表）从第 60 批起就有 `scene` 维度，但**条目自身**的字段一直只有「我方想得到」的那几个（`title`/`content`/`tags`/`sourceType`）。
+第 74 批核账把它判成 **I 类（内部可做、只是没排期）0.015**，缺口栏原文是：
+
+> 条目级字段未落库：`cover_file`/`image_files`/`status`/`sp_type`/`res_type`/`meta_data`（**证据已有**）
+
+本批把「证据已有」变成「字段已落库」。取证位置仍是竞品 Vite 产物（`rea-reelmate/scripts*/files/origins/<hash>/assets/`），但取的是 **payload builder**（组装请求的函数），不是 schema 猜测：
+
+```js
+// ArT8U6Tg.js（3,668 B）逐字
+const L = (e) => ({ uk_id: e.uk_id||"", scene: O(i)?i:o.Style,
+  status: N(e.status)?e.status:h.Enabled, use_type: e.use_type===g.Team?g.Team:g.Official,
+  sp_type: e.sp_type||0, prompt_template: e.prompt_template||"",
+  cover_file: k||y[0]||"", image_files:y, origin_image_files:I, orgin_cover_file:b,
+  meta_data:F, sort: e.sort||0, ... })
+```
+
+```js
+// 0zWWdXb_.js（6,097 B）逐字
+status  = { Enabled: 1, Disabled: 2 }
+use_type = { Official: 1, Team: 2 }
+```
+
+→ 顺带**纠正台账笔误**：第 74 批把 `Official/Team` 记成了 `status` 的取值，实际是 `use_type` 的（两个字段在同一 payload 里同时出现，新建分支默认 `use_type: u.Team`）。
+
+### 32.2 迁移：0043 七列 + 0044 补 `res_type`
+
+```sql
+-- 0043_salty_pepper_potts.sql
+ALTER TABLE "knowledge_assets" ADD COLUMN "cover_asset_id" bigint;
+ALTER TABLE "knowledge_assets" ADD COLUMN "image_asset_ids" bigint[] DEFAULT '{}'::bigint[] NOT NULL;
+ALTER TABLE "knowledge_assets" ADD COLUMN "use_type" smallint DEFAULT 2 NOT NULL;
+ALTER TABLE "knowledge_assets" ADD COLUMN "status" smallint DEFAULT 1 NOT NULL;
+ALTER TABLE "knowledge_assets" ADD COLUMN "sp_type" smallint DEFAULT 0 NOT NULL;
+ALTER TABLE "knowledge_assets" ADD COLUMN "meta_data" jsonb;
+ALTER TABLE "knowledge_assets" ADD COLUMN "sort" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "knowledge_assets" ADD CONSTRAINT "knowledge_assets_cover_asset_id_assets_id_fk"
+  FOREIGN KEY ("cover_asset_id") REFERENCES "assets"("id") ON DELETE set null;
+CREATE INDEX "idx_knowledge_assets_status"
+  ON "knowledge_assets" USING btree ("space_id","scene","status","sort");
+
+-- 0044_cuddly_speed.sql（补账时才发现漏的；证据：竞品列表请求带 res_type、条目映射 res_type: Number(je.res_type ?? 0)）
+ALTER TABLE "knowledge_assets" ADD COLUMN "res_type" smallint DEFAULT 0 NOT NULL;
+```
+
+**四个取舍**：
+
+| 取舍 | 决定 | 理由 |
+|---|---|---|
+| 封面存 URL 还是 asset id | **id**（外键 `ON DELETE set null`） | 签名 URL 会过期；set null 还能自动退回「首图兜底」 |
+| 配图存关联表还是 `bigint[]` | **数组** | 竞品 `image_files` 就是有序 id 列表、图片没有条目级属性；代价是元素无外键（删资产会留死 id，读时退占位图） |
+| `meta_data` 存字符串还是 jsonb | **jsonb** | 竞品发 JSON 字符串只是前端图省事；库里 jsonb 才能查/索引，出参给对象 |
+| 新列默认值 | `use_type=2`(Team) / `status=1`(Enabled) / `sp_type=0` / `res_type=0` / `sort=0` | 取竞品 payload 的默认分支（`e.use_type===Team?Team:Official` 在团队库里恒 Team；`status` 缺省 Enabled） |
+
+### 32.3 封面回落规则（`knowledgeCoverAssetId`）
+
+竞品原规则：`cover_file = trim(cover_file) || image_files[0] || ""`。我方在 `@app/shared` 复刻：
+
+```ts
+export function knowledgeCoverAssetId(row: {
+  coverAssetId?: bigint | null;
+  imageAssetIds?: readonly bigint[] | null;
+}): bigint | null {
+  if (row.coverAssetId) return row.coverAssetId;         // 人工指定优先
+  const first = row.imageAssetIds?.[0];                   // 否则首图
+  return first ?? null;
+}
+```
+
+DTO 多给一个 `cover_is_fallback: boolean`（= 没人工封面但兜底出了一张）——前端将来做「更换封面」时，不会把兜底图误当成用户设过的封面。
+
+签名流程：`resolveCovers(rows)` **批量**取 `coverAssetId` 对应的 `assets.uri`，逐条 `storage.signDownload(uri, 3600)`；**签不出来就不放 `cover_uri`**（前端退占位图），不让存储异常把整页打成 500。
+
+### 32.4 读宽写严：四个筛选参数与两类错误
+
+`GET /knowledge/assets`、`GET /knowledge/assets/search` 共用 `entryFilters()`，新增四个筛选：
+
+| 参数 | 类型 | 语义 | 非法值 |
+|---|---|---|---|
+| `status` | 1 \| 2 | `ENABLED` / `DISABLED` | 400101（msg 列出合法值） |
+| `use_type` | 1 \| 2 | 官方 / 团队 | 400101 |
+| `sp_type` | 多值（`?sp_type=1,2` 或 `?sp_type=1&sp_type=2`） | 业务分区 id，**只透传不解释** | 400101（逐个校验 `-1..32767`） |
+| `res_type` | 单值 | 资源类型 id，**只透传不解释** | 400101（`0..32767`） |
+
+写入侧（`POST`/`PATCH /knowledge/assets`）的校验：
+
+| 情况 | 返回 | 为什么不 |
+|---|---|---|
+| `cover_asset_id` / `image_asset_ids` 指向**别的 space** 的资产 | **400102** `assets not found in this space: …` | 用 400101 会泄露「这个 id 存在，只是不属于你」，等于给跨空间探测开了枚举面 |
+| id 不是数字 / 超过 20 位 | 400101（`msg` 带字段名） | 复用 `toBigId()`（第 69 批的收口） |
+| `image_asset_ids` 超过 20 张 | 400101 `image_asset_ids must contain at most 20 ids` | zod 默认文案是「Array must contain at most 20 element(s)」，CLI/agent 看不出是哪个参数 |
+| scene 3/4 且三种封面来源全空 | 400101 `cover is required for this scene (set cover_asset_id or image_asset_ids)` | 竞品规则表里这两个场景 `cover_file` 必填；「配图第一张」也算有封面 |
+| `PATCH` 只改标题、条目本来就没有封面 | **不报错**（若该 scene 本来允许无封面） | 校验必须拿「合并后的值」，否则每次改标题都要重传封面 |
+
+### 32.5 测试（`apps/api/test/knowledge.spec.ts` 21 → 24 例）
+
+1. **全链路**：scene=4（封面必填）建条目带 cover + 2 张配图 + `use_type:1` + `sp_type:7` + `res_type:12` + `meta_data:{model:"seedance",steps:12}` + `sort:5` → 8 字段逐一断言 + `cover_uri` 有真值 + `cover_is_fallback:false` + `scene_cover_required:true`；默认条目是 `use_type 2 / status 1 / sort 0`；四个筛选（含多值 `sp_type=7,0`、`res_type=12`）与非法值。
+2. **封面回落与必填边界**：scene=3 无封面 → 400101；只给一张配图 → 成功、`cover_asset_id:null`、`cover_uri` 来自配图；scene=1 无封面 → 成功；只 `PATCH {title}` 不报缺封面；`PATCH {image_asset_ids:[]}` 在 scene=3 上又变 400101。
+3. **引用必须属于本 space 且未删**：跨空间 cover / 配图 → 400102；`"abc"` → 400101 带字段名；21 张 → 400101 带 `image_asset_ids`。
+
+### 32.6 诚实边界
+
+- `sp_type` / `res_type` **只透传不解释**：语义只到「业务分区 id / 资源类型 id」这一层，竞品没给值域，我方不自造含义。
+- `image_asset_ids` 的元素**没有外键**：删资产后会留死 id（读时签名失败 → 退占位图）。要彻底干净得建关联表，代价是每次增删都要维护顺序；本批按竞品原始形状（有序 id 数组）走。
+- `?sp_type=1,2` 是**我方方言**（竞品用数组参数），两种写法都支持，但「多值语义」本身是我方推断。
+- 本批只清掉 I 类 0.085 里的 0.015；剩余 0.07（#19 双浏览器 E2E / #3 真 ffmpeg 切片 / #9 agent REPL 与 SSE）仍未排期。

@@ -706,10 +706,24 @@ onMounted(load);
               <label class="kb-asset-check">
                 <input v-model="selectedIds" type="checkbox" :value="asset.id">
               </label>
+              <img
+                v-if="asset.cover_uri"
+                class="kb-asset-cover"
+                :src="asset.cover_uri"
+                :alt="asset.title"
+                loading="lazy"
+              >
+              <div v-else class="kb-asset-cover kb-asset-cover-empty" aria-hidden="true" />
               <div class="kb-asset-body">
                 <div class="kb-asset-head">
                   <strong class="kb-asset-title">{{ asset.title }}</strong>
                   <span class="kb-asset-type">{{ asset.source_type_name }}</span>
+                  <span v-if="asset.use_type === 1" class="kb-badge kb-badge-official">
+                    {{ t("knowledge.useTypeOfficial") }}
+                  </span>
+                  <span v-if="asset.status === 2" class="kb-badge kb-badge-off">
+                    {{ t("knowledge.statusDisabled") }}
+                  </span>
                   <span class="kb-asset-dir">{{ asset.dir_name || t("knowledge.uncategorized") }}</span>
                 </div>
                 <p v-if="asset.content" class="kb-asset-content">{{ asset.content }}</p>
@@ -1112,6 +1126,34 @@ onMounted(load);
 }
 .kb-asset-check {
   padding-top: 2px;
+}
+.kb-asset-cover {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-1);
+  background: var(--bg-sunken);
+}
+.kb-asset-cover-empty {
+  display: block;
+}
+.kb-badge {
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-1);
+  color: var(--text-3);
+}
+.kb-badge-official {
+  color: var(--brand-on-soft);
+  border-color: var(--brand-border, var(--border-1));
+}
+.kb-badge-off {
+  color: var(--text-4);
+  text-decoration: line-through;
 }
 .kb-asset-body {
   flex: 1;

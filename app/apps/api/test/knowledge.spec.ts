@@ -952,4 +952,256 @@ describe("knowledge e2e", () => {
     expect(byScene["1"]).toBe(1);
     expect(byScene["0"]).toBe(1);
   });
+
+  // ── 第 75 批：竞品「知识库模板条目」的条目级字段 ─────────────────────
+  //
+  // 证据：`ArT8U6Tg.js` 的 payload builder 逐字
+  //   `{ uk_id, scene, status, use_type, sp_type, prompt_template, cover_file: k||y[0]||"",
+  //      image_files, origin_image_files, orgin_cover_file, meta_data, sort, ... }`
+  // 与 `0zWWdXb_.js` 的两个枚举 `status{Enabled:1,Disabled:2}` / `use_type{Official:1,Team:2}`。
+  it("条目级字段：封面/配图/归属/启停/meta/sort 全链路，且封面为空时回落首图", async () => {
+    const u = await loginNewUser("75");
+    const coverAsset = await seedAsset(u.spaceId, "封面图");
+    const secondAsset = await seedAsset(u.spaceId, "第二张图");
+
+    const created = await inject(
+      "POST",
+      "/knowledge/assets",
+      {
+        title: "视频特效模板",
+        scene: 4,
+        content: "slow motion",
+        cover_asset_id: coverAsset,
+        image_asset_ids: [coverAsset, secondAsset],
+        use_type: 1,
+        sp_type: 7,
+        res_type: 12,
+        meta_data: { model: "seedance", steps: 12 },
+        sort: 5,
+      },
+      u.token,
+      u.spaceId,
+    );
+    expect(created.code).toBe(0);
+    const dto = (
+      created.data as {
+        asset: {
+          id: string;
+          cover_asset_id: string | null;
+          cover_uri: string | null;
+          cover_is_fallback: boolean;
+          image_asset_ids: string[];
+          use_type: number;
+          status: number;
+          sp_type: number;
+          res_type: number;
+          meta_data: Record<string, unknown> | null;
+          sort: number;
+          scene_cover_required: boolean;
+        };
+      }
+    ).asset;
+    expect(dto.cover_asset_id).toBe(coverAsset);
+    expect(dto.cover_uri).toBeTruthy(); // 存储签名（mock 模式下也返回可用 URL）
+    expect(dto.cover_is_fallback).toBe(false);
+    expect(dto.image_asset_ids).toEqual([coverAsset, secondAsset]);
+    expect(dto.use_type).toBe(1);
+    expect(dto.status).toBe(1); // 默认启用
+    expect(dto.sp_type).toBe(7);
+    expect(dto.res_type).toBe(12);
+    expect(dto.meta_data).toMatchObject({ model: "seedance", steps: 12 });
+    expect(dto.sort).toBe(5);
+    expect(dto.scene_cover_required).toBe(true); // 4 视频特效的封面必填
+
+    // 默认值：不传 use_type 时是 2（团队），status 是 1（启用），sort 是 0
+    const plain = await inject("POST", "/knowledge/assets", { title: "默认值条目" }, u.token, u.spaceId);
+    const plainDto = (plain.data as { asset: { use_type: number; status: number; sort: number } }).asset;
+    expect(plainDto.use_type).toBe(2);
+    expect(plainDto.status).toBe(1);
+    expect(plainDto.sort).toBe(0);
+
+    // 列表按 status / use_type 筛选
+    const enabledOfficial = await inject(
+      "GET",
+      "/knowledge/assets?status=1&use_type=1",
+      undefined,
+      u.token,
+      u.spaceId,
+    );
+    expect((enabledOfficial.data as { total: number }).total).toBe(1);
+    const disabled = await inject("GET", "/knowledge/assets?status=2", undefined, u.token, u.spaceId);
+    expect((disabled.data as { total: number }).total).toBe(0);
+
+    // 竞品列表请求里的 sp_type 是数组（`sp_type: [-1,1,2,3]`），两种写法都要能解析
+    const bySpType = await inject("GET", "/knowledge/assets?sp_type=7", undefined, u.token, u.spaceId);
+    expect((bySpType.data as { total: number }).total).toBe(1);
+    const bySpTypeMulti = await inject("GET", "/knowledge/assets?sp_type=7,0", undefined, u.token, u.spaceId);
+    expect((bySpTypeMulti.data as { total: number }).total).toBe(2); // 7 的那条 + 默认 0 的那条
+    const byResType = await inject("GET", "/knowledge/assets?res_type=12", undefined, u.token, u.spaceId);
+    expect((byResType.data as { total: number }).total).toBe(1);
+    const byResTypeMiss = await inject("GET", "/knowledge/assets?res_type=5", undefined, u.token, u.spaceId);
+    expect((byResTypeMiss.data as { total: number }).total).toBe(0);
+    // 非法取值要 400101 且 msg 带字段名（否则 CLI/agent 看不出哪个参数错）
+    const badSpType = await inject("GET", "/knowledge/assets?sp_type=abc", undefined, u.token, u.spaceId);
+    expect(badSpType.code).toBe(400101);
+    expect(badSpType.msg).toContain("sp_type");
+    const badResType = await inject("GET", "/knowledge/assets?res_type=70000", undefined, u.token, u.spaceId);
+    expect(badResType.code).toBe(400101);
+
+    // 清空人工封面 → 回落到 image_asset_ids[0]，并标出是兜底
+    const cleared = await inject(
+      "PATCH",
+      `/knowledge/assets/${dto.id}`,
+      { cover_asset_id: null },
+      u.token,
+      u.spaceId,
+    );
+    expect(cleared.code).toBe(0);
+    const clearedDto = (cleared.data as { asset: { cover_asset_id: string | null; cover_is_fallback: boolean } }).asset;
+    expect(clearedDto.cover_asset_id).toBeNull();
+    expect(clearedDto.cover_is_fallback).toBe(true);
+
+    // 停用 + 清 meta + 改排序；未传的字段保持原样
+    const patched = await inject(
+      "PATCH",
+      `/knowledge/assets/${dto.id}`,
+      { status: 2, meta_data: null, sort: 9 },
+      u.token,
+      u.spaceId,
+    );
+    expect(patched.code).toBe(0);
+    const patchedDto = (
+      patched.data as { asset: { status: number; meta_data: unknown; sort: number; title: string; use_type: number } }
+    ).asset;
+    expect(patchedDto.status).toBe(2);
+    expect(patchedDto.meta_data).toBeNull();
+    expect(patchedDto.sort).toBe(9);
+    expect(patchedDto.title).toBe("视频特效模板"); // 未传不动
+    expect(patchedDto.use_type).toBe(1);
+    expect((await inject("GET", "/knowledge/assets?status=1&use_type=1", undefined, u.token, u.spaceId)).data).toMatchObject({
+      total: 0,
+    });
+    expect((await inject("GET", "/knowledge/assets?status=2", undefined, u.token, u.spaceId)).data).toMatchObject({
+      total: 1,
+    });
+  });
+
+  it("封面必填只对 scene 3/4 生效；配图可替代封面；只改标题不会误判缺封面", async () => {
+    const u = await loginNewUser("76");
+    const img = await seedAsset(u.spaceId, "构图参考图");
+
+    // scene=3 分镜构图：封面（或至少一张配图）必填
+    const noCover = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "构图A", scene: 3, content: "三分法" },
+      u.token,
+      u.spaceId,
+    );
+    expect(noCover.code).toBe(400101);
+    expect(noCover.msg).toContain("cover is required");
+
+    // 只给配图、不给单独封面 → 允许（竞品 `cover_file: k || y[0]`）
+    const withImages = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "构图B", scene: 3, content: "对角线", image_asset_ids: [img] },
+      u.token,
+      u.spaceId,
+    );
+    expect(withImages.code).toBe(0);
+    const withImagesDto = (
+      withImages.data as { asset: { id: string; cover_asset_id: string | null; cover_uri: string | null } }
+    ).asset;
+    expect(withImagesDto.cover_asset_id).toBeNull();
+    expect(withImagesDto.cover_uri).toBeTruthy(); // 由首图兜底
+
+    // scene=1 风格：封面不要求
+    const style = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "赛博", scene: 1, content: "neon" },
+      u.token,
+      u.spaceId,
+    );
+    expect(style.code).toBe(0);
+
+    // 只改标题时，校验器必须用「合并后的现有封面」判断，而不是当成"没有封面"
+    const renamed = await inject(
+      "PATCH",
+      `/knowledge/assets/${withImagesDto.id}`,
+      { title: "构图B2" },
+      u.token,
+      u.spaceId,
+    );
+    expect(renamed.code).toBe(0);
+    expect((renamed.data as { asset: { title: string } }).asset.title).toBe("构图B2");
+
+    // 把配图清空且不设封面 → 该场景又变成缺封面，拒绝
+    const emptied = await inject(
+      "PATCH",
+      `/knowledge/assets/${withImagesDto.id}`,
+      { image_asset_ids: [] },
+      u.token,
+      u.spaceId,
+    );
+    expect(emptied.code).toBe(400101);
+    expect(emptied.msg).toContain("cover is required");
+  });
+
+  it("封面/配图引用必须属于本 space 且未删：跨空间 400102、坏 id 400101、超 20 张 400101", async () => {
+    const u = await loginNewUser("77");
+    const other = await loginNewUser("78");
+    const foreign = await seedAsset(other.spaceId, "别人家的图");
+    const mine = await seedAsset(u.spaceId, "我的图");
+
+    // 跨空间：不告诉调用方"这个 id 在别处存在"（400102 而不是 400101）
+    const cross = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "偷图", cover_asset_id: foreign },
+      u.token,
+      u.spaceId,
+    );
+    expect(cross.code).toBe(400102);
+    const crossList = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "偷图2", image_asset_ids: [mine, foreign] },
+      u.token,
+      u.spaceId,
+    );
+    expect(crossList.code).toBe(400102);
+
+    // 坏 id 形状
+    const badCover = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "坏封面", cover_asset_id: "abc" },
+      u.token,
+      u.spaceId,
+    );
+    expect(badCover.code).toBe(400101);
+    expect(badCover.msg).toContain("cover_asset_id");
+    const badImages = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "坏配图", image_asset_ids: ["abc"] },
+      u.token,
+      u.spaceId,
+    );
+    expect(badImages.code).toBe(400101);
+    expect(badImages.msg).toContain("image_asset_ids");
+
+    // 21 张超过上限（zod 层拦，字段名必须出现在 msg 里否则 CLI/agent 看不出是哪个参数）
+    const tooMany = await inject(
+      "POST",
+      "/knowledge/assets",
+      { title: "太多图", image_asset_ids: Array.from({ length: 21 }, () => mine) },
+      u.token,
+      u.spaceId,
+    );
+    expect(tooMany.code).toBe(400101);
+    expect(tooMany.msg).toContain("image_asset_ids");
+  });
 });

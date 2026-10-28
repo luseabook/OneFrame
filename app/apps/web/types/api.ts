@@ -1764,6 +1764,28 @@ export interface KnowledgeAssetDto {
   created_at: string;
   updated_at: string;
   resource: KnowledgeResourceRefDto | null;
+  /** 第 75 批（竞品 `ArT8U6Tg.js`）：该场景是否要求封面（scene 3 分镜构图 / 4 视频特效） */
+  scene_cover_required: boolean;
+  /** 人工指定的封面资产 id；为空表示未指定，`cover_uri` 由 `image_asset_ids[0]` 兜底 */
+  cover_asset_id: string | null;
+  /** 已签名的封面 URL（人工封面优先，否则取第一张配图）；签不出来时为 null，前端退占位图 */
+  cover_uri: string | null;
+  /** true = `cover_uri` 是兜底来的（并非人工指定），用于 UI 上区分「设过封面」与「自动取首图」 */
+  cover_is_fallback: boolean;
+  /** 配图（有序，竞品 `image_files`）；元素是资产库 id */
+  image_asset_ids: string[];
+  /** 归属：1 官方 / 2 团队（竞品 `use_type`） */
+  use_type: number;
+  use_type_name: string;
+  /** 1 启用 / 2 停用（竞品 `status`） */
+  status: number;
+  status_name: string;
+  /** 竞品 `sp_type`，语义未取证，仅透传 */
+  sp_type: number;
+  /** 竞品 `res_type`，语义未取证，仅透传（列表可筛：`?res_type=`） */
+  res_type: number;
+  meta_data: Record<string, unknown> | null;
+  sort: number;
 }
 
 export interface KnowledgeAssetListDto {

@@ -208,12 +208,70 @@ export const knowledgePhase1Tabs = (): readonly KnowledgeSceneTab[] =>
   KNOWLEDGE_SCENE_TABS.filter((t) => t.phase1);
 
 /**
+ * 条目启用状态（第 75 批）—— 竞品 `0zWWdXb_.js` 的 `a` 枚举，逐字：
+ * `e[e.Enabled=1]="Enabled", e[e.Disabled=2]="Disabled"`。
+ *
+ * 竞品列表表头里有 `status` 列（`columns:["name","prompt","status",...]`），
+ * 且 `ArT8U6Tg.js` 的 payload builder 每次都会写 `status: N(e.status) ? e.status : h.Enabled`
+ * —— 即**不是可选字段**：新建默认启用、停用是显式动作。所以我方也给它非空默认值。
+ */
+export const KNOWLEDGE_STATUS = { ENABLED: 1, DISABLED: 2 } as const;
+export type KnowledgeStatusValue = (typeof KNOWLEDGE_STATUS)[keyof typeof KNOWLEDGE_STATUS];
+export const KNOWLEDGE_STATUS_VALUES: readonly KnowledgeStatusValue[] = [KNOWLEDGE_STATUS.ENABLED, KNOWLEDGE_STATUS.DISABLED];
+
+export const isKnowledgeStatus = (v: unknown): v is KnowledgeStatusValue =>
+  typeof v === "number" && KNOWLEDGE_STATUS_VALUES.includes(v as KnowledgeStatusValue);
+
+/**
+ * 条目归属（第 75 批）—— 竞品 `0zWWdXb_.js` 的 `d` 枚举，逐字：
+ * `e[e.Official=1]="Official", e[e.Team=2]="Team"`。
+ *
+ * **纠正一处台账笔误**：第 74 批核账时把 `Official/Team` 记成了「`status` 的来源枚举」，
+ * 实际竞品是**两个平行字段**：`status`(启用/停用) 与 `use_type`(官方/团队)。
+ * 依据是 `ArT8U6Tg.js` 的 payload 同时出现 `status:N(e.status)?…` 与
+ * `use_type:e.use_type===g.Team?g.Team:g.Official`；`C3NJvyLn.js` 新建分支也写
+ * `use_type:u.Team`（团队库建的条目默认团队归属）。
+ */
+export const KNOWLEDGE_USE_TYPE = { OFFICIAL: 1, TEAM: 2 } as const;
+export type KnowledgeUseTypeValue = (typeof KNOWLEDGE_USE_TYPE)[keyof typeof KNOWLEDGE_USE_TYPE];
+export const KNOWLEDGE_USE_TYPE_VALUES: readonly KnowledgeUseTypeValue[] = [KNOWLEDGE_USE_TYPE.OFFICIAL, KNOWLEDGE_USE_TYPE.TEAM];
+
+export const isKnowledgeUseType = (v: unknown): v is KnowledgeUseTypeValue =>
+  typeof v === "number" && KNOWLEDGE_USE_TYPE_VALUES.includes(v as KnowledgeUseTypeValue);
+
+/**
+ * 封面的实际取值（第 75 批）—— 竞品 `ArT8U6Tg.js` 逐字：
+ * `cover_file: k || y[0] || ""`（`k` = trim 过的 `cover_file`，`y` = 归一后的 `image_files`）。
+ *
+ * 即**没有单独封面时用第一张图**。这条兜底不能省：竞品新建表单只让人上传一组图
+ * （`image_files`），封面是"从这组图里挑一张"，所以「有图无封面」是常态而非脏数据。
+ */
+export const knowledgeCoverAssetId = (row: {
+  coverAssetId?: bigint | null;
+  imageAssetIds?: readonly bigint[] | null;
+}): bigint | null => {
+  if (row.coverAssetId) return row.coverAssetId;
+  const first = row.imageAssetIds?.[0];
+  return first ?? null;
+};
+
+/**
  * 按场景规则校验一条模板资产的字段，返回首个错误（无错返回 null）。
  * 与 zod 的基础校验分工：zod 管类型与绝对上限，这里管**每类不同**的上限与必填。
+ *
+ * 第 75 批：封面判据从 `coverUri`（外部链接时代的占位）改成**资产 id**，
+ * 与竞品 `cover_file: k || y[0] || ""` 同口径 —— `coverAssetId` 或任一 `imageAssetIds`
+ * 存在即算有封面。`coverUri` 仍保留以兼容第 60 批的调用方。
  */
 export const validateKnowledgeSceneFields = (
   scene: number,
-  input: { title?: string; content?: string | null; coverUri?: string | null },
+  input: {
+    title?: string;
+    content?: string | null;
+    coverUri?: string | null;
+    coverAssetId?: string | null;
+    imageAssetIds?: readonly string[];
+  },
 ): { field: string; message: string } | null => {
   const rule = knowledgeSceneRule(scene);
   if (input.title !== undefined && input.title.length > rule.nameMaxLength) {
@@ -226,8 +284,10 @@ export const validateKnowledgeSceneFields = (
   if (rule.promptMaxLength > 0 && content.length > rule.promptMaxLength) {
     return { field: "content", message: `content must be at most ${rule.promptMaxLength} characters for this scene` };
   }
-  if (rule.coverRequired && !input.coverUri) {
-    return { field: "cover_uri", message: "cover_uri is required for this scene" };
+  const hasCover =
+    Boolean(input.coverUri) || Boolean(input.coverAssetId) || (input.imageAssetIds?.length ?? 0) > 0;
+  if (rule.coverRequired && !hasCover) {
+    return { field: "cover_asset_id", message: "cover is required for this scene (set cover_asset_id or image_asset_ids)" };
   }
   return null;
 };

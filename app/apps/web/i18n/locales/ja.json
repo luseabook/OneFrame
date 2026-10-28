@@ -1850,7 +1850,9 @@
       "palette": "カラーパレット",
       "expression": "表情",
       "audioLibrary": "音声テンプレート"
-    }
+    },
+    "useTypeOfficial": "公式",
+    "statusDisabled": "無効"
   },
   "workDetail": {
     "metaTitle": "作品詳細 · OneFrame",

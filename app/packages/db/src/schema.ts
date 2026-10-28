@@ -2472,6 +2472,50 @@ export const knowledgeAssets = pgTable(
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     /** 1 文本 / 2 资产引用 / 3 链接 */
     sourceType: smallint("source_type").notNull().default(1),
+    // ── 第 75 批：竞品「知识库模板条目」的条目级字段 ────────────────────
+    /**
+     * 封面（竞品 `cover_file`）。**存资产 id 而不是 URL**：与画布封面同一条理由
+     * （`canvases.cover_asset_id`）——URL 是签名产物，落库后几小时就成死链；
+     * 存 id 还能在素材被删时靠 `set null` 自动退回「第一张图」的兜底。
+     *
+     * 竞品 `ArT8U6Tg.js`：`cover_file: k || y[0] || ""` —— 封面为空时取 `image_files` 首图，
+     * 这条兜底在 `@app/shared` 的 `knowledgeCoverAssetId()` 里实现，DTO 也按它出 `cover_uri`。
+     */
+    coverAssetId: bigint("cover_asset_id", { mode: "bigint" }).references(() => assets.id, { onDelete: "set null" }),
+    /**
+     * 配图组（竞品 `image_files`，可为字符串或逗号串，取值侧 `p()` 归一成 `string[]`）。
+     *
+     * 用 `bigint[]` 而不是建一张关联表：竞品的 `image_files` 就是**有序的 id 列表**
+     * （writer 侧 `E(e)=p(e)[0]||""` 直接取第 0 个当封面），没有每条图片自己的属性要存。
+     * 代价是数组里的元素没有外键约束 —— 读取时统一过滤掉已不存在的 id（见 service）。
+     */
+    imageAssetIds: bigint("image_asset_ids", { mode: "bigint" }).array().notNull().default(sql`'{}'::bigint[]`),
+    /** 归属：1 官方(Official) / 2 团队(Team)，竞品 `use_type` 枚举；团队库新建默认 2 */
+    useType: smallint("use_type").notNull().default(2),
+    /** 启用状态：1 启用(Enabled) / 2 停用(Disabled)，竞品 `status` 枚举，默认启用 */
+    status: smallint("status").notNull().default(1),
+    /**
+     * 竞品 `sp_type`（payload 里恒写 `sp_type:e.sp_type||0`）。语义未取证 ——
+     * 竞品其他域的 `sp_type` 是「作品类型」，但知识库条目的取值集合没有任何产物可证，
+     * 故只做**透传存储**（默认 0），不在业务逻辑里解释它。
+     */
+    spType: smallint("sp_type").notNull().default(0),
+    /**
+     * 竞品 `res_type`：知识库**列表请求的过滤参数**（`C-jRJshu.js` @10127：
+     * `{...scene, sp_type:[-1,1,2,3], use_type, status, res_type: t.type || void 0}`）
+     * 且条目映射里也带（`CpJ9ea8-.js` @2093361：`res_type: Number(je.res_type ?? 0)`）。
+     * 语义只到「资源类型 id」这一层（与 `res_id`/`res_type_id` 那组资源字段同源），
+     * 具体取值表没有产物可证 —— 与 `sp_type` 一样只做透传 + 过滤，不在业务逻辑里解释。
+     */
+    resType: smallint("res_type").notNull().default(0),
+    /**
+     * 竞品 `meta_data`：网络上它是 **JSON 字符串**（`ArT8U6Tg.js` 的 `F` 对对象做
+     * `JSON.stringify`、对字符串 trim 后原样发）。我方落 `jsonb`，读出来是对象 ——
+     * 这是**刻意偏离**：在库里存字符串会让「按 meta 里的键过滤」变成全表 `::json` 转换。
+     */
+    metaData: jsonb("meta_data"),
+    /** 排序（竞品 `sort`，payload 恒写 `sort:e.sort||0`；前端拖拽排序用） */
+    sort: integer("sort").notNull().default(0),
     createdBy: bigint("created_by", { mode: "bigint" }).references(() => users.id),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -2481,6 +2525,8 @@ export const knowledgeAssets = pgTable(
     index("idx_knowledge_assets_space").on(t.spaceId, t.dirId, t.createdAt.desc()),
     index("idx_knowledge_assets_scene").on(t.spaceId, t.scene, t.createdAt.desc()),
     index("idx_knowledge_assets_tags").using("gin", t.tags),
+    /** 列表按场景 + 启停筛选、按 sort 排序（竞品列表有 status 列且可筛） */
+    index("idx_knowledge_assets_status").on(t.spaceId, t.scene, t.status, t.sort),
   ],
 );
 

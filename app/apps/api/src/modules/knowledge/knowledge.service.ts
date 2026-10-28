@@ -1,10 +1,28 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { and, arrayContains, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { assets, knowledgeAssets, knowledgeBases, knowledgeDirs, knowledgeTags, users } from "@app/db";
 import type { Tx } from "@app/db";
-import { AppError, ErrorCode, isKnowledgeScene, KNOWLEDGE_SCENE_SLUG, knowledgeSceneRule, newId, validateKnowledgeSceneFields } from "@app/shared";
+import {
+  AppError,
+  ErrorCode,
+  isKnowledgeScene,
+  isKnowledgeStatus,
+  isKnowledgeUseType,
+  KNOWLEDGE_SCENE_SLUG,
+  KNOWLEDGE_STATUS,
+  KNOWLEDGE_STATUS_VALUES,
+  KNOWLEDGE_USE_TYPE,
+  KNOWLEDGE_USE_TYPE_VALUES,
+  knowledgeCoverAssetId,
+  knowledgeSceneRule,
+  newId,
+  validateKnowledgeSceneFields,
+} from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import type { AuthContext } from "../../common/auth.types";
+import { StorageService } from "../../storage/storage.service";
 
 type DirRow = typeof knowledgeDirs.$inferSelect;
 type AssetRow = typeof knowledgeAssets.$inferSelect;
@@ -43,6 +61,8 @@ export const KNOWLEDGE_MAX_DIR_DEPTH = 5;
  */
 @Injectable()
 export class KnowledgeService {
+  constructor(@Inject(StorageService) private readonly storage: StorageService) {}
+
   // ══════════════════════════════════════════════════════════
   // 一、目录树
   // ══════════════════════════════════════════════════════════
@@ -411,6 +431,14 @@ export class KnowledgeService {
       tags?: string[];
       source_type?: number;
       scene?: number;
+      /** 第 75 批：竞品列表的 status 列可筛（1 启用 / 2 停用） */
+      status?: number;
+      /** 第 75 批：竞品 `use_type`（1 官方 / 2 团队） */
+      use_type?: number;
+      /** 第 75 批：竞品列表请求里的 `sp_type: [-1,1,2,3]`（多值） */
+      sp_type?: number[];
+      /** 第 75 批：竞品列表请求里的 `res_type`（单值） */
+      res_type?: number;
       page?: number;
       page_size?: number;
     },
@@ -433,6 +461,8 @@ export class KnowledgeService {
     // 第 60 批：竞品 `asset/search` 的 query 里 scene 是必填维度，缺失就分不出"风格/音色"
     const listScene = this.normalizeScene(query.scene);
     if (listScene !== undefined) conds.push(eq(knowledgeAssets.scene, listScene));
+    // 第 75 批：启停/归属/来源类型的筛选（与 search 共用同一段，见 entryFilters）
+    conds.push(...this.entryFilters(query));
     if (query.tags && query.tags.length > 0) {
       // 标签"且"语义，与集市筛选同口径
       conds.push(arrayContains(knowledgeAssets.tags, query.tags));
@@ -444,13 +474,17 @@ export class KnowledgeService {
       .leftJoin(knowledgeDirs, eq(knowledgeDirs.id, knowledgeAssets.dirId))
       .leftJoin(users, eq(users.id, knowledgeAssets.createdBy))
       .where(where)
-      .orderBy(desc(knowledgeAssets.createdAt))
+      // 第 75 批：先按竞品 `sort`（0 表示未排序，此时与旧行为一致按创建时间倒序）
+      .orderBy(asc(knowledgeAssets.sort), desc(knowledgeAssets.createdAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize);
     const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(knowledgeAssets).where(where);
     const assetRefs = await this.resolveAssetRefs(rows.map((r) => r.asset));
+    const covers = await this.resolveCovers(rows.map((r) => r.asset));
     return {
-      list: rows.map((r) => this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)))),
+      list: rows.map((r) =>
+        this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)), covers.get(String(r.asset.id))),
+      ),
       total: countRow?.count ?? 0,
       page,
       page_size: pageSize,
@@ -471,6 +505,11 @@ export class KnowledgeService {
       dir_id?: string;
       source_type?: number;
       scene?: number;
+      /** 第 75 批：与 list 同口径的启停/归属/来源类型筛选 */
+      status?: number;
+      use_type?: number;
+      sp_type?: number[];
+      res_type?: number;
       page?: number;
       page_size?: number;
     },
@@ -487,6 +526,8 @@ export class KnowledgeService {
     if (query.source_type !== undefined) conds.push(eq(knowledgeAssets.sourceType, query.source_type));
     const searchScene = this.normalizeScene(query.scene);
     if (searchScene !== undefined) conds.push(eq(knowledgeAssets.scene, searchScene));
+    // 第 75 批：与 list 共用同一套条目级筛选
+    conds.push(...this.entryFilters(query));
     if (query.dir_id) {
       const dir = await this.requireDir(db, spaceId, query.dir_id);
       const all = await this.dirRows(spaceId);
@@ -505,8 +546,11 @@ export class KnowledgeService {
       .offset((page - 1) * pageSize);
     const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(knowledgeAssets).where(where);
     const assetRefs = await this.resolveAssetRefs(rows.map((r) => r.asset));
+    const covers = await this.resolveCovers(rows.map((r) => r.asset));
     return {
-      list: rows.map((r) => this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)))),
+      list: rows.map((r) =>
+        this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)), covers.get(String(r.asset.id))),
+      ),
       total: countRow?.count ?? 0,
       page,
       page_size: pageSize,
@@ -525,7 +569,10 @@ export class KnowledgeService {
       ? await db.select({ nickname: users.nickname }).from(users).where(eq(users.id, row.createdBy))
       : [{ nickname: null as string | null }];
     const refs = await this.resolveAssetRefs([row]);
-    return { asset: this.toAssetDto(row, dir?.name ?? null, author?.nickname ?? null, refs.get(String(row.id))) };
+    const covers = await this.resolveCovers([row]);
+    return {
+      asset: this.toAssetDto(row, dir?.name ?? null, author?.nickname ?? null, refs.get(String(row.id)), covers.get(String(row.id))),
+    };
   }
 
   /**
@@ -547,6 +594,22 @@ export class KnowledgeService {
       scene?: number;
       /** 1 文本 / 3 链接（2 资产引用走 import-from-asset，不从这里建） */
       source_type?: number;
+      /** 第 75 批：竞品 `cover_file`；不传则读时回落 `image_asset_ids` 首图 */
+      cover_asset_id?: string | null;
+      /** 第 75 批：竞品 `image_files` */
+      image_asset_ids?: string[];
+      /** 第 75 批：竞品 `use_type`（1 官方 / 2 团队），默认 2 团队 */
+      use_type?: number;
+      /** 第 75 批：竞品 `status`（1 启用 / 2 停用），默认 1 启用 */
+      status?: number;
+      /** 第 75 批：竞品 `sp_type`，默认 0（语义未取证，仅透传） */
+      sp_type?: number;
+      /** 第 75 批：竞品 `res_type`，默认 0（语义未取证，仅透传 + 可筛） */
+      res_type?: number;
+      /** 第 75 批：竞品 `meta_data`（竞品发 JSON 字符串，我方收对象、落 jsonb） */
+      meta_data?: Record<string, unknown> | null;
+      /** 第 75 批：竞品 `sort`，默认 0 */
+      sort?: number;
     },
   ) {
     const spaceId = BigInt(auth.spaceId);
@@ -555,7 +618,18 @@ export class KnowledgeService {
     if (title.length === 0) {
       throw new AppError(ErrorCode.INVALID_PARAM, "title must not be empty", { field: "title" });
     }
-    const sceneError = validateKnowledgeSceneFields(scene, { title, content: input.content ?? null });
+    // 第 75 批：先解析条目级资产引用（封面/配图）——封面是否必填依赖 scene 规则，
+    // 所以必须在 validateKnowledgeSceneFields 之前拿到它们。
+    const entryAssets = await this.resolveEntryAssets(spaceId, {
+      cover_asset_id: input.cover_asset_id,
+      image_asset_ids: input.image_asset_ids,
+    });
+    const sceneError = validateKnowledgeSceneFields(scene, {
+      title,
+      content: input.content ?? null,
+      coverAssetId: entryAssets.coverAssetId ? String(entryAssets.coverAssetId) : null,
+      imageAssetIds: entryAssets.imageAssetIds?.map((id) => String(id)),
+    });
     if (sceneError) {
       throw new AppError(ErrorCode.INVALID_PARAM, sceneError.message, { field: sceneError.field, scene });
     }
@@ -572,6 +646,14 @@ export class KnowledgeService {
     }
     if (sourceType === 3 && (!input.content || input.content.trim() === "")) {
       throw new AppError(ErrorCode.INVALID_PARAM, "link entry requires content (the URL)", { field: "content" });
+    }
+    const useType = input.use_type ?? KNOWLEDGE_USE_TYPE.TEAM;
+    if (!isKnowledgeUseType(useType)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `use_type must be one of ${KNOWLEDGE_USE_TYPE_VALUES.join(",")}`, { field: "use_type" });
+    }
+    const status = input.status ?? KNOWLEDGE_STATUS.ENABLED;
+    if (!isKnowledgeStatus(status)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `status must be one of ${KNOWLEDGE_STATUS_VALUES.join(",")}`, { field: "status" });
     }
     const tags = await this.validateTags(BigInt(auth.spaceId), input.tags ?? [], scene);
     if (input.dir_id) {
@@ -596,26 +678,80 @@ export class KnowledgeService {
         content: input.content ?? null,
         tags,
         sourceType,
+        // 第 75 批：条目级字段（竞品 payload 的 cover_file / image_files / use_type /
+        // status / sp_type / meta_data / sort）。默认值与竞品一致：团队归属、启用、不计排序。
+        coverAssetId: entryAssets.coverAssetId ?? null,
+        imageAssetIds: entryAssets.imageAssetIds ?? [],
+        useType,
+        status,
+        spType: input.sp_type ?? 0,
+        resType: input.res_type ?? 0,
+        metaData: input.meta_data ?? null,
+        sort: input.sort ?? 0,
         createdBy: BigInt(auth.userId),
       })
       .returning();
-    return { asset: this.toAssetDto(row!, null, null, undefined) };
+    // 第 75 批：新建后立刻解析封面 URL（否则调用方拿到 null 还要再查一次列表）
+    const covers = await this.resolveCovers([row!]);
+    return { asset: this.toAssetDto(row!, null, null, undefined, covers.get(String(row!.id))) };
   }
 
-  /** 编辑资产（rt:743 `POST /dir/:ukd_id/asset/:uk_id/name` 扩展为通用编辑） */
+  /**
+   * 编辑资产（rt:743 `POST /dir/:ukd_id/asset/:uk_id/name` 扩展为通用编辑）。
+   *
+   * 第 75 批：可改条目级字段（封面/配图/归属/启停/sp_type/meta_data/sort）。
+   * 语义统一为「传了才改」：`undefined` 不动、`null` 清空（仅 cover_asset_id / meta_data /
+   * dir_id 这类可空字段），数组字段传 `[]` 表示清空。校验器拿**合并后的值**判场景规则，
+   * 否则「本来有封面、这次只改标题」会被误判成缺封面。
+   */
   async patchAsset(
     auth: AuthContext,
     assetId: string,
-    input: { title?: string; content?: string; dir_id?: string | null; tags?: string[]; scene?: number },
+    input: {
+      title?: string;
+      content?: string;
+      dir_id?: string | null;
+      tags?: string[];
+      scene?: number;
+      cover_asset_id?: string | null;
+      image_asset_ids?: string[];
+      use_type?: number;
+      status?: number;
+      sp_type?: number;
+      res_type?: number;
+      meta_data?: Record<string, unknown> | null;
+      sort?: number;
+    },
   ) {
     const spaceId = BigInt(auth.spaceId);
     const existing = await this.requireAsset(db, spaceId, assetId);
     const scene = input.scene === undefined ? existing.scene : (this.normalizeScene(input.scene) ?? existing.scene);
     const nextTitle = input.title !== undefined ? input.title.trim() : existing.title;
     const nextContent = input.content !== undefined ? input.content : existing.content;
-    const sceneError = validateKnowledgeSceneFields(scene, { title: nextTitle, content: nextContent });
+    const entryAssets = await this.resolveEntryAssets(spaceId, {
+      cover_asset_id: input.cover_asset_id,
+      image_asset_ids: input.image_asset_ids,
+    });
+    const nextCover = entryAssets.coverAssetId === undefined ? existing.coverAssetId : entryAssets.coverAssetId;
+    const nextImages = entryAssets.imageAssetIds === undefined ? existing.imageAssetIds : entryAssets.imageAssetIds;
+    const sceneError = validateKnowledgeSceneFields(scene, {
+      title: nextTitle,
+      content: nextContent,
+      coverAssetId: nextCover ? String(nextCover) : null,
+      imageAssetIds: nextImages.map((id) => String(id)),
+    });
     if (sceneError) {
       throw new AppError(ErrorCode.INVALID_PARAM, sceneError.message, { field: sceneError.field, scene });
+    }
+    if (input.use_type !== undefined && !isKnowledgeUseType(input.use_type)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `use_type must be one of ${KNOWLEDGE_USE_TYPE_VALUES.join(",")}`, {
+        field: "use_type",
+      });
+    }
+    if (input.status !== undefined && !isKnowledgeStatus(input.status)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `status must be one of ${KNOWLEDGE_STATUS_VALUES.join(",")}`, {
+        field: "status",
+      });
     }
     if (input.dir_id) {
       const dir = await this.requireDir(db, spaceId, input.dir_id);
@@ -636,11 +772,20 @@ export class KnowledgeService {
         scene,
         dirId: input.dir_id === undefined ? existing.dirId : input.dir_id ? BigInt(input.dir_id) : null,
         tags,
+        coverAssetId: nextCover,
+        imageAssetIds: nextImages,
+        useType: input.use_type ?? existing.useType,
+        status: input.status ?? existing.status,
+        spType: input.sp_type ?? existing.spType,
+        resType: input.res_type ?? existing.resType,
+        metaData: input.meta_data === undefined ? existing.metaData : input.meta_data,
+        sort: input.sort ?? existing.sort,
         updatedAt: new Date(),
       })
       .where(eq(knowledgeAssets.id, existing.id))
       .returning();
-    return { asset: this.toAssetDto(row!, null, null, undefined) };
+    const covers = await this.resolveCovers([row!]);
+    return { asset: this.toAssetDto(row!, null, null, undefined, covers.get(String(row!.id))) };
   }
 
   /** 设置标签（rt:738 `POST /asset/{uk_id}/tag`）：**整体替换**语义 */
@@ -1208,6 +1353,56 @@ export class KnowledgeService {
       .orderBy(asc(knowledgeDirs.sort), asc(knowledgeDirs.id));
   }
 
+  /**
+   * 第 75 批：条目级筛选（`status` / `use_type` / `sp_type` / `res_type`）。
+   *
+   * `listAssets` 与 `searchAssets` **共用这一段**：竞品这两个端点的筛选参数是同一套
+   * （`C-jRJshu.js` @10127 的列表请求 `{scene, sp_type:[-1,1,2,3], use_type, status, res_type}`），
+   * 各自内联一份迟早漂移（第 71 批就吃过「两个 spec 各写一份断言」的苦）。
+   *
+   * `sp_type` / `res_type` 我们只验证「是非负整数」，不枚举合法值 —— 竞品自身的取值集合
+   * 只在知识库列表请求里出现过 `[-1,1,2,3]`（`sp_type`），`res_type` 连这层都没有；
+   * 硬编码枚举会把竞品新增的类型直接打成 400。
+   */
+  private entryFilters(query: { status?: number; use_type?: number; sp_type?: number[]; res_type?: number }): SQL[] {
+    const conds: SQL[] = [];
+    if (query.status !== undefined) {
+      if (!isKnowledgeStatus(query.status)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, `status must be one of ${KNOWLEDGE_STATUS_VALUES.join("/")}`, {
+          field: "status",
+        });
+      }
+      conds.push(eq(knowledgeAssets.status, query.status));
+    }
+    if (query.use_type !== undefined) {
+      if (!isKnowledgeUseType(query.use_type)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, `use_type must be one of ${KNOWLEDGE_USE_TYPE_VALUES.join("/")}`, {
+          field: "use_type",
+        });
+      }
+      conds.push(eq(knowledgeAssets.useType, query.use_type));
+    }
+    if (query.sp_type && query.sp_type.length > 0) {
+      for (const value of query.sp_type) {
+        if (!Number.isInteger(value) || value < -1 || value > 32767) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "sp_type must be integers between -1 and 32767", {
+            field: "sp_type",
+          });
+        }
+      }
+      conds.push(inArray(knowledgeAssets.spType, query.sp_type));
+    }
+    if (query.res_type !== undefined) {
+      if (!Number.isInteger(query.res_type) || query.res_type < 0 || query.res_type > 32767) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "res_type must be an integer between 0 and 32767", {
+          field: "res_type",
+        });
+      }
+      conds.push(eq(knowledgeAssets.resType, query.res_type));
+    }
+    return conds;
+  }
+
   /** 场景入参归一：缺省 → undefined（=不按场景过滤），非法值 → 400101 */
   private normalizeScene(scene: number | undefined): number | undefined {
     if (scene === undefined || scene === null) return undefined;
@@ -1437,6 +1632,83 @@ export class KnowledgeService {
       );
   }
 
+  /**
+   * 解析条目级资产引用（第 75 批：竞品 `cover_file` / `image_files`）。
+   *
+   * 三态语义（与 patch 的「传了才改」一致）：
+   * - `undefined` → 返回 undefined，表示**不动**这个字段；
+   * - `null`（仅封面）→ 返回 null，表示**清空**；
+   * - 字符串/数组 → 校验后返回 bigint。
+   *
+   * 校验两条：① id 形状（`toBigId`，非法 400101，字段名报给调用方）；
+   * ② **必须属于当前 space 且未删**（跨空间引用等于把别人的素材挂到自己知识库，
+   * 用 400102 而不是 400101 —— 不告诉调用方"这个 id 在别处存在"）。
+   * 配图上限 20 张（竞品无上限证据，取与其它素材数组同量级）。
+   */
+  private async resolveEntryAssets(
+    spaceId: bigint,
+    input: { cover_asset_id?: string | null; image_asset_ids?: string[] },
+  ): Promise<{ coverAssetId?: bigint | null; imageAssetIds?: bigint[] }> {
+    const out: { coverAssetId?: bigint | null; imageAssetIds?: bigint[] } = {};
+    if (input.image_asset_ids !== undefined) {
+      if (input.image_asset_ids.length > 20) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "image_asset_ids must contain at most 20 ids", {
+          field: "image_asset_ids",
+        });
+      }
+      out.imageAssetIds = input.image_asset_ids.map((raw) => toBigId(raw, "image_asset_ids"));
+    }
+    if (input.cover_asset_id !== undefined) {
+      out.coverAssetId = input.cover_asset_id === null ? null : toBigId(input.cover_asset_id, "cover_asset_id");
+    }
+    const wanted = [
+      ...(out.coverAssetId ? [out.coverAssetId] : []),
+      ...(out.imageAssetIds ?? []),
+    ];
+    if (wanted.length > 0) {
+      const unique = [...new Set(wanted.map((id) => String(id)))].map((id) => BigInt(id));
+      const found = await db
+        .select({ id: assets.id })
+        .from(assets)
+        .where(and(inArray(assets.id, unique), eq(assets.spaceId, spaceId), isNull(assets.deletedAt)));
+      const foundIds = new Set(found.map((r) => String(r.id)));
+      const missing = wanted.map((id) => String(id)).filter((id) => !foundIds.has(id));
+      if (missing.length > 0) {
+        throw new AppError(ErrorCode.NOT_FOUND, `assets not found in this space: ${missing.join(",")}`, {
+          field: input.cover_asset_id !== undefined && out.coverAssetId ? "cover_asset_id" : "image_asset_ids",
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 批量解析封面 URL（第 75 批）。取 `cover_asset_id`，为空时回落 `image_asset_ids[0]`
+   * —— 与竞品 `cover_file: k || y[0] || ""` 同口径（见 `knowledgeCoverAssetId()`）。
+   * 图片资源在私有桶里，所以统一签名 1 小时；签名失败就留空（前端退回占位图），
+   * 不让一条资源的存储异常把整页列表打成 500。
+   */
+  private async resolveCovers(rows: AssetRow[]): Promise<Map<string, string>> {
+    const wanted = rows
+      .map((r) => ({ key: String(r.id), assetId: knowledgeCoverAssetId(r) }))
+      .filter((x): x is { key: string; assetId: bigint } => x.assetId !== null);
+    if (wanted.length === 0) return new Map();
+    const ids = [...new Set(wanted.map((x) => String(x.assetId)))].map((id) => BigInt(id));
+    const refs = await db
+      .select({ id: assets.id, uri: assets.uri })
+      .from(assets)
+      .where(and(inArray(assets.id, ids), isNull(assets.deletedAt)));
+    const uriById = new Map(refs.map((r) => [String(r.id), r.uri]));
+    const out = new Map<string, string>();
+    for (const item of wanted) {
+      const uri = uriById.get(String(item.assetId));
+      if (!uri) continue;
+      const signed = await this.storage.signDownload(uri, 3600).catch(() => null);
+      if (signed) out.set(item.key, signed);
+    }
+    return out;
+  }
+
   private async assetCountByDir(spaceId: bigint, scene?: number): Promise<Map<string, number>> {
     const conds = [eq(knowledgeAssets.spaceId, spaceId), isNull(knowledgeAssets.deletedAt)];
     if (scene !== undefined) conds.push(eq(knowledgeAssets.scene, scene));
@@ -1511,8 +1783,11 @@ export class KnowledgeService {
     dirName?: string | null,
     authorName?: string | null,
     ref?: { id: string; kind: string; uri: string; preview_uri: string | null; name: string },
+    coverUrl?: string,
   ) {
     const rule = knowledgeSceneRule(row.scene);
+    /** 封面实际来源（0/1 交由前端判断是否显示「自动取首图」提示） */
+    const effectiveCoverId = knowledgeCoverAssetId(row);
     return {
       id: String(row.id),
       /** 模板场景（竞品枚举值，见 shared 的 KNOWLEDGE_SCENE） */
@@ -1523,6 +1798,7 @@ export class KnowledgeService {
       scene_prompt_required: rule.promptRequired,
       scene_prompt_max_length: rule.promptMaxLength,
       scene_prompt_column: rule.promptColumn,
+      scene_cover_required: rule.coverRequired,
       dir_id: row.dirId ? String(row.dirId) : null,
       dir_name: dirName ?? null,
       asset_id: row.assetId ? String(row.assetId) : null,
@@ -1531,6 +1807,29 @@ export class KnowledgeService {
       tags: row.tags,
       source_type: row.sourceType,
       source_type_name: row.sourceType === 2 ? "资产引用" : row.sourceType === 3 ? "链接" : "文本",
+      // ── 第 75 批：竞品条目级字段 ──────────────────────────────────
+      /** 人工指定的封面（竞品 `cover_file`）；为空不代表没封面，见 `cover_uri` */
+      cover_asset_id: row.coverAssetId ? String(row.coverAssetId) : null,
+      /** 实际渲染用的封面 URL：人工封面优先，否则回落 `image_asset_ids[0]`（竞品同口径） */
+      cover_uri: coverUrl ?? null,
+      /** 封面是否为"自动取首图"（供前端显示提示，省得前端自己再判一次） */
+      cover_is_fallback: !row.coverAssetId && Boolean(effectiveCoverId),
+      /** 配图组（竞品 `image_files`）；元素无外键，若素材被删前端会拿不到图 */
+      image_asset_ids: row.imageAssetIds.map((id) => String(id)),
+      /** 归属：1 官方 / 2 团队（竞品 `use_type`） */
+      use_type: row.useType,
+      use_type_name: row.useType === KNOWLEDGE_USE_TYPE.OFFICIAL ? "官方" : "团队",
+      /** 启停：1 启用 / 2 停用（竞品 `status`） */
+      status: row.status,
+      status_name: row.status === KNOWLEDGE_STATUS.DISABLED ? "停用" : "启用",
+      /** 竞品 `sp_type` 透传（语义未取证，不在业务里解释） */
+      sp_type: row.spType,
+      /** 竞品 `res_type` 透传（列表请求里当筛选用，语义未取证） */
+      res_type: row.resType,
+      /** 竞品 `meta_data` 在网络上是 JSON 字符串，我方落 jsonb、出对象（刻意偏离，见 schema 注释） */
+      meta_data: row.metaData ?? null,
+      /** 竞品 `sort` */
+      sort: row.sort,
       created_by: row.createdBy ? String(row.createdBy) : null,
       created_by_name: authorName ?? null,
       created_at: row.createdAt.toISOString(),

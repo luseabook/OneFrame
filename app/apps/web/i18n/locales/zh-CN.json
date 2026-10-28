@@ -1850,7 +1850,9 @@
       "palette": "色调",
       "expression": "表情",
       "audioLibrary": "音频模版"
-    }
+    },
+    "useTypeOfficial": "官方",
+    "statusDisabled": "已停用"
   },
   "workDetail": {
     "metaTitle": "作品详情 · 一帧",

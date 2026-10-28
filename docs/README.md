@@ -127,6 +127,76 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.29 · 第 75 批：#18 知识库「条目级字段」—— 证据是竞品自己的 payload builder · 2026-10-28）
+
+> 上一批（第 74 批）核账之后，代码侧「不需要任何外部输入、只是没排期」的只剩 **0.085**：#18 知识库条目级字段 0.015、#19 双浏览器 E2E 0.03、#3 真 ffmpeg 切片 0.02、#9 agent REPL/SSE 0.02。
+> 本批先清掉其中**证据最硬的一块**——知识库条目级字段 0.015，让 #18 从 99.5% 到 100%。
+
+### 一、证据不是「猜字段名」，是竞品自己拼请求的那段代码
+
+`knowledge_assets` 原来只有 `title`/`content`/`tags`/`sourceType`/`scene` 这些「我方想得到」的字段。竞品条目到底还有什么？去它的前端 bundle 里找**组装请求的那段函数**，比找 schema 靠谱：
+
+```js
+// ArT8U6Tg.js（3,668 B）里的 payload builder，逐字
+const L = (e) => ({
+  uk_id: e.uk_id || "",
+  scene: O(i) ? i : o.Style,
+  status: N(e.status) ? e.status : h.Enabled,
+  use_type: e.use_type === g.Team ? g.Team : g.Official,
+  sp_type: e.sp_type || 0,
+  prompt_template: e.prompt_template || "",
+  cover_file: k || y[0] || "",          // ← 没有人工封面就取首图
+  image_files: y, origin_image_files: I,
+  orgin_cover_file: b,                  // ← 竞品自己把 origin 拼错了，两处兜底
+  meta_data: F,                         // ← 网络上是 JSON 字符串
+  sort: e.sort || 0, ... })
+```
+
+两个枚举在 `0zWWdXb_.js`（6,097 B）里：`status = {Enabled:1, Disabled:2}`、`use_type = {Official:1, Team:2}`。
+顺带**纠正台账一处笔误**：第 74 批把 `Official/Team` 记成了 `status` 的取值，实际它是 `use_type`（`ArT8U6Tg.js` 里两个字段同时出现，且新建默认 `use_type: u.Team`）。
+
+### 二、改了哪 8 列，以及三个不显然的决定
+
+| 列 | 对应竞品 | 我方决定 |
+|---|---|---|
+| `cover_asset_id` | `cover_file` | 存 **asset id** 不存 URL（外键 `ON DELETE set null`；存 URL 的话签名过期就是死链） |
+| `image_asset_ids bigint[]` | `image_files` | **不建关联表**：竞品就是一个有序 id 列表、图片没有条目级属性；代价是元素无外键 |
+| `use_type` / `status` / `sp_type` / `res_type` | 同名 | 默认值取竞品语义：`use_type=2`(Team)、`status=1`(Enabled) |
+| `meta_data jsonb` | `meta_data`（字符串） | **刻意偏离**：库里存 jsonb（可查可索引），出参给对象；竞品发字符串只是因为前端懒 |
+| `sort` | `sort` | 列表默认 `sort asc, created_at desc`；全 0 时行为与旧版一致 |
+
+三个不显然的决定：
+1. **封面回落放进 shared，不放进 service**：`knowledgeCoverAssetId()` 复刻 `cover_file: k||y[0]||""`，DTO 额外给 `cover_is_fallback`——让前端知道「这张封面是兜底来的」，将来要做「换封面」时不会误以为用户设过。
+2. **封面/配图校验跨空间返 400102，不返 400101**：400101 会告诉调用方「这个 id 格式对但不存在于本空间」，配合「在别处存在」就能探测别人的资产 id；400102 只说「找不到」。
+3. **`patchAsset` 的封面必填校验拿「合并后的值」**：只改标题时如果只看入参，`cover_asset_id` 是 `undefined`，会被 scene 3/4 的必填规则误判——这类 bug 只有「先 PATCH 一次标题」的用例能抓到。
+
+### 三、为什么 `res_type` 是补账时才发现的
+
+主台账 #18 缺口栏原文列了 6 个字段，其中 `res_type` 我方一直没落。用 token 扫 607 个 bundle 文件（30 处命中）确认它确实是**条目级**字段：竞品列表请求带 `res_type: t.type || void 0`、条目映射 `res_type: Number(je.res_type ?? 0)`、白名单 `["generate_image_type","res_type","style_templete",…]`。
+→ 迁移 **0044** 单独补这一列。**教训与第 73 批同一条**：缺口清单里的字段名要逐个对着证据核一遍，不能「看到清单就以为齐了」。
+
+### 四、验证
+
+| 项 | 结果 |
+|---|---|
+| 新用例外 | `knowledge.spec.ts` 21 → **24 例**（全链路 8 字段 + 封面回落；封面必填只对 scene 3/4 且配图可替代；跨空间/坏 id/21 张） |
+| api | **82 文件 916 例** 全绿 |
+| 全站用例 | 1,292 → **1,295**（api 916 / adapters 164 / cli 105 / worker 52 / db 26 / shared 26 / storage 6） |
+| 门禁 | `pwsh _acceptance\verify-round.ps1` → **12/12 全绿**（跑两次：加 `res_type` 前后各一次） |
+| 前端 | `knowledge` 列表渲染封面 + 「官方 / 已停用」徽标；5 语言各 +2 key，`i18n-check` 通过；typecheck/lint/build 干净 |
+| 规模 | 迁移 43 → **45**、端点 712 不变、web .vue 54,678 → 54,720 行 |
+| 分数 | **#18 99.5% → 100%（+0.015）**；全站 **202.45 → 202.47/206 = 98.3%**，剩余 3.55 → **3.53**；生态组 94.92 → **94.93** |
+
+### 五、诚实边界
+
+- `res_type`/`sp_type` **只透传不解释**：语义只到「资源类型 id / 业务分区 id」这一层，竞品没给值域，我方不自造含义。
+- 图片 id 无外键：删资产后 `image_asset_ids` 里会留死 id，读时靠签名失败退占位图；要彻底干净得建关联表，代价是每次增删都要维护顺序，本批按竞品原始形状走。
+- `?sp_type=1,2` 的逗号串是我方方言（竞品是数组参数），两种写法都支持，但「多值语义」本身是我方推断。
+- 本批只清掉 I 类 0.085 里的 0.015，剩下 **0.07**（#19 双浏览器 E2E 0.03 / #3 真 ffmpeg 切片 0.02 / #9 agent REPL 与 SSE 0.02）仍是「不等人、只等排期」。
+
+---
+
+
 ## 变更登记（v6.28 · 第 74 批：核账 —— 每个没满 100% 的格子，到底卡在谁身上 · 2026-10-28）
 
 前一批结尾我说下一批做「核账」。这一批没有一行代码，动的是台账本身 —— 因为 98.3% 这个位置最容易出现
