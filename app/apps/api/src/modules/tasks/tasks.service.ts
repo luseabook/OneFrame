@@ -404,12 +404,45 @@ export class TasksService {
       : [];
     const item = results[index - 1];
     if (!item?.uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
+    return this.signResult(row.id, index, item.uri);
+  }
 
-    // 存储 key（无协议前缀）→ 预签名；mock/外部 URL 原样返回
-    const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
-    const url = isStorageKey ? await this.storage.signDownload(item.uri, 86_400) : item.uri;
-    const ext = item.uri.split(".").pop()?.toLowerCase() || "bin";
-    return { url, filename: `task-${row.id}-${index}.${ext}`, expires_in: 86_400 };
+  /**
+   * 一次拿回该任务**全部结果**的下载地址（竞品 `POST /task/{task_id}/download` 的形状）。
+   *
+   * 为什么不是 zip：竞品这条 `responseBodyType: json`（不是 `raw`），所以它回的是 URL 列表；
+   * 打包下载是另一条 `POST /task/result/batch-download`（我方已有 `POST /tasks/batch-download`）。
+   *
+   * 两个取舍：
+   * - **空槽跳过并计数**（`results[i]` 只有 `preview_uri` 没有 `uri` 的情形），不让一个坏槽
+   *   把整单打进 404 —— 单条接口可以报「这条结果不存在」，批量接口不能。
+   * - 每个 URL 独立 24h（与单条同口径），一致而不是「iOS 一份、批量一份」。
+   */
+  async downloadUrls(spaceId: string, id: string) {
+    const row = await this.findTask(spaceId, id);
+    const results = Array.isArray(row.results)
+      ? (row.results as Array<{ uri?: string }>)
+      : [];
+    const items: Array<{ index: number; url: string; filename: string; expires_in: number }> = [];
+    let skipped = 0;
+    for (let i = 0; i < results.length; i += 1) {
+      const uri = results[i]?.uri;
+      if (!uri) {
+        skipped += 1;
+        continue;
+      }
+      const signed = await this.signResult(row.id, i + 1, uri);
+      items.push({ index: i + 1, ...signed });
+    }
+    return { task_id: String(row.id), count: items.length, skipped, items, expires_in: 86_400 };
+  }
+
+  /** 存储 key（无协议前缀）→ 预签名；mock/外部 URL 原样返回 */
+  private async signResult(taskId: bigint, index: number, uri: string) {
+    const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri);
+    const url = isStorageKey ? await this.storage.signDownload(uri, 86_400) : uri;
+    const ext = uri.split(".").pop()?.toLowerCase() || "bin";
+    return { url, filename: `task-${taskId}-${index}.${ext}`, expires_in: 86_400 };
   }
 
   async createShare(spaceId: string, taskId: string, expiresDays: number) {

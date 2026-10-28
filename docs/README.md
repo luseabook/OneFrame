@@ -127,6 +127,139 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.36 · 第 82 批：审计「满分」模块 #24 任务系统 —— 17 条竞品路由里，1 条是真缺、12 条只是换了名字、4 条连模型都没有 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 79~81 批连着查出三件事：#7 团队的「100%」是按 33 条算的（竞品 40 条）、#8 影视版只差一种方法、
+#21 数据看板 13 条里有 8 条方法不对。于是还剩 6 个满分模块没被这样对过，这批挑 **#24 任务系统**
+（`S(1)`，权重 1，台账里写「10 端点 + 3 队列 + ETag，11 例，缺口：多区域数据面」）。
+
+问题：**竞品 `/web/v1/task/*` 一共 17 条 METHOD+path，我方 `tasks` 家族 14 条 —— 差的那 5 条，是缺能力还是缺名字？**
+
+答案是「三者都有」，而且这三类的处理方式**必须不同**：
+
+| 类别 | 条数 | 处理方式 | 为什么 |
+|---|---|---|---|
+| 真能力缺口 | 1 | 补实现 | 客户端要的能力我方根本给不出，且给得出 |
+| 命名/形状偏离 | 12 | **不补别名**，登记进守卫 | 换个路径就能通，补别名等于同一能力两个入口 |
+| 无数据模型 | 4 | 登记进**豁免表**，不造假接口 | 库里连表/列都没有，硬造接口就是骗自己 |
+
+### 二、逐条对账（17 条）
+
+| 竞品形状 | 我方现状 | 判定 |
+|---|---|---|
+| `DELETE /task/{task_id}` | `DELETE /tasks/:id`（软删） | 偏离（复数） |
+| `GET /task`（8 个筛选 query） | `GET /tasks` | 偏离（复数） |
+| `GET /task/{task_id}` | `GET /tasks/:id` | 偏离（复数） |
+| `POST /task/{task_id}/cancel` | `POST /tasks/:id/cancel` | 偏离（复数） |
+| `POST /task/{task_id}/retry` | `POST /tasks/:id/retry` | 偏离（复数） |
+| `POST /task/{task_id}/regenerate` | `POST /tasks/:id/regenerate` | 偏离（复数） |
+| `POST /task/{task_id}/feedback` | `POST /tasks/:id/feedback` | 偏离（复数） |
+| `POST /task/{task_id}/share` | `POST /tasks/:id/share` | 偏离（复数） |
+| `POST /task/result` | `POST /task/result` | ✅ 同形 |
+| `POST /task/result/batch-download` | `POST /tasks/batch-download` | 偏离（复数） |
+| **`POST /task/{task_id}/download`** | 只有 `GET /tasks/:id/results/:n/download-url` | **❌ 真缺口** |
+| `GET /task/share/{share_id}/info` | `GET /share/{token}` | 偏离（token 不用 share_id） |
+| `POST /task/share/{share_id}/batch-download` | `POST /share/{token}/batch-download` | 偏离（token） |
+| `GET /task/is_first/interact` | 无 | **豁免**（无 user 维度） |
+| `POST /task/result/folder` | 无 | **豁免**（无文件夹模型） |
+| `POST /task/result/interact` | 无 | **豁免**（无互动模型） |
+| `POST /task/workflow/retry` | 无 | **豁免**（无 workflow 实体） |
+
+3 + 12 + 1 + 1 = 17，账对得上。
+
+### 三、那 1 条真缺口：`POST /task/{task_id}/download`
+
+竞品这条是 `Method.POST` + `paramNames: ["task_id"]` + `responseBodyType: json` + 两个 schema 全 `{}`。
+`json` 响应说明**它不回文件流**，回的是「下载地址」—— 也就是「一次拿这个任务全部结果的地址」。
+我方原先只有 `GET /tasks/:id/results/:n/download-url`：要拿 3 个结果就得发 3 次请求，还得先知道有几条。
+
+新增 `POST /tasks/:id/download`，响应：
+
+```json
+{
+  "task_id": "1087...",
+  "count": 2,
+  "skipped": 1,
+  "items": [
+    { "index": 1, "url": "http://.../v1/files/...&sig=...", "filename": "task-1087...-1.png", "expires_in": 86400 },
+    { "index": 2, "url": "https://cdn.example.test/remote.mp4", "filename": "task-1087...-2.mp4", "expires_in": 86400 }
+  ],
+  "expires_in": 86400
+}
+```
+
+两个取舍值得写下来：
+
+1. **空槽进 `skipped`，不是整单 404。** 一个任务的结果数组可能有三槽而只有两槽真的生成了
+   （第三槽只有 `preview_uri`、没有 `uri`）。单条接口可以报「这条结果不存在」，
+   批量接口不行 —— 一个空槽把整单打进 404，等于「部分成功」这件事表达不出来。
+2. **每个 URL 独立 24h，与单条同口径。** 不为了批量改成更短或更长；
+   `expires_in` 同时出现在顶层与每条里，客户端任取其一都不会错。
+
+### 四、为什么那 12 条不补别名（与第 81 批的区别）
+
+第 81 批给 kds 补了 8 条 POST 别名，这批却明确**不**给 `/task/*` 补单数别名。区别在「差的是什么」：
+
+- kds 差的是 **METHOD**：`POST` 打到只有 `GET` 的路径上是 404，客户端**改不了**（它是按竞品 SDK 生成的）；
+- task 差的是 **命名**：`/task/{id}` 换 `/tasks/{id}` 就能通，路径在客户端是配置项。
+
+所以第 81 批补别名、这批登记偏离。守卫测试里两者对应两个不同的表：`DEVIATIONS`（有能力、形状不同，
+必须给出 `ours` 指向真实存在的路由）与这批新加的 `WAIVED`（能力不在，必须写清缺哪个模型）。
+
+**`WAIVED` 的设计约束**（不写清就退回补代码）：
+
+```ts
+const WAIVED: Record<string, string> = {
+  "GET /task/is_first/interact":
+    "no result-interaction model: task_events has no user_id column, so \"first interact of this user\" is not computable",
+  "POST /task/result/folder": "tasks has no folder_id column and there is no task folder table",
+  ...
+};
+```
+
+守卫里断言：每条豁免的 reason **长度 > 20**、豁免的键**必须 ⊆ `TASK_SHAPES`**（豁免只对 #24 开放，
+以后要扩域必须显式改这条断言）、且豁免与偏离不能重复登记同一条。
+
+### 五、守卫与反向验证
+
+`competitor-route-parity.spec.ts` 从「五组 133 条」扩到 **六组 150 条**（48 + 30 + 35 + 7 + 13 + 17），
+新增用例断言 #24 的三分类恰好是 **1 同形 / 12 偏离 / 4 豁免**，三者相加等于 17。
+
+反向验证（`_acceptance/_r82_break.py break|restore`）：把 `@Post("tasks/:id/download")` 改名成
+`@Post("tasks/:id/download-BROKEN")`，立刻 **2 例红**，其中一条打印
+
+```
+deviation target missing: POST /task/{}/download → POST /tasks/{}/download: expected false to be true
+```
+
+—— 即「偏离表里登记的我方路由必须真实存在」这句话是活的，不是注释。改回即绿。
+
+### 六、验证与数字
+
+| 项 | 结果 |
+|---|---|
+| api typecheck / eslint | 干净 / 退出 0 |
+| `competitor-route-parity.spec.ts` | 9 passed（+1 例 #24 三分类，+1 例死条目扩到豁免表） |
+| `tasks-batch.spec.ts` | **14 passed**（原 11，+3 例 download） |
+| api 全量 | **84 文件 937 例**（原 933） |
+| 门禁 `verify-round.ps1` | **12/12 全绿**（api 真跑 169.90s，worker 61） |
+| 端点 | 736 → **737** |
+| 用例总数 | 1,334 → **1,338** |
+| 全站 | 202.44 → **202.43**（剩余 3.56 → **3.57**） |
+| B 类 | 0.735 → **0.745** |
+
+### 七、诚实边界
+
+1. **4 条豁免仍然是「没有的能力」**，只是记了账、不会被忘掉；它们要产品一句话决定「建不建模型」；
+2. **12 条命名偏离不算缺口**，但客户端确实要按我方路径接（ADR-009 定的是命名权，不是兼容层）；
+3. `GET /task` 的 `folder_id` / `is_star` / `request_type` 三个筛选项我方没有 —— 与豁免同源（依赖文件夹/收藏模型）；
+4 守卫仍是**快照式**：竞品新增第 18 条 task 路由时，要人手动加进 `TASK_SHAPES`；
+5. 本批**据实下调** #24 100% → 99%：99% 表示「能力面已经对完，差的是要决策的 0.01」，不是「做不下去了」。
+
+---
+
 ## 变更登记（v6.35 · 第 81 批：审计「满分」模块 #21 数据看板 —— 13 条竞品路由里 8 条调的是 POST · 2026-10-28）
 
 ### 一、这批在回答什么问题

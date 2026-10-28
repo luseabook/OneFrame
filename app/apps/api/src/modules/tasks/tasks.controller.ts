@@ -127,4 +127,18 @@ export class TasksController {
   ) {
     return this.tasks.downloadUrl(req.auth?.spaceId ?? "", id, n);
   }
+
+  /**
+   * 一次取回该任务全部结果的下载地址（**新增能力**，不是别名）。
+   *
+   * 竞品对应的是 `POST /task/{task_id}/download`：`method: POST`、`paramNames:["task_id"]`、
+   * `requestBodyType: json`、`requestDataOptional: !1`、`responseBodyType: json`，但两个 json schema
+   * 都是 `{}` —— body 放什么、响应长什么样没有证据。我方按自己的资源风格落在 `tasks/:id/download`
+   * （单复数差异与其余 11 条一起登记在 `competitor-route-parity.spec.ts` 的 DEVIATIONS），
+   * 响应口径 `{task_id, count, skipped, items[], expires_in}` 写进 api-spec §17.39。
+   */
+  @Post("tasks/:id/download")
+  async downloadAll(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.tasks.downloadUrls(req.auth?.spaceId ?? "", id);
+  }
 }

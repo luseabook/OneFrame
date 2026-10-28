@@ -191,6 +191,56 @@ const KDS_SHAPES = [
 ];
 
 /**
+ * 任务系统：竞品 `/web/v1/task/*` 17 条（第 82 批审计）
+ *
+ * 这批的形状证据比前几批更薄：`_acceptance/out_r82_task_evidence.txt` 里能拿到的只有
+ * `method` / `path` / `paramNames` / `queryNames` / `requestBodyType` / `responseBodyType` /
+ * `requestDataOptional`，**两个 json schema 全是 `{}`**。所以：
+ *
+ * - 1 条按竞品形状补了别名：`POST /task/{task_id}/download`（我方原先只有按结果下标的
+ *   `GET /tasks/:id/results/:n/download-url`，一次拿全部要走 N 次，这是真的能力缺口）；
+ * - 3 条是「能力在、形状不同」（复数前缀 / 分享用 token 不用 share_id），登记进 DEVIATIONS；
+ * - 4 条**没有对应数据模型**，登记进 WAIVED 而不是硬造接口 —— 造假接口比缺接口更坏。
+ */
+const TASK_SHAPES = [
+  "DELETE /web/v1/task/:task_id",
+  "GET /web/v1/task",
+  "GET /web/v1/task/:task_id",
+  "GET /web/v1/task/is_first/interact",
+  "GET /web/v1/task/share/:share_id/info",
+  "POST /web/v1/task/:task_id/cancel",
+  "POST /web/v1/task/:task_id/download",
+  "POST /web/v1/task/:task_id/feedback",
+  "POST /web/v1/task/:task_id/regenerate",
+  "POST /web/v1/task/:task_id/retry",
+  "POST /web/v1/task/:task_id/share",
+  "POST /web/v1/task/result",
+  "POST /web/v1/task/result/batch-download",
+  "POST /web/v1/task/result/folder",
+  "POST /web/v1/task/result/interact",
+  "POST /web/v1/task/share/:share_id/batch-download",
+  "POST /web/v1/task/workflow/retry",
+];
+
+/**
+ * 无等价物豁免：竞品有这条路由，但我方**连数据模型都不存在**，补一个空壳接口只会让人以为
+ * 能力已经在了。每条都必须写清「缺的是哪个模型」，并在台账 §5.5 里作为 B 类记账。
+ *
+ * 与 DEVIATIONS 的区别：DEVIATIONS 是「能力在、形状不同」（有 ours 可指向）；
+ * WAIVED 是「能力不在」（没有 ours）。
+ */
+const WAIVED: Record<string, string> = {
+  "GET /task/is_first/interact":
+    "我方没有「结果互动」概念，`task_events` 也没有 user_id 列 —— 算不出「这个人的首次互动」，硬回一个 true 就是假数据",
+  "POST /task/result/folder":
+    "我方任务没有文件夹模型（`tasks` 表无 folder_id，`GET /task` 也没有 folder 维度），建文件夹表超出本批范围",
+  "POST /task/result/interact":
+    "同上：结果互动需要「谁在什么时候对哪条结果做了什么」的落库模型，`task_events` 缺 user_id，补了也不能去重",
+  "POST /task/workflow/retry":
+    "我方 Capability 只有 video/image/text/speech/music，没有 workflow 任务实体；workflow 在我方是画布/agent 编排，条目不同",
+};
+
+/**
  * 显式登记的形状偏离：竞品形状 → 我方等价形状（同 METHOD 同路径，归一化后）。
  *
  * 只允许登记「能力已经在、只是形状不同」的偏离。能力缺失必须补代码，不能登记到这张表里
@@ -226,6 +276,39 @@ const DEVIATIONS: Record<string, { ours: string; reason: string }> = {
     ours: "POST /campaigns/{}/signup",
     reason: "同上：报名提交与草稿共用 `/signup`，靠 body 里的字段区分（我方在契约里写明）",
   },
+  // ---- 第 82 批：#24 任务系统，能力在、形状不同 ----
+  // 竞品任务域用**单数** `/task/*`（除 `POST /task/result` 外），我方资源一律复数 `/tasks/*`。
+  // 这是 ADR-009 的命名风格差异，不是能力缺口，故统一登记而不加单数别名
+  // （第 81 批给 kds 加别名是因为那里差的是 METHOD，按竞品形状发请求会 404 而不是「换个路径」）。
+  "DELETE /task/{}": { ours: "DELETE /tasks/{}", reason: "ADR-009：竞品单数 `/task/*`，我方复数 `/tasks/*`" },
+  "GET /task": { ours: "GET /tasks", reason: "同上：列表在 `/tasks`（我方复数风格）" },
+  "GET /task/{}": { ours: "GET /tasks/{}", reason: "同上：单条详情" },
+  "POST /task/{}/cancel": {
+    ours: "POST /tasks/{}/cancel",
+    reason: "同上：任务动作都挂在 `/tasks/{id}/*` 下（cancel/retry/regenerate/feedback/share 同族）",
+  },
+  "POST /task/{}/feedback": { ours: "POST /tasks/{}/feedback", reason: "同上：反馈挂在任务资源下" },
+  "POST /task/{}/regenerate": { ours: "POST /tasks/{}/regenerate", reason: "同上：再生成与 retry 分属两条（语义不同）" },
+  "POST /task/{}/retry": { ours: "POST /tasks/{}/retry", reason: "同上：重试只对失败态" },
+  "POST /task/{}/share": { ours: "POST /tasks/{}/share", reason: "同上：创建分享挂在任务资源下" },
+  "POST /task/{}/download": {
+    ours: "POST /tasks/{}/download",
+    reason:
+      "第 82 批**新增的能力**（一次拿全部结果 URL）：路径按我方复数风格落在 `/tasks/{id}/download`，单复数差异同上",
+  },
+  "POST /task/result/batch-download": {
+    ours: "POST /tasks/batch-download",
+    reason: "我方批量下载是 `/tasks/batch-download`（复数前缀）；竞品把 `result` 折进 `task/result/*` 命名空间",
+  },
+  "GET /task/share/{}/info": {
+    ours: "GET /share/{}",
+    reason:
+      "分享是独立资源：竞品用 server 生成的 `share_id`，我方用不可猜测的 `token`（`task_shares.token`，24 字节 base64url），都只用于匿名读取",
+  },
+  "POST /task/share/{}/batch-download": {
+    ours: "POST /share/{}/batch-download",
+    reason: "同上：匿名分享走 `/share/{token}/*`，不能挂到需要登录态的任务路径下",
+  },
 };
 
 const EXPECTED_COUNTS: Record<string, number> = {
@@ -234,6 +317,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   op: OP_SHAPES.length,
   campaign: CAMPAIGN_SHAPES.length,
   kds: KDS_SHAPES.length,
+  task: TASK_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -287,6 +371,7 @@ function ourRoutes(): Set<string> {
 
 const ROUTES = ourRoutes();
 const DEVIATED = new Set(Object.keys(DEVIATIONS));
+const WAIVED_SHAPES = new Set(Object.keys(WAIVED));
 
 function missing(shapes: string[]): string[] {
   const gaps: string[] = [];
@@ -297,6 +382,13 @@ function missing(shapes: string[]): string[] {
     if (deviation) {
       // 白名单不能自证：登记的我方形状必须真的存在，否则改路径会静默通过
       expect(ROUTES.has(deviation.ours), `deviation target missing: ${shape} → ${deviation.ours}`).toBe(true);
+      continue;
+    }
+    // 豁免也要自证：必须写清缺哪个模型，且不能与偏离表重叠
+    const waiver = WAIVED[shape];
+    if (waiver) {
+      expect(waiver.length, `waiver reason too short: ${shape}`).toBeGreaterThan(20);
+      expect(DEVIATED.has(shape), `shape both deviated and waived: ${shape}`).toBe(false);
       continue;
     }
     gaps.push(shape);
@@ -317,13 +409,21 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // 第 81 批：数据看板的同名 GET/POST 双形状（竞品 POST，我方补别名后两者都在）
     expect(ROUTES.has("GET /kds/da/team/{}/query")).toBe(true);
     expect(ROUTES.has("POST /kds/da/team/{}/query")).toBe(true);
+    // 第 82 批：任务结果批量下载（新增能力；竞品形状是单数 `/task/{id}/download`，登记在 DEVIATIONS）
+    expect(ROUTES.has("POST /tasks/{}/download")).toBe(true);
+    expect(ROUTES.has("POST /tasks/batch-download")).toBe(true);
   });
 
-  it("竞品五组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13）", () => {
-    expect(EXPECTED_COUNTS).toEqual({ film: 48, crc: 30, op: 35, campaign: 7, kds: 13 });
+  it("竞品六组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17）", () => {
+    expect(EXPECTED_COUNTS).toEqual({ film: 48, crc: 30, op: 35, campaign: 7, kds: 13, task: 17 });
     expect(
-      FILM_SHAPES.length + CRC_SHAPES.length + OP_SHAPES.length + CAMPAIGN_SHAPES.length + KDS_SHAPES.length,
-    ).toBe(133);
+      FILM_SHAPES.length +
+        CRC_SHAPES.length +
+        OP_SHAPES.length +
+        CAMPAIGN_SHAPES.length +
+        KDS_SHAPES.length +
+        TASK_SHAPES.length,
+    ).toBe(150);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -331,6 +431,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       op: OP_SHAPES,
       campaign: CAMPAIGN_SHAPES,
       kds: KDS_SHAPES,
+      task: TASK_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -367,11 +468,31 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(KDS_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)))).toEqual([]);
   });
 
-  it("偏离登记表没有死条目（每条都对应竞品真实形状）", () => {
+  it("#24 任务系统：17 条里 1 条同形 + 12 条命名偏离 + 4 条无模型豁免", () => {
+    expect(TASK_SHAPES.length).toBe(17);
+    expect(missing(TASK_SHAPES)).toEqual([]);
+    const deviated = TASK_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = TASK_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    const exact = TASK_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    // 三条数加起来必须正好等于 17：不多不少，漏一条或重复登记都会红
+    expect(exact.length).toBe(1); // POST /task/result（我方本来就是同名路径）
+    expect(deviated.length).toBe(12);
+    expect(waived.length).toBe(4);
+    expect(exact.length + deviated.length + waived.length).toBe(TASK_SHAPES.length);
+    // 豁免项必须点名「缺的是哪个模型/哪张表」，写不清楚就退回去补代码
+    for (const raw of waived) {
+      expect(WAIVED[shapeOf(raw)]!.length, `waiver too vague: ${raw}`).toBeGreaterThan(20);
+    }
+  });
+
+  it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
-      [...FILM_SHAPES, ...CRC_SHAPES, ...OP_SHAPES, ...CAMPAIGN_SHAPES, ...KDS_SHAPES].map(shapeOf),
+      [...FILM_SHAPES, ...CRC_SHAPES, ...OP_SHAPES, ...CAMPAIGN_SHAPES, ...KDS_SHAPES, ...TASK_SHAPES].map(shapeOf),
     );
-    const dead = Object.keys(DEVIATIONS).filter((shape) => !all.has(shape));
-    expect(dead).toEqual([]);
+    expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
+    expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
+    // 豁免只给 #24 开过口子：以后想给别的域用，必须显式改这条断言并在台账记账
+    const taskShapes = new Set(TASK_SHAPES.map(shapeOf));
+    expect(Object.keys(WAIVED).filter((shape) => !taskShapes.has(shape))).toEqual([]);
   });
 });

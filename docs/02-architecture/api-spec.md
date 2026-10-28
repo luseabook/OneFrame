@@ -3852,3 +3852,99 @@ GET 全部保留（既有客户端不受影响）；同名 GET/POST 的差异只
 3. 其余满分模块（#1 首页、#24 任务、#26 分享、#27 运营后台、#28 架构）尚未审计；
 4. 守卫是**快照式**：竞品新增第 14 条 kds 路由时，需要人手动加进 `KDS_SHAPES`；
 5. 本批**不改分**（#21 记 100%），价值在「那个 100% 现在可复跑、且客户端形状真能通」。
+
+---
+
+## 17.39 任务的 `download` 形状与三类路由缺口（第 82 批）
+
+### 39.1 为什么 worker/客户端的下载形状要进 API 文档
+
+`POST /v1/tasks/:id/download` 是给**客户端**用的：任务详情页要「一次拿到这个任务全部结果的下载地址」。
+它和 `GET /v1/tasks/:id/results/:n/download-url`（单条）共用同一套签名逻辑，但**语义不同**：
+单条是「我要第 n 个结果」，批量是「我要这个任务的所有结果，顺便告诉我缺了几个」。这个「缺了几个」是响应的一部分。
+
+### 39.2 端点契约
+
+```
+POST /v1/tasks/:id/download
+Authorization: Bearer <access_token>
+X-Space-Id: <space_id>
+（无请求体；竞品 requestDataOptional: !1 但两个 schema 均为 {}，故不读 body）
+```
+
+响应（`200`）：
+
+```json
+{
+  "code": 0,
+  "msg": "ok",
+  "data": {
+    "task_id": "108785247576391680",
+    "count": 2,
+    "skipped": 1,
+    "items": [
+      {
+        "index": 1,
+        "url": "http://127.0.0.1:3002/v1/files/u/1087.../result.png?expires=...&sig=...",
+        "filename": "task-108785247576391680-1.png",
+        "expires_in": 86400
+      },
+      {
+        "index": 2,
+        "url": "https://cdn.example.test/remote.mp4",
+        "filename": "task-108785247576391680-2.mp4",
+        "expires_in": 86400
+      }
+    ],
+    "expires_in": 86400
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `task_id` | string | 任务 id（bigint 序列化为字符串） |
+| `count` | int | 真正给了地址的结果条数（= `items.length`） |
+| `skipped` | int | 结果槽存在但没有 `uri` 的条数（只有 `preview_uri` 的槽） |
+| `items[].index` | int | **1 基**，与 `GET .../results/:n/download-url` 的 `n` 同一口径 |
+| `items[].url` | string | 存储 key → 预签名 URL（24h）；`http(s)` 开头的原样透出 |
+| `items[].filename` | string | `task-<task_id>-<index>.<ext>`，`ext` 取自 uri 后缀 |
+| `expires_in` | int | 顶层与每条都给，取其一即可 |
+
+错误：`400101`（非法 id / 任务不存在）、`400102`（任务不属于当前空间）。
+
+### 39.3 空槽、外部 URL、与单条接口的一致性
+
+1. **空槽进 `skipped`，不是 404**：一个任务的结果数组可能有 3 槽而只有 2 槽生成了。单条接口可以报
+   「这条结果不存在」，批量接口不能把整单打进 404 —— 否则「部分成功」无法表达。
+2. **外部 URL 原样透出**：`results[].uri` 若以 `http(s)://` 开头（第三方直链），不签名、不改写；
+   只有存储 key 才走 `storage.signDownload(uri, 86_400)`。
+3. **与单条接口共用 `signResult()`**：同一份文件名规则、同一 24h TTL，避免两条路径给出两个口径。
+
+### 39.4 三类路由缺口（与守卫测试的对应关系）
+
+上级台账 #24 的 17 条竞品路由，按处理方式分三类，`apps/api/test/competitor-route-parity.spec.ts` 里各有归属：
+
+| 类别 | 条数 | 守卫里的表 | 约束 |
+|---|---|---|---|
+| 真能力缺口（已补） | 1 | `TASK_SHAPES` 直接命中 | `POST /task/{task_id}/download` → 我方 `POST /tasks/{}/download` |
+| 命名/形状偏离 | 12 | `DEVIATIONS` | 必须给出 `ours` 且该路由**真实存在**（否则报 `deviation target missing`） |
+| 无数据模型（不造假） | 4 | `WAIVED` | 必须写清「缺哪个模型/哪张列」，reason 长度 > 20，且键必须 ⊆ `TASK_SHAPES` |
+
+豁免的 4 条：`GET /task/is_first/interact`（`task_events` 无 `user_id`，算不出「这个人的第一次」）、
+`POST /task/result/folder`（`tasks` 无 `folder_id`，无文件夹表）、`POST /task/result/interact`（无互动模型）、
+`POST /task/workflow/retry`（`Capability` 只有 video/image/text/speech/music，无 workflow 实体）。
+
+### 39.5 为什么 #24 从 100% 下调到 99%
+
+「100%」的口径是「竞品有的能力，我方都有对应的调用形状」。这 4 条里，**竞品有、我方连数据模型都没有** ——
+它们不是「换个名字」，也不是「少个方法」，而是「没有这个业务概念」。按第 79 批起沿用的规则，
+这种差异**据实记 0.01（B 类）**，等产品决定要不要建模型；不加分、也不假装满分。
+
+### 39.6 边界
+
+1. 只补**方法/入参形状**；竞品 4 条豁免的两个 json schema 都是 `{}`，字段语义**无证据**，故不做「猜字段」的实现；
+2. 12 条命名偏离**不提供兼容别名**（与第 81 批 kds 的区别：那里差 METHOD，这里差命名）；
+3. `GET /tasks` 的 `folder_id` / `is_star` / `request_type` 三个筛选未实现，与豁免同源；
+4. 守卫是**快照式**：竞品新增 task 路由时需人工加进 `TASK_SHAPES`；
+5. 本批**不改动**单条 `download-url` 的响应形状（仍 `{url, filename, expires_in}`），只新增批量端点。

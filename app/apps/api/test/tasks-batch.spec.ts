@@ -275,6 +275,86 @@ describe("feedback（双写 + 覆盖语义）", () => {
   });
 });
 
+/**
+ * 第 82 批：竞品 `POST /task/{task_id}/download` 的形状。
+ *
+ * 竞品这条 `responseBodyType: json`（不是文件流），所以它回的是「全部结果的下载地址」，
+ * 而我方原先只有按结果下标的 `GET /tasks/:id/results/:n/download-url` —— 一次拿全要走 N 次。
+ * 三个断言刻意分开：**空槽跳过不清空整单**、**越权仍然看不见**、**坏 id 不是 500**。
+ */
+describe("tasks/:id/download（竞品形状：一次拿全部结果 URL）", () => {
+  /** 造一条带三种结果槽位的任务：存储 key / 外部 URL / 空槽（只有 preview_uri） */
+  async function seedTaskWithResults(dedupeSuffix: string): Promise<string> {
+    const id = newId();
+    await db.insert(tasks).values({
+      id,
+      spaceId: BigInt(spaceId),
+      userId: BigInt(userId),
+      capability: "image",
+      mode: "text2image",
+      modelId: BigInt(modelId),
+      input: { prompt: "three slots" },
+      options: { ratio, resolution, count: 1 },
+      status: TaskStatus.SUCCEEDED,
+      progress: 100,
+      results: [
+        { uri: "u/seed/result.png", preview_uri: "u/seed/result.png" },
+        { uri: "https://cdn.example.test/remote.mp4" },
+        { preview_uri: "u/seed/preview-only.png" },
+      ],
+      creditsFrozen: 0,
+      creditsSettled: 10,
+      dedupeKey: `spec:multi:${dedupeSuffix}:${Date.now()}`,
+      finishedAt: new Date(),
+    });
+    return String(id);
+  }
+
+  it("返回全部结果的签名地址，空槽进 skipped 而不是整单失败", async () => {
+    const id = await seedTaskWithResults("all");
+    const res = await inject("POST", `/tasks/${id}/download`);
+    expect(res.body.code).toBe(0);
+    const data = res.body.data as {
+      task_id: string;
+      count: number;
+      skipped: number;
+      expires_in: number;
+      items: Array<{ index: number; url: string; filename: string }>;
+    };
+    expect(data.task_id).toBe(id);
+    expect(data.count).toBe(2);
+    expect(data.skipped).toBe(1);
+    expect(data.expires_in).toBe(86_400);
+    // 存储 key 被预签名（带 http 且含签名参数），外部 URL 原样透出
+    expect(data.items[0]!.index).toBe(1);
+    expect(data.items[0]!.url).toMatch(/^http/);
+    expect(data.items[0]!.filename).toMatch(/^task-\d+-1\.png$/);
+    expect(data.items[1]!.index).toBe(2);
+    expect(data.items[1]!.url).toBe("https://cdn.example.test/remote.mp4");
+    expect(data.items[1]!.filename).toMatch(/^task-\d+-2\.(mp4|test)$/);
+  });
+
+  it("没有结果的任务回空列表而不是 404（客户端的「下载」按钮不该炸）", async () => {
+    const res = await inject("POST", `/tasks/${otherTaskId}/download`);
+    expect(res.body.code).toBe(0);
+    const data = res.body.data as { count: number; skipped: number; items: unknown[] };
+    expect(data.count).toBe(0);
+    expect(data.skipped).toBe(0);
+    expect(data.items).toEqual([]);
+  });
+
+  it("越权任务看不见（别的 space）且坏 id 是 400101 不是 500", async () => {
+    const another = await seedTaskForAnotherSpace();
+    const denied = await inject("POST", `/tasks/${another}/download`);
+    expect(denied.body.code).toBe(400102);
+
+    const broken = await inject("POST", "/tasks/abc/download");
+    expect(broken.status).toBeLessThan(500);
+    expect(broken.body.code).toBe(400101);
+    expect(broken.body.msg).toContain("invalid task id");
+  });
+});
+
 /** 造一个"别的 space"的任务：批量结果与越权写都必须看不见它 */
 async function seedTaskForAnotherSpace(): Promise<string> {
   const otherUser = BigInt(`7${String(Date.now()).slice(-9)}${Math.floor(Math.random() * 100)}`);
