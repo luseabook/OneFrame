@@ -126,6 +126,73 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.25 · 第 71 批：删掉一集要连带清 8 张表 —— 漏一张就是 500 · 2026-10-28）
+
+> 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.4**（同一批；本文件与主台账各有一套编号，勿混）。
+
+**这一批补的是两条被 CLI 骨架钉住的后端缺口。** 用户面差别一句话：以前 `oneframe episode delete <ID>` 回的是「我方无 DELETE episodes；不要的集用 PATCH 清空内容」，`episode batch-create` 回的是「我方只支持按数量新增」——现在两条都能真的用，而且删得干净、建得可控。
+
+### 一、缺口是「reason 写着没有，竞品其实有」
+
+`apps/cli/src/registry.ts` 里这两条骨架的 `reason` 是唯一对外信息（骨架命令没有 `path`，所以第 65/66/67 批那套「路径 ↔ 后端路由」门禁**管不到它们**）：
+
+| 命令 | 原 reason（逐字） | 竞品证据 |
+|---|---|---|
+| `episode delete` | 我方无 DELETE episodes；不要的集用 PATCH /projects/:id/episodes/:eid 清空内容，整项目用 workspace delete（归档） | `ApiDfEpisodeDeletePOST`；CLI `commands/episode.md:21` `reelmate episode delete EPISODE_ID` |
+| `episode batch-create` | 我方只支持按数量新增：`--set count=N`（无逐集标题载荷端点） | `ApiDfEpisodeBatchCreatePOST`；CLI `commands/episode.md:142` `batch-create --set @episodes.json`，items 每项 `{"sort":1,"name":"第1集","s_script_id":"…"}` |
+
+两个竞品端点的 `requestDataJsonSchema` 都是**空对象** —— 也就是只有路由形状、没有字段证据。所以入参字段名是我方自定的，已在 `packages/shared/src/schemas/pipeline.ts` 与 `api-spec §17.29` 里登记「待取证」。
+
+### 二、删集为什么不是一句 `DELETE`
+
+指向 `episodes.id` 的外键一共 **8 张表，全部 RESTRICT** —— 不先清子表，删集会被数据库直接挡下（表现是 500）。更麻烦的是层级：`storyboard_assets` 引用的是 `storyboards.id`，不是 `episodes.id`。
+
+| 顺序 | 表 | 引用目标 | 备注 |
+|---:|---|---|---|
+| 1 | `storyboard_assets` | `storyboards.id` | 必须先按本集的分镜 id 删 |
+| 2 | `storyboards` | `episodes.id` | |
+| 3 | `episode_resources` | `episodes.id` | 此前没有任何删除路径 |
+| 4 | `export_jobs` | `episodes.id` | 同上 |
+| 5 | `project_timelines` | `episodes.id` | 另有 `uq_project_timelines_episode` |
+| 6 | `timeline_exports` | `episodes.id` | |
+| 7 | `extraction_tasks` | `episodes.id` | |
+| 8 | `director_scenes` | `episodes.id` | |
+| 9 | `timeline_publications` | `episodes.id` | |
+| 10 | `episodes` | — | 最后才删本体 |
+
+整段在一个事务里（`db.transaction`），并 touch `script_projects.updated_at`；返回体里如实上报 `cleared.storyboards`，让调用方能判断「删的是不是我以为的那一集」。
+
+### 三、两个不显然的决定
+
+| 决定 | 怎么做 | 为什么 |
+|---|---|---|
+| **删集不重排集号** | 删第 2 集后，剩下的仍是 1、3、4…，留下空洞 | 竞品文档只说「删除该集」，**没有重排证据**；重排会让外部已引用的「第 N 集」漂移，属于破坏性副作用 |
+| **建集不回收空洞** | 不给 `sort` 就排到当前最大集号之后（不留的空洞不填） | 与「不重排」同一套口径，否则「删了第 2 集 → 下次建集默默占 2 号」，外部引用会指向另一集 |
+| **`sort` 撞号必须 400101** | 显式报错，不静默改号 | 静默改号 = 用户以为建在第 5 集，实际是第 6 集 |
+| **`s_script_id` 不接收** | zod 只声明 `name`/`sort`/`synopsis` | 竞品该字段是「拆解结果 ID」，我方拆集结果直接落 `episodes`，没有这个实体；造一个只为对齐字段名的空实体是假实现 |
+
+竞品 `batch-create` 返回 `succeeded`/`failed`/`unconfirmed`（异步时 `succeeded[]` 只含已确认项，未确认进 `unconfirmed[]`）。我方是**同步**实现：整批落库或整体抛错，没有「未确认」这种中间态 —— 这个差异也写进了 `api-spec §17.29`，没有伪装成竞品的三态。
+
+### 四、验证
+
+| 项 | 结果 |
+|---|---|
+| 新 spec `apps/api/test/episode-edit.spec.ts` | **6 例**：级联清理（分镜/分镜资产关联/剧集资源）、不重排、空洞不回收、撞号/空数组/超上限/空白标题 400101、重复删 `abc` 不存在 id 跨空间 |
+| api 测试 | **80 文件 903 例**（原 79/897） |
+| 全库用例 | 1,275 → **1,281**（api 903 / adapters 164 / cli 104 / worker 52 / db 26 / shared 26 / storage 6） |
+| 端点 | 706 → **708** |
+| CLI | 命令 202 不变；ready **154 → 156**、骨架 **48 → 46** |
+| 门禁 | `verify-round.ps1` **12/12 全绿** |
+
+### 五、诚实边界
+
+**这批不加分**（全站仍 202.45/206 = 98.3%，剩余 3.55）。原因不是「做得不够」，而是这两条能力此前只被记在 #9 的「48 条骨架命令」里，而 #9 的分档是 1% 整数粒度（0.24 = 8×3%），48→46 在台账上表达不出来。同理 #3 剧集分镜的 0.15 缺口是 `quality-check` 评分口径（竞品只给路由、无字段证据），本批补的删集/建集不在那 0.15 里 —— 所以也没有借它调高 #3。
+
+真要说口径上的收益：**「宣称可用、其实没有」这类账已经清干净了**。第 65 批修的是 path 写错（36 条 404）、第 70 批修的是 reason 过期（5 条）、第 71 批修的是「我方确实没有，但竞品有且证据充分」的 2 条 —— 46 条骨架现在每一条的 reason 都指向一个真的还不存在的后端端点（见主台账 §5 第 4 行），而不是又一批过期记录。
+
+---
+
+
 ## 变更登记（v6.24 · 第 70 批：ad/redraw 两组命令写着「当前无端点」，其实端点早就在 —— 接线并补齐到竞品同款，顺手修 `--set` 大整数 id 失真 · 2026-10-28）
 
 > 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.3**（同一批；本文件与主台账各有一套编号，勿混）。

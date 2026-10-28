@@ -123,6 +123,27 @@ const episodeParseResetSchema = z.object({
 
 const episodeParseRetrySchema = z.object({ episode_id: z.string().min(1) });
 
+/**
+ * 第 71 批：批量建集（竞品 `POST /web/v1/df/episode/batch-create`）。
+ *
+ * 竞品 CLI 的载荷是 `{"items":[{"sort":1,"name":"第1集","s_script_id":"…"}]}`；
+ * `s_script_id` 是竞品「拆解结果 ID」，我方拆集结果直接落 episodes、没有该实体，
+ * 所以这里只声明三个我方真能消费的字段（多给的键会被 zod strip，不会静默改写语义）。
+ * 上限 10 与 `addEpisodes` 的 `Math.min(10, …)` 保持同一口径。
+ */
+const batchCreateEpisodesSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(80).optional(),
+        sort: z.number().int().min(1).max(999).optional(),
+        synopsis: z.string().max(4000).optional(),
+      }),
+    )
+    .min(1)
+    .max(10),
+});
+
 const publishSchema = z.object({
   title: z.string().trim().max(100).optional(),
   slice: z
@@ -300,6 +321,19 @@ export class ScriptController {
   async createEpisodes(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
     const count = Number((body as { count?: number } | null)?.count ?? 1);
     return this.script.addEpisodes(req.auth?.spaceId ?? "", id, count);
+  }
+
+  /**
+   * 第 71 批：批量建集（竞品 `POST /web/v1/df/episode/batch-create`；CLI `episode batch-create`）。
+   * 与上面按数量的接口并存：那个只表达「再建几集」，这个能逐集给标题 / 集号 / 梗概。
+   */
+  @Post("projects/:id/episodes/batch")
+  async batchCreateEpisodes(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    return this.script.batchCreateEpisodes(
+      req.auth?.spaceId ?? "",
+      id,
+      parseOrThrow(batchCreateEpisodesSchema, body ?? {}),
+    );
   }
 
   /** 复制为我的项目（示例作品体验，PRD 增补 §3.2） */
@@ -531,6 +565,18 @@ export class ScriptController {
     @Body() body: unknown,
   ) {
     return this.script.patchEpisode(req.auth?.spaceId ?? "", id, eid, parseOrThrow(episodePatchSchema, body));
+  }
+
+  /**
+   * 第 71 批：删除单集（竞品 `POST /web/v1/df/episode/delete`；CLI `episode delete EPISODE_ID`）。
+   *
+   * 竞品把 id 放在 body 里（端点 params 为空），我方按 REST 口径放路径 —— CLI 的
+   * `episode delete <EPISODE_ID>` 因此能直接映射成 `DELETE …/episodes/{episode_id}`。
+   * 级联清子表的顺序与「为什么不重排集号」见 `ScriptService.deleteEpisode` 的注释。
+   */
+  @Delete("projects/:id/episodes/:eid")
+  async deleteEpisode(@Req() req: AuthedRequest, @Param("id") id: string, @Param("eid") eid: string) {
+    return this.script.deleteEpisode(req.auth?.spaceId ?? "", id, eid);
   }
 
   @Patch("projects/:id/episodes/:eid/storyboards/:sid")

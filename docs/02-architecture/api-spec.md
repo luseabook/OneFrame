@@ -3000,3 +3000,119 @@ return JSON.parse(guarded) as unknown;
   若某字段服务端要求 string 而值小于安全整数（如 `episode_id=12`），仍会以 number 发出。当前 zod 层对此类字段用
   `z.union([z.string(), z.number()])` 兜住；这条边界登记在此，待有字段真的踩到时再改（改成「按 schema 判类型」需要 CLI 知道服务端 schema，
   属于更大的改造）。
+
+---
+
+## 17.29 剧集删除与批量建集：8 张 RESTRICT 外键 + 「不重排」「不回收空洞」（第 71 批）
+
+### 29.1 为什么现在才做
+
+`apps/cli/src/registry.ts` 里 `episode delete` 与 `episode batch-create` 一直是 `todo(...)`，`reason` 原文是
+「我方无 DELETE episodes；不要的集用 `PATCH /projects/:id/episodes/:eid` 清空内容」与「我方只支持按数量新增
+`--set count=N`」。
+
+骨架命令**没有 `path` 字段**，所以第 65/66/67 批那套「CLI 命令路径 ↔ 后端路由」门禁（`registry-routes.spec.ts`、
+`web-api-contract.spec.ts`）覆盖不到它们 —— 唯一对外信息就是这句 `reason`。竞品对这两件事都有端点：
+
+| 竞品端点 | 我方实现 | 证据 |
+|---|---|---|
+| `POST /web/v1/df/episode/delete`（`ApiDfEpisodeDeletePOST`；path 里没有 `:ep_id` → id 在 body） | `DELETE /v1/projects/:project_id/episodes/:episode_id` | 竞品 CLI `commands/episode.md:21` `reelmate episode delete EPISODE_ID` |
+| `POST /web/v1/df/episode/batch-create`（`ApiDfEpisodeBatchCreatePOST`） | `POST /v1/projects/:project_id/episodes/batch` | 竞品 CLI `commands/episode.md:142` `batch-create --set @episodes.json` |
+
+两个竞品端点的 `requestDataJsonSchema` 都是空对象 → **字段名只有路由形状、没有字段级证据**，所以入参是我方自定的
+（`packages/shared/src/schemas/pipeline.ts` 的注释里登记「待取证」）。竞品把 id 放 body，我方按 REST 口径放路径 ——
+这样 `episode delete <EPISODE_ID>` 能一对一映射，不需要在 CLI 侧造一层 body。
+
+### 29.2 `DELETE /v1/projects/:project_id/episodes/:episode_id`
+
+指向 `episodes.id` 的外键共 **8 张表，全部 RESTRICT**：不先清子表，删除会被数据库挡下（表现为 500）。
+且 `storyboard_assets` 引用的是 `storyboards.id`（不是 episode），层级多一层。
+
+| 顺序 | 表 | 引用目标 |
+|---:|---|---|
+| 1 | `storyboard_assets` | `storyboards.id`（先按本集分镜 id 删） |
+| 2 | `storyboards` | `episodes.id` |
+| 3 | `episode_resources` | `episodes.id` |
+| 4 | `export_jobs` | `episodes.id` |
+| 5 | `project_timelines` | `episodes.id`（另有 `uq_project_timelines_episode`） |
+| 6 | `timeline_exports` | `episodes.id` |
+| 7 | `extraction_tasks` | `episodes.id` |
+| 8 | `director_scenes` | `episodes.id` |
+| 9 | `timeline_publications` | `episodes.id` |
+| 10 | `episodes` | —（本体） |
+
+整个序列在一个 `db.transaction` 内，最后 touch `script_projects.updated_at`。
+
+响应：
+
+```json
+{ "deleted": true, "episode_id": "108763409815617536", "ep_no": 1, "cleared": { "storyboards": 2 } }
+```
+
+`cleared` 是本批新增的诊断字段：调用方据此确认「删的是不是我以为的那一集」（尤其 CLI 里一次只传一个 id 时）。
+
+错误码：
+
+| 场景 | code | msg |
+|---|---|---|
+| `:episode_id` 不是数字 | 400101 | `invalid episode id`（field `eid`） |
+| 项目不在本空间 / 不存在 | 400102 | `project not found` |
+| 该集不存在、不属于该项目、或已被删 | 400102 | `episode not found` |
+
+### 29.3 `POST /v1/projects/:project_id/episodes/batch`
+
+请求（`items` **1..10** 条，上限与按数量建集的 `Math.min(10, …)` 同一口径）：
+
+```json
+{ "items": [ { "name": "第 3 集", "sort": 3, "synopsis": "可选" } ] }
+```
+
+规则：
+
+| 规则 | 行为 | 理由 |
+|---|---|---|
+| 给了 `sort` | 用它当 `ep_no`；**撞号 → 400101** `ep_no N already used in this project`（field `sort`） | 静默改号 = 用户以为建在第 5 集、实际第 6 集 |
+| 没给 `sort` | 排到当前**最大集号之后**，中间空洞**不回收** | 与「删集不重排」同一套口径，否则「删了第 2 集 → 下次建集默默占 2 号」，外部引用会指向另一集 |
+| 没给 `name` | 标题回落 `第N集` | 与按数量建集的默认标题一致 |
+| `sort` 不在 1..999 | 400101（zod） | |
+| `items` 空 / 超 10 条 | 400101（zod） | |
+
+响应：`{ "created": [ { "id": "…", "ep_no": 3, "title": "第 3 集" } ] }`。
+
+**与竞品的两处语义差（明确不假装对齐）**：
+
+1. 竞品 item 里的 `s_script_id`（「拆解结果 ID」）我方**不接收** —— 我方拆集结果直接落 `episodes`，没有「拆解结果」这个实体；
+   为了对齐字段名而造一张空表是假实现。
+2. 竞品返回 `succeeded`/`failed`/`unconfirmed` 三态（异步时 `unconfirmed[]` 里的项不算完成）。我方是**同步**实现：
+   整批落库或整体抛错，没有「未确认」中间态，故只返回 `created`。
+
+### 29.4 不重排集号
+
+删掉第 2 集后，剩下的仍是 1、3、4…（留空洞）。竞品文档只写「删除该集」，**没有重排证据**；而重排会让外部已引用的
+「第 N 集」漂移 —— 是破坏性副作用。空洞由 `sort` 显式指定（或排到末尾）来绕，不靠自动重排。
+
+### 29.5 测试与验证
+
+`apps/api/test/episode-edit.spec.ts`（6 例）：
+
+| # | 钉住什么 |
+|---|---|
+| 1 | `outline/generate` 建出的集号是 1..N 紧密序列（基线） |
+| 2 | 批量建集：给 `sort` 用它、不给排到末尾（不回收空洞）、无 `name` 回落 `第N集` |
+| 3 | 撞号 / 空数组 / 超 10 条 / 空白标题 → 400101，且**失败不落库** |
+| 4 | 删集连带清 `storyboards` / `storyboard_assets` / `episode_resources`；别集不受影响；被删的集再查 400102 |
+| 5 | 重复删 / `abc` / 不存在的 id / 跨空间 → 400101 或 400102（不出 500） |
+| 6 | 删集留空洞、其余集号原样；再批量建集仍从最大号往后排 |
+
+规模：端点 706 → **708**；api 测试 79 文件 897 例 → **80 文件 903 例**；全库用例 1,275 → **1,281**；
+CLI 命令 202 不变、ready 154 → **156**、骨架 48 → **46**；`verify-round.ps1` **12/12 全绿**。
+
+### 29.6 诚实边界
+
+- 本批**不加分**（全站仍 202.45/206 = 98.3%，剩余 3.55）：这两条能力此前只记在 #9 的「48 条骨架」里，而 #9 的台账是
+  1% 整数粒度（0.24 = 8×3%），48→46 表达不出来；#3 剧集分镜的 0.15 缺口是 `quality-check` 评分口径，本批能力不在其中。
+- **降级（集号重排）没有实现**：竞品是否有「删集后重排」的开关无从取证，故只做「不重排」这一种确定行为。
+- **批量建集不校验项目状态**（例如归档项目也能建集）：竞品文档没写这条约束，我方沿用 `addEpisodes` 的现状（同样不校验），
+  这条差异登记在此，等有明确产品口径再收紧。
+- 删集**不回收**分镜产出的 `tasks` 记录：`tasks.episode_id` 在 schema 里没有外键（历史设计），任务记录按 90 天过期清理；
+  本批不去猜「是否该级联删任务」，避免误删仍在跑的生成任务。

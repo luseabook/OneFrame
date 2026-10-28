@@ -286,8 +286,14 @@ const episodeCommands: CommandSpec[] = [
   http("episode", "split", "POST", "projects/{project_id}/episodes/split", "按剧本文本拆集", "commands/episode.md:160", {
     write: true,
   }),
-  todo("episode", "delete", "删除剧集", "commands/episode.md:126", "我方无 DELETE episodes；不要的集用 PATCH /projects/:id/episodes/:eid 清空内容，整项目用 workspace delete（归档）"),
-  todo("episode", "batch-create", "批量建集", "commands/episode.md:142", "我方只支持按数量新增：`oneframe episode create --workspace <SP> --set count=N`（无逐集标题载荷端点）"),
+  http("episode", "delete", "DELETE", "projects/{project_id}/episodes/{episode_id}", "删除剧集（连同该集的分镜、时间线、导出与资源引用一起删；不重排集号）", "commands/episode.md:126", {
+    slots: ["episode_id"],
+    positionals: [{ display: "EPISODE_ID", desc: "剧集 ID", required: true }],
+    write: true,
+  }),
+  http("episode", "batch-create", "POST", "projects/{project_id}/episodes/batch", "批量建集，逐集给标题/集号（`--set @episodes.json`，items 每项 name/sort/synopsis）", "commands/episode.md:142", {
+    write: true,
+  }),
   http("episode", "split-list", "GET", "projects/{project_id}/matrix", "查看拆集结果（= 项目剧集矩阵，拆集结果直接落 episodes）", "commands/episode.md:176", {
     transform: "episodesOfProject",
     }),

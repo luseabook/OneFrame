@@ -2,8 +2,11 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   assets,
+  directorScenes,
+  episodeResources,
   episodes,
   exportJobs,
+  extractionTasks,
   freezeCredits,
   models,
   projectAssets,
@@ -15,6 +18,7 @@ import {
   tasks,
   teamGroups,
   timelineExports,
+  timelinePublications,
 } from "@app/db";
 import {
   AppError,
@@ -681,6 +685,115 @@ export class ScriptService {
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "episode not found");
     return episodeDto(row);
+  }
+
+  /**
+   * 第 71 批：删除单集。
+   *
+   * 竞品证据：`POST /web/v1/df/episode/delete`（`ApiDfEpisodeDeletePOST`，params 里没有 id，
+   * 说明集 id 在 body）；CLI 侧竞品 `commands/episode.md:21` 是 `reelmate episode delete EPISODE_ID`。
+   *
+   * 指向 `episodes.id` 的外键一共 8 张表，全部是 RESTRICT —— 不先清子表，删集会被数据库直接挡下。
+   * 清表顺序按依赖从叶子往根走；`storyboard_assets` 引用的是 `storyboards.id`（不是 episode），
+   * 所以要先按本集的分镜 id 把它的行删掉（与第 68 批删分镜同一套口径）。
+   *
+   * **不重排 ep_no**：竞品文档只写「删除该集」，没有重排证据；重排还会让外部已引用的
+   * 「第 N 集」漂移，是破坏性副作用。留空洞是两端一致的可见结果。
+   */
+  async deleteEpisode(spaceId: string, projectId: string, episodeId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const episode = await this.findEpisode(project.id, episodeId);
+    const cleared = await db.transaction(async (tx) => {
+      const shots = await tx
+        .select({ id: storyboards.id })
+        .from(storyboards)
+        .where(eq(storyboards.episodeId, episode.id));
+      const shotIds = shots.map((row) => row.id);
+      if (shotIds.length > 0) {
+        await tx.delete(storyboardAssets).where(inArray(storyboardAssets.storyboardId, shotIds));
+      }
+      await tx.delete(storyboards).where(eq(storyboards.episodeId, episode.id));
+      // 下面 7 张表此前没有任何删除路径，是本批第一次清出来的；全部 references episodes.id。
+      await tx.delete(episodeResources).where(eq(episodeResources.episodeId, episode.id));
+      await tx.delete(exportJobs).where(eq(exportJobs.episodeId, episode.id));
+      await tx.delete(projectTimelines).where(eq(projectTimelines.episodeId, episode.id));
+      await tx.delete(timelineExports).where(eq(timelineExports.episodeId, episode.id));
+      await tx.delete(extractionTasks).where(eq(extractionTasks.episodeId, episode.id));
+      await tx.delete(directorScenes).where(eq(directorScenes.episodeId, episode.id));
+      await tx.delete(timelinePublications).where(eq(timelinePublications.episodeId, episode.id));
+      await tx.delete(episodes).where(eq(episodes.id, episode.id));
+      await tx
+        .update(scriptProjects)
+        .set({ updatedAt: new Date() })
+        .where(eq(scriptProjects.id, project.id));
+      return { storyboards: shotIds.length };
+    });
+    return { deleted: true, episode_id: String(episode.id), ep_no: episode.epNo, cleared };
+  }
+
+  /**
+   * 第 71 批：批量建集。
+   *
+   * 竞品证据：`POST /web/v1/df/episode/batch-create`；竞品 CLI `commands/episode.md:142`
+   * 的入参是 `--set @episodes.json`，`items` 每项 `{"sort":1,"name":"第1集","s_script_id":"…"}`，
+   * 返回 `succeeded`/`failed`/`unconfirmed`（异步时 `succeeded[]` 只含已确认项）。
+   *
+   * 我方是同步实现：要么整批落库、要么抛错，没有 `unconfirmed` 这种中间态；
+   * `s_script_id`（竞品「拆解结果 ID」）在我方没有对应实体（拆集结果直接落 episodes），
+   * 故**不接收该字段**（zod 拒收未知字段会报错，故在 controller 里只声明三个已知字段）。
+   * `sort` 给了就用它（撞号 400101，不静默改号）；不给则排到当前最大集号之后，标题回落 `第N集`。
+   */
+  async batchCreateEpisodes(
+    spaceId: string,
+    projectId: string,
+    input: { items: Array<{ name?: string; sort?: number; synopsis?: string }> },
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const existing = await db
+      .select({ epNo: episodes.epNo })
+      .from(episodes)
+      .where(eq(episodes.projectId, project.id));
+    const used = new Set(existing.map((row) => row.epNo));
+    let nextNo = existing.reduce((max, row) => Math.max(max, row.epNo), 0) + 1;
+    const prepared: Array<{ epNo: number; title: string; synopsis: string | null }> = [];
+    for (const item of input.items) {
+      let epNo: number;
+      if (item.sort !== undefined) {
+        if (used.has(item.sort)) {
+          throw new AppError(ErrorCode.INVALID_PARAM, `ep_no ${item.sort} already used in this project`, {
+            field: "sort",
+          });
+        }
+        epNo = item.sort;
+      } else {
+        while (used.has(nextNo)) nextNo += 1;
+        epNo = nextNo;
+      }
+      used.add(epNo);
+      prepared.push({ epNo, title: item.name?.trim() || `第${epNo}集`, synopsis: item.synopsis ?? null });
+    }
+
+    const created = await db.transaction(async (tx) => {
+      const rows: Array<{ id: string; ep_no: number; title: string }> = [];
+      for (const item of prepared) {
+        const idBig = newId();
+        await tx.insert(episodes).values({
+          id: idBig,
+          projectId: project.id,
+          epNo: item.epNo,
+          title: item.title,
+          synopsis: item.synopsis,
+          status: 1,
+        });
+        rows.push({ id: String(idBig), ep_no: item.epNo, title: item.title });
+      }
+      await tx
+        .update(scriptProjects)
+        .set({ updatedAt: new Date() })
+        .where(eq(scriptProjects.id, project.id));
+      return rows;
+    });
+    return { created };
   }
 
   async generateScriptDraft(

@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 15 条命令：可用 11 条、骨架 4 条。
+共 15 条命令：可用 13 条、骨架 2 条。
 
 ## `episode list`
 
@@ -66,26 +66,26 @@ oneframe episode split [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] 
 
 ## `episode delete`
 
-删除剧集
+删除剧集（连同该集的分镜、时间线、导出与资源引用一起删；不重排集号）
 
 ```text
-oneframe episode delete [--json]
+oneframe episode delete <EPISODE_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无 DELETE episodes；不要的集用 PATCH /projects/:id/episodes/:eid 清空内容，整项目用 workspace delete（归档）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`DELETE projects/{project_id}/episodes/{episode_id}`
 - 契约证据：`commands/episode.md:126`
 
 ## `episode batch-create`
 
-批量建集
+批量建集，逐集给标题/集号（`--set @episodes.json`，items 每项 name/sort/synopsis）
 
 ```text
-oneframe episode batch-create [--json]
+oneframe episode batch-create [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方只支持按数量新增：`oneframe episode create --workspace <SP> --set count=N`（无逐集标题载荷端点）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST projects/{project_id}/episodes/batch`
 - 契约证据：`commands/episode.md:142`
 
 ## `episode split-list`
