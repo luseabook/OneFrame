@@ -1,0 +1,2 @@
+ALTER TABLE "canvases" ADD COLUMN "cover_asset_id" bigint;--> statement-breakpoint
+ALTER TABLE "canvases" ADD CONSTRAINT "canvases_cover_asset_id_assets_id_fk" FOREIGN KEY ("cover_asset_id") REFERENCES "public"."assets"("id") ON DELETE set null ON UPDATE no action;

@@ -898,6 +898,22 @@ export const canvases = pgTable(
       .references(() => users.id),
     /** 「钉住节点」单选（routes.txt:402 为单值语义） */
     pinnedNodeId: bigint("pinned_node_id", { mode: "bigint" }),
+    /**
+     * 画布封面（人工指定，`assets.id`）。
+     *
+     * 证据：竞品「全部项目」列表项返回 `cover` / `covers[]` 两个字段，且封面是
+     * **file_id 而不是 URL**（`Cp3a6_yk.js` 的 `_[...]` 调用拿到的是 `t.file_id`，
+     * 提交走 `POST /script_project/edit { cover: file_id, sp_id }`；
+     * 展示侧 `q(e) = e.cover || U(e)[0] || ""`，即 `cover` 优先、否则取 `covers` 首图）。
+     *
+     * `null` = 未人工指定，投影时按"画布内最近一次图片节点产物"自动兜底
+     * （`works.service` 里与工坊侧 `cover_uri` 同一套 `assets.meta->>'task_id'` 口径）。
+     * 存 `assets.id` 而不是 storage key：删素材后外键 `set null` 会自动退回自动兜底，
+     * 而 key 变成一个永远 404 的死地址。
+     */
+    coverAssetId: bigint("cover_asset_id", { mode: "bigint" }).references(() => assets.id, {
+      onDelete: "set null",
+    }),
     lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),

@@ -44,7 +44,12 @@ const props = defineProps<{
   width: number;
 }>();
 
-const emit = defineEmits<{ close: []; "download-created": [listId: string] }>();
+const emit = defineEmits<{
+  close: [];
+  "download-created": [listId: string];
+  /** 把选中节点的图片产物设为画布封面（第 62 批）；父组件负责调 API */
+  "set-cover": [nodeId: string];
+}>();
 
 const ed = props.editor;
 
@@ -2289,6 +2294,18 @@ function toggleSec(key: string): void {
             <img v-if="isImageResult()" :src="resultUri()!" :alt="selectedNode?.name ?? t('canvasUi.resultAlt')" loading="lazy" />
             <video v-else :src="resultUri()!" controls preload="metadata" />
             <p class="cv-hint">{{ t("canvasUi.lastResult") }}</p>
+            <!-- 第 62 批：竞品封面是用户指定的 file_id，画布产物天然就是候选图 -->
+            <Button
+              v-if="isImageResult()"
+              size="sm"
+              variant="ghost"
+              block
+              class="insp-set-cover"
+              :disabled="isLocalNode() || !selectedNode?.id"
+              @click="emit('set-cover', selectedNode?.id ?? '')"
+            >
+              {{ t("canvasUi.setAsCover") }}
+            </Button>
           </div>
 
           <Button

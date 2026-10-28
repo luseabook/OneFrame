@@ -2310,3 +2310,99 @@ bundle 目录的 **606 个 js** 全量扫 `mcp`，只有 **3 处命中**：
 - **`skill path` 只报路径、不替用户拷**：与竞品契约一致（它也只打印路径）。
 - **骨架命令的文档照写**：`commands/*.md` 里明确标 `ready: false` 与原因，
   让 Agent 知道"这条还没实现"而不是"我调错了"。
+
+### 17.21 画布封面与「全部项目」元信息：迁移 0039 与 `POST /canvas/canvases/:canvas_id/cover`（第 62 批）
+
+#### 21.1 为什么现在才做：竞品有封面，我方恒为 `null`
+
+竞品证据（Vite 产物 `_acceptance/competitor_endpoints.tsv`、`DDLTpMu7.js`、`Cp3a6_yk.js`）：
+
+```
+GET /web/v1/df/script_project/list
+    queryNames = page, page_size, name, group_id, process_status, sp_source,
+                 sp_type, project_category, project_subcategory, project_categories
+    列表项    = sp_id, name, cover, covers[], updated_at, created_at, creator_nick,
+                 group_id, group_name, sp_source, sp_type, project_category, project_subcategory
+Cp3a6_yk.js  function N(e){ return { cover: e.cover||"", covers: Array.isArray(e.covers)? e.covers.filter(a=>!!a) : [] } }
+Cp3a6_yk.js  function U(e){ const {cover,covers}=N(e); return covers.length>0 ? covers : (cover? [cover] : []) }
+Cp3a6_yk.js  function q(e){ const a=e.cover||""; return a || U(e)[0] || "" }
+Cp3a6_yk.js  设封面  = POST /df/script_project/edit { cover: <file_id>, sp_id }
+Cp3a6_yk.js  改名    = POST /df/script_project/edit { name, sp_id, only_name: true }
+Cp3a6_yk.js  换分组  = POST /df/script_project/:sp_id/group/edit
+```
+
+两条关键事实：① 封面是 **file_id**（不是 URL）；② 展示口径是 `cover || covers[0] || ""`，即"单封面 + 多图列表"并存。
+
+我方 `/works` 的画布行此前 `cover_uri` **恒为 `null`**（`works.service.ts` 的 `queryCanvas` 只统计 `node_count/running_nodes/failed_nodes`），前端画布卡片只渲染空占位——用户面上就是"画布项目永远没有封面"，而竞品有。
+
+#### 21.2 数据层：迁移 0039
+
+```sql
+ALTER TABLE "canvases" ADD COLUMN "cover_asset_id" bigint;
+ALTER TABLE "canvases" ADD CONSTRAINT "canvases_cover_asset_id_assets_id_fk"
+  FOREIGN KEY ("cover_asset_id") REFERENCES "public"."assets"("id") ON DELETE set null;
+```
+
+| 决定 | 理由 |
+|---|---|
+| 存 `cover_asset_id`，不存 URL | URL 带签名与对象 key，素材删除或存储换域名后就是死链；外键 `on delete set null` 让"人工封面没了"自动退回自动兜底，而不是留一个 404 的 `img` |
+| `null` = 未人工指定 | 与"显式清空"语义一致：清空写 `null` 后回落自动兜底，而不是显示空白 |
+
+迁移总数 39 → **40**（`0039_quiet_carlie_cooper.sql`），表数仍 112。
+
+#### 21.3 端点数：+1（不塞进 `PATCH /canvas/canvases/:id`）
+
+| 方法 | 路径 | Body | 语义 |
+|---|---|---|---|
+| POST | `/v1/canvas/canvases/:canvas_id/cover` | `{ node_id?: string \| null, asset_id?: string \| null }` | 设/清封面。`node_id` 优先 → 解析该节点产物；否则用 `asset_id`；**都不传 = 清除**（回落自动兜底）。响应 `{ cover_asset_id, cover_uri, covers }` |
+
+为什么独立端点：`PATCH /canvas/canvases/:id` 的改名要带乐观锁 `version`（并发编辑冲突检测），封面与画布内容无关，塞进去会让"只想换个封面"也必须提交版本号、误触发冲突条。
+
+三档取值与错误码：
+
+| 输入 | 行为 | 失败 |
+|---|---|---|
+| `node_id` | 查 `canvas_nodes.task_id` → `assets where source_task_id = taskId and kind='image' and deleted_at is null order by id desc limit 1` | 节点无产物 → **400102** `node has no produced image asset yet` |
+| `asset_id` | 正则 `/^\d{1,20}$/` 校验后查 `assets`（限同 space、未删） | 非数字 → **400101**；查不到/跨 space → **400102** `asset not found` |
+| 都不传 | 写 `cover_asset_id = null`，读路径回落自动兜底 | — |
+
+自动兜底（`autoCoverAssetId`）的 join 方向只有一条：`canvas_nodes.task_id` → `assets.source_task_id` —— 产物是**任务**写的，不是节点写的。
+
+#### 21.4 `/works` 的响应字段扩展（无新端点）
+
+画布行（`kind=canvas`）新增/补齐：
+
+| 字段 | 来源 | 说明 |
+|---|---|---|
+| `cover_uri` | 人工封面优先，否则自动兜底；`storage.signDownload(uri, 3600)` | 原来恒为 `null` |
+| `covers[]` | `cover_uri ? [cover_uri] : []` | 对齐竞品 `covers[]` 形状；我方是单封面，**不伪造多图** |
+| `creator_nick` | `users.nickname`（`canvases.owner_user_id`） | 竞品同名 |
+| `last_edited_at` | `canvases.last_edited_at` | 竞品 `updated_at`；前端优先用它排序/显示 |
+
+工坊行（`kind=workshop`）同样补 `covers[]`、`creator_nick`、`last_edited_at`，但后两者恒为 `null`：
+
+> `script_projects` 没有"创建人"字段。回填空间 owner 等于把"空间所有者"伪装成"项目创建人"，是伪造数据，不做。
+
+#### 21.5 查询参数：接两个竞品别名，明确拒绝六个
+
+| 竞品参数 | 我方 | 行为 |
+|---|---|---|
+| `name` | `keyword` | **别名接住**；两个都给时 `name` 优先 |
+| `process_status=-1` | `status=all` | **别名接住**（竞品 `-1` = 全部） |
+| `process_status` 其它值 | — | **400101**：语义竞品前端未暴露枚举，不外推 |
+| `group_id` / `sp_source` / `sp_type` / `project_category` / `project_subcategory` / `project_categories` | 无对应维度 | **zod 拒绝**，并在 `07-plan` 登记为口径差异 |
+
+拒绝而不是忽略的理由：静默忽略会让调用方以为筛过了，拿到的是没筛的全集——比报错更危险。
+
+#### 21.6 测试
+
+`apps/api/test/works-aggregate.spec.ts` 6 → **9 例**：
+
+1. 无人工封面时自动取"画布内最近一次图片节点产物"，`/works` 返回签名后的 `cover_uri` 且 `covers` 恰为 `[cover_uri]`；
+2. `POST .../cover` 人工指定 → 优先；`node_id` → 解析到该节点产物；`{}` 清除 → 回落自动；跨 space → 400102；`"not-a-number"` → 400101；`"9999999999"` → 400102；
+3. 参数别名：`name=` 命中目标项目、`process_status=-1` 含归档、`process_status=1` → 400101。
+
+#### 21.7 诚实边界
+
+- 项目分组（`group_id`/`group_name` + `POST /df/script_project/:sp_id/group/edit`）与五档分类（`project_category` = SHORT_FILM/DRAMA/FILM，`project_subcategory` = ALL/AI_SHORT_FILM/AI_AD_DRAMA/AI_DRAMA/VIDEO_REDRAW，证据已取到）**本批未做**——所以 #5 只从 90% → 94%，并把这两项据实从"卡竞品证据"改记为 A 类"待排期 0.18"（见 `07-plan` §3.5）。
+- 竞品"封面可多图（`covers[]`）"只做了形状兼容，没有多封面选择 UI；我方语义是单封面 + 自动兜底。

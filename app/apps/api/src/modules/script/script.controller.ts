@@ -142,13 +142,30 @@ const clipAssetsSchema = z.object({
   clear: z.boolean().optional(),
 });
 
-/** 作品库查询：形态（tab/kind）+ 状态 + 时间 + 关键词 + 四态 */
+/**
+ * 作品库查询：形态（tab/kind）+ 状态 + 时间 + 关键词 + 四态。
+ *
+ * `name` / `process_status` 是竞品参数名兼容别名（第 62 批，证据：
+ * `GET /df/script_project/list` 的 queryNames 依次为 page、page_size、name、group_id、
+ * process_status、sp_source、sp_type、project_category、project_subcategory、project_categories）：
+ * - `name` 等价于 `keyword`（竞品叫 name，我方叫 keyword；两个都给时 name 优先）；
+ * - `process_status` 竞品用 `"-1"` 表示"全部"，我方对应 `status=all`；
+ *   其它取值（1/2/3…）的语义竞品前端没暴露枚举，不外推，直接 400101 并说明待取证。
+ * - `group_id` / `sp_source` / `sp_type` / `project_category` / `project_subcategory` /
+ *   `project_categories` 我方不接：没有项目分组与分类维度（我方用 `kind` 加 `project_mode`），
+ *   静默忽略会让调用方以为筛过了，比报错更危险 → 由 zod 拒绝，文档里登记为口径差异。
+ */
 const worksQuerySchema = z.object({
   tab: z.enum(["workshop", "canvas", "all"]).optional(),
   kind: z.enum(["workshop", "canvas"]).optional(),
   status: z.enum(["archived", "active", "all"]).optional(),
   state: z.enum(["draft", "producing", "ready", "archived"]).optional(),
   keyword: z.string().max(80).optional(),
+  name: z.string().max(80).optional(),
+  process_status: z
+    .string()
+    .regex(/^-1$/, { message: "only process_status=-1 (all) is supported; other values await evidence" })
+    .optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -194,9 +211,11 @@ export class ScriptController {
     return this.script.listWorks(req.auth?.spaceId ?? "", {
       tab: q.tab,
       kind: q.kind,
-      status: q.status,
+      // `process_status=-1`（竞品"全部"）等价于 `status=all`；两者都给时显式 status 优先
+      status: q.process_status === "-1" ? "all" : q.status,
       state: q.state,
-      keyword: q.keyword,
+      // `name` 是竞品参数名，等价 keyword
+      keyword: q.name ?? q.keyword,
       from: q.from,
       to: q.to,
       page: q.page ?? 1,

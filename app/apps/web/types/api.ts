@@ -133,6 +133,15 @@ export interface WorkDto extends ProjectDto {
   shot_count: number;
   done_count: number;
   cover_uri: string | null;
+  /**
+   * 竞品列表项给 `covers[]`（多封面），展示侧取 `cover || covers[0]`。
+   * 我方只有单封面，兼容形状恒为 `[cover_uri]` 或 `[]`（不伪造多图）。
+   */
+  covers?: string[];
+  /** 画布侧创建人昵称（竞品 `creator_nick`）；工坊侧无创建人字段 → null */
+  creator_nick?: string | null;
+  /** 画布侧最后编辑时间（`canvases.last_edited_at`）；工坊侧 null */
+  last_edited_at?: string | null;
   work_state: "draft" | "producing" | "ready" | "archived" | "canvas";
   /** ReelFlow：项目全部时间线片段时长之和（秒）；0 = 还没剪过 */
   timeline_duration_s?: number;

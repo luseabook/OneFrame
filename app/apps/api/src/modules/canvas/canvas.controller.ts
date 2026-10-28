@@ -18,6 +18,16 @@ const createCanvas = z.object({
   episode_id: z.string().optional(),
 });
 const renameCanvas = z.object({ title: z.string().min(1).max(60), version: z.number().int().optional() });
+/**
+ * 画布封面：`asset_id` 与 `node_id` 二选一；都不给 = 清除（回落到自动兜底）。
+ *
+ * 为什么不做成必填：清除是常见操作（"这张图不好看，换回自动"），
+ * 强制传 `asset_id: null` 会让前端为"没值"造一个假值。
+ */
+const coverCanvas = z.object({
+  asset_id: z.string().max(20).nullable().optional(),
+  node_id: z.string().max(20).nullable().optional(),
+});
 
 const nodeBase = z.object({
   node_type: z.string().min(1),
@@ -165,6 +175,19 @@ export class CanvasController {
   async remove(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string) {
     const c = this.ctx(req);
     return this.canvas.remove(c.spaceId, canvasId);
+  }
+
+  /**
+   * 设置 / 清除画布封面（第 62 批）。
+   *
+   * 放在 `POST /canvas/canvases/:id/cover` 而不是塞进 `PATCH canvases/:id`：
+   * ① 竞品就是独立动作（`POST /script_project/edit { cover, sp_id }`）；
+   * ② 改名要带乐观锁 version，设封面不该被画布版本号拖累（封面与画布内容无关）。
+   */
+  @Post("canvases/:canvas_id/cover")
+  async cover(@Req() req: AuthedRequest, @Param("canvas_id") canvasId: string, @Body() body: unknown) {
+    const c = this.ctx(req);
+    return this.canvas.setCover(c.spaceId, canvasId, parseOrThrow(coverCanvas, body ?? {}));
   }
 
   /** 整图提交（乐观锁 + 快照） */

@@ -39,6 +39,17 @@ export const useCanvasApi = () => {
 
     remove: (canvasId: string) => api.delete<{ ok: boolean }>(base(canvasId)),
 
+    /**
+     * 设置 / 清除画布封面（第 62 批）。
+     * 收 `node_id`（画布节点产物）或 `asset_id`（素材库）；都不传 = 清除，回落到自动兜底。
+     * 独立于 `rename`：封面与画布内容版本号无关，不该被乐观锁拖累。
+     */
+    setCover: (canvasId: string, input: { node_id?: string | null; asset_id?: string | null } = {}) =>
+      api.post<{ cover_asset_id: string | null; cover_uri: string | null; covers: string[] }>(
+        `${base(canvasId)}/cover`,
+        input,
+      ),
+
     /** 整图提交：乐观锁 + 整体替换 + 版本推进 + 写快照 */
     commit: (canvasId: string, payload: CommitPayload) =>
       api.post<CommitResult>(`${base(canvasId)}/commit`, payload),

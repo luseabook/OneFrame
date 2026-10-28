@@ -1,6 +1,7 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
+  assets,
   canvasEdges,
   canvasGroups,
   canvasNodes,
@@ -10,6 +11,7 @@ import {
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { RedisService } from "../../redis/redis.service";
+import { StorageService } from "../../storage/storage.service";
 
 /**
  * 画布（canvas）域服务 —— F1 契约 §12.1 / §14.4
@@ -62,7 +64,11 @@ function asSnowflake(v: string | null | undefined): bigint | null {
 
 @Injectable()
 export class CanvasService {
-  constructor(@Inject(RedisService) private readonly redis: RedisService) {}
+  constructor(
+    @Inject(RedisService) private readonly redis: RedisService,
+    // 封面是 storage key，读时签名成可访问 URL（与工坊侧 cover_uri 同一口径）
+    @Inject(StorageService) private readonly storage: StorageService,
+  ) {}
 
   // ── 画布本体 ─────────────────────────────────────────────
   async create(spaceId: string, userId: string, input: { title?: string; creation_mode?: number; episode_id?: string }) {
@@ -94,16 +100,26 @@ export class CanvasService {
       .from(canvases)
       .where(and(eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
     return {
-      list: rows.map((c) => ({
-        id: String(c.id),
-        title: c.title,
-        version: c.version,
-        creation_mode: c.creationMode,
-        episode_id: c.episodeId ? String(c.episodeId) : null,
-        pinned_node_id: c.pinnedNodeId ? String(c.pinnedNodeId) : null,
-        last_edited_at: c.lastEditedAt?.toISOString() ?? null,
-        updated_at: c.updatedAt.toISOString(),
-      })),
+      list: await Promise.all(
+        rows.map(async (c) => {
+          const cover = await this.coverOf(c.id, c.coverAssetId);
+          return {
+            id: String(c.id),
+            title: c.title,
+            version: c.version,
+            creation_mode: c.creationMode,
+            episode_id: c.episodeId ? String(c.episodeId) : null,
+            pinned_node_id: c.pinnedNodeId ? String(c.pinnedNodeId) : null,
+            last_edited_at: c.lastEditedAt?.toISOString() ?? null,
+            cover_asset_id: cover.assetId,
+            cover_uri: cover.uri,
+            // 竞品「全部项目」列表项同时给 cover 与 covers[]（`Cp3a6_yk.js`），
+            // 展示侧 `cover || covers[0]`；我方只有单封面，这里给兼容形状（不伪造多图）
+            covers: cover.uri ? [cover.uri] : [],
+            updated_at: c.updatedAt.toISOString(),
+          };
+        }),
+      ),
       total: cnt?.n ?? 0,
       page: p,
       page_size: ps,
@@ -113,6 +129,7 @@ export class CanvasService {
   /** 取画布详情（含节点/边/分组，供前端一次性渲染） */
   async get(spaceId: string, canvasId: string) {
     const canvas = await this.mustGetCanvas(spaceId, canvasId);
+    const cover = await this.coverOf(canvas.id, canvas.coverAssetId);
     const [nodes, edges, groups] = await Promise.all([
       db
         .select()
@@ -130,6 +147,9 @@ export class CanvasService {
         creation_mode: canvas.creationMode,
         episode_id: canvas.episodeId ? String(canvas.episodeId) : null,
         pinned_node_id: canvas.pinnedNodeId ? String(canvas.pinnedNodeId) : null,
+        cover_asset_id: cover.assetId,
+        cover_uri: cover.uri,
+        covers: cover.uri ? [cover.uri] : [],
       },
       nodes: nodes.map(this.toNodeDto),
       edges: edges.map((e) => ({
@@ -165,6 +185,119 @@ export class CanvasService {
     const canvas = await this.mustGetCanvas(spaceId, canvasId);
     await db.update(canvases).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(canvases.id, canvas.id));
     return { ok: true };
+  }
+
+  // ── 封面 ────────────────────────────────────────────────
+  /**
+   * 设置 / 清除画布封面。
+   *
+   * 证据：竞品把封面当 **file_id** 存，不是 URL ——
+   * `POST /df/script_project/edit { cover: file_id, sp_id }`（`Cp3a6_yk.js`），
+   * 列表侧返回 `cover` + `covers[]`，展示取 `cover || covers[0]`。
+   * 我方因此只收 `asset_id`（本空间素材 id）：收任意 URL 等于允许把外站图塞进封面，
+   * 且素材删除后会留死链；存 id 时外键 `on delete set null` 自动退回自动兜底。
+   *
+   * 另收 `node_id`：画布图片节点的产物就是"最近生成的那张图"，
+   * inspector 上点一下即可设封面，不必先去素材库翻 id。
+   * 两者都传时以 `node_id` 为准；都不传 / 传 null = 清除，回落到自动兜底。
+   */
+  async setCover(spaceId: string, canvasId: string, input: { asset_id?: string | null; node_id?: string | null }) {
+    const canvas = await this.mustGetCanvas(spaceId, canvasId);
+    let assetId: bigint | null = null;
+
+    if (input.node_id) {
+      assetId = await this.assetIdOfNode(canvas.id, input.node_id);
+      if (!assetId) {
+        // 明确区分"节点还没有产物"与"asset 不存在"：前者是用户点早了，后者是参数错
+        throw new AppError(ErrorCode.NOT_FOUND, "node has no produced image asset yet");
+      }
+    } else if (input.asset_id) {
+      if (!/^\d{1,20}$/.test(input.asset_id)) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid asset_id", { field: "asset_id" });
+      }
+      const [row] = await db
+        .select({ id: assets.id })
+        .from(assets)
+        .where(
+          and(
+            eq(assets.id, BigInt(input.asset_id)),
+            eq(assets.spaceId, BigInt(spaceId)),
+            isNull(assets.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
+      assetId = row.id;
+    }
+
+    await db
+      .update(canvases)
+      .set({ coverAssetId: assetId, updatedAt: new Date() })
+      .where(eq(canvases.id, canvas.id));
+    const cover = await this.coverOf(canvas.id, assetId);
+    return {
+      cover_asset_id: cover.assetId,
+      cover_uri: cover.uri,
+      covers: cover.uri ? [cover.uri] : [],
+    };
+  }
+
+  /** 人工封面优先；否则按"画布内最近一次图片节点产物"兜底（与工坊侧 cover_uri 同口径） */
+  private async coverOf(
+    canvasId: bigint,
+    coverAssetId: bigint | null,
+  ): Promise<{ assetId: string | null; uri: string | null }> {
+    const id = coverAssetId ?? (await this.autoCoverAssetId(canvasId));
+    if (!id) return { assetId: null, uri: null };
+    const [row] = await db
+      .select({ id: assets.id, uri: assets.uri })
+      .from(assets)
+      .where(and(eq(assets.id, id), isNull(assets.deletedAt)))
+      .limit(1);
+    if (!row) return { assetId: null, uri: null };
+    const uri = await this.storage.signDownload(row.uri, 3600).catch(() => null);
+    return { assetId: String(row.id), uri };
+  }
+
+  private async autoCoverAssetId(canvasId: bigint): Promise<bigint | null> {
+    const [row] = await db
+      .select({ id: assets.id })
+      .from(assets)
+      .innerJoin(canvasNodes, eq(canvasNodes.taskId, assets.sourceTaskId))
+      .where(
+        and(
+          eq(canvasNodes.canvasId, canvasId),
+          isNull(canvasNodes.deletedAt),
+          isNull(assets.deletedAt),
+          eq(assets.kind, "image"),
+        ),
+      )
+      .orderBy(desc(assets.id))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  private async assetIdOfNode(canvasId: bigint, nodeId: string): Promise<bigint | null> {
+    if (!/^\d{1,20}$/.test(nodeId)) return null;
+    const [node] = await db
+      .select({ taskId: canvasNodes.taskId })
+      .from(canvasNodes)
+      .where(
+        and(
+          eq(canvasNodes.id, BigInt(nodeId)),
+          eq(canvasNodes.canvasId, canvasId),
+          isNull(canvasNodes.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!node?.taskId) return null;
+    const [row] = await db
+      .select({ id: assets.id })
+      .from(assets)
+      .where(and(eq(assets.sourceTaskId, node.taskId), eq(assets.kind, "image"), isNull(assets.deletedAt)))
+      .orderBy(desc(assets.id))
+      .limit(1);
+    return row?.id ?? null;
   }
 
   // ── 节点 ────────────────────────────────────────────────

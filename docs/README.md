@@ -126,6 +126,69 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.16 · 第 62 批：#5 全部项目补「画布封面」，并把「项目分组/分类」从"卡证据"改记为"待排期" · 2026-10-28）
+
+> 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.5（同一批；本文件与主台账各有一套编号，勿混）。
+> **这批加分**：201.96 → **202.08/206 = 98.1%**，剩余 3.92（#5 90% → 94%，+0.12）。
+
+### 一、这批补的是真缺口：画布项目「永远没有封面」
+
+用户面上最直观的差别在这里——竞品的「全部项目」列表里，每个画布项目都有缩略图；我方的画布卡片**只渲染一个空占位**。不是样式没写，是**后端根本不给**：
+
+```ts
+// works.service.ts（本批前）queryCanvas 的 CTE 只统计三个数
+merge_row.node_count, merge_row.running_nodes, merge_row.failed_nodes
+// DTO 里直接写死
+cover_uri: null,
+```
+
+竞品证据（Vite 产物，`_acceptance/competitor_endpoints.tsv` 与两个 mapper 文件）：
+
+```
+GET  /web/v1/df/script_project/list
+     queryNames = page, page_size, name, group_id, process_status, sp_source,
+                  sp_type, project_category, project_subcategory, project_categories
+     响应字段  = sp_id, name, cover, covers[], updated_at, created_at, creator_nick,
+                  group_id, group_name, sp_source, sp_type, project_category, project_subcategory
+Cp3a6_yk.js  function q(e){ const a=e.cover||""; return a || U(e)[0] || "" }   // cover || covers[0]
+Cp3a6_yk.js  设封面 = POST /df/script_project/edit { cover: <file_id>, sp_id }
+```
+
+注意 `cover` 是 **file_id**，不是 URL。这一条决定了落库形状。
+
+### 二、三个不显然的设计决定
+
+| 决定 | 为什么不能图省事 |
+|---|---|
+| 存 `cover_asset_id`（外键 `on delete set null`），不存 URL | URL 里带签名/对象 key，素材被删或存储换域名后就是死链；外键 `set null` 让"人工指定的封面没了"自动退回自动兜底，而不是留一个 404 的 `img` |
+| 三档取值：人工 `asset_id` → 节点 `node_id` → 自动兜底 | 竞品只有一档（显式 file_id）。我方画布是节点图，"这张图画布当封面"最自然的动作是**在检查器里对当前节点点一下**，所以支持 `node_id`；不传任何参数=清除，清除后回落到"画布内最近一次图片节点产物"，而不是变空白 |
+| 独立端点 `POST /canvas/canvases/:id/cover`，不塞进 `PATCH canvases/:id` | `PATCH` 改名要带乐观锁 `version`（并发编辑冲突检测）。封面与画布内容无关，塞进去会让"只想换个封面"也必须提交版本号，冲突条误触发 |
+
+自动兜底的 SQL 只有一个 join 方向：`canvas_nodes.task_id` → `assets.source_task_id`（产物是任务写的，不是节点写的）。`works.service.ts` 里则是同一逻辑的 CTE 子查询，且 **`order by (a.id = c.cover_asset_id) desc, a.id desc`** —— 人工封面永远排第一。
+
+### 三、顺手补齐的竞品参数名（以及**明确拒绝**的 6 个）
+
+竞品叫 `name`，我方叫 `keyword`；竞品用 `process_status=-1` 表示"全部"，我方是 `status=all`。两个都当别名接住了，并有用例钉死。
+
+剩下 6 个（`group_id`/`sp_source`/`sp_type`/`project_category`/`project_subcategory`/`project_categories`）**没有接**：我方项目没有"分组"和"分类"维度。处理方式不是"静默忽略"，而是 **zod 直接拒绝**：
+
+> 静默忽略比报错更危险——调用方会以为筛过了，拿到的是没筛的全集。
+
+### 四、验证
+
+| 层 | 内容 |
+|---|---|
+| api 测试（`works-aggregate.spec.ts` 6 → 9 例） | ① 画布无人工封面时自动取最近图片节点产物，`/works` 返回**签名后**的 `cover_uri` 且 `covers` 恰为 `[cover_uri]`；② 人工指定 → 优先；节点指定 → 解析到该节点产物；`{}` 清除 → 回落自动；跨 space → 400102；非法 id → 400101；③ 参数别名 `name`/`process_status=-1` 生效、`process_status=1` → 400101 |
+| 手工核对 | `node_count` 从 2 变 3（新增一个产物节点）后，原有跨域投影断言与 SQL count 断言**同步改 3**，不放过"顺手放宽断言" |
+| 全站总闸 | `pwsh _acceptance/verify-round.ps1` → 12/12 全绿 |
+
+### 五、诚实边界：这批**没有**打到 100%
+
+- 工坊项目没有"创建人"字段 → `creator_nick` 明确返回 `null`，**不拿空间 owner 冒充项目创建人**。
+- 项目分组（`group_id`/`group_name` + `POST /df/script_project/:sp_id/group/edit`）与五档分类（`project_category`/`project_subcategory`，两项枚举原文已取到）**本批没做**。所以 #5 只从 90% → **94%**；同时把这些从"卡竞品证据"**据实改记**为 A 类"待排期 0.18"（§3.5），因为这批证明证据已经在手、不卡任何人。
+
+---
+
 ## 变更登记（v6.15 · 第 61 批：#9 CLI/MCP 补 Agent 分发通道 `skill-path` + 随包 Skill，并纠正一条写错多轮的「MCP 缺口」· 2026-10-28）
 
 > 批次台账见 `07-plan/implement-progress-vs-reelmate.md` §9 v8.4（同一批；本文件与主台账各有一套编号，勿混）。

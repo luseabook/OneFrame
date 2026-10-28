@@ -526,6 +526,27 @@ async function onRename(next: string): Promise<void> {
   }
 }
 
+// ── 画布封面（第 62 批）────────────────────────────────
+/**
+ * 把某个图片节点的产物设为画布封面。
+ *
+ * 为什么由父组件调 API 而不是 inspector 自己调：封面是**画布级**属性（一画布一个封面），
+ * inspector 只认识选中的节点；放父层以后要加"从素材库选封面"也只用改这一处。
+ * 不推进 `version`：封面与画布内容无关，不该让正在编辑的人遇到 746002。
+ */
+async function onSetCover(nodeId: string): Promise<void> {
+  if (!nodeId) return;
+  try {
+    await api.setCover(canvasId.value, { node_id: nodeId });
+    toast.success(t("canvasUi.coverSaved"));
+  } catch (e) {
+    const err = e as { code?: number; message?: string };
+    // 节点刚生成还没落产物时后端给 400102；这不是故障，给可执行提示
+    if (err.code === 400102) toast.error(t("canvasUi.coverNoResult"));
+    else toast.error(err.message || t("canvasUi.coverFailed"));
+  }
+}
+
 // ── 历史版本 ────────────────────────────────────────────
 async function openHistory(): Promise<void> {
   historyOpen.value = true;
@@ -941,6 +962,7 @@ onUnmounted(() => {
           :width="inspectorWidth"
           @close="inspectorOpen = false"
           @download-created="onDownloadCreated"
+          @set-cover="onSetCover"
         />
         <!-- v-if 而非 v-show：面板挂载即开会话列表与 SSE 流，
              用 v-show 会在页签不可见时仍挂一条后台连接 -->

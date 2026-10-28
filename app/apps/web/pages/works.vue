@@ -235,7 +235,8 @@ onMounted(load);
           <!-- 画布项目：只读投影，跳画布编辑器，不提供归档/续做 -->
           <template v-if="w.kind === 'canvas'">
             <NuxtLink :to="`/canvas/${w.id}`" class="cover">
-              <div class="cover-empty">
+              <img v-if="w.cover_uri" :src="w.cover_uri" :alt="w.title" loading="lazy" />
+              <div v-else class="cover-empty">
                 <span>{{ t("works.canvasWithNodes", { count: w.node_count ?? 0 }) }}</span>
               </div>
               <Tag class="state-tag" tone="brand" size="sm" dot>{{ t("works.canvasTag") }}</Tag>
@@ -248,7 +249,10 @@ onMounted(load);
                 {{ w.creation_mode === 1 ? t("works.creationStudio") : t("works.creationCanvas") }}
               </p>
               <p v-if="w.failed_nodes" class="meta warn">{{ t("works.failedNodes", { count: w.failed_nodes }) }}</p>
-              <p class="time">{{ t("works.lastEdited", { date: new Date(w.updated_at ?? w.created_at).toLocaleString(locale) }) }}</p>
+              <p v-if="w.creator_nick" class="meta">{{ t("works.creator", { name: w.creator_nick }) }}</p>
+              <p class="time">
+                {{ t("works.lastEdited", { date: new Date(w.last_edited_at ?? w.updated_at ?? w.created_at).toLocaleString(locale) }) }}
+              </p>
             </div>
           </template>
 

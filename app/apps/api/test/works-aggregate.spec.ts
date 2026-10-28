@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import cookie from "@fastify/cookie";
 import { sql } from "drizzle-orm";
-import { canvasNodes, canvases } from "@app/db";
+import { canvasNodes, canvases, assets, tasks } from "@app/db";
 import { newId } from "@app/shared";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
@@ -74,6 +74,12 @@ describe("works aggregate e2e", () => {
   let canvasId = "";
   let activeProjectId = "";
   let archivedProjectId = "";
+  // 第 62 批：封面相关夹具
+  let manualAssetId = "";
+  let autoAssetId = "";
+  let imageNodeId = "";
+  let foreignAssetId = "";
+  let coverTaskId = "";
 
   beforeAll(async () => {
     app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
@@ -138,6 +144,58 @@ describe("works aggregate e2e", () => {
         status: 2,
       },
     ]);
+
+    // ── 第 62 批夹具：封面 ────────────────────────────────
+    // ① 人工可选的素材（走 asset_id 分支；不需要任务）
+    manualAssetId = String(newId());
+    await db.insert(assets).values({
+      id: BigInt(manualAssetId),
+      spaceId: BigInt(spaceId),
+      kind: "image",
+      uri: `u/${spaceId}/assets/manual-${stamp}.png`,
+      name: `人工封面-${stamp}`,
+    });
+    // ② 图片节点产物（走自动兜底：node.task_id → assets.source_task_id）
+    coverTaskId = String(newId());
+    await db.insert(tasks).values({
+      id: BigInt(coverTaskId),
+      spaceId: BigInt(spaceId),
+      userId: BigInt(userId),
+      capability: "image",
+      mode: "text2image",
+      modelId: 1001n,
+      input: { prompt: "cover" },
+      options: {},
+      status: 3,
+    });
+    autoAssetId = String(newId());
+    await db.insert(assets).values({
+      id: BigInt(autoAssetId),
+      spaceId: BigInt(spaceId),
+      kind: "image",
+      uri: `u/${spaceId}/assets/auto-${stamp}.png`,
+      name: `自动封面-${stamp}`,
+      sourceTaskId: BigInt(coverTaskId),
+    });
+    imageNodeId = String(newId());
+    await db.insert(canvasNodes).values({
+      id: BigInt(imageNodeId),
+      spaceId: BigInt(spaceId),
+      canvasId: BigInt(canvasId),
+      nodeType: "image",
+      name: "产物节点",
+      status: 3,
+      taskId: BigInt(coverTaskId),
+    });
+    // ③ 别的空间的素材（越权用例）
+    foreignAssetId = String(newId());
+    await db.insert(assets).values({
+      id: BigInt(foreignAssetId),
+      spaceId: BigInt(otherSpaceId),
+      kind: "image",
+      uri: `u/${otherSpaceId}/assets/foreign-${stamp}.png`,
+      name: `别人的图-${stamp}`,
+    });
   });
 
   afterAll(async () => {
@@ -150,6 +208,9 @@ describe("works aggregate e2e", () => {
       select id from script_projects where title like ${`%${stamp}%`}
     )`);
     await cleanup(sql`delete from script_projects where title like ${`%${stamp}%`}`);
+    // 第 62 批夹具：先删素材（canvases.cover_asset_id 是 set null，不挡删除），再删任务
+    await cleanup(sql`delete from assets where name like ${`%${stamp}%`}`);
+    if (coverTaskId) await cleanup(sql`delete from tasks where id = ${BigInt(coverTaskId)}`);
     await app.close();
     await pool.end().catch(() => {});
   });
@@ -171,10 +232,10 @@ describe("works aggregate e2e", () => {
     expect(res.code).toBe(0);
     const mine = res.data.list.filter((item: { title: string }) => item.title.includes(stamp));
     expect(mine).toHaveLength(1);
-    expect(mine[0]).toMatchObject({ kind: "canvas", id: canvasId, node_count: 2, creation_mode: 2, work_state: "canvas" });
+    expect(mine[0]).toMatchObject({ kind: "canvas", id: canvasId, node_count: 3, creation_mode: 2, work_state: "canvas" });
     // 画布统计只读：节点仍在、状态未变
     const rows = await db.execute(sql`select count(*)::int as count from canvas_nodes where canvas_id = ${BigInt(canvasId)}`);
-    expect(Number((((rows as unknown) as { rows?: Array<{ count: number }> }).rows ?? [])[0]?.count ?? 0)).toBe(2);
+    expect(Number((((rows as unknown) as { rows?: Array<{ count: number }> }).rows ?? [])[0]?.count ?? 0)).toBe(3);
   });
 
   it("tab=all merges both forms sorted by updated_at desc", async () => {
@@ -232,5 +293,76 @@ describe("works aggregate e2e", () => {
     const mine = res.data.list.filter((item: { title: string }) => item.title.includes(stamp));
     expect(mine).toHaveLength(0);
     void otherSpaceId;
+  });
+
+  // ── 第 62 批：全部项目元信息（封面 / 创建人 / 最后编辑 + 竞品参数别名）──
+  /**
+   * 竞品证据（`_acceptance/competitor_endpoints.tsv` + `DDLTpMu7.js` / `Cp3a6_yk.js`）：
+   * - `GET /df/script_project/list` 返回 `cover` + `covers[]`，展示取 `cover || covers[0]`；
+   * - 封面是 **file_id**，设置走 `POST /df/script_project/edit { cover: file_id, sp_id }`；
+   * - 列表项另有 `creator_nick`、`updated_at`、`created_at` 等元信息。
+   * 我方把「全部项目」拆成 工坊项目 + 画布 两个域投影，所以封面只对画布有真缺口
+   * （工坊侧的 cover_uri 本来就由分镜结果推导）。
+   */
+  it("canvas cover falls back to the latest image node output, and works list signs it", async () => {
+    const res = await inject("GET", "/works?tab=canvas");
+    expect(res.code).toBe(0);
+    const row = res.data.list.find((item: { id: string }) => item.id === canvasId);
+    expect(row).toBeTruthy();
+    // 没有人工封面时自动取"画布内最近一次图片节点产物"
+    expect(row.cover_uri).toBeTruthy();
+    // 竞品给 `covers[]`，我方单封面 → 兼容形状恰为一项，且与 cover_uri 一致
+    expect(row.covers).toEqual([row.cover_uri]);
+    // 创建人昵称与最后编辑时间来自 canvases 本体
+    expect(row).toHaveProperty("creator_nick");
+    expect(row).toHaveProperty("last_edited_at");
+  });
+
+  it("POST /canvas/canvases/:id/cover sets manual cover, prefers it, and clears back to automatic", async () => {
+    const set = await inject("POST", `/canvas/canvases/${canvasId}/cover`, { asset_id: manualAssetId });
+    expect(set.code).toBe(0);
+    expect(set.data.cover_asset_id).toBe(manualAssetId);
+    expect(set.data.cover_uri).toBeTruthy();
+
+    // 人工封面优先于自动兜底
+    const byAsset = await inject("GET", `/works?tab=canvas`);
+    const rowByAsset = byAsset.data.list.find((item: { id: string }) => item.id === canvasId);
+    expect(rowByAsset.cover_uri).toBe(set.data.cover_uri);
+
+    // 用节点 id 设封面：解析到节点产物（assets.source_task_id = node.task_id）
+    const byNode = await inject("POST", `/canvas/canvases/${canvasId}/cover`, { node_id: imageNodeId });
+    expect(byNode.code).toBe(0);
+    expect(byNode.data.cover_asset_id).toBe(autoAssetId);
+
+    // 清除（不传任何字段）→ 回落到自动兜底，仍是节点产物而不是 null
+    const cleared = await inject("POST", `/canvas/canvases/${canvasId}/cover`, {});
+    expect(cleared.code).toBe(0);
+    expect(cleared.data.cover_asset_id).toBe(autoAssetId);
+
+    // 越权 / 非法参数
+    expect((await inject("POST", `/canvas/canvases/${canvasId}/cover`, { asset_id: foreignAssetId })).code).toBe(400102);
+    expect((await inject("POST", `/canvas/canvases/${canvasId}/cover`, { asset_id: "not-a-number" })).code).toBe(400101);
+    expect((await inject("POST", `/canvas/canvases/${canvasId}/cover`, { asset_id: "9999999999" })).code).toBe(400102);
+    // 节点没有产物时给"还没产物"（同一个 400102，但 msg 不同，前端据此换提示）
+    const textNode = await inject("POST", `/canvas/canvases/${canvasId}/cover`, {
+      node_id: "9999999999",
+    });
+    expect(textNode.code).toBe(400102);
+  });
+
+  it("accepts competitor query aliases: name ≡ keyword, process_status=-1 ≡ status=all", async () => {
+    // 竞品参数名是 name（我方叫 keyword）
+    const byName = await inject("GET", `/works?name=${encodeURIComponent(`作品A-${stamp}`)}`);
+    expect(byName.code).toBe(0);
+    expect(byName.data.list.map((item: { id: string }) => item.id)).toEqual([activeProjectId]);
+
+    // process_status=-1 是竞品"全部"（含归档）；不带时为默认 active
+    const all = await inject("GET", "/works?process_status=-1&page_size=60");
+    expect(all.code).toBe(0);
+    expect(all.data.list.some((item: { id: string }) => item.id === archivedProjectId)).toBe(true);
+
+    // 其它取值含义未取证 → 明确拒绝，不静默当成"全部"
+    const bad = await inject("GET", "/works?process_status=1");
+    expect(bad.code).toBe(400101);
   });
 });

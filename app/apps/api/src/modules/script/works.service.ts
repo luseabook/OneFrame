@@ -54,6 +54,12 @@ interface WorkshopRow {
   shot_count: number;
   done_count: number;
   cover_uri: string | null;
+  /** 竞品列表项给 `covers[]`；我方单封面，兼容形状为 `[cover_uri]`（不伪造多图） */
+  covers: string[];
+  /** 画布侧的创建人昵称（竞品 `creator_nick`）；工坊侧无创建人字段 → null */
+  creator_nick: string | null;
+  /** 画布侧最后编辑时间（`canvases.last_edited_at`）；工坊侧 null */
+  last_edited_at: string | null;
   portrait_uri: string | null;
   timeline_duration_s: number;
   timeline_episode_count: number;
@@ -66,9 +72,12 @@ interface CanvasRow {
   creation_mode: number;
   created_at: string;
   updated_at: string;
+  last_edited_at: string | null;
+  creator_nick: string | null;
   node_count: number;
   running_nodes: number;
   failed_nodes: number;
+  cover_uri: string | null;
 }
 
 @Injectable()
@@ -255,6 +264,11 @@ export class WorksService {
       shot_count: Number(row.shot_count ?? 0),
       done_count: Number(row.done_count ?? 0),
       cover_uri: coverUrl,
+      covers: coverUrl ? [coverUrl] : [],
+      // 工坊项目没有创建人字段（作品是空间级资产），竞品 `creator_nick` 在团队多用户下才有意义；
+      // 这里显式给 null 而不是回填空间 owner —— 回填会把"空间所有者"伪装成"项目创建人"
+      creator_nick: null as string | null,
+      last_edited_at: null as string | null,
       timeline_duration_s: Number(row.timeline_duration_s ?? 0),
       timeline_episode_count: Number(row.timeline_episode_count ?? 0),
       work_state: row.work_state,
@@ -278,11 +292,27 @@ export class WorksService {
     const base = sql`
       with base as (
         select c.id::text as id, c.title, c.creation_mode, c.created_at, c.updated_at,
+               c.last_edited_at,
+               (select u.nickname from users u where u.id = c.owner_user_id) as creator_nick,
                (select count(*)::int from canvas_nodes n where n.canvas_id = c.id) as node_count,
                (select count(*)::int from canvas_nodes n2 where n2.canvas_id = c.id and n2.status = 2)
                  as running_nodes,
                (select count(*)::int from canvas_nodes n3 where n3.canvas_id = c.id and n3.status = 3)
-                 as failed_nodes
+                 as failed_nodes,
+               -- 封面：人工指定优先，否则自动取画布内最近一次图片节点产物。
+               -- 竞品列表项就是 cover(单值) + covers[](多图)，这里只做单封面（不伪造多图）
+               (select a.uri
+                  from assets a
+                 where a.deleted_at is null and a.kind = 'image'
+                   and (
+                     a.id = c.cover_asset_id
+                     or a.source_task_id in (
+                       select n4.task_id from canvas_nodes n4
+                        where n4.canvas_id = c.id and n4.deleted_at is null and n4.task_id is not null
+                     )
+                   )
+                 order by (a.id = c.cover_asset_id) desc, a.id desc
+                 limit 1) as cover_uri
           from canvases c
          where c.space_id = ${BigInt(spaceId)} and c.deleted_at is null
       )
@@ -297,36 +327,43 @@ export class WorksService {
     const [rowsResult, countResult] = await Promise.all([db.execute(rowsQuery), db.execute(countQuery)]);
     const rows = (((rowsResult as unknown) as { rows?: CanvasRow[] }).rows ?? []) as CanvasRow[];
     const total = Number((((countResult as unknown) as { rows?: Array<{ count: number }> }).rows ?? [])[0]?.count ?? 0);
-    return {
-      rows: rows.map((row) => ({
-        id: row.id,
-        kind: "canvas" as const,
-        title: row.title,
-        genre: null,
-        ratio: null,
-        drama_type: null,
-        source_type: null,
-        source_file_name: null,
-        source_text: null,
-        status: null,
-        archived_at: null,
-        is_sample: false,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        episode_count: 0,
-        shot_count: Number(row.node_count ?? 0),
-        done_count: 0,
-        cover_uri: null,
-        timeline_duration_s: 0,
-        timeline_episode_count: 0,
-        work_state: "canvas",
-        node_count: Number(row.node_count ?? 0),
-        creation_mode: row.creation_mode,
-        running_nodes: Number(row.running_nodes ?? 0),
-        failed_nodes: Number(row.failed_nodes ?? 0),
-      })),
-      total,
-    };
+    const list = await Promise.all(
+      rows.map(async (row) => {
+        const coverKey = row.cover_uri ?? null;
+        const coverUrl = coverKey ? await this.storage.signDownload(coverKey, 3600).catch(() => null) : null;
+        return {
+          id: row.id,
+          kind: "canvas" as const,
+          title: row.title,
+          genre: null,
+          ratio: null,
+          drama_type: null,
+          source_type: null,
+          source_file_name: null,
+          source_text: null,
+          status: null,
+          archived_at: null,
+          is_sample: false,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          last_edited_at: row.last_edited_at,
+          creator_nick: row.creator_nick,
+          episode_count: 0,
+          shot_count: Number(row.node_count ?? 0),
+          done_count: 0,
+          cover_uri: coverUrl,
+          covers: coverUrl ? [coverUrl] : [],
+          timeline_duration_s: 0,
+          timeline_episode_count: 0,
+          work_state: "canvas",
+          node_count: Number(row.node_count ?? 0),
+          creation_mode: row.creation_mode,
+          running_nodes: Number(row.running_nodes ?? 0),
+          failed_nodes: Number(row.failed_nodes ?? 0),
+        };
+      }),
+    );
+    return { rows: list, total };
   }
 }
 
