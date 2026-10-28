@@ -20,6 +20,7 @@ import {
   type SceneKey,
 } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { QueueService } from "../../queue/queue.service";
 import { StorageService } from "../../storage/storage.service";
 import { CreditsService } from "../credits/credits.service";
@@ -118,7 +119,7 @@ export class TasksService {
     const rows = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.id, parsed)));
+      .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.id, parsed), isNull(tasks.deletedAt)));
     return rows.map((row) => this.toDto(row));
   }
 
@@ -128,7 +129,7 @@ export class TasksService {
   ) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.page_size ?? 20));
-    const conditions = [eq(tasks.spaceId, BigInt(spaceId))];
+    const conditions = [eq(tasks.spaceId, BigInt(spaceId)), isNull(tasks.deletedAt)];
     if (query.status !== undefined) conditions.push(eq(tasks.status, query.status));
     if (query.capability) conditions.push(eq(tasks.capability, query.capability));
     const where = and(...conditions);
@@ -202,7 +203,9 @@ export class TasksService {
       const [row] = await tx
         .select()
         .from(tasks)
-        .where(and(eq(tasks.id, BigInt(id)), eq(tasks.spaceId, BigInt(spaceId))))
+        .where(
+          and(eq(tasks.id, toBigId(id, "id")), eq(tasks.spaceId, BigInt(spaceId)), isNull(tasks.deletedAt)),
+        )
         .for("update");
       if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
       if (row.status !== TaskStatus.PENDING && row.status !== TaskStatus.RUNNING) {
@@ -229,6 +232,42 @@ export class TasksService {
       });
       return this.toDto(updated ?? row);
     });
+  }
+
+  /**
+   * 删除任务记录（软删；第 72 批）。
+   *
+   * 竞品：`DELETE /web/v1/task/{task_id}`（`commands/task.md:195`「删除任务记录」，支持 `--dry-run` /
+   * `--idempotency-key`）。
+   *
+   * 三条判断，缺一条就会变成「删了不该删的」：
+   * 1. **只允许终态**（3 成功 / 4 失败 / 5 取消 / 7 驳回）：1 排队、2 运行、6 审核中还在飞 —— 删记录
+   *    不会停止上游生成，用户以为删掉了、后台还在跑还会回写结果。想删就先用 `task cancel`。
+   * 2. **不允许带着冻结积分**：终态理论上已结算或已解冻，但历史脏数据可能存在；带冻结就删会让那笔钱永远悬着。
+   * 3. **软删而不是物理删**：`canvas_nodes.task_id`、`assets.source_task_id` 有外键，
+   *    `credit_flows.ref_task_id` 是对账依据 —— 物理删要么被外键拒绝，要么把「这张图是哪次生成出来的」
+   *    这条链剪断。软删只影响**读**（列表 / 详情 / 下载 / 公开分享都不再返回它）。
+   */
+  async remove(spaceId: string, id: string) {
+    const row = await this.findTask(spaceId, id);
+    const running =
+      row.status === TaskStatus.PENDING ||
+      row.status === TaskStatus.RUNNING ||
+      row.status === TaskStatus.REVIEWING;
+    if (running) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task is still running; cancel it before deleting", {
+        field: "id",
+      });
+    }
+    if (row.creditsFrozen > 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task still holds frozen credits", { field: "id" });
+    }
+    const [updated] = await db
+      .update(tasks)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(tasks.id, row.id))
+      .returning();
+    return { deleted: true, task_id: String(row.id), status: (updated ?? row).status };
   }
 
   async retry(spaceId: string, id: string): Promise<TaskDto> {
@@ -316,6 +355,7 @@ export class TasksService {
           eq(tasks.spaceId, BigInt(spaceId)),
           inArray(tasks.id, ids),
           eq(tasks.status, TaskStatus.SUCCEEDED),
+          isNull(tasks.deletedAt),
         ),
       );
     if (rows.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no succeeded tasks to download");
@@ -404,7 +444,7 @@ export class TasksService {
     const [row] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId)));
+      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId), isNull(tasks.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
 
     const rawResults = Array.isArray(row.results)
@@ -466,7 +506,7 @@ export class TasksService {
     const rows = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.id, ids)));
+      .where(and(eq(tasks.spaceId, BigInt(spaceId)), inArray(tasks.id, ids), isNull(tasks.deletedAt)));
 
     const byId = new Map(rows.map((row) => [String(row.id), row]));
     const items = taskIds
@@ -632,7 +672,7 @@ export class TasksService {
     const [row] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, bigId), eq(tasks.spaceId, BigInt(spaceId))));
+      .where(and(eq(tasks.id, bigId), eq(tasks.spaceId, BigInt(spaceId)), isNull(tasks.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
     return row;
   }
@@ -658,7 +698,7 @@ export class TasksService {
     const [row] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId)));
+      .where(and(eq(tasks.id, share.taskId), eq(tasks.spaceId, share.spaceId), isNull(tasks.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
 
     const results = Array.isArray(row.results) ? (row.results as Array<{ uri?: string }>) : [];

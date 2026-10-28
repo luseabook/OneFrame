@@ -326,6 +326,18 @@ export const tasks = pgTable(
     feedback: jsonb("feedback"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     expireAt: timestamp("expire_at", { withTimezone: true }), // 结果保留 90 天
+    /**
+     * 用户主动删除任务记录（软删；第 72 批）。
+     *
+     * 竞品证据：`DELETE /web/v1/task/{task_id}`（CLI `commands/task.md:195`「删除任务记录」，
+     * 支持 `--dry-run` 与 `--idempotency-key`）。
+     *
+     * 为什么是软删而不是物理删：`tasks` 被这些地方引用 —— `canvas_nodes.task_id`（FK）、
+     * `assets.source_task_id`（FK）、`storyboards.image_task_id` / `video_task_id`（无 FK 但语义上指向产出）、
+     * `credit_flows.ref_task_id`（对账依据）。物理删要么被外键拒绝、要么把「这张图是哪次生成出来的」
+     * 这条对账链剪断。软删只影响**读**：列表/详情/下载/分享不再返回它，账本与外键保持完整。
+     */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

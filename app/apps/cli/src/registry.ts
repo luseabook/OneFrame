@@ -27,7 +27,8 @@ export type TransformName =
   | "episodesOfProject"
   | "storyboardsOfEpisode"
   | "nodeById"
-  | "taskList";
+  | "taskList"
+  | "creditsLog";
 
 export type BuiltinName =
   | "login"
@@ -211,7 +212,19 @@ const taskCommands: CommandSpec[] = [
     write: true,
     paid: true,
     }),
-  todo("task", "delete", "删除任务记录", "commands/task.md:195", "我方无删除任务端点；结果按 tasks.expire_at（90 天）自动过期，需要“看不见”请在列表侧过滤"),
+  /**
+   * 删除任务记录（第 72 批；后端 `DELETE /tasks/:id`，软删）。
+   *
+   * 竞品 `DELETE /web/v1/task/{task_id}` 支持 `--dry-run` / `--idempotency-key`，那两条由全局能力提供
+   * （dry-run 不写库、幂等键不适用于「软删」这种幂等操作本身）。
+   * 注意语义边界：只有终态任务能删，运行中要先 `task cancel` —— 否则用户以为删掉了、后台还在生成，
+   * 这条 `reason` 改成 summary 里的显式提示。
+   */
+  http("task", "delete", "DELETE", "tasks/{task_id}", "删除任务记录（软删；只有终态可删，运行中请先 task cancel）", "commands/task.md:195", {
+    slots: ["task_id"],
+    positionals: [{ display: "TASK_ID", desc: "任务 ID", required: true }],
+    write: true,
+  }),
 ];
 
 // ── 积分（commands/credits.md）─────────────────────────────────────────
@@ -223,13 +236,19 @@ const creditsCommands: CommandSpec[] = [
   http("credits", "estimate", "POST", "credits/quote", "生成前试算消耗（不扣费）", "commands/credits.md:96", {
     write: true,
   }),
-  todo(
-    "credits",
-    "log",
-    "查询积分流水（旧接口语义：无符号 val + event_type）",
-    "commands/credits.md:43",
-    "我方只有一套带符号 points 的口径 GET /credits/flows，没有 log 的无符号口径；请用 credits flows",
-  ),
+  /**
+   * 竞品有**两个**语义不同的积分明细接口，文档自己写明「不能混用」（`commands/credits.md:68`）：
+   *   - `credits flows`（新，Web 消耗页同源）：带符号 `points` + `section` + `rm_task_id`；
+   *   - `credits log`（旧，`/web/v1/user/credits-log`）：`event_type`(1 获取 / 2 消耗) + 无符号 `val`。
+   *
+   * 我方只有一套账本（`credit_flows.delta` 带符号）——不再为旧接口造第二个后端端点（两份真相同步必然漂移），
+   * 改由 CLI 在客户端把带符号 `delta` 派生成旧语义：`event_type = delta >= 0 ? 1 : 2`、`val = |delta|`。
+   * 这是纯展示层换算（`transforms.ts` 的 `creditsLog`），字段来源仍是同一个接口。
+   */
+  http("credits", "log", "GET", "credits/flows", "查询积分流水（竞品旧接口语义：event_type + 无符号 val，由 CLI 从带符号 delta 派生）", "commands/credits.md:43", {
+    queryKeys: ["page", "page_size", "task_id"],
+    transform: "creditsLog",
+  }),
 ];
 
 // ── 工作区（commands/workspace.md；我方 = script_projects）────────────────

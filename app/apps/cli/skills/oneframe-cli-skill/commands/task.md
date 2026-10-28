@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 8 条命令：可用 7 条、骨架 1 条。
+共 8 条命令：可用 8 条、骨架 0 条。
 
 ## `task get`
 
@@ -91,12 +91,12 @@ oneframe task regenerate <TASK_ID> [--set KEY=VALUE]... [--dry-run] [--idempoten
 
 ## `task delete`
 
-删除任务记录
+删除任务记录（软删；只有终态可删，运行中请先 task cancel）
 
 ```text
-oneframe task delete [--json]
+oneframe task delete <TASK_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无删除任务端点；结果按 tasks.expire_at（90 天）自动过期，需要“看不见”请在列表侧过滤
+- 状态：可用（HTTP 端点已存在）
+- 端点：`DELETE tasks/{task_id}`
 - 契约证据：`commands/task.md:195`

@@ -88,6 +88,38 @@ describe("响应整形", () => {
     expect(paginatedView([1, 2], 2, 1, 2)).toMatchObject({ has_more: false, next_page: null });
   });
 
+  /**
+   * 第 72 批：竞品有 `credits log`（旧接口，`event_type` + 无符号 `val`）与 `credits flows`
+   * （新接口，带符号 `points`）两个语义不同的接口，文档自己写明不能混用（commands/credits.md:68）。
+   * 我方只有一份带符号账本，旧语义由 CLI 派生 —— 这里钉住换算规则，防止有人"顺手"把符号改掉。
+   */
+  it("credits log 把带符号 delta 派生成旧接口口径（event_type 1/2 + 无符号 val）", () => {
+    const flows = {
+      list: [
+        { id: "1", kind: "recharge", delta: 80, frozen_delta: 0, balance_after: 80, task_id: null, memo: "gift", created_at: "t1" },
+        { id: "2", kind: "settle", delta: -12, frozen_delta: 0, balance_after: 68, task_id: "9", memo: null, created_at: "t2" },
+        { id: "3", kind: "freeze", delta: 0, frozen_delta: 5, balance_after: 68, task_id: "9", memo: null, created_at: "t3" },
+      ],
+      total: 3,
+      page: 1,
+      page_size: 20,
+    };
+    const shaped = applyTransform("creditsLog", flows) as {
+      count: number;
+      has_more: boolean;
+      list: Array<Record<string, unknown>>;
+    };
+    expect(shaped.count).toBe(3);
+    expect(shaped.has_more).toBe(false);
+    expect(shaped.list.map((row) => [row.event_type, row.val])).toEqual([
+      [1, 80],
+      [2, 12],
+      [1, 0],
+    ]);
+    // 原始带符号字段不被改写（只增不改）：kind/task_id/created_at 照旧透出
+    expect(shaped.list[1]).toMatchObject({ kind: "settle", task_id: "9", created_at: "t2" });
+  });
+
   it("通过 run 链路：task list 归一页；episode list 取 episodes", async () => {
     const dir = makeDir();
     withProfile(dir);

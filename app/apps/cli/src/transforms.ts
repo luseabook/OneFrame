@@ -138,5 +138,46 @@ export function applyTransform(
         Number(record.page_size ?? list.length),
       );
     }
+
+    /**
+     * `credits log`：把带符号 `delta` 派生成竞品**旧接口**的语义。
+     *
+     * 竞品文档（`commands/credits.md:68`）自己写明 `credits log`（`/user/credits-log`）与
+     * `credits flows`（`/user/credits-dashboard/flows`）字段语义不同、不能混用：
+     * 旧接口是 `event_type`（1 获取 / 2 消耗）+ **无符号** `val`，新接口才是带符号 `points`。
+     *
+     * 我方账本只有一份带符号真值（`credit_flows.delta`），所以这里做的是**纯展示换算**：
+     * `event_type = delta >= 0 ? 1 : 2`、`val = |delta|`。不新增后端端点，也不改 `credits flows` 的带符号口径。
+     *
+     * `delta === 0` 的行（冻结/解冻时 `delta` 可能为 0、变动全在 `frozen_delta`）归入 1（获取）——
+     * 这类行在旧接口里没有对应概念，宁可归到"不是消耗"，也不把冻结误报成扣分。
+     */
+    case "creditsLog": {
+      const record = asRecord(data);
+      const rows = Array.isArray(record.list)
+        ? (record.list as Record<string, unknown>[])
+        : Array.isArray(data)
+          ? (data as Record<string, unknown>[])
+          : [];
+      const list = rows.map((row) => {
+        const delta = Number(row.delta ?? 0);
+        return {
+          id: row.id,
+          event_type: delta >= 0 ? 1 : 2,
+          val: Math.abs(delta),
+          kind: row.kind,
+          balance_after: row.balance_after,
+          task_id: row.task_id ?? null,
+          memo: row.memo ?? null,
+          created_at: row.created_at,
+        };
+      });
+      return paginatedView(
+        list,
+        Number(record.total ?? list.length),
+        Number(record.page ?? 1),
+        Number(record.page_size ?? list.length),
+      );
+    }
   }
 }

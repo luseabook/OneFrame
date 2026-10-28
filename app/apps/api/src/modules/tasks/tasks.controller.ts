@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, Res, ParseIntPipe, Inject } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res, ParseIntPipe, Inject } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
@@ -100,6 +100,18 @@ export class TasksController {
   @Post("tasks/:id/cancel")
   async cancel(@Req() req: AuthedRequest, @Param("id") id: string) {
     return this.tasks.cancel(req.auth?.spaceId ?? "", id);
+  }
+
+  /**
+   * 删除任务记录（第 72 批；对照竞品 `DELETE /web/v1/task/{task_id}`）。
+   *
+   * 竞品把路径写成单数 `task`，我方沿用既有复数风格 `tasks/:id`（与 `tasks/:id/cancel|retry|regenerate` 一致）——
+   * 契约差异登记在 docs/02-architecture/api-spec.md §17.30，不为了对齐字符串把同一资源的单复数混着用。
+   * 语义是**软删**：只允许终态、删后列表/详情/下载/公开分享都读不到，账本与外键不动（详见 `TasksService.remove`）。
+   */
+  @Delete("tasks/:id")
+  async remove(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.tasks.remove(req.auth?.spaceId ?? "", id);
   }
 
   @Post("tasks/:id/retry")

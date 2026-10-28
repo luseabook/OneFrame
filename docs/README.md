@@ -126,6 +126,82 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.26 · 第 72 批：任务「删了但还在跑」不能发生 —— 软删 + 五条读路径同时收口 · 2026-10-28）
+
+> 这一批补的是 CLI 骨架里两条「reason 写着没有、其实竞品有」的记录（第 70 批的 ad/redraw 是同一类），
+> 但真正值得写下来的是**为什么删一条任务记录不是一句 `DELETE`**。
+
+### 一、缺口还是「reason 写着没有、其实竞品有」
+
+`apps/cli/src/registry.ts` 里两条骨架的 reason 原文：
+
+- `task delete`：「我方无删除任务端点；结果按 `tasks.expire_at`（90 天）自动过期…」
+- `credits log`：「我方只有一套带符号 `points` 的口径 `GET /credits/flows`，没有 log 的无符号口径」
+
+竞品证据（`_acceptance/reelmate_cli_skill/reelmate-cli-skill/commands/`）：
+
+| 命令 | 文档位置 | 后端 | 关键语义 |
+|---|---|---|---|
+| `task delete TASK_ID` | `task.md:195` | `DELETE /web/v1/task/{task_id}` | 支持 `--dry-run`、`--idempotency-key` |
+| `credits log` | `credits.md:68` | `GET /web/v1/user/credits-log` | `event_type` 1 获取 / 2 消耗 + **无符号 `val`** |
+| `credits flows` | `credits.md:68` | `GET /web/v1/user/credits-dashboard/flows` | 带符号 `points` + `section` + `rm_task_id`/`volc_task_id` |
+
+**`credits.md:68` 明确写这两个积分接口「语义不同、不能混用」**——这决定了本批的做法（见下）。
+
+### 二、为什么删除是软删
+
+`tasks` 表被这些地方引用 / 依赖：
+
+- `canvas_nodes.task_id`（画布节点指向任务，硬删会被外键拒绝）
+- `assets.source_task_id`（任务产物素材，硬删会剪断产物归属）
+- `credit_flows.ref_task_id`（积分流水指向任务，是**对账依据**，硬删会让一笔钱的去向失去凭证）
+
+所以迁移 `0042_worthless_mentor.sql` 只加一列 `tasks.deleted_at`，删除 = 打时间戳；**结果行、`credits_settled`、
+`results` JSON 全部保留**，只是读不到。这不是「实现偷懒」，是让「用户看到没了」与「账能对上」同时成立。
+
+### 三、四个不显然的决定
+
+| 决定 | 为什么 |
+|---|---|
+| 软删，且**只影响读** | 见上：外键与对账链要求行必须存在；90 天过期清理是另一条生命周期，两者不能混 |
+| 仍在跑（PENDING/RUNNING/REVIEWING）→ **400101** | 否则「记录删了但后台还在生成」，用户会以为没扣钱/没产出；先 `cancel` 再删 |
+| `credits_frozen > 0` → **400101** | 冻结中的积分必须有归属任务才能解冻/结算，删了任务那笔钱就永远悬着 |
+| `credits log` **不新增后端端点** | 竞品两接口语义不同、不能混用；我方只有带符号 `delta` 一份真相，第二份真相同步必然漂移 → 由 CLI `transforms.ts` 派生旧口径字段 |
+
+派生规则（`apps/cli/src/transforms.ts` 的 `creditsLog`）：`event_type = delta >= 0 ? 1 : 2`、`val = Math.abs(delta)`；
+`delta === 0`（冻结/解冻行）按 1（获取）归类并保留 `kind`，让调用方仍能区分。
+
+### 四、读路径必须**一起**改，只改一处等于没改
+
+`apps/api/src/modules/tasks/tasks.service.ts` 里加 `isNull(tasks.deletedAt)` 的位置：
+
+- `list()` / `getMany()`（列表与 `?ids=`）
+- `findTask()`（详情、`regenerate`、`feedback`、`retry`、`downloadUrl`、`createShare`/`revokeShare` 共用）
+- `batchDownload()` / `resultMany()`（`/tasks/batch-download`、`/task/result`）
+- `publicShare()` / `publicShareDownload()`（分享与公开下载，任务删了链接也必须失效）
+
+E2E 断言就按这条写：删成功之后，**五条读路径全部失效**、但 DB 行/结果/结算字段仍在。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| `apps/api/test/task-delete.spec.ts` | **5 例**（软删后 5 条读路径失效、分享自毁、运行中三态、冻结积分、坏 id/不存在/重复删/跨空间） |
+| `apps/cli/test/transforms.spec.ts` | +1 例（`creditsLog` 把 +80/−12/0 派生为 `[[1,80],[2,12],[1,0]]`） |
+| api 全量 | **81 文件 908 例**（原 80/903） |
+| cli 全量 | **15 文件 105 例**（原 15/104） |
+| 总闸 | `_acceptance/verify-round.ps1` **12/12 全绿** |
+| 规模 | 端点 **709**、迁移 **43**（0000–0042）、用例 **1,287** |
+
+### 六、诚实边界
+
+- **本批不加分**：这两条能力此前只记在 #9 的「骨架命令」缺口里，而 #9 台账是 1% 整数粒度（0.24 = 8×3%），
+  48→46 表达不出来；全站仍 **98.3%（202.45/206，剩余 3.55）**。
+- `task delete` **未实现 `--dry-run` / `--idempotency-key`**：竞品文档有这两个旗标，但我方写接口目前没有幂等键体系
+  （不是这一个端点的事），硬造一个只对本端点有效的幂等键会与其他写接口不一致 → 登记为已知差异。
+- `credits log` 的派生只保证**旧的三个字段**（`event_type`/`val`/`created_at`）可用；`section` 与
+  `income/consume/transfer` 的 tab 语义属新接口，派生不出来，也不假装有。
+
 ## 变更登记（v6.25 · 第 71 批：删掉一集要连带清 8 张表 —— 漏一张就是 500 · 2026-10-28）
 
 > 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.4**（同一批；本文件与主台账各有一套编号，勿混）。

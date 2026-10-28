@@ -3116,3 +3116,70 @@ CLI 命令 202 不变、ready 154 → **156**、骨架 48 → **46**；`verify-r
   这条差异登记在此，等有明确产品口径再收紧。
 - 删集**不回收**分镜产出的 `tasks` 记录：`tasks.episode_id` 在 schema 里没有外键（历史设计），任务记录按 90 天过期清理；
   本批不去猜「是否该级联删任务」，避免误删仍在跑的生成任务。
+
+## 17.30 任务软删与 `credits log` 的客户端口径（第 72 批）
+
+### 30.1 为什么现在才做
+
+`apps/cli/src/registry.ts` 的两条骨架命令（`task delete`、`credits log`）的 reason 原文都写着「我方没有」，
+而竞品 CLI 文档 `commands/task.md:195` 与 `commands/credits.md:68` 都给了明确用法与后端路径。
+其中 `credits.md:68` 还逐字写了关键约束：**`credits log`（旧，无符号 `val` + `event_type`）与
+`credits flows`（新，带符号 `points` + `section` + task id）语义不同、不能混用**。
+
+### 30.2 迁移 0042（软删）
+
+```sql
+ALTER TABLE "tasks" ADD COLUMN "deleted_at" timestamp with time zone;
+```
+
+三个决定：
+
+| 决定 | 理由 |
+|---|---|
+| 软删而非物理删 | `canvas_nodes.task_id`、`assets.source_task_id` 是外键；`credit_flows.ref_task_id` 是对账依据，物理删会被拒或剪断对账链 |
+| 不加 partial index | 现有 `idx_tasks_space_status` 已按 `space_id` 领先，软删条件的过滤走这条索引足够；等真的有慢查询再加 |
+| 只影响读、不改 90 天过期 | `expire_at` 是保留期清理，与用户主动删除是两条生命周期，不能互相代替 |
+
+### 30.3 `DELETE /tasks/:id`
+
+- 方法与路径：`DELETE /v1/tasks/:id`（竞品是单数 `task`，我方沿用复数风格，与 `tasks/:id/cancel|retry|regenerate` 一致）
+- 成功响应：`{ deleted: true, task_id: "<id>", status: <删除前的状态> }`
+- 错误码：
+
+| code | 场景 | msg 关键片段 |
+|---:|---|---|
+| 400101 | 任务仍在跑（PENDING/RUNNING/REVIEWING） | `task is still running` |
+| 400101 | `credits_frozen > 0` | `still holds frozen credits` |
+| 400101 | 路径 id 不是数字 | `invalid task id` |
+| 400102 | 不存在 / 已删 / 跨空间 | `task not found` |
+
+删除后**同时**失效的读路径（都加了 `isNull(tasks.deleted_at)`）：
+列表 `GET /tasks`、`GET /tasks?ids=`、详情 `GET /tasks/:id`、`POST /task/result`（进 `missing[]`）、
+`POST /tasks/batch-download`（400102）、`GET /share/:token` 与 `POST /share/:token/batch-download`（分享自毁）。
+
+### 30.4 `credits log`：派生而不是第二份真相
+
+CLI 的 `credits log` 打到 `GET /v1/credits/flows`（我方唯一真相：带符号 `delta`），再由
+`apps/cli/src/transforms.ts` 的 `creditsLog` 派生竞品旧接口字段：
+
+| 旧接口字段 | 派生规则 |
+|---|---|
+| `event_type` | `delta >= 0 ? 1 : 2`（1 获取 / 2 消耗；`delta === 0` 的冻结/解冻行归 1） |
+| `val` | `Math.abs(delta)` |
+| `kind` / `task_id` / `memo` / `created_at` | 原样透出 |
+
+**不为旧接口造第二个后端端点**：两份真相同步必然漂移；而新接口的 `section`/`tab` 语义派生不出来，也不假装有。
+
+### 30.5 测试与验证
+
+- `apps/api/test/task-delete.spec.ts`（5 例）：软删后行/结果/`credits_settled` 仍在但五条读路径失效；分享自毁；
+  运行中三态与冻结积分两条 400101；坏 id/不存在/重复删/跨空间不 500。
+- `apps/cli/test/transforms.spec.ts` +1 例：`+80 / −12 / 0` → `[[1,80],[2,12],[1,0]]`。
+- 结果：api 81 文件 908 例、cli 15 文件 105 例、`verify-round.ps1` 12/12 全绿；端点 709、迁移 43、总用例 1,287。
+
+### 30.6 诚实边界
+
+- **不加分**：这两条能力此前只记在 #9「骨架命令」缺口里，1% 整数粒度（0.24 = 8×3%）表达不出 48→46。
+- `task delete` 未实现竞品的 `--dry-run` / `--idempotency-key`：我方写接口没有幂等键体系，只给单个端点造假幂等键会与其余写接口不一致。
+- `credits log` 派生只覆盖旧口径三字段；`section` 与 `income/consume/transfer` tab 属新接口语义，未派生。
+
