@@ -7,7 +7,7 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 
 发布态只依赖三样东西：当前二进制的 `--help`、本文件、以及随包文档（`manual/`、`commands/`）。不要引用任何外部文档站或截图。
 
-本包版本 **0.1.0**（`VERSION`），命令 197 条、可用 144 条。
+本包版本 **0.1.0**（`VERSION`），命令 202 条、可用 154 条。
 
 ## <HARD-GATE>
 
@@ -71,8 +71,8 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 | `agent` | 5 | 3 | 2 | `commands/agent.md` |
 | `novel` | 6 | 5 | 1 | `commands/novel.md` |
 | `market` | 3 | 3 | 0 | `commands/market.md` |
-| `ad` | 3 | 0 | 3 | `commands/ad.md` |
-| `redraw` | 2 | 0 | 2 | `commands/redraw.md` |
+| `ad` | 8 | 8 | 0 | `commands/ad.md` |
+| `redraw` | 2 | 2 | 0 | `commands/redraw.md` |
 | `ai` | 2 | 0 | 2 | `commands/ai.md` |
 | `clip` | 2 | 0 | 2 | `commands/clip.md` |
 | `voice` | 1 | 0 | 1 | `commands/voice.md` |

@@ -2911,3 +2911,92 @@ api 全量 77 文件 **891 例**。
 
 写接口 body 里的 `BigInt(input.x)` 同类风险约 **80 处**未在本批处理（`team`/`market`/`knowledge`/`subject` 等），
 传非数字仍是 500。定位命令：`grep 'BigInt\((q|input|body|params)\.' apps/api/src`。本批只收口路径参数层。
+
+## 17.28 ad/redraw 的 CLI 契约与 `--set` 大整数保真（第 70 批）
+
+> 这一节记的不是服务端新端点（`ad-drama` 与 `video-redraw` 早在第 13/14 批就上线了），而是**客户端一侧的契约**：
+> 哪些命令对应哪条 URL、`--set` 怎么判类型、以及为什么「说明文字过期」也算缺陷。
+
+### 28.1 为什么客户端契约要写进 API 文档
+
+`apps/cli/test/registry-routes.spec.ts`（第 65 批）保证「**ready 命令的 path 必须能在后端路由表里找到**」。
+但 `todo(...)` 形态的骨架命令没有 `path`，于是那句 `reason` 就成了**唯一对外说明**——它写「对方模块本轮由队友落地、
+当前无端点，CLI 接线放下一轮」，agent 读到就会认为「这个能力不存在」，**比真的缺能力更有害**（缺能力至少不会误导选型）。
+
+第 70 批逐条对账后发现：`registry.ts:834-838` 的 5 条骨架里，`ad` 的 3 条与 `redraw` 的 2 条的 reason 全是过期记录。
+因此这一节先给「命令 ↔ URL」的正式映射，再给 `--set` 的类型规则。
+
+### 28.2 命令 ↔ 端点映射（10 条）
+
+| CLI | method + path | 备注 |
+|---|---|---|
+| `oneframe ad info` | `GET /v1/ad-drama/projects/{project_id}` | `--workspace` 提供 `{project_id}` |
+| `oneframe ad save` | `POST /v1/ad-drama/projects` | write；`sp_id`/`ep_id` 传值即更新，不传即创建 |
+| `oneframe ad selling-point` | `POST /v1/ad-drama/projects/{project_id}/selling-point/generate` | write · paid |
+| `oneframe ad plot` | `POST /v1/ad-drama/projects/{project_id}/brief/generate` | write · paid |
+| `oneframe ad script` | `POST /v1/ad-drama/projects/{project_id}/script/generate` | write · paid；必填 `brief_id` |
+| `oneframe ad asset` | `POST /v1/ad-drama/projects/{project_id}/asset/extract` | write · paid |
+| `oneframe ad plan` | `POST /v1/ad-drama/projects/{project_id}/storyboard/generate` | write · paid；`template_type` 必填 |
+| `oneframe ad reset` | `POST /v1/ad-drama/projects/{project_id}/script/reset` | write；不计费 |
+| `oneframe redraw info` | `GET /v1/video-redraw/projects/{project_id}` | — |
+| `oneframe redraw create` | `POST /v1/video-redraw/projects` | write；必填 `title`/`source_uri` |
+
+`paid` 标记的依据不是猜：`ad-drama.service.ts` 的 `:225`/`:272`/`:340`/`:442`/`:515`/`:569` 六处分别调用 `credits.price()`，
+五个生成类动作各命中一处；`reset` 不调价目表，所以不标 paid（标了会让 CLI 在 `--dry-run` 时误报花费）。
+
+`ad` 补到 8 个动词是对齐竞品 `commands/ad.md:22-31` 的同款清单；`redraw` 只接 `info` 与 `create`，因为竞品
+`commands/redraw.md` 自己写明 `create`/`episode`/`bind`/`asset`/`plan` 是「流程待接入」，其中仅 `create` 有真实入参证据
+（`redraw.controller.ts:21-30` 的 `createBody`：`title`、`source_uri`、`redraw_strength 0..100`、`style ∈ REDRAW_STYLES`，
+后者来自 `redraw.service.ts:53`）。其余四条**不凭空造**。
+
+### 28.3 `--set` 的类型推断规则（改在 `apps/cli/src/args.ts`）
+
+`--set` 的入参是「一段像 JSON 的文本」，`coerceScalar` 负责把它变成 JS 值。修前是裸 `JSON.parse`，
+于是 **18 位雪花 id 一律被当成 number**，再被 IEEE-754 截到 53 位有效位——最后几位被改掉。
+
+```ts
+const BIG_INT_RUN = /(?<![\w."-])(\d{16,})(?![\d."])/g;
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const guarded = text.replace(BIG_INT_RUN, (run) => (BigInt(run) > MAX_SAFE ? `"${run}"` : run));
+return JSON.parse(guarded) as unknown;
+```
+
+| 输入 | 推断结果 | 规则 |
+|---|---|---|
+| `count=2` | number | 短数字不变 |
+| `n=9007199254740991` | number | `<= MAX_SAFE_INTEGER` 可精确表示，不必改类型 |
+| `brief_id=108760275629637632` | string | 超过安全整数 → 加引号 |
+| `shot_ids=[108760275629637632,108760275629637633]` | string[] | 数组内裸 id 同样保护 |
+| `brief_id="108760275629637632"` | string | 已带引号不二次加引号（前后瞻排除 `"`） |
+
+**为什么不让所有 id 都走字符串**：`--set count=2`、`--set step=2` 这类数量参数若变字符串，服务端 zod
+（`z.number()`）会直接 400101，等于用一个真缺陷换另一个真缺陷；而「只在会被 JS 精度损失时改类型」是唯一不需要知道
+字段语义的判据。
+
+### 28.4 `ad-drama` 与 `video-redraw` 端点全表（服务端事实，供 CLI/前端对照）
+
+| 模块 | 端点 |
+|---|---|
+| `ad-drama`（`@Controller("ad-drama")`，12 条） | `POST projects`、`GET projects/:id`、`POST projects/:id/selling-point/generate`、`POST projects/:id/brief/generate`、`POST projects/:id/brief/select`、`POST projects/:id/script/generate`、`POST projects/:id/script/edit`、`POST projects/:id/script/reset`、`POST projects/:id/storyboard/generate`、`POST projects/:id/asset/extract`、`POST projects/:id/asset/image-tips`、`POST projects/:id/point` |
+| `video-redraw`（`@Controller("video-redraw")`，9 条） | `POST projects`、`GET projects`、`GET projects/:id`、`POST projects/:id/point`、`POST projects/:id/episodes`、`POST projects/:id/episodes/batch`、`POST projects/:id/storyboard/plan`、`POST projects/:id/resources/generate`、`POST projects/:id/asset/bind` |
+
+注意 CLI **没有**把 `brief/select`、`script/edit`、`asset/image-tips`、`point` 四个动作做成命令：前两个是「在已有候选上挑选/改稿」
+的交互动作（竞品 CLI 也没有），后两个是计费确认与运营口径接口。命令数应跟竞品对得上，不该比它多造动作。
+
+### 28.5 测试与验证
+
+| 层 | 内容 |
+|---|---|
+| `apps/cli/test/ad-redraw-parity.spec.ts`（新增，4 例） | ① ad 组恰好 8 个动词且无骨架；② 10 条命令的 `method + path` 逐条钉死；③ 5 条生成命令必须 `paid && write`，而 `info`/`save`/`reset`/redraw 两条不得标 paid；④ 扫 `apps/api/src` 确认 `@Controller("ad-drama")`、`@Controller("video-redraw")` 仍存在（防后端改名后 CLI 静默失效） |
+| `apps/cli/test/args.spec.ts`（+1 例） | 覆盖 28.3 表里的四种边界 |
+| 真链路 | 起 api 于 3002，用真 `oneframe` 二进制跑 ad 全链与 redraw 两条（见 README v6.24 §五） |
+
+### 28.6 诚实边界
+
+- 本批**不加分**：`#9` 的 0.24 缺口对应 48 条仍卡后端端点的骨架命令，本批没有让任何一条从「缺端点」变成「有端点」。
+- 两组命令的**响应字段**仍是「我方 DTO 形状」——竞品 CLI 文档只给输出键名（`SP_ID`/`STAGE`/`video_redraw_stage` 等），
+  没有字段级 JSON schema；语义对得上 ≠ 逐字段取证。
+- `--set` 的启发式只保证「超过安全整数的裸整数不被改值」，**不保证**「用户想传字符串时一定传成字符串」：
+  若某字段服务端要求 string 而值小于安全整数（如 `episode_id=12`），仍会以 number 发出。当前 zod 层对此类字段用
+  `z.union([z.string(), z.number()])` 兜住；这条边界登记在此，待有字段真的踩到时再改（改成「按 schema 判类型」需要 CLI 知道服务端 schema，
+  属于更大的改造）。

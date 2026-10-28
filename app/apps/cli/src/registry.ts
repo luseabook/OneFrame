@@ -831,11 +831,47 @@ const pendingCommands: CommandSpec[] = [
   http("market", "mine", "GET", "market/creator/works", "我的上架作品", "commands/market.md:99", {
     queryKeys: ["page", "page_size", "status"],
     }),
-  todo("ad", "info", "广告信息", "commands/ad.md:33", "ad 域本轮由队友落地（modules/ad）；CLI 接线放下一轮，当前无端点"),
-  todo("ad", "save", "保存广告素材", "commands/ad.md:49", "同上：modules/ad 落地后接；当前无端点"),
-  todo("ad", "plan", "广告方案", "commands/ad.md:141", "同上：modules/ad 落地后接；当前无端点"),
-  todo("redraw", "info", "重绘信息", "commands/redraw.md:27", "redraw 域本轮由队友落地（modules/redraw）；CLI 接线放下一轮，当前无端点"),
-  todo("redraw", "create", "创建重绘", "commands/redraw.md:68", "同上：modules/redraw 落地后接；当前无端点"),
+  // 广告剧（ad）—— 第 70 批接线。竞品 CLI 一共 8 个子命令（`commands/ad.md:22-31`），
+  // 端点第 44 批就已在 `apps/api/src/modules/ad/ad-drama.controller.ts`（`@Controller("ad-drama")`）
+  // 落地，但 CLI 侧 3 条 `todo` 一直写着「当前无端点」。**这 3 条 reason 是过期的**：
+  // 骨架命令会让 agent 以为能力不存在，比"缺能力"更有害，所以这里逐条对齐真实端点。
+  // 参数名沿用竞品取证过的名字（`commands/ad.md:57-67`、`:117`、`:133`、`:149`），不自造同义词。
+  http("ad", "info", "GET", "ad-drama/projects/{project_id}", "广告项目详情 + 五段进度（--workspace 提供项目 ID）", "commands/ad.md:33", {
+    }),
+  http("ad", "save", "POST", "ad-drama/projects", "新建/更新广告项目（--set material_name=… material_highlight=… material_image=… style=… ratio=9:16）", "commands/ad.md:49", {
+    write: true,
+    }),
+  http("ad", "selling-point", "POST", "ad-drama/projects/{project_id}/selling-point/generate", "生成商品卖点（`--set count=1..8` 可选）", "commands/ad.md:77", {
+    write: true,
+    paid: true,
+    }),
+  http("ad", "plot", "POST", "ad-drama/projects/{project_id}/brief/generate", "生成剧情方案候选（`--set count=1..5` 可选）", "commands/ad.md:93", {
+    write: true,
+    paid: true,
+    }),
+  http("ad", "script", "POST", "ad-drama/projects/{project_id}/script/generate", "按选中方案生成广告脚本（`--set brief_id=`）", "commands/ad.md:109", {
+    write: true,
+    paid: true,
+    }),
+  http("ad", "asset", "POST", "ad-drama/projects/{project_id}/asset/extract", "抽取广告资产（`--set need_voice=1|2`）", "commands/ad.md:125", {
+    write: true,
+    paid: true,
+    }),
+  http("ad", "plan", "POST", "ad-drama/projects/{project_id}/storyboard/generate", "生成分镜规划（`--set template_type=1|2`）", "commands/ad.md:141", {
+    write: true,
+    paid: true,
+    }),
+  http("ad", "reset", "POST", "ad-drama/projects/{project_id}/script/reset", "重置脚本，回到剧情方案选择", "commands/ad.md:157", {
+    write: true,
+    }),
+  // 视频转绘（redraw）—— 第 70 批接线。竞品 CLI 只有 `info` 是可用流程，
+  // 其余 4 条在竞品文档里明写「流程待接入」（`commands/redraw.md:21-24`、`:72`），
+  // 所以我方也只接 `info` / `create` 两条确定形状的，不替竞品把未定契约坐实。
+  http("redraw", "info", "GET", "video-redraw/projects/{project_id}", "转绘项目四段进度（`video_redraw_stage` / `video_redraw_stage_status`）", "commands/redraw.md:27", {
+    }),
+  http("redraw", "create", "POST", "video-redraw/projects", "创建转绘项目（--set title=… source_uri=… 可选 redraw_strength=0..100 / style=anime|ghibli|ink|comic|cyberpunk）", "commands/redraw.md:68", {
+    write: true,
+    }),
   todo("ai", "upscale", "AI 放大", "commands/ai.md:29", "我方无 ai 工具独立端点；后处理能力在工具箱：`POST /generations`（mode 取自 GET /generations/tools）"),
   todo("ai", "subtitle-erase", "去字幕", "commands/ai.md:45", "用工具箱入口：mode=de_subtitle_auto|de_subtitle_region（`GET /generations/tools` 目录；Web 侧 /create/video-upscale）"),
   todo("clip", "create", "创建剪辑", "commands/clip.md:23", "clip 无独立端点（画布有 clip 节点与 timeline clips）；用 `node create clip` + `PUT .../timeline`"),

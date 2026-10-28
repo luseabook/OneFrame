@@ -103,15 +103,34 @@ export interface ParsedArgs {
 }
 
 /**
+ * 超 `Number.MAX_SAFE_INTEGER` 的裸整数（我方 id 是 18 位雪花）先加引号，再交给
+ * `JSON.parse`。
+ *
+ * 为什么必须这样：`JSON.parse("108760122495598592")` 会**静默把尾数改掉**
+ * （→ `108760122495598590`），因为 IEEE-754 双精度只有 53 位有效整数；而服务端
+ * 对 id 一律用 `z.string()`，拿到数字还会直接 400101 `Expected string, received
+ * number`（第 70 批跑 `ad script --set brief_id=<真实 id>` 时实测命中）。
+ *
+ * 两条约束共同的效果是：`--set` 里的 id **只能是字符串**。与其要求在帮助里写
+ * "id 记得加引号"，不如在解析层按「能否被 JS 精确表示」自动判定——短数字
+ * （`count=2`、`duration_s=5`）仍是数字，安全整数（`9007199254740991`）也仍是数字，
+ * 只有真正表示不了的才变字符串。
+ */
+const BIG_INT_RUN = /(?<![\w."-])(\d{16,})(?![\d."])/g;
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
  * `--set` 的值强转：能按 JSON 解析就用 JSON，否则保留字符串。
  * 这样 `--set nums=[1]` 得到数组、`--set ratio=9:16` 得到字符串 `"9:16"`、
  * `--set qty=1` 得到数字 1——与竞品「值可以是 JSON」一致，且不需要为每个键写规则。
+ * 例外见 {@link BIG_INT_RUN}：超 `Number.MAX_SAFE_INTEGER` 的整数字面量保持字符串。
  */
 export function coerceScalar(raw: string): unknown {
   const text = raw.trim();
   if (text === "") return "";
   try {
-    return JSON.parse(text) as unknown;
+    const guarded = text.replace(BIG_INT_RUN, (run) => (BigInt(run) > MAX_SAFE ? `"${run}"` : run));
+    return JSON.parse(guarded) as unknown;
   } catch {
     return raw;
   }

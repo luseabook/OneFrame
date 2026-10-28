@@ -42,6 +42,19 @@ describe("参数解析", () => {
     expect(parsed.sets.is_store_draft).toBe(true);
   });
 
+  it("--set 里的 18 位 id 保持字符串（超 Number.MAX_SAFE_INTEGER，JSON.parse 会改尾数）", () => {
+    // 实测事故：`ad script --set brief_id=108760275629637632` 被强转成数字，
+    // 尾数被 IEEE-754 改掉 → 服务端 400101 `Expected string, received number`。
+    const id = "108760275629637632";
+    expect(coerceScalar(id)).toBe(id);
+    expect(coerceScalar(`[${id},108760275629637633]`)).toEqual([id, "108760275629637633"]);
+    // 短数字仍按数字走（`count=2` 这类不能被误伤）
+    expect(coerceScalar("2")).toBe(2);
+    expect(coerceScalar("9007199254740991")).toBe(Number.MAX_SAFE_INTEGER);
+    // 已经是带引号的字符串不会被二次加引号
+    expect(coerceScalar(`"${id}"`)).toBe(id);
+  });
+
   it("--set @file.json 识别为批量载荷文件（episode.md:22）", () => {
     const parsed = parseArgv(["episode", "batch-create", "--set", "@episodes.json"]);
     expect(parsed.batchFile).toBe("episodes.json");

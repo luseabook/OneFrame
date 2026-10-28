@@ -126,6 +126,93 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.24 · 第 70 批：ad/redraw 两组命令写着「当前无端点」，其实端点早就在 —— 接线并补齐到竞品同款，顺手修 `--set` 大整数 id 失真 · 2026-10-28）
+
+> 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.3**（同一批；本文件与主台账各有一套编号，勿混）。
+
+**这一批修的是两类「代码看起来对、实际不对」的东西。** 用户面差别有两句：
+
+1. 以前 `oneframe ad save` / `ad info` / `redraw create` 会直接回「该能力未实现（我方无端点）」——**但后端两个模块早在册**
+   （`@Controller("ad-drama")` 12 条、`@Controller("video-redraw")` 9 条）。现在 ad 的 8 个动作与 redraw 的 2 个动作都能跑。
+2. 以前 `--set brief_id=108760275629637632` 这条最普通的写法会**把 id 的最后几位改掉**，然后服务端回
+   `400101 Expected string, received number`；现在会原样保住。
+
+分数不动（仍 98.3% / 202.45 / 剩余 3.55）——骨架 48 条仍卡在后端未落地的端点，本批只是把「明明有端点却对外说没有」这种
+**比缺能力更有害**的状态清掉。
+
+### 一、两类缺陷与两种发现方式
+
+| 缺陷 | 怎么发现的 | 为什么平时的门禁抓不到 |
+|---|---|---|
+| 5 条命令的 `reason` 是**过期记录**（写「当前无端点」，实际早已上线） | 把 `registry.ts` 里每条 `todo(...)` 的 reason 当**断言**逐条去 grep 后端 controller —— 这次直接命中 `ad-drama.controller.ts` 与 `redraw.controller.ts` | 骨架命令**不参与** `registry-routes.spec.ts` 的路径比对（它没有 `path` 字段），typecheck/lint 也不会怀疑一句说明文字 |
+| `--set` 把 18 位 id 变成浮点 | **真 CLI 打真 API** 才暴露：`ad script --set brief_id=…` 一路 400101 | registry 里字段名/位置全对，`args.spec.ts` 只测了「JSON 能解析」，没测「解析后还是原来的值」 |
+
+一句话概括这两类：**说明文字与类型推断都不在任何门禁的断言范围内**，所以只能靠「读一条命令的 reason 就去 grep 一次」和
+「用真二进制跑一条真链路」。
+
+### 二、接线清单（10 条，全部指向已存在的端点）
+
+| 组 | 动词 | method + path | 标记 |
+|---|---|---|---|
+| ad | `info` | `GET ad-drama/projects/{project_id}` | — |
+| ad | `save` | `POST ad-drama/projects` | write |
+| ad | `selling-point` | `POST ad-drama/projects/{project_id}/selling-point/generate` | write · paid |
+| ad | `plot` | `POST …/brief/generate` | write · paid |
+| ad | `script` | `POST …/script/generate` | write · paid |
+| ad | `asset` | `POST …/asset/extract` | write · paid |
+| ad | `plan` | `POST …/storyboard/generate` | write · paid |
+| ad | `reset` | `POST …/script/reset` | write |
+| redraw | `info` | `GET video-redraw/projects/{project_id}` | — |
+| redraw | `create` | `POST video-redraw/projects` | write |
+
+`paid` 不是猜的：`ad-drama.service.ts` 里 `:225`/`:272`/`:340`/`:442`/`:515`/`:569` 六处逐个调 `credits.price()`，
+五个生成类动作各对应一处（`reset` 不计费）。
+
+### 三、为什么 ad 补到 8 个动词、redraw 只补 2 个
+
+竞品 `commands/ad.md:22-31` 列了 8 个动词（`info`/`save`/`selling-point`/`plot`/`script`/`asset`/`plan`/`reset`），
+而竞品 `commands/redraw.md` 自己写明 `create`/`episode`/`bind`/`asset`/`plan` 是「流程待接入」——**只有 `info` 是它声称可用的**。
+所以：ad 补齐到 8（我方后端正好都有对应端点），redraw 只接 `info` 与 `create`（`create` 有真实入参证据：
+`redraw.controller.ts:21-30` 的 `createBody` + `redraw.service.ts:53` 的 `REDRAW_STYLES`），
+其余四条**不凭空造**。
+
+### 四、`--set` 的 id 保真：规则比「都当字符串」复杂
+
+改动只在 `apps/cli/src/args.ts` 的 `coerceScalar`：
+
+```ts
+// 修前：整串直接 JSON.parse —— 18 位裸整数一定失真
+// 修后：只给「超过 MAX_SAFE_INTEGER 的裸整数」加引号，其余不动
+const BIG_INT_RUN = /(?<![\w."-])(\d{16,})(?![\d."])/g;
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const guarded = text.replace(BIG_INT_RUN, (run) => (BigInt(run) > MAX_SAFE ? `"${run}"` : run));
+return JSON.parse(guarded) as unknown;
+```
+
+| `--set` 输入 | 结果 | 理由 |
+|---|---|---|
+| `count=2` | number `2` | 短数字照旧，别把「数量」变成字符串 |
+| `n=9007199254740991` | number（安全整数） | 能被 JS 精确表示就不必改类型 |
+| `brief_id=108760275629637632` | string `"108760275629637632"` | 超过安全整数，转数字必然失真 |
+| `shot_ids=[1087…,1087…]` | string 数组 | 数组内裸 id 同样受保护；已带引号的不二次加引号 |
+
+### 五、验证（真跑，不是只看 registry）
+
+| 项目 | 结果 |
+|---|---|
+| `pnpm --filter @app/cli build` | `[gen-skill] 写入 4 个、未变 39 个（共 43）` → 再跑 `写入 0 个、未变 43 个`（内容幂等） |
+| `dist/registry.js` | **202 命令 / 38 组 / 154 ready / 48 skeleton**（原 197 / 144 / 53） |
+| cli 单测 | **15 文件 104 例全绿**（原 14/99；`args.spec.ts` +1、新增 `ad-redraw-parity.spec.ts` 4 例） |
+| 真 CLI 打真 API | ad 全链 `save`→`info`→`selling-point`(2 条)→`plot`(2 条)→`script`(带真实 brief_id)→`asset`(4 条)→`plan`(3 shot)→`reset`→`info`（末态 `stage=4`/`shots=3`）；redraw `create` 回 `project_mode:3`、`info` 回 `video_redraw_stage:"episode"` |
+| 总闸 | `pwsh _acceptance/verify-round.ps1` → **12/12 全绿** |
+
+### 六、诚实边界
+
+- **不加分**：48 条骨架仍卡在后端未落地的端点（各自权重已计入对应模块），本批清掉的是「过期说明」与「命令层类型失真」，不是新能力。
+- `ad`/`redraw` 两组的**响应字段**仍是「我方 DTO 形状」——竞品 CLI 文档只给用法与输出键名（`SP_ID`/`STAGE`/`video_redraw_stage` 等），没有字段级 JSON schema；已有字段对齐是我方与竞品语义对得上，不是逐字段取证。
+- redraw 的 `episode`/`bind`/`asset`/`plan` 四条命令仍是骨架，因为竞品自己也没写清流程；等它给证据再做，不猜。
+
+
 ## 变更登记（v6.23 · 第 69 批：路径里的 id 写错时不再返回 500 —— 248 条 GET 探针抓出的 18 条 · 2026-10-28）
 
 > 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.2**（同一批；本文件与主台账各有一套编号，勿混）。
