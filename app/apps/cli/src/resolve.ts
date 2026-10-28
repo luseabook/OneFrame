@@ -102,7 +102,12 @@ export function buildQuery(
   parsed: ParsedArgs,
   warnings?: string[],
 ): Record<string, unknown> {
-  const query: Record<string, unknown> = {};
+  const query: Record<string, unknown> = { ...(spec.fixedQuery ?? {}) };
+  if (spec.write === true) {
+    // 写命令的 `--set` 全部进 body（见 buildBody），这里既不收 query，也不该报
+    // 「不接受 --set」——那条警告是给 GET 命令防脏键用的，写命令上它是错的提示。
+    return query;
+  }
   if (spec.queryKeys === undefined) {
     // 没有声明白名单的 GET（如 node get）不收 --set，避免把脏键发给服务端
     if (Object.keys(parsed.sets).length > 0) {
@@ -145,6 +150,15 @@ export function buildBody(spec: CommandSpec, ctx: ResolveContext): unknown {
       const values = ctx.args.slice(param.index).filter((v) => v !== "");
       if (values.length === 0) continue;
       body[param.key] = values;
+      continue;
+    }
+    if (param.as === "reference_uri") {
+      // 工具箱 `POST /generations` 的入参形状：`input.reference_uris: string[]`。
+      // 位置参数只给一个 URI，这里包成数组，并保留 fixedBody/--set 可能写进 input 的其他字段。
+      const value = ctx.args[param.index];
+      if (value === undefined || value === "") continue;
+      const current = (body[param.key] as Record<string, unknown> | undefined) ?? {};
+      body[param.key] = { ...current, reference_uris: [value] };
       continue;
     }
     const value = ctx.args[param.index];

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { flagBool, flagString, parseArgv, type ParsedArgs } from "./args";
 import { runBuiltin } from "./builtins";
 import { currentProfile, readConfig, resolveWebBaseUrl, type OneframeConfig } from "./config";
@@ -136,7 +137,11 @@ async function runHttp(
   const pathLabel = path.startsWith("/") ? path : `/${path}`;
   const write = isWriteCommand(spec);
   const dryRun = write && flagBool(parsed, "dry-run");
-  const idempotencyKey = flagString(parsed, "idempotency-key");
+  const idempotencyKey =
+    flagString(parsed, "idempotency-key") ??
+    // 服务端强制 `Idempotency-Key` 的端点（`POST /generations`）：没显式传就自动生成一个，
+    // 否则请求必然 400 `Idempotency-Key header required`——「能用但有坑」比「不能用」更糟。
+    (spec.autoIdempotency === true ? randomUUID() : undefined);
 
   let body: unknown;
   if (write) {

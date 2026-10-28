@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 12 条命令：可用 6 条、骨架 6 条。
+共 12 条命令：可用 9 条、骨架 3 条。
 
 ## `asset-lib list`
 
@@ -67,14 +67,14 @@ oneframe asset-lib dir-create [NAME] [--set KEY=VALUE]... [--dry-run] [--idempot
 
 ## `asset-lib get`
 
-查看资产详情
+查看资产详情（第 88 批补的单个资源端点，与列表同一形状）
 
 ```text
-oneframe asset-lib get [--json]
+oneframe asset-lib get <ASSET_ID> [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无 GET /assets/:id；用 `asset-lib list --set page=1` 过滤，或从 `task get` 的 results 取
+- 状态：可用（HTTP 端点已存在）
+- 端点：`GET assets/{asset_id}`
 - 契约证据：`commands/asset-lib.md:121`
 
 ## `asset-lib import`
@@ -115,26 +115,26 @@ oneframe asset-lib resource-list [--json]
 
 ## `asset-lib tag-add`
 
-资产打标签
+设置资产标签（`--set 'tags=[a,b]'`，我方 tags 是整体替换的数组字段）
 
 ```text
-oneframe asset-lib tag-add [--json]
+oneframe asset-lib tag-add <ASSET_ID> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：素材(PATCH /assets/:id)支持 tags 字段：`asset-lib rename <ID> --set tags=[a]` 可达；独立 tag 端点无
+- 状态：可用（HTTP 端点已存在）
+- 端点：`PATCH assets/{asset_id}`
 - 契约证据：`commands/asset-lib.md:249`
 
 ## `asset-lib move`
 
-移动资产到目录
+移动资产到目录（`--set folder_id=null` 表示移出目录）
 
 ```text
-oneframe asset-lib move [--json]
+oneframe asset-lib move <ASSET_ID> [FOLDER_ID] [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：用 `asset-lib rename <ID> --set folder_id=<DIR>`（PATCH /assets/:id 支持 folder_id）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`PATCH assets/{asset_id}`
 - 契约证据：`commands/asset-lib.md:281`
 
 ## `asset-lib batch-delete`

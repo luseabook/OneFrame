@@ -489,6 +489,64 @@ async function taskWait(ctx: BuiltinContext): Promise<BuiltinResult> {
   return { data: { tasks: latest } };
 }
 
+/** 提取任务四态（`app/apps/api/src/modules/extraction/extraction.service.ts:28-33`） */
+const EXTRACTION_RUNNING = 1;
+const EXTRACTION_FAILED = 3;
+const EXTRACTION_INVALID = 4;
+
+/**
+ * `resource extract-wait`：把「轮询提取任务」从用户脚本搬进 CLI。
+ *
+ * 为什么是纯客户端命令：服务端已有 `GET /extraction/tasks/:id`（四态），竞品也没有
+ * 单独的 wait 端点，它的 `extract-wait` 同样是客户端轮询（`commands/resource.md:586`）。
+ * 所以这里不新增后端端点，只做「查 → 判 → 睡 → 再查」。
+ *
+ * 失败终态按 `task wait` 的同一套退出码口径：3/4 抛 `task_failed`（退出码 4，脚本可据此重跑），
+ * 超时抛 `timeout`（退出码 6），而不是混成一个「失败 1」。
+ */
+async function extractWait(ctx: BuiltinContext): Promise<BuiltinResult> {
+  const { runtime, config, parsed, args } = ctx;
+  requireProfile(config);
+  const id = args[0] ?? flagString(parsed, "task-id");
+  if (!id || id.startsWith("--")) throw usageError("resource extract-wait 需要 ET_ID（提取任务 ID）");
+  const client = createClient({ runtime, config });
+  const timeoutMs = parseDuration(flagString(parsed, "timeout"), 0);
+  const deadline = timeoutMs > 0 ? runtime.now().getTime() + timeoutMs : Number.POSITIVE_INFINITY;
+  const intervalMs = 2000;
+
+  let latest: Record<string, unknown> = {};
+  for (;;) {
+    const row = await client.call<unknown>({
+      method: "GET",
+      path: `/extraction/tasks/${encodeURIComponent(id)}`,
+    });
+    latest = asRecord(row);
+    const status = Number(latest.status);
+    if (parsed.json !== true) {
+      runtime.stderr(`[wait] ${id} ${String(latest.status_name ?? status)}\n`);
+    }
+    if (status !== EXTRACTION_RUNNING) break;
+    if (runtime.now().getTime() >= deadline) {
+      throw new CliError("timeout", `等待超时（${timeoutMs}ms），提取任务仍在跑：${id}`, {
+        exitCode: EXIT.TIMEOUT,
+        retryable: false,
+        raw: { task: latest },
+      });
+    }
+    await runtime.sleep(intervalMs);
+  }
+
+  const status = Number(latest.status);
+  if (status === EXTRACTION_FAILED || status === EXTRACTION_INVALID) {
+    throw new CliError("task_failed", `提取任务未成功（status=${status}）：${id}`, {
+      exitCode: EXIT.TASK_FAILED,
+      retryable: status === EXTRACTION_FAILED,
+      raw: { task: latest },
+    });
+  }
+  return { data: { task: latest } };
+}
+
 /** Agent 一回合理应多久内给出结论（竞品 `commands/agent.md:147` 的 `--timeout` 缺省口径） */
 const AGENT_TURN_TIMEOUT_MS = 120_000;
 
@@ -984,6 +1042,8 @@ export async function runBuiltin(name: BuiltinName, ctx: BuiltinContext): Promis
       return workflowDetect(ctx, "resume");
     case "task-wait":
       return taskWait(ctx);
+    case "resource-extract-wait":
+      return extractWait(ctx);
     case "task-download":
       return taskDownload(ctx);
     case "agent-enter":

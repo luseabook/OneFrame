@@ -47,6 +47,7 @@ export type BuiltinName =
   | "workflow-resume"
   | "task-wait"
   | "task-download"
+  | "resource-extract-wait"
   | "agent-enter"
   | "agent-run"
   | "ledger-list"
@@ -62,11 +63,15 @@ export interface Positional {
   required?: boolean;
 }
 
-/** 位置参数 → 请求体字段（写命令用；`array` 时把重复位置参数聚成数组） */
+/**
+ * 位置参数 → 请求体字段（写命令用）。
+ * - `array`：把重复位置参数聚成数组
+ * - `reference_uri`：把单个 URI 包成生成请求的 `input.reference_uris`（工具箱 `POST /generations` 的形状）
+ */
 export interface BodyParam {
   key: string;
   index: number;
-  as?: "string" | "number" | "array";
+  as?: "string" | "number" | "array" | "reference_uri";
 }
 
 export interface CommandSpec {
@@ -87,8 +92,12 @@ export interface CommandSpec {
   slots?: (string | null)[];
   /** GET 命令：把 `--set` 中这些键放进 query（白名单） */
   queryKeys?: string[];
+  /** GET 命令：固定写进 query 的常量（白名单键仍可用 `--set` 覆盖） */
+  fixedQuery?: Record<string, unknown>;
   /** 写命令：`--set`/`--update` 全部进 body，并支持 --dry-run / --idempotency-key */
   write?: boolean;
+  /** 服务端强制 `Idempotency-Key` 的端点：未显式传时由 CLI 自动生成（`POST /generations`） */
+  autoIdempotency?: boolean;
   /** 写命令：位置参数映射进 body */
   bodyParams?: BodyParam[];
   /** 写命令：flag → body 字段名（如 `--left` → `src_node_id`） */
@@ -446,7 +455,10 @@ const assetLibCommands: CommandSpec[] = [
     positionals: [{ display: "NAME", desc: "目录名（也可 --name）" }],
     bodyParams: [{ key: "name", index: 0 }],
     }),
-  todo("asset-lib", "get", "查看资产详情", "commands/asset-lib.md:121", "我方无 GET /assets/:id；用 `asset-lib list --set page=1` 过滤，或从 `task get` 的 results 取"),
+  http("asset-lib", "get", "GET", "assets/{asset_id}", "查看资产详情（第 88 批补的单个资源端点，与列表同一形状）", "commands/asset-lib.md:121", {
+    slots: ["asset_id"],
+    positionals: [{ display: "ASSET_ID", desc: "资产 ID", required: true }],
+  }),
   http("asset-lib", "import", "POST", "assets/from-task", "从生成任务导入资产（= 素材入库）", "commands/asset-lib.md:137", {
     write: true,
     positionals: [{ display: "TASK_ID", desc: "任务 ID", required: true }],
@@ -454,8 +466,20 @@ const assetLibCommands: CommandSpec[] = [
     }),
   todo("asset-lib", "search", "搜索资产", "commands/asset-lib.md:185", "我方素材列表无 q 参数；知识库侧有搜索：`GET /v1/knowledge/assets/search`（CLI 尚未建组，见回报）"),
   todo("asset-lib", "resource-list", "asset-lib resource list", "commands/asset-lib.md:201", "“资源”语义在我方分两处：项目资产用 `resource list --workspace <SP>`，素材用 `asset-lib list`"),
-  todo("asset-lib", "tag-add", "资产打标签", "commands/asset-lib.md:249", "素材(PATCH /assets/:id)支持 tags 字段：`asset-lib rename <ID> --set tags=[a]` 可达；独立 tag 端点无"),
-  todo("asset-lib", "move", "移动资产到目录", "commands/asset-lib.md:281", "用 `asset-lib rename <ID> --set folder_id=<DIR>`（PATCH /assets/:id 支持 folder_id）"),
+  http("asset-lib", "tag-add", "PATCH", "assets/{asset_id}", "设置资产标签（`--set 'tags=[a,b]'`，我方 tags 是整体替换的数组字段）", "commands/asset-lib.md:249", {
+    slots: ["asset_id"],
+    positionals: [{ display: "ASSET_ID", desc: "资产 ID", required: true }],
+    write: true,
+  }),
+  http("asset-lib", "move", "PATCH", "assets/{asset_id}", "移动资产到目录（`--set folder_id=null` 表示移出目录）", "commands/asset-lib.md:281", {
+    slots: ["asset_id"],
+    positionals: [
+      { display: "ASSET_ID", desc: "资产 ID", required: true },
+      { display: "FOLDER_ID", desc: "目标目录 ID（也可 --set folder_id=）" },
+    ],
+    bodyParams: [{ key: "folder_id", index: 1 }],
+    write: true,
+  }),
   todo("asset-lib", "batch-delete", "批量删除资产", "commands/asset-lib.md:297", "我方无批量删除；逐条 `asset-lib delete <ID>`（DELETE /assets/:id 是软删，可用 `POST /assets/:id/restore` 找回）"),
   todo("file", "metadata", "查看文件元数据", "commands/file.md:21", "我方无独立文件端点；产物元数据在 `task get <ID>` 的 results 里（含 size/content_type）"),
   todo("file", "object", "查看对象", "commands/file.md:43", "我方无对象存储浏览端点（key 由服务端生成，不对外枚举）"),
@@ -561,7 +585,9 @@ const resourceCommands: CommandSpec[] = [
   }),
   http("resource", "batch-info", "POST", "projects/{project_id}/assets/batch-info", "批量查询资产详情（`--set asset_ids=[id,id]`；查不到的进 missing，不整体报错）", "commands/resource.md:96", {
   }),
-  todo("resource", "extract-wait", "阻塞等待提取任务", "commands/resource.md:586", "组合即可：`resource extract-status <ET_ID>` 轮询，或 `task wait <TASK_ID>`（提取任务也落 tasks）"),
+  local("resource", "extract-wait", "阻塞等待提取任务到终态（客户端轮询 GET /extraction/tasks/:id）", "commands/resource.md:586", "resource-extract-wait", {
+    positionals: [{ display: "ET_ID", desc: "提取任务 ID（也可 --task-id）", required: true }],
+  }),
   todo("resource", "prompt-template", "生成官方资产提示词空表", "commands/resource.md:145", "xlsx 模板导出端点未落地（待取证）；当前 `--set` 直接提交 JSON"),
   todo("resource", "prompt-sheet-read", "回读资产提示词表", "commands/resource.md:163", "xlsx 回读端点未落地（待取证）；批量导入用 `resource draft-import --set @assets.json`"),
 ];
@@ -925,11 +951,28 @@ const pendingCommands: CommandSpec[] = [
   http("redraw", "create", "POST", "video-redraw/projects", "创建转绘项目（--set title=… source_uri=… 可选 redraw_strength=0..100 / style=anime|ghibli|ink|comic|cyberpunk）", "commands/redraw.md:68", {
     write: true,
     }),
-  todo("ai", "upscale", "AI 放大", "commands/ai.md:29", "我方无 ai 工具独立端点；后处理能力在工具箱：`POST /generations`（mode 取自 GET /generations/tools）"),
-  todo("ai", "subtitle-erase", "去字幕", "commands/ai.md:45", "用工具箱入口：mode=de_subtitle_auto|de_subtitle_region（`GET /generations/tools` 目录；Web 侧 /create/video-upscale）"),
+  http("ai", "upscale", "POST", "generations", "AI 放大（工具箱 video_upscale：1080p/2K/4K 按档计费）", "commands/ai.md:29", {
+    write: true,
+    paid: true,
+    autoIdempotency: true,
+    fixedBody: { mode: "video_upscale", model: "toolbox-video-upscale", options: { resolution: "1080p" } },
+    positionals: [{ display: "VIDEO_URI", desc: "待放大视频的 URI（assets 里的 uri 或公网 URL）", required: true }],
+    bodyParams: [{ key: "input", index: 0, as: "reference_uri" }],
+  }),
+  http("ai", "subtitle-erase", "POST", "generations", "去字幕（默认自动检测；框选区域用 `--set mode=de_subtitle_region --set model=toolbox-de-subtitle-region`）", "commands/ai.md:45", {
+    write: true,
+    paid: true,
+    autoIdempotency: true,
+    fixedBody: { mode: "de_subtitle_auto", model: "toolbox-de-subtitle-auto", options: { resolution: "per_call" } },
+    positionals: [{ display: "VIDEO_URI", desc: "待处理视频的 URI", required: true }],
+    bodyParams: [{ key: "input", index: 0, as: "reference_uri" }],
+  }),
   todo("clip", "create", "创建剪辑", "commands/clip.md:23", "clip 无独立端点（画布有 clip 节点与 timeline clips）；用 `node create clip` + `PUT .../timeline`"),
   todo("clip", "crop", "裁剪", "commands/clip.md:45", "同上：无独立裁剪端点，走画布节点/timeline"),
-  todo("voice", "list", "音色列表", "commands/voice.md:17", "voice 端点未落地；音色相关在 /op 与 resource voice-*（两者均未落地），待取证"),
+  http("voice", "list", "GET", "models", "音色列表（模型目录里 capability=speech 的条目；竞品 voice/list 归此）", "commands/voice.md:17", {
+    queryKeys: ["mode", "visible"],
+    fixedQuery: { capability: "speech" },
+  }),
   todo("sync-fm", "", "同步到 Filmora", "commands/sync-fm.md:17", "Filmora 外部集成未落地（无端点、无凭据契约）；待取证"),
 ];
 

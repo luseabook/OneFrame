@@ -2,28 +2,30 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 2 条命令：可用 0 条、骨架 2 条。
+共 2 条命令：可用 2 条、骨架 0 条。
 
 ## `ai upscale`
 
-AI 放大
+AI 放大（工具箱 video_upscale：1080p/2K/4K 按档计费）
 
 ```text
-oneframe ai upscale [--json]
+oneframe ai upscale <VIDEO_URI> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：我方无 ai 工具独立端点；后处理能力在工具箱：`POST /generations`（mode 取自 GET /generations/tools）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST generations`
+- 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/ai.md:29`
 
 ## `ai subtitle-erase`
 
-去字幕
+去字幕（默认自动检测；框选区域用 `--set mode=de_subtitle_region --set model=toolbox-de-subtitle-region`）
 
 ```text
-oneframe ai subtitle-erase [--json]
+oneframe ai subtitle-erase <VIDEO_URI> [--set KEY=VALUE]... [--dry-run] [--idempotency-key KEY] [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：用工具箱入口：mode=de_subtitle_auto|de_subtitle_region（`GET /generations/tools` 目录；Web 侧 /create/video-upscale）
+- 状态：可用（HTTP 端点已存在）
+- 端点：`POST generations`
+- 付费命令：先 `--dry-run` 看将发送的请求，再正式执行
 - 契约证据：`commands/ai.md:45`

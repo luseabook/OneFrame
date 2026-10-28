@@ -4305,3 +4305,56 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 2. `/asset/workflows` 的 13 条里，「删除」「改名」翻译成模板快照语义是推断。
 3. 本批不触碰 #17 的两条字段级缺口（`prompt_blocked` 列、`prompt_inject_mode` 语义）。
 4. 分数不变：#17 仍 99%（0.08 归 B 类）。
+
+## 17.46 CLI 侧的 7 条客户端形状：把骨架接到已有端点（第 89 批）
+
+> 为什么客户端契约要写进 API 文档：本批**没有新增任何端点**，但加了一条硬约束的实现 —— `POST /generations` 必须带 `Idempotency-Key`，而 CLI 现在会自动生成它。照着「直接 POST /generations」写脚本的人第一个请求就会拿到 400，这属于接口契约遗漏，不是 CLI 的内部细节。
+
+### 46.1 七条命令与调用形状
+
+| CLI 命令 | 方法 + 路径 | body / query | 说明 |
+|---|---|---|---|
+| `asset-lib get <ASSET_ID>` | `GET /assets/{asset_id}` | — | 与 `GET /assets` 列表项**同一形状**（`toDto` 同一个函数）；软删不可见 |
+| `asset-lib move <ASSET_ID> <FOLDER_ID>` | `PATCH /assets/{asset_id}` | `{ folder_id }` | `folder_id=null` 表示移出目录；「缺少该键」与「显式 null」语义不同 |
+| `asset-lib tag-add <ASSET_ID> --set 'tags=[...]'` | `PATCH /assets/{asset_id}` | `{ tags: string[] }` | **整体替换**（≤20 个），不是追加 |
+| `ai upscale <VIDEO_URI>` | `POST /generations` | `{ mode:"video_upscale", model:"toolbox-video-upscale", input:{reference_uris:[uri]}, options:{resolution:"1080p"} }` | 2K/4K 换 `options.resolution`；按档计价（1080p 15 / 2K 30 / 4K …） |
+| `ai subtitle-erase <VIDEO_URI>` | `POST /generations` | `{ mode:"de_subtitle_auto", model:"toolbox-de-subtitle-auto", input:{reference_uris:[uri]}, options:{resolution:"per_call"} }` | 框选区域：`mode=de_subtitle_region` + `model=toolbox-de-subtitle-region` |
+| `voice list` | `GET /models` | `?capability=speech&visible=1` | 「音色」= 模型目录条目，不是用户的音色库（后者需新表，未做） |
+| `resource extract-wait <ET_ID>` | `GET /extraction/tasks/{task_id}`（轮询） | — | 1 进行中 / 2 成功 / 3 失败 / 4 失效 |
+
+### 46.2 `POST /generations` 的幂等键是硬要求
+
+服务端在缺少 `Idempotency-Key` 头时直接 `AppError(ErrorCode.BAD_REQUEST, "Idempotency-Key header required")`（400101）。因此：
+
+- 任何调用方（CLI、脚本、前端）都必须自己生成一个稳定键；同一「用户意图」重试要复用同一个键，换意图要换键。
+- CLI 的做法：声明了 `autoIdempotency` 的写命令自动生成 UUID（覆盖 `ai upscale` / `ai subtitle-erase`），用户可用 `--idempotency-key` 覆盖。
+- 键落在既有的幂等账本里（`GET /idempotency` 家族），重复键返回首次结果而不是再扣一次积分。
+
+### 46.3 `resource extract-wait` 的状态机与退出码
+
+| 提取任务状态 | CLI 行为 | 退出码 |
+|---|---|---|
+| 1 进行中 | 继续轮询，非 `--json` 时往 stderr 打 `[wait] <id> <状态名>` | 继续 |
+| 2 成功 | 返回 `{ data: { task } }` | 0 |
+| 3 失败 | `CliError("task_failed", retryable=true)` | `EXIT.TASK_FAILED` |
+| 4 已删除或失效 | `CliError("task_failed", retryable=false)` | `EXIT.TASK_FAILED` |
+| 超过 `--timeout` | `CliError("timeout", raw.task=latest)` | `EXIT.TIMEOUT` |
+
+`--json` 模式下不打印进度行（保持 stdout/stderr 干净，脚本可解析）。
+
+### 46.4 三条契约约束
+
+1. **`reference_uris` 是工具箱的唯一入参形态**：工具类 mode（放大/去字幕/切分…）不接受 `prompt` 决定输入素材，必须走 `input.reference_uris[]`；CLI 的 `as:"reference_uri"` 就是为此存在。
+2. **`voice list` 不是「我的音色」**：它读的是 `GET /models?capability=speech`（模型目录）。竞品的 `GET /ai/voice-clone-list` 一类需要 `voice_clones` 表，属产品口径未定，未实现、也未用目录项冒充。
+3. **`asset-lib move`/`tag-add` 与 `asset-lib rename` 是同一条 PATCH**：三者共用 `PATCH /assets/{id}`（`{name?, folder_id?, tags?}`），CLI 拆成三条命令只是为了 `--help` 可读，服务端只有一条写入路径。
+
+### 46.5 「骨架」是客户端待办，不是后端缺口
+
+`registry.ts` 里 `ready:false` 的条目是**客户端还没接的命令**，它既可能对应「后端缺端点」，也可能对应「后端已有、CLI 没接」。第 89 批把 40 条分成 7 + 33（见 README v6.43），骨架数从 40 降到 33。**不要把骨架数的减少理解成端点数增加** —— 本批端点仍是 752。
+
+### 46.6 边界
+
+1. 只接线「端点已存在」的 7 条；33 条保留骨架，reason 未逐条重写。
+2. `ai upscale` 的默认分辨率取 1080p（价目表第一档），不是「最优档」；要 4K 须显式传。
+3. `resource extract-wait` 的轮询间隔与 `task wait` 一致（2s），没有做自适应退避。
+4. 本批未改任何服务端校验、计费或幂等语义 —— 只是把既有契约正确地用起来。

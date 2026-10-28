@@ -7,7 +7,7 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 
 发布态只依赖三样东西：当前二进制的 `--help`、本文件、以及随包文档（`manual/`、`commands/`）。不要引用任何外部文档站或截图。
 
-本包版本 **0.1.0**（`VERSION`），命令 204 条、可用 164 条。
+本包版本 **0.1.0**（`VERSION`），命令 204 条、可用 171 条。
 
 ## <HARD-GATE>
 
@@ -54,9 +54,9 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 | `episode` | 15 | 13 | 2 | `commands/episode.md` |
 | `storyboard` | 18 | 9 | 9 | `commands/storyboard.md` |
 | `upload` | 1 | 1 | 0 | `commands/upload.md` |
-| `resource` | 17 | 14 | 3 | `commands/resource.md` |
+| `resource` | 17 | 15 | 2 | `commands/resource.md` |
 | `subject` | 10 | 7 | 3 | `commands/subject.md` |
-| `asset-lib` | 12 | 6 | 6 | `commands/asset-lib.md` |
+| `asset-lib` | 12 | 9 | 3 | `commands/asset-lib.md` |
 | `file` | 3 | 0 | 3 | `commands/file.md` |
 | `canvas` | 10 | 10 | 0 | `commands/canvas.md` |
 | `node` | 10 | 10 | 0 | `commands/node.md` |
@@ -73,9 +73,9 @@ description: 调用 oneframe 写入 OneFrame 项目或无限画布，或询问 O
 | `market` | 3 | 3 | 0 | `commands/market.md` |
 | `ad` | 8 | 8 | 0 | `commands/ad.md` |
 | `redraw` | 2 | 2 | 0 | `commands/redraw.md` |
-| `ai` | 2 | 0 | 2 | `commands/ai.md` |
+| `ai` | 2 | 2 | 0 | `commands/ai.md` |
 | `clip` | 2 | 0 | 2 | `commands/clip.md` |
-| `voice` | 1 | 0 | 1 | `commands/voice.md` |
+| `voice` | 1 | 1 | 0 | `commands/voice.md` |
 | `sync-fm` | 1 | 0 | 1 | `commands/sync-fm.md` |
 
 ## stdout / stderr 契约

@@ -2,7 +2,7 @@
 
 > 本文件由 `apps/cli/scripts/gen-skill.cjs` 从 `src/registry.ts` 生成，**不要手改**；改命令请改 registry 后重跑 `pnpm --filter @app/cli build`。
 
-共 17 条命令：可用 14 条、骨架 3 条。
+共 17 条命令：可用 15 条、骨架 2 条。
 
 ## `resource list`
 
@@ -178,14 +178,13 @@ oneframe resource batch-info [--json]
 
 ## `resource extract-wait`
 
-阻塞等待提取任务
+阻塞等待提取任务到终态（客户端轮询 GET /extraction/tasks/:id）
 
 ```text
-oneframe resource extract-wait [--json]
+oneframe resource extract-wait <ET_ID> [--json]
 ```
 
-- 状态：骨架（执行会明确报未接入，不伪造成功）
-- 未接入原因：组合即可：`resource extract-status <ET_ID>` 轮询，或 `task wait <TASK_ID>`（提取任务也落 tasks）
+- 状态：可用（纯客户端，不发请求）
 - 契约证据：`commands/resource.md:586`
 
 ## `resource prompt-template`

@@ -127,6 +127,78 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.43 · 第 89 批：#9 CLI 骨架逐条复查 —— 40 条里 7 条是「后端早就有、CLI 没接」 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+#9 CLI/MCP 的缺口栏从第 74 批起就写着「40 条骨架命令（卡在后端未落地的端点）」，权重 0.22。但这句话混了两种完全不同的东西：
+
+1. **真缺后端**：竞品有这条路由、我方没有对应能力或形状（33 条，如 `material get`、`group execute`、`novel config`）；
+2. **后端早就有、只是 CLI 没接**：端点已在 752 条路由里，`registry.ts` 里却还挂着一条 `todo()`（7 条）。
+
+第 78 批的 `agent enter`/`run` 就属于第 2 类（reason 写着「REPL 未实现 / SSE 未接」，而 `POST /agent/task/chat` 与画布会话 SSE 早已就绪）。本批把 40 条逐条对着真实路由复查一遍，把第 2 类全部接线 —— 因为**把客户端工作量记成后端能力缺口，会让「还差什么」这件事失真**。
+
+### 二、40 条怎么分成两类
+
+| 分类 | 条数 | 例子 | 处理 |
+|---|---:|---|---|
+| 后端已有、CLI 没接 | **7** | `asset-lib get`（第 88 批刚补 `GET /assets/:id`，reason 已过期）、`asset-lib move`/`tag-add`（`PATCH /assets/:id` 早支持 `folder_id`/`tags`）、`ai upscale`/`subtitle-erase`（工具箱 `POST /generations` 的 `video_upscale`/`de_subtitle_*` mode）、`voice list`（`GET /models?capability=speech`）、`resource extract-wait`（`GET /extraction/tasks/:id` 轮询） | **本批全部接线成真命令** |
+| 确实还没有端点 | **33** | `model price`、`subject batch-details`/`reset`、`storyboard` 草稿族 4 条、xlsx 模板 4 条、`material get`/`batch-add`、`group execute`/`template-get`、`file object`、`sync-fm`、`clip create`/`crop` … | 保留骨架，reason 不再写「组合即可」这种含糊话 |
+
+所以本批**没有新增任何后端端点**（端点仍是 752），改的是客户端能力：**骨架 40→33、ready 164→171、命令总数 204 不变**。
+
+### 三、7 条怎么接的
+
+| 命令 | 后端 | 关键形状 |
+|---|---|---|
+| `asset-lib get <ID>` | `GET /assets/:id` | 与列表同一形状（第 88 批刚补），此前 reason 说「我方无此端点」已过期 |
+| `asset-lib move <ID> <FOLDER_ID>` | `PATCH /assets/:id` | body `{folder_id}`；`--set folder_id=null` 传 JSON `null` = 移出目录 |
+| `asset-lib tag-add <ID> --set 'tags=[a,b]'` | `PATCH /assets/:id` | body `{tags}`，整体替换（≤20 个） |
+| `ai upscale <VIDEO_URI>` | `POST /generations` | `mode=video_upscale`、`model=toolbox-video-upscale`、`options.resolution=1080p`（2K/4K 用 `--set resolution=2k`） |
+| `ai subtitle-erase <VIDEO_URI>` | `POST /generations` | 默认 `de_subtitle_auto`；框选区域 `--set mode=de_subtitle_region --set model=toolbox-de-subtitle-region` |
+| `voice list` | `GET /models` | 固定 `capability=speech`（`--set visible=1` 追加过滤） |
+| `resource extract-wait <ET_ID>` | `GET /extraction/tasks/:id` | 客户端轮询到终态；`--timeout` 超时、失败/失效映射退出码 |
+
+### 四、四个通用扩展点（这是本批真正的工程价值）
+
+1. **`fixedQuery`**：命令可以声明「永远带上的 query」（`voice list` 的 `capability=speech`），`--set` 仍可覆盖同一键 —— 避免为一条命令写一个特例函数。
+2. **`as: "reference_uri"`**：工具箱的唯一入参形态是 `input.reference_uris[]`，位置参数 `<VIDEO_URI>` 用这个新类型塞进去，**不再需要 `--set 'input={...}'` 手写 JSON**。
+3. **`autoIdempotency`**：`POST /generations` 强制要求 `Idempotency-Key` 头，缺了就 400。CLI 对声明了该标记的写命令自动 `randomUUID()` 生成键（用户仍可 `--idempotency-key` 指定）。**这是最容易踩的坑**：手写 curl 的人会在第一次调用就撞 400。
+4. **内置轮询命令 `resource-extract-wait`**：把 `taskWait` 的模式复用为「按提取任务四态（1 进行中 / 2 成功 / 3 失败 / 4 失效）轮询到终态」，非 `--json` 时每轮往 stderr 打一行进度。
+
+顺带修掉一条基线缺陷：`buildQuery` 对**写命令**也会返回「该命令不接受 `--set`」警告，而写命令的 `--set` 本来就该进 body —— 也就是说**此前所有写命令都在误报**。本批在 `buildQuery` 里对 `write === true` 直接返回。
+
+### 五、验证
+
+- 新增 `app/apps/cli/test/cli-wiring.spec.ts` **10 例**：骨架数=33 且 7 条无 reason；`asset-lib get 7` → `GET /v1/assets/7`；`move 7 12` → body `{folder_id:"12"}` 且 `--set folder_id=null` 精确为 `null`、stderr 不含「不接受 --set」；`tag-add` 的 tags 数组；`ai upscale` 的完整 body + 自动幂等键非空；`ai subtitle-erase` 默认/覆盖两种 mode；`voice list` 的 `capability=speech`；`extract-wait` 的 1→2 成功、3 失败、超时三种收尾。
+- **两次反向验证**：把 `capability: "speech"` 改坏 → 1 红；把 `generations` 路径改坏 → `registry-routes.spec.ts`（跨包静态校验）与功能例共 2 红。均已 restore。
+- cli 全量 **17 文件 128 例**（原 118）、`tsc --noEmit` 干净、`eslint` 退出 0；门禁 **12/12 全绿**；api 956 例不变。
+
+### 六、数字
+
+| 项 | 改前 | 改后 |
+|---|---:|---:|
+| #9 CLI/MCP 缺口 | 0.22 | **0.18** |
+| #9 完成度 | 97.25% | **97.75%** |
+| 骨架命令 | 40 | **33** |
+| ready 命令 | 164 | **171** |
+| cli 用例 | 118 | **128** |
+| 总用例 | 1,357 | **1,367** |
+| 全站 | 202.52 / 98.3% | **202.56 / 98.3%** |
+| 剩余权重 | 3.48 | **3.44** |
+| 生态组 | 94.85 / 98.8% | **94.89 / 98.8%** |
+| E 类 | 2.57 | **2.53** |
+| 端点 | 752 | 752（不变） |
+
+### 七、诚实边界
+
+1. **只接线了 7 条**，剩余 33 条一条没动 —— 它们背后确实没有端点形状，不是「没排期」。
+2. `voice list` 的「音色」= 模型目录里 `capability=speech` 的条目；竞品那个「我的音色库」（列表/详情/改名/删除 + 收藏）需要 `voice_clones`/`timbre_favorites` 表，**仍记在 #6 的 B 类 0.10 里**，本批没有假装它被解决了。
+3. `resource extract-wait` 复用 `GET /extraction/tasks/:id` 的四态，没有新端点，也没有改提取服务端的行为。
+4. 骨架的 reason 文案本批动了 7 条（换成真命令），其余 33 条**没有逐条重写 reason** —— 只把明显过期的（`asset-lib get`）清掉了；reason 与新证据的一致性仍是后续批次的事。
+5. 分数只上调 0.04（#9 97.25%→97.75%），因为减少的是**客户端待办**，不是后端能力缺口；把 7 条骨架的消失当成「后端补了 7 个端点」是错的。
+
+
 ## 变更登记（v6.42 · 第 88 批：审计 #17 资产/主体 —— 36 条竞品形状里 0 条同形，但只有 1 条是真缺口 · 2026-10-28）
 
 ### 一、这批在回答什么问题
