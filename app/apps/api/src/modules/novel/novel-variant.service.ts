@@ -26,6 +26,7 @@ import type {
   CharactersGenerateRequest,
   ChapterOutlineGenerateRequest,
   FissionCreateRequest,
+  OriginalIdeaPatch,
   OverseasRequest,
 } from "./novel.schemas";
 
@@ -380,6 +381,132 @@ export class NovelVariantService {
   async patchEpisodeOutline(spaceId: string, ntId: string, neoId: string, input: { title?: string; synopsis?: string }) {
     await this.novels.requireNovel(spaceId, ntId);
     return this.novels.patchEpisodeOutline(spaceId, ntId, neoId, input);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 补完（第 90 批）：竞品 102 条里 53 条未对上的 → 这 5 条是「同能力缺单个对象形状」
+  //
+  // 与上面 4 条薄路径同一动机，但注意一个区别：这 5 条**不是只读**。
+  // `patch_summary_outline` / `regenerate idea` / `patch idea` / `patch character`
+  // 都会写 `novels.meta.fission` 或角色卡，所以全部先过 `assertDraftLike`
+  // —— 已定稿的本子再改中间产物，会让下游（分集剧本）与上游（创意方案）互相矛盾。
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * `GET /fission_script/summary_outline` —— 读总纲（竞品同族路径）。
+   *
+   * 没生成过总纲时返回 `null` 而**不是 404**：链路还没走到这一步是正常状态，
+   * 前端要能区分「还没生成」（可点生成）与「本子不存在」（该报错）。
+   */
+  async getSummaryOutline(spaceId: string, ntId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    const state = this.fissionState(novel);
+    return {
+      summary_outline: state.summary_outline ?? null,
+      generated: state.summary_outline !== undefined && state.summary_outline !== null,
+      selected_ni_id: typeof state.selected_ni_id === "string" ? state.selected_ni_id : null,
+      source_nt_id: typeof state.source_nt_id === "string" ? state.source_nt_id : null,
+      llm_mode: this.llm.mode,
+    };
+  }
+
+  /**
+   * `PATCH /fission_script/summary_outline` —— 手工改总纲的**标量字段**。
+   *
+   * `beats` 不在可改范围：它是 `episode_outline/generate` 的输入，
+   * 逐条改节拍等于手工重划分集边界——与其在这里开一个半结构化补丁，
+   * 不如让用户重新生成（`POST summary_outline`）后整段替换。
+   */
+  async patchSummaryOutline(
+    spaceId: string,
+    ntId: string,
+    input: { title?: string; logline?: string; theme?: string; structure?: string },
+  ) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "fission/summary_outline/patch");
+    const state = this.fissionState(novel);
+    const current = asRecord(state.summary_outline);
+    if (Object.keys(current).length === 0) {
+      throw new AppError(ErrorCode.BAD_REQUEST, "summary outline not generated yet", {
+        reason: "summary_outline_missing",
+      });
+    }
+    const patch: Record<string, unknown> = {};
+    for (const key of ["title", "logline", "theme", "structure"] as const) {
+      const value = input[key];
+      if (value === undefined) continue;
+      patch[key] = value.trim();
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new AppError(ErrorCode.BAD_REQUEST, "at least one field is required", {
+        field: "title|logline|theme|structure",
+      });
+    }
+    const outline = { ...current, ...patch, updated_at: new Date().toISOString() };
+    await this.patchFissionState(novel, { summary_outline: outline });
+    return { summary_outline: outline };
+  }
+
+  /**
+   * `POST /fission_script/idea` —— **重新生成**创意方案。
+   *
+   * 三条约束：
+   * 1. 只在裂变本上可用（必须已有 `meta.fission.source_nt_id`）—— 主链没有"创意方案"阶段；
+   * 2. 重生成会清空 `selected_ni_id`：旧选项被换掉了，继续指向它会让
+   *    `summary_outline` 读到一条不存在的方案（静默错配比报错更坏）；
+   * 3. 用 `nonce` 换种子而不是沿用 `direction` —— 否则"再点一次"得到一模一样的三条，
+   *    用户会以为按钮坏了。`nonce` 缺省取时间戳，调用方传固定值可复现。
+   */
+  async regenerateIdeas(spaceId: string, ntId: string, input: { direction?: string; nonce?: string } = {}) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "fission/idea");
+    const state = this.fissionState(novel);
+    if (typeof state.source_nt_id !== "string" || state.source_nt_id.length === 0) {
+      throw new AppError(ErrorCode.BAD_REQUEST, "this novel is not a fission derivative", { reason: "not_fission" });
+    }
+    const seed = seedOf([novel.title, input.direction ?? "", input.nonce ?? String(Date.now())].join("\n"));
+    const ideas = Array.from({ length: 3 }, (_, i) => {
+      const angle = ANGLES[(seed + i * 3) % ANGLES.length]!;
+      return {
+        ni_id: `ni_${((seed + i * 104729) >>> 0).toString(16)}`,
+        title: `${novel.title}·${angle.label}`,
+        logline: `${angle.logline}${input.direction ? `方向补充：${input.direction}` : ""}`,
+        angle: angle.key,
+        selected: false,
+      };
+    });
+    await this.patchFissionState(novel, { ideas, selected_ni_id: null });
+    return { list: ideas, count: ideas.length, regenerated: true, source_nt_id: state.source_nt_id };
+  }
+
+  /** `PATCH /fission_script/idea/:ni_id` —— 改一条创意方案（只改文案字段，不动 `ni_id`/`angle`） */
+  async patchIdea(spaceId: string, ntId: string, niId: string, input: OriginalIdeaPatch) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "fission/idea/patch");
+    const state = this.fissionState(novel);
+    const ideas = (Array.isArray(state.ideas) ? state.ideas : []) as Array<Record<string, unknown>>;
+    const index = ideas.findIndex((row) => row.ni_id === niId);
+    if (index < 0) throw new AppError(ErrorCode.NOT_FOUND, "idea not found", { reason: "idea_not_found" });
+    const patch: Record<string, unknown> = {};
+    for (const key of ["title", "logline", "genre", "tone"] as const) {
+      const value = input[key];
+      if (value === undefined) continue;
+      patch[key] = value.trim();
+    }
+    ideas[index] = { ...ideas[index], ...patch, updated_at: new Date().toISOString() };
+    await this.patchFissionState(novel, { ideas });
+    return { idea: ideas[index], selected: state.selected_ni_id === niId };
+  }
+
+  /** `PATCH /fission_script/characters/:nc_id` —— 单张角色卡编辑（与原创链同一实现，不另写一套规则） */
+  async patchCharacter(
+    spaceId: string,
+    ntId: string,
+    ncId: string,
+    input: Parameters<NovelService["patchCharacter"]>[3],
+  ) {
+    await this.novels.requireNovel(spaceId, ntId);
+    return this.novels.patchCharacter(spaceId, ntId, ncId, input);
   }
 
   /** 分集剧本（裂变链的最后一步）直接复用主链的生成逻辑，避免两套写正文代码 */

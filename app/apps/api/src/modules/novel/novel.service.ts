@@ -603,6 +603,54 @@ export class NovelService {
     return source.slice(0, 20_000);
   }
 
+  /**
+   * 导出整本（第 90 批；竞品 `GET /df/novel/:nt_id/download?only_episodes=`）。
+   *
+   * 只拼**已有文本**，不调模型、不改状态。两段可分别开关：
+   * - 章节正文（`novel_chapters.content`，`only_episodes=true` 时跳过）；
+   * - 分集剧本（`novel_episodes.script_text`）。
+   *
+   * 为什么返回 `{filename, content}` 而不是直接写响应：
+   * 导出是**纯函数**（同样的库给同样的文本），把这些放 controller 会让
+   * "导出的内容"依赖 HTTP 层；也让测试能直接断言字符串而不解析响应头。
+   * 未拆章/未出剧本时返回空段（`0` 章 / `0` 集）而不是 404 ——
+   * "本子存在但还没内容"和"本子不存在"是两件事。
+   */
+  async exportText(spaceId: string, ntId: string, onlyEpisodes = false): Promise<{
+    filename: string;
+    content: string;
+    chapter_count: number;
+    episode_count: number;
+  }> {
+    const novel = await this.requireNovel(spaceId, ntId);
+    const chapters = onlyEpisodes ? [] : await this.chaptersOf(novel.id);
+    const episodes = await db
+      .select()
+      .from(novelEpisodes)
+      .where(eq(novelEpisodes.novelId, novel.id))
+      .orderBy(asc(novelEpisodes.episodeNo));
+    const parts: string[] = [`# ${novel.title}`];
+    if (!onlyEpisodes && chapters.length > 0) {
+      parts.push("## 章节正文");
+      for (const chapter of chapters) {
+        parts.push(`### 第 ${chapter.chapterNo} 章 ${chapter.title}\n\n${chapter.content}`);
+      }
+    }
+    if (episodes.length > 0) {
+      parts.push("## 分集剧本");
+      for (const episode of episodes) {
+        parts.push(`### 第 ${episode.episodeNo} 集 ${episode.title}\n\n${episode.scriptText}`);
+      }
+    }
+    const safeTitle = novel.title.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60) || `novel-${novel.id}`;
+    return {
+      filename: `${safeTitle}${onlyEpisodes ? "-episodes" : ""}.md`,
+      content: `${parts.join("\n\n")}\n`,
+      chapter_count: chapters.length,
+      episode_count: episodes.length,
+    };
+  }
+
   private async saveWorldview(novelId: bigint, worldview: WorldviewResult) {
     const settings = {
       era: worldview.era,

@@ -217,6 +217,41 @@ export const originalIdeaPatchSchema = z
   });
 export type OriginalIdeaPatch = z.infer<typeof originalIdeaPatchSchema>;
 
+/**
+ * 素材**手工新增**（第 90 批；竞品 `POST /df/novel/:nt_id/original_script/materials`）。
+ *
+ * 与 `materials/generate` 的区别：这条不调模型，用户自己写一条素材。
+ * 竞品两个 schema 都是 `{}`（字段名无证据），故只收 `title`/`content`/`selected` 三个
+ * 我方已有字段；**不编造** `type`/`source` 这类没见过会怎么用的键。
+ */
+export const originalMaterialCreateSchema = z.object({
+  title: z.string().trim().min(1).max(NOVEL_LIMITS.TITLE_MAX).optional(),
+  content: z.string().trim().min(1).max(500),
+  selected: z.boolean().optional(),
+});
+export type OriginalMaterialCreateRequest = z.infer<typeof originalMaterialCreateSchema>;
+
+/**
+ * 角色卡**批量改名**（第 90 批；竞品 `POST .../original_script/characters/batch-rename`）。
+ *
+ * 竞品请求体无证据（`requestDataJsonSchema: {}`），本契约定为 `items[]`：
+ * 一条 = 一张卡的新名字。**只改 name**，别的字段仍走单条 `PATCH`——
+ * 批量接口一旦能改"角色描述/提示词"，就等于把 N 张卡的语义一起改掉，
+ * 而改名恰好是唯一能整批做而不引起下游重生成的字段（名字只影响展示与引用标签）。
+ */
+export const characterBatchRenameSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        nc_id: z.string().min(1).max(40),
+        name: z.string().trim().min(1).max(40),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+export type CharacterBatchRenameRequest = z.infer<typeof characterBatchRenameSchema>;
+
 // 原创链角色卡生成**复用**既有的 `charactersGenerateSchema`（count + instructions）：
 // 薄路径只是换个前缀，参数形状必须与 `/content-analysis/novel_character_cards/generate` 完全一致，
 // 否则同一动作出现两套校验口径（前端还得记哪个端点用哪套）。

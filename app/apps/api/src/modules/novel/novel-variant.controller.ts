@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
 import { z } from "zod";
-import { AppError, ErrorCode, novelScriptGenerateSchema } from "@app/shared";
+import { AppError, ErrorCode, novelCharacterPatchSchema, novelScriptGenerateSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { NovelVariantService } from "./novel-variant.service";
@@ -10,11 +10,31 @@ import {
   outlinePatchSchema,
   episodeOutlineGenerateSchema,
   fissionCreateSchema,
+  originalIdeaPatchSchema,
   overseasSchema,
 } from "./novel.schemas";
 
 /** 选定创意方案（竞品 `idea/select-op`：只提交当前 ni_id + selected=true） */
 const ideaSelectSchema = z.object({ ni_id: z.string().min(1).max(40) });
+
+/**
+ * 重生成创意方案（第 90 批）：可选方向补充 + 可选 nonce（同 nonce 可复现同一组方案）。
+ * `nonce` 存在的意义是「再点一次要换一批」，见 service 注释。
+ */
+const ideaRegenerateSchema = z.object({
+  direction: z.string().trim().max(300).optional(),
+  nonce: z.string().trim().max(64).optional(),
+});
+
+/** 总纲手工编辑：只允许标量字段（`beats` 不在可改范围，见 service 注释） */
+const fissionSummaryPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80).optional(),
+    logline: z.string().trim().min(1).max(300).optional(),
+    theme: z.string().trim().min(1).max(120).optional(),
+    structure: z.string().trim().min(1).max(120).optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "至少需要一个可更新字段" });
 
 function ctx(req: AuthedRequest): { spaceId: string; userId: string } {
   const auth = req.auth;
@@ -52,6 +72,13 @@ export class NovelFissionController {
     return this.variants.listIdeas(spaceId, ntId);
   }
 
+  /** 重新生成创意方案（第 90 批；竞品同族 `POST .../fission_script/idea`） */
+  @Post("idea")
+  async regenerateIdeas(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = ctx(req);
+    return this.variants.regenerateIdeas(spaceId, ntId, parseOrThrow(ideaRegenerateSchema, body ?? {}));
+  }
+
   /** 选定一条创意方案（竞品 `idea/select-op`） */
   @Post("idea/select-op")
   async selectIdea(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
@@ -83,6 +110,20 @@ export class NovelFissionController {
       ntId,
       parseOrThrow(chapterOutlineGenerateSchema, body ?? {}),
     );
+  }
+
+  /** 读总纲（第 90 批；未生成时 `summary_outline: null`，不是 404） */
+  @Get("summary_outline")
+  async getSummaryOutline(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
+    const { spaceId } = ctx(req);
+    return this.variants.getSummaryOutline(spaceId, ntId);
+  }
+
+  /** 手工改总纲的标量字段（第 90 批；节拍 `beats` 不可改，见 service 注释） */
+  @Patch("summary_outline")
+  async patchSummaryOutline(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = ctx(req);
+    return this.variants.patchSummaryOutline(spaceId, ntId, parseOrThrow(fissionSummaryPatchSchema, body ?? {}));
   }
 
   /** 集纲生成（竞品 `episodes_outline`） */
@@ -119,11 +160,35 @@ export class NovelFissionController {
     return this.variants.getIdea(spaceId, ntId, niId);
   }
 
+  /** 改一条创意方案（第 90 批；只改文案字段，不动 `ni_id`/`angle`） */
+  @Patch("idea/:niId")
+  async patchIdea(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("niId") niId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = ctx(req);
+    return this.variants.patchIdea(spaceId, ntId, niId, parseOrThrow(originalIdeaPatchSchema, body ?? {}));
+  }
+
   /** 单个角色（竞品 `fission_script/characters/:nc_id`） */
   @Get("characters/:ncId")
   async character(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
     const { spaceId } = ctx(req);
     return this.variants.getCharacter(spaceId, ntId, ncId);
+  }
+
+  /** 单张角色卡编辑（第 90 批；与原创链同一实现，不另写一套规则） */
+  @Patch("characters/:ncId")
+  async patchCharacter(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("ncId") ncId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = ctx(req);
+    return this.variants.patchCharacter(spaceId, ntId, ncId, parseOrThrow(novelCharacterPatchSchema, body ?? {}));
   }
 
   /** 单条集纲（竞品 `fission_script/episodes_outline/:neo_id`） */

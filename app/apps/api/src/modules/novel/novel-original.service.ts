@@ -1,11 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { asc, eq } from "drizzle-orm";
-import { novelChapters, novelEpisodeOutlines, novels } from "@app/db";
+import { and, asc, eq } from "drizzle-orm";
+import { novelChapters, novelCharacters, novelEpisodeOutlines, novels } from "@app/db";
 import {
   AppError,
   ErrorCode,
   NOVEL_LIMITS,
   NovelSourceType,
+  newId,
   type NovelCharacterCreateRequest,
   type NovelCharacterPatchRequest,
   type NovelEpisodePatchRequest,
@@ -17,11 +18,13 @@ import { NovelLlmService, type OriginalIdeaItem, type OriginalSummaryOutline } f
 import { NovelService } from "./novel.service";
 import { asRecord, novelDto, type NovelRow } from "./novel.dto";
 import type {
+  CharacterBatchRenameRequest,
   CharactersGenerateRequest,
   OriginalChapterOutlineGenerateRequest,
   OriginalEpisodeOutlineGenerateRequest,
   OriginalIdeaGenerateRequest,
   OriginalIdeaPatch,
+  OriginalMaterialCreateRequest,
   OriginalMaterialGenerateRequest,
   OriginalMaterialPatch,
   OriginalOutlineGenerateRequest,
@@ -576,6 +579,106 @@ export class NovelOriginalService {
   async confirmCharacter(spaceId: string, ntId: string, ncId: string) {
     await this.requireOriginal(spaceId, ntId);
     return this.novels.confirmCharacter(spaceId, ntId, ncId);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 5c. 第 90 批复核竞品 102 条 novel 路由后补的 6 条形状
+  //
+  // 这 6 条的共同点：竞品给了「单个对象」的读写形状，我方原先只有集合/批量版本。
+  // **没有一条需要新表** —— 角色卡在 `novel_characters`、素材在 `novels.meta.original.materials`、
+  // 集纲在 `novel_episode_outlines`，缺的只是"按 id 拿一条 / 改一条"的入口。
+  // 反过来说，这 6 条不是"新能力"，是**同能力的另一种调用形状**，故不加分（见台账第 90 批）。
+  // ══════════════════════════════════════════════════════════════
+
+  /** `GET /original_script/characters/:nc_id` —— 单张角色卡（与列表同一 dto，不多不少） */
+  async getCharacter(spaceId: string, ntId: string, ncId: string) {
+    await this.requireOriginal(spaceId, ntId);
+    const { list } = (await this.novels.listCharacters(spaceId, ntId)) as { list: Array<{ id: string }> };
+    const found = list.find((row) => row.id === ncId);
+    if (!found) throw new AppError(ErrorCode.NOT_FOUND, "character not found", { reason: "character_not_found" });
+    return { character: found };
+  }
+
+  /** `POST /original_script/characters/:nc_id/delete` —— 删一张角色卡（竞品用 POST 不是 DELETE） */
+  async deleteCharacter(spaceId: string, ntId: string, ncId: string) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "original_script/characters/delete");
+    const { list } = (await this.novels.listCharacters(spaceId, ntId)) as {
+      list: Array<{ id: string; name: string }>;
+    };
+    const target = list.find((row) => row.id === ncId);
+    if (!target) throw new AppError(ErrorCode.NOT_FOUND, "character not found", { reason: "character_not_found" });
+    await db
+      .delete(novelCharacters)
+      .where(and(eq(novelCharacters.id, BigInt(target.id)), eq(novelCharacters.novelId, novel.id)));
+    return { deleted: { id: target.id, name: target.name }, remaining: Math.max(0, list.length - 1) };
+  }
+
+  /** `POST /original_script/characters/batch-rename` —— 批量改名（**只改 name**，改别的走单条 PATCH） */
+  async batchRenameCharacters(spaceId: string, ntId: string, input: CharacterBatchRenameRequest) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "original_script/characters/batch-rename");
+    const { list } = (await this.novels.listCharacters(spaceId, ntId)) as {
+      list: Array<{ id: string; name: string }>;
+    };
+    const byId = new Map(list.map((row) => [row.id, row]));
+    const unknown = input.items.filter((item) => !byId.has(item.nc_id)).map((item) => item.nc_id);
+    if (unknown.length > 0) {
+      throw new AppError(ErrorCode.NOT_FOUND, "character not found", {
+        reason: "character_not_found",
+        ids: unknown,
+      });
+    }
+    const renamed: Array<{ id: string; from: string; to: string }> = [];
+    for (const item of input.items) {
+      const row = byId.get(item.nc_id)!;
+      if (row.name === item.name) continue;
+      await db
+        .update(novelCharacters)
+        .set({ name: item.name, updatedAt: new Date() })
+        .where(and(eq(novelCharacters.id, BigInt(row.id)), eq(novelCharacters.novelId, novel.id)));
+      renamed.push({ id: row.id, from: row.name, to: item.name });
+    }
+    const after = (await this.novels.listCharacters(spaceId, ntId)) as { list: unknown };
+    return { renamed, count: renamed.length, list: after.list };
+  }
+
+  /** `GET /original_script/materials/:nm_id` —— 单条素材 */
+  async getMaterial(spaceId: string, ntId: string, nmId: string) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    const materials = (this.state(novel).materials as Array<Record<string, unknown>> | undefined) ?? [];
+    const found = materials.find((row) => row.nm_id === nmId);
+    if (!found) throw new AppError(ErrorCode.NOT_FOUND, "material not found", { reason: "material_not_found" });
+    return { material: found, selected: found.selected === true, total: materials.length };
+  }
+
+  /**
+   * `POST /original_script/materials` —— **手工**新增一条素材（不调模型）。
+   *
+   * 与 `materials/generate` 的分工：生成是"让我替你想"，这条是"我自己写一条"。
+   * 竞品有这两个入口但两个 schema 都是 `{}`，故只收我方 schema 里已有的三个字段，
+   * 并额外落一个 `manual: true` —— 下游若要区分"模型产出"与"人手写"，有据可依。
+   */
+  async createMaterial(spaceId: string, ntId: string, input: OriginalMaterialCreateRequest) {
+    const novel = await this.requireOriginal(spaceId, ntId);
+    this.novels.assertDraftLike(novel, "original_script/materials/create");
+    const materials = (this.state(novel).materials as Array<Record<string, unknown>> | undefined) ?? [];
+    const row = {
+      nm_id: `nm_${String(newId())}`,
+      title: input.title?.trim() || `素材${materials.length + 1}`,
+      content: input.content,
+      selected: input.selected ?? false,
+      manual: true,
+      created_at: new Date().toISOString(),
+    };
+    await this.patchState(novel, { materials: [...materials, row], step: "materials" });
+    return { material: row, total: materials.length + 1 };
+  }
+
+  /** `PATCH /original_script/episodes_outline/:neo_id` —— 单条集纲编辑（复用改编链同一实现） */
+  async patchEpisodeOutline(spaceId: string, ntId: string, neoId: string, input: { title?: string; synopsis?: string }) {
+    await this.requireOriginal(spaceId, ntId);
+    return this.novels.patchEpisodeOutline(spaceId, ntId, neoId, input);
   }
   // ══════════════════════════════════════════════════════════════
   // 6. 定稿（竞品 `novel finalize`，`novel.md:663-683`）

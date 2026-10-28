@@ -306,6 +306,41 @@ export class NovelAgentService {
   // 2. 会话列表 / 新建 / 切换 / 详情
   // ══════════════════════════════════════════════════════════════
 
+  /**
+   * `GET /script_edit_agent`（第 90 批；竞品同族路径）。
+   *
+   * 与 `heartbeat` 的关键区别：**这是只读探针，没有 ACTIVE 会话时返回 `active:false` 而不是 400**。
+   * 竞品前端用它决定"要不要显示编辑态入口"，客户端在进入前一定会调它；
+   * 若此时报 400，前端只能把 400 当 false 处理 —— 那等于把状态判断写进错误分支。
+   *
+   * `in_flight` 读 Redis 轮次锁（多副本下唯一真相）：DB 里 ACTIVE 只说明"会话开着"，
+   * 不说明"模型正在跑"；这两个状态分开表达，前端才能区分"可以发消息"与"先等这一轮"。
+   */
+  async state(spaceId: string, userId: string, ntId: string) {
+    const novel = await this.novels.requireNovel(spaceId, ntId);
+    const rows = await db
+      .select()
+      .from(novelEditSessions)
+      .where(
+        and(
+          eq(novelEditSessions.novelId, novel.id),
+          eq(novelEditSessions.userId, BigInt(userId)),
+          eq(novelEditSessions.status, NovelEditSessionStatus.ACTIVE),
+        ),
+      )
+      .orderBy(desc(novelEditSessions.updatedAt));
+    const session = rows[0] ?? null;
+    const pending = session ? await this.pendingRows(session.id) : [];
+    const inFlight = session ? (await this.redis.get(this.lockKey(String(session.id)))) !== null : false;
+    return {
+      active: session !== null,
+      session: session ? editSessionDto(session) : null,
+      pending_count: pending.length,
+      in_flight: inFlight,
+      llm_mode: this.llm.mode,
+    };
+  }
+
   async listSessions(spaceId: string, ntId: string) {
     const novel = await this.novels.requireNovel(spaceId, ntId);
     const rows = await db

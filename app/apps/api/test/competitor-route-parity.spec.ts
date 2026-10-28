@@ -10,8 +10,9 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十四组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
- * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114，共 425 条，来自
+ * 本文件把竞品的十六组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 /
+ * asset 36 / novel 102，共 563 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -24,9 +25,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十四组共 425 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十六组共 563 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十二行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #2 / #4 / #6 / #8 / #10 / #11 / #12 / #21 / #22 / #24 / #26 / #27 十三行的
  * 「逐条对照」说法。
  *
  * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
@@ -817,7 +818,6 @@ const AI_IN_SCOPE_GAPS = [
 // 逐条对完的结构是：10 条同形（film 的画布绑定）、100 条结构性偏离、
 // 4 条能力缺口（clip / crop / group-recover / tpls 元素批量建）。台账据此把 #11 的剩余
 // 从 0.20（E 类「无响应体证据」）改成 0.10（B 类四条小能力），分数 99% → 99.5%。
-const CANVAS_PREFIX_REASON = "竞品把 canvas id 直接接在 /df/canvas/:canvas_id 后面，我方统一在 /canvas/canvases/:canvas_id（ADR-009 已登记的前缀偏离，尾段同构）";
 const CANVAS_SHAPES = [
   "DELETE /df/canvas/agent-skills/{}",
   "DELETE /df/canvas/agent-skills/{}/favorite",
@@ -1146,6 +1146,250 @@ for (const [shape, reason] of Object.entries(ASSET_WAIVED)) {
   WAIVED[shapeOf(shape)] = reason;
 }
 
+// #2 小说改编链：竞品 102 条形状全部挂在 `/df/novel/*` 下。
+// `/df` 是竞品的域分层（`/df/novel_market` 是剧本广场 #12，不属本组），不是我方的能力差异；
+// 我方按 ADR-009 直接是 `/novel/*`。守卫的 normalize() 只剥 `/web/v1`，所以这一组「同形」必然是 0：
+// 前缀差异本身就是一条显式偏离（登记在 NOVEL_PAIRS），不是「没对账」。
+const NOVEL_SHAPES: string[] = [
+  'GET /df/novel/{}/buy/detail',
+  'PUT /df/novel/{}/buy/edit',
+  'GET /df/novel/{}/buy/characters',
+  'PUT /df/novel/{}/buy/characters/{}',
+  'GET /df/novel/{}/buy/episodes',
+  'PUT /df/novel/{}/buy/chapters/{}',
+  'GET /df/novel/{}/buy/content-tree',
+  'POST /df/novel/{}',
+  'POST /df/novel/{}/summary',
+  'POST /df/novel/list',
+  'PUT /df/novel/{}/adjust',
+  'GET /df/novel/{}',
+  'POST /df/novel/{}/delete',
+  'GET /df/novel/{}/chapter_outline/list',
+  'POST /df/novel/split',
+  'GET /df/novel/split/{}',
+  'PUT /df/novel/{}/chapter_outline/{}',
+  'POST /df/novel/{}/episode_outline/generate',
+  'PUT /df/novel/{}/episode_outline/{}',
+  'POST /df/novel/{}/core_character/generate',
+  'GET /df/novel/{}/core_character/list',
+  'PUT /df/novel/{}/core_character/{}',
+  'POST /df/novel/{}/episode/generate',
+  'GET /df/novel/{}/episode/list',
+  'PUT /df/novel/{}/episode/{}',
+  'POST /df/novel/{}/finalize',
+  'GET /df/novel/{}/download',
+  'GET /df/novel/{}/novel_chapters/list',
+  'GET /df/novel/{}/point',
+  'POST /df/novel/{}/content-analysis',
+  'POST /df/novel/{}/script-analysis',
+  'POST /df/novel/{}/script-generate',
+  'GET /df/novel/{}/content-analysis/detail',
+  'PUT /df/novel/{}/content-analysis/worldview',
+  'PUT /df/novel/{}/content-analysis/novel_character_cards/{}',
+  'PUT /df/novel/{}/script-analysis/novel_storyline/{}',
+  'POST /df/novel/original_script/idea',
+  'POST /df/novel/{}/original_script/characters',
+  'POST /df/novel/{}/original_script/materials',
+  'POST /df/novel/{}/original_script/summary_outline',
+  'POST /df/novel/{}/original_script/chapters_outline',
+  'POST /df/novel/{}/original_script/episodes_outline',
+  'POST /df/novel/{}/original_script/episodes',
+  'GET /df/novel/{}/original_script/idea',
+  'GET /df/novel/{}/original_script/idea/{}',
+  'PUT /df/novel/{}/original_script/idea/{}',
+  'POST /df/novel/{}/original_script/idea/select-op',
+  'GET /df/novel/{}/original_script/characters',
+  'GET /df/novel/{}/original_script/characters/{}',
+  'PUT /df/novel/{}/original_script/characters/{}',
+  'POST /df/novel/{}/original_script/characters/{}/delete',
+  'POST /df/novel/{}/original_script/characters/add',
+  'GET /df/novel/{}/original_script/materials',
+  'POST /df/novel/{}/original_script/materials/select-op',
+  'GET /df/novel/{}/original_script/materials/{}',
+  'PUT /df/novel/{}/original_script/materials/{}',
+  'POST /df/novel/{}/original_script/materials/generate',
+  'GET /df/novel/{}/original_script/summary_outline',
+  'PUT /df/novel/{}/original_script/summary_outline',
+  'GET /df/novel/{}/original_script/chapters_outline',
+  'PUT /df/novel/{}/original_script/chapters_outline/{}',
+  'PUT /df/novel/{}/original_script/episodes_outline/{}',
+  'GET /df/novel/member-groups',
+  'POST /df/novel/{}/group',
+  'GET /df/novel/{}/permission',
+  'GET /df/novel/distribute/list',
+  'POST /df/novel/{}/permission',
+  'POST /df/novel/{}/original_script/characters/batch-rename',
+  'POST /df/novel/{}/script_edit_agent/enter',
+  'POST /df/novel/{}/script_edit_agent/heartbeat',
+  'POST /df/novel/{}/script_edit_agent/exit',
+  'GET /df/novel/{}/script_edit_agent/sessions',
+  'POST /df/novel/{}/script_edit_agent/sessions',
+  'POST /df/novel/{}/script_edit_agent/sessions/switch',
+  'GET /df/novel/{}/script_edit_agent/sessions/{}',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/chat',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/abort',
+  'PUT /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/pending',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/apply',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/reject',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/apply_all',
+  'POST /df/novel/{}/script_edit_agent/sessions/{}/reject_all',
+  'GET /df/novel/{}/script_edit_agent',
+  'POST /df/novel/{}/script_edit_agent/version/{}/finalize',
+  'POST /df/novel/{}/script_edit_agent/version/{}/delete',
+  'POST /df/novel/{}/fission_script',
+  'POST /df/novel/{}/fission_script/idea',
+  'POST /df/novel/{}/fission_script/idea/select-op',
+  'GET /df/novel/{}/fission_script/idea',
+  'PUT /df/novel/{}/fission_script/idea/{}',
+  'GET /df/novel/{}/fission_script/idea/{}',
+  'POST /df/novel/{}/fission_script/summary_outline',
+  'PUT /df/novel/{}/fission_script/summary_outline',
+  'GET /df/novel/{}/fission_script/summary_outline',
+  'POST /df/novel/{}/fission_script/episodes_outline',
+  'PUT /df/novel/{}/fission_script/episodes_outline/{}',
+  'POST /df/novel/{}/fission_script/episodes',
+  'GET /df/novel/{}/fission_script/characters',
+  'GET /df/novel/{}/fission_script/characters/{}',
+  'PUT /df/novel/{}/fission_script/characters/{}',
+  'GET /df/novel/{}/fission_script/chapters_outline',
+  'POST /df/novel/fission_script/create',
+];
+
+// 90 条 = 58 条「剥掉 /df 就同形」的前缀偏离 + 32 条结构性偏离（方法/命名/入口不同）。
+// 后者里 13 条是本批按竞品形状补的单点形状（能力早就在，只是缺「单个对象」入口）。
+const NOVEL_PAIRS: Array<[string, string, string]> = [
+  ['POST /df/novel/{}', 'POST /novel', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/summary', 'GET /novel/{}/summary', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/list', 'GET /novel/list', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['PUT /df/novel/{}/adjust', 'PATCH /novel/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}', 'GET /novel/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/delete', 'DELETE /novel/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/chapter_outline/list', 'GET /novel/{}/chapter_outline/list', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/split', 'POST /novel/{}/split', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/split/{}', 'GET /novel/{}/chapters', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['PUT /df/novel/{}/chapter_outline/{}', 'PATCH /novel/{}/chapter_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/episode_outline/generate', 'POST /novel/{}/episode_outline/generate', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/episode_outline/{}', 'PATCH /novel/{}/episode_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/core_character/generate', 'POST /novel/{}/core_character/generate', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/core_character/list', 'GET /novel/{}/core_character/list', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/core_character/{}', 'PATCH /novel/{}/core_character/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/episode/generate', 'POST /novel/{}/script-generate', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/episode/list', 'GET /novel/{}/episode/list', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/episode/{}', 'PATCH /novel/{}/episode/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/finalize', 'POST /novel/{}/finalize', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/download', 'GET /novel/{}/download', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/novel_chapters/list', 'GET /novel/{}/chapters', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/point', 'POST /credits/quote', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/content-analysis', 'POST /novel/{}/content-analysis', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script-analysis', 'POST /novel/{}/content-analysis', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/script-generate', 'POST /novel/{}/script-generate', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/content-analysis/detail', 'GET /novel/{}/content-analysis/detail', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/content-analysis/worldview', 'PUT /novel/{}/content-analysis/worldview', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/content-analysis/novel_character_cards/{}', 'PATCH /novel/{}/content-analysis/novel_character_cards/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['PUT /df/novel/{}/script-analysis/novel_storyline/{}', 'PATCH /novel/{}/chapter_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/original_script/idea', 'POST /novel/{}/original_script/idea', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/original_script/characters', 'POST /novel/{}/original_script/characters', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/materials', 'POST /novel/{}/original_script/materials', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/summary_outline', 'POST /novel/{}/original_script/summary_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/chapters_outline', 'POST /novel/{}/original_script/chapters_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/episodes_outline', 'POST /novel/{}/original_script/episodes_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/episodes', 'POST /novel/{}/original_script/episodes', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/idea', 'GET /novel/{}/original_script/idea', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/idea/{}', 'GET /novel/{}/original_script/idea/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/original_script/idea/{}', 'PATCH /novel/{}/original_script/idea/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/original_script/idea/select-op', 'POST /novel/{}/original_script/idea/select-op', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/characters', 'GET /novel/{}/original_script/characters', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/characters/{}', 'GET /novel/{}/original_script/characters/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/original_script/characters/{}', 'PATCH /novel/{}/original_script/characters/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/original_script/characters/{}/delete', 'POST /novel/{}/original_script/characters/{}/delete', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/characters/add', 'POST /novel/{}/original_script/characters', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/original_script/materials', 'GET /novel/{}/original_script/materials', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/original_script/materials/select-op', 'POST /novel/{}/original_script/materials/select-op', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/materials/{}', 'GET /novel/{}/original_script/materials/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/original_script/materials/{}', 'PATCH /novel/{}/original_script/materials/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/original_script/materials/generate', 'POST /novel/{}/original_script/materials/generate', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/original_script/summary_outline', 'GET /novel/{}/original_script/summary_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/original_script/summary_outline', 'PATCH /novel/{}/original_script/summary_outline', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/original_script/chapters_outline', 'GET /novel/{}/original_script/chapters_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/original_script/chapters_outline/{}', 'PATCH /novel/{}/original_script/chapters_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['PUT /df/novel/{}/original_script/episodes_outline/{}', 'PATCH /novel/{}/original_script/episodes_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/original_script/characters/batch-rename', 'POST /novel/{}/original_script/characters/batch-rename', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/enter', 'POST /novel/{}/script_edit_agent/enter', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/heartbeat', 'POST /novel/{}/script_edit_agent/heartbeat', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/exit', 'POST /novel/{}/script_edit_agent/exit', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/script_edit_agent/sessions', 'GET /novel/{}/script_edit_agent/sessions', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions', 'POST /novel/{}/script_edit_agent/sessions', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/switch', 'POST /novel/{}/script_edit_agent/sessions/switch', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/script_edit_agent/sessions/{}', 'GET /novel/{}/script_edit_agent/sessions/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/chat', 'POST /novel/{}/script_edit_agent/sessions/{}/chat', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/abort', 'POST /novel/{}/script_edit_agent/sessions/{}/abort', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/pending', 'GET /novel/{}/script_edit_agent/sessions/{}/episodes/{}/pending', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/apply', 'POST /novel/{}/script_edit_agent/sessions/{}/episodes/{}/apply', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/episodes/{}/reject', 'POST /novel/{}/script_edit_agent/sessions/{}/episodes/{}/reject', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/apply_all', 'POST /novel/{}/script_edit_agent/sessions/{}/apply_all', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/sessions/{}/reject_all', 'POST /novel/{}/script_edit_agent/sessions/{}/reject_all', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/script_edit_agent', 'GET /novel/{}/script_edit_agent', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/version/{}/finalize', 'POST /novel/{}/script_edit_agent/version/{}/finalize', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/script_edit_agent/version/{}/delete', 'DELETE /novel/{}/script_edit_agent/version/{}/delete', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/fission_script', 'POST /novel/{}/fission_script', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/fission_script/idea', 'POST /novel/{}/fission_script/idea', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/fission_script/idea/select-op', 'POST /novel/{}/fission_script/idea/select-op', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/fission_script/idea', 'GET /novel/{}/fission_script/idea', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/fission_script/idea/{}', 'PATCH /novel/{}/fission_script/idea/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/fission_script/idea/{}', 'GET /novel/{}/fission_script/idea/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/fission_script/summary_outline', 'POST /novel/{}/fission_script/summary_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/fission_script/summary_outline', 'PATCH /novel/{}/fission_script/summary_outline', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/fission_script/summary_outline', 'GET /novel/{}/fission_script/summary_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/{}/fission_script/episodes_outline', 'POST /novel/{}/fission_script/episodes_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/fission_script/episodes_outline/{}', 'PATCH /novel/{}/fission_script/episodes_outline/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['POST /df/novel/{}/fission_script/episodes', 'POST /novel/{}/fission_script/episodes', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/fission_script/characters', 'GET /novel/{}/fission_script/characters', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['GET /df/novel/{}/fission_script/characters/{}', 'GET /novel/{}/fission_script/characters/{}', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['PUT /df/novel/{}/fission_script/characters/{}', 'PATCH /novel/{}/fission_script/characters/{}', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+  ['GET /df/novel/{}/fission_script/chapters_outline', 'GET /novel/{}/fission_script/chapters_outline', '前缀偏离：竞品把小说改编链挂在 `/df/novel/*`，我方按 ADR-009 直接是 `/novel/*`（`/df` 是竞品的域分层，不是能力差异）'],
+  ['POST /df/novel/fission_script/create', 'POST /novel/{}/fission_script', '结构性偏离：能力在，方法/命名/入口不同（ADR-009）'],
+];
+
+// 12 条豁免 = 买断/授权 7 条 + 本子级协作组/权限/分发 5 条：我方连模型都没有（不是没做，是没建表）。
+const NOVEL_WAIVED: Record<string, string> = {
+  'GET /df/novel/{}/buy/detail': 'B 类：我方没有「买断/授权」模型（`novels` 只有 owner 与协作关系，没有 buy 记录表），买断详情无处可查',
+  'PUT /df/novel/{}/buy/edit': 'B 类：同上——没有买断记录，就没有可改的买断条款',
+  'GET /df/novel/{}/buy/characters': 'B 类：买断角色表是我方没有的第二套角色归属（`novel_characters` 只有 `novel_id`，没有 buyer 维度）',
+  'PUT /df/novel/{}/buy/characters/{}': 'B 类：同上——买断角色没有可写的记录，`novel_characters` 也没有 buyer 维度',
+  'GET /df/novel/{}/buy/episodes': 'B 类：买断分集清单同理，`novel_episodes` 没有 buyer 维度',
+  'PUT /df/novel/{}/buy/chapters/{}': 'B 类：买断章节写能力同理——没有 buy 记录表，`novel_chapters` 也没有 buyer 维度，写进去只能造假',
+  'GET /df/novel/{}/buy/content-tree': 'B 类：买断内容树是「买方视角」的目录，我方没有买方模型，算不出这棵树',
+  'GET /df/novel/member-groups': 'B 类：我方没有「本子级协作组」模型（团队权限在 `/cam/permissions`，不是 novel 维度）',
+  'POST /df/novel/{}/group': 'B 类：同上——没有 novel 维度的成员组表可写',
+  'GET /df/novel/{}/permission': 'B 类：本子级权限矩阵没有落库（权限在团队/空间层），读不出单本权限',
+  'GET /df/novel/distribute/list': 'B 类：分发列表是发行侧数据（我方只有运营侧 `/op/distributor/*` 的配置，没有作者侧分发记录）',
+  'POST /df/novel/{}/permission': 'B 类：同上——没有本子级权限表，写只能造假',
+};
+
+// 本批按竞品形状补的 13 条我方路由（断言它们真实存在，防止以后被改名后覆盖数仍虚高）
+const NOVEL_IMPLEMENTED: string[] = [
+  'GET /novel/{}/download',
+  'GET /novel/{}/script_edit_agent',
+  'POST /novel/{}/original_script/materials',
+  'GET /novel/{}/original_script/materials/{}',
+  'GET /novel/{}/original_script/characters/{}',
+  'POST /novel/{}/original_script/characters/{}/delete',
+  'POST /novel/{}/original_script/characters/batch-rename',
+  'GET /novel/{}/fission_script/summary_outline',
+  'PATCH /novel/{}/fission_script/summary_outline',
+  'POST /novel/{}/fission_script/idea',
+  'PATCH /novel/{}/fission_script/idea/{}',
+  'PATCH /novel/{}/fission_script/characters/{}',
+  'PATCH /novel/{}/original_script/episodes_outline/{}',
+];
+
+for (const [shape, ours, reason] of NOVEL_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(NOVEL_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -1162,6 +1406,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   ai: AI_SHAPES.length,
   canvas: CANVAS_SHAPES.length,
   asset: ASSET_SHAPES.length,
+  novel: NOVEL_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -1295,9 +1540,23 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("GET /subjects")).toBe(true);
     expect(ROUTES.has("GET /agent-skills")).toBe(true);
     expect(ROUTES.has("GET /canvas/templates")).toBe(true);
+    // 第 90 批：#2 小说改编链按竞品形状补的 13 条单点入口（其余 89 条是前缀/结构性偏离）
+    expect(ROUTES.has("GET /novel/{}/download")).toBe(true);
+    expect(ROUTES.has("GET /novel/{}/script_edit_agent")).toBe(true);
+    expect(ROUTES.has("POST /novel/{}/original_script/materials")).toBe(true);
+    expect(ROUTES.has("GET /novel/{}/original_script/materials/{}")).toBe(true);
+    expect(ROUTES.has("GET /novel/{}/original_script/characters/{}")).toBe(true);
+    expect(ROUTES.has("POST /novel/{}/original_script/characters/{}/delete")).toBe(true);
+    expect(ROUTES.has("POST /novel/{}/original_script/characters/batch-rename")).toBe(true);
+    expect(ROUTES.has("GET /novel/{}/fission_script/summary_outline")).toBe(true);
+    expect(ROUTES.has("PATCH /novel/{}/fission_script/summary_outline")).toBe(true);
+    expect(ROUTES.has("POST /novel/{}/fission_script/idea")).toBe(true);
+    expect(ROUTES.has("PATCH /novel/{}/fission_script/idea/{}")).toBe(true);
+    expect(ROUTES.has("PATCH /novel/{}/fission_script/characters/{}")).toBe(true);
+    expect(ROUTES.has("PATCH /novel/{}/original_script/episodes_outline/{}")).toBe(true);
   });
 
-  it("竞品十五组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36）", () => {
+  it("竞品十六组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64 / canvas 114 / asset 36 / novel 102）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -1314,6 +1573,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       ai: 64,
       canvas: 114,
       asset: 36,
+      novel: 102,
     });
     expect(
       FILM_SHAPES.length +
@@ -1330,8 +1590,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ACCOUNT_SHAPES.length +
         AI_SHAPES.length +
         CANVAS_SHAPES.length +
-        ASSET_SHAPES.length,
-    ).toBe(461);
+        ASSET_SHAPES.length +
+        NOVEL_SHAPES.length,
+    ).toBe(563);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -1349,6 +1610,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       ai: AI_SHAPES,
       canvas: CANVAS_SHAPES,
       asset: ASSET_SHAPES,
+      novel: NOVEL_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -1596,6 +1858,32 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(DEVIATIONS[shapeOf("GET /asset/workflows")]!.ours).toBe("GET /canvas/templates");
   });
 
+  it("#2 小说改编链：102 条竞品形状 = 0 同形 + 90 结构性偏离 + 12 条无模型豁免（本批补 13 条单点形状）", () => {
+    expect(NOVEL_SHAPES.length).toBe(102);
+    // 竞品 novel 全挂在 `/df/novel/*`，我方是 `/novel/*`：前缀差异本身就是一条显式偏离
+    expect(NOVEL_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)))).toEqual([]);
+    expect(missing(NOVEL_SHAPES)).toEqual([]);
+    expect(NOVEL_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw))).length).toBe(90);
+    expect(NOVEL_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw))).length).toBe(12);
+    // 90 条里有 58 条是「剥掉 /df 就同形」的纯前缀偏离，剩下的才是方法/命名/入口不同
+    const prefixOnly = NOVEL_SHAPES.filter((raw) => {
+      const [method, path] = shapeOf(raw).split(" ");
+      return ROUTES.has(`${method} ${path!.replace(/^\/df\//, "/")}`);
+    });
+    expect(prefixOnly.length).toBe(58);
+    // 本批补的 13 条单点形状必须真的在路由表里
+    for (const ours of NOVEL_IMPLEMENTED) {
+      expect(ROUTES.has(ours), `implemented shape missing: ${ours}`).toBe(true);
+    }
+    // 豁免必须点名缺的是哪个模型；买断/授权这一族要能一眼认出
+    for (const shape of Object.keys(NOVEL_WAIVED)) {
+      expect(WAIVED[shapeOf(shape)]!.length, `waiver too short: ${shape}`).toBeGreaterThan(20);
+    }
+    for (const shape of Object.keys(NOVEL_WAIVED).filter((s) => s.includes("/buy/"))) {
+      expect(WAIVED[shapeOf(shape)]!.startsWith("B 类"), `must say B 类: ${shape}`).toBe(true);
+    }
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -1614,13 +1902,14 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...AI_SHAPES,
         ...CANVAS_SHAPES,
         ...ASSET_SHAPES,
+        ...NOVEL_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只在四个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
+    // 豁免只在五个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
     // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）、
-    // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）。
+    // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）、#2 小说（买断授权 7 + 本子级协作/权限/分发 5）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
     const waiverScope = new Set(
       [
@@ -1630,6 +1919,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...AI_SHAPES,
         ...CANVAS_SHAPES,
         ...ASSET_SHAPES,
+        ...NOVEL_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);

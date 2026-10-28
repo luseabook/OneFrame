@@ -4,12 +4,14 @@ import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { NovelOriginalService } from "./novel-original.service";
 import {
+  characterBatchRenameSchema,
   charactersGenerateSchema,
   originalChapterOutlineGenerateSchema,
   originalEpisodeOutlineGenerateSchema,
   originalIdeaGenerateSchema,
   originalIdeaPatchSchema,
   originalIdeaSelectSchema,
+  originalMaterialCreateSchema,
   originalMaterialGenerateSchema,
   originalMaterialPatchSchema,
   originalMaterialSelectSchema,
@@ -110,6 +112,26 @@ export class NovelOriginalController {
     return this.original.listMaterials(spaceId, ntId);
   }
 
+  /**
+   * 手工新增一条素材（第 90 批；竞品 `POST /df/novel/:nt_id/original_script/materials`）。
+   *
+   * 与 `materials/generate` 的分工写在 service 里；这里只强调一条路由约定：
+   * **静态段 `generate`/`select-op` 必须在参数路由之前声明**，而这条是精确路径
+   * `materials`，与 `materials/:nmId`（下一条 GET）不冲突（方法不同、深度不同）。
+   */
+  @Post("materials")
+  async createMaterial(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = this.ctx(req);
+    return this.original.createMaterial(spaceId, ntId, parseOrThrow(originalMaterialCreateSchema, body ?? {}));
+  }
+
+  /** 单条素材（第 90 批；竞品同族路径） */
+  @Get("materials/:nmId")
+  async getMaterial(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("nmId") nmId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.getMaterial(spaceId, ntId, nmId);
+  }
+
   /** 勾选素材（竞品 `novel material set`，`novel.md:550-573`：加法语义，不取消其它） */
   @Post("materials/select-op")
   async selectMaterial(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
@@ -191,6 +213,24 @@ export class NovelOriginalController {
     return this.original.listCharacters(spaceId, ntId);
   }
 
+  /** 单张角色卡（第 90 批；竞品同族路径。与列表同一 dto，不多不少） */
+  @Get("characters/:ncId")
+  async getCharacter(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.getCharacter(spaceId, ntId, ncId);
+  }
+
+  /**
+   * 批量改名（第 90 批；竞品 `POST .../characters/batch-rename`）。
+   * 声明在 `characters/:ncId/confirm` 之前：两条都是 2~3 段 POST，
+   * 但 `batch-rename` 是静态段，必须先被匹配到，否则会被当成 nc_id。
+   */
+  @Post("characters/batch-rename")
+  async batchRenameCharacters(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Body() body: unknown) {
+    const { spaceId } = this.ctx(req);
+    return this.original.batchRenameCharacters(spaceId, ntId, parseOrThrow(characterBatchRenameSchema, body ?? {}));
+  }
+
   /**
    * 生成角色卡（路径别名，语义同 `POST /content-analysis/novel_character_cards/generate`）。
    * 静态段 `generate` 必须声明在 `:ncId` 参数路由之前，避免被当成 nc_id。
@@ -220,6 +260,13 @@ export class NovelOriginalController {
     return this.original.patchCharacter(spaceId, ntId, ncId, parseOrThrow(novelCharacterPatchSchema, body ?? {}));
   }
 
+  /** 删除一张角色卡（第 90 批；竞品用 `POST .../characters/:nc_id/delete` 而非 DELETE） */
+  @Post("characters/:ncId/delete")
+  async deleteCharacter(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
+    const { spaceId } = this.ctx(req);
+    return this.original.deleteCharacter(spaceId, ntId, ncId);
+  }
+
   /** 确认单张角色卡（路径别名，语义同 `core_character`：置 is_core=true，重复确认幂等） */
   @Post("characters/:ncId/confirm")
   async confirmCharacter(@Req() req: AuthedRequest, @Param("ntId") ntId: string, @Param("ncId") ncId: string) {
@@ -244,6 +291,18 @@ export class NovelOriginalController {
   async listEpisodeOutlines(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
     const { spaceId } = this.ctx(req);
     return this.original.listEpisodeOutlines(spaceId, ntId);
+  }
+
+  /** 编辑单条集纲（第 90 批；竞品同族路径，语义与改编链 `PATCH /episode_outline/:neo_id` 一致） */
+  @Patch("episodes_outline/:neoId")
+  async patchEpisodeOutline(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Param("neoId") neoId: string,
+    @Body() body: unknown,
+  ) {
+    const { spaceId } = this.ctx(req);
+    return this.original.patchEpisodeOutline(spaceId, ntId, neoId, parseOrThrow(outlinePatchSchema, body ?? {}));
   }
 
   /** 生成分集剧本（竞品 `novel script`，`novel.md:641-661`） */

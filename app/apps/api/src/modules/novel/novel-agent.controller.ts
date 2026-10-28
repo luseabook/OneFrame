@@ -56,6 +56,19 @@ export class NovelAgentController {
     return this.agent.heartbeat(spaceId, userId, ntId, parseOrThrow(novelEditHeartbeatSchema, body ?? {}));
   }
 
+  /**
+   * 编辑态探针（第 90 批；竞品 `GET /df/novel/:nt_id/script_edit_agent`）。
+   *
+   * 与 `heartbeat` 的分工：这是**只读**的"现在能不能编辑"，
+   * 没有 ACTIVE 会话也回 200（`active:false`）；`heartbeat` 才是有副作用的续命。
+   * 前端进入页面前调这条，避免用 400 当状态信号。
+   */
+  @Get()
+  async state(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
+    const { spaceId, userId } = this.ctx(req);
+    return this.agent.state(spaceId, userId, ntId);
+  }
+
   @Get("sessions")
   async listSessions(@Req() req: AuthedRequest, @Param("ntId") ntId: string) {
     const { spaceId } = this.ctx(req);

@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import {
   AppError,
@@ -115,6 +116,33 @@ export class NovelController {
     const { spaceId } = this.ctx(req);
     const no = parseOrThrow(noSchema, { no: chapterNo }).no;
     return this.novels.getChapter(spaceId, ntId, no);
+  }
+
+  /**
+   * 导出整本（第 90 批；竞品 `GET /df/novel/:nt_id/download?only_episodes=`）。
+   *
+   * 为什么回**原始 markdown** 而不是 JSON 信封：
+   * 调用方（CLI `novel export` / 浏览器）要的是文件本身；套一层 `{code,data:{content}}`
+   * 会让"另存为"在客户端多做一次解包，且大文件要整段进内存拼 JSON。
+   * 这与第 81 批 kds 的两条 CSV 导出同一口径（`text/csv` + `content-disposition`）。
+   *
+   * 中文标题必须用 `filename*=UTF-8''…`：`filename="…"` 只允许 ASCII，
+   * 直接把中文塞进去，浏览器会拿到 `%E5%B0%8F…` 或乱码。
+   */
+  @Get(":ntId/download")
+  async download(
+    @Req() req: AuthedRequest,
+    @Param("ntId") ntId: string,
+    @Query("only_episodes") onlyEpisodes: string | undefined,
+    @Res() reply: FastifyReply,
+  ) {
+    const { spaceId } = this.ctx(req);
+    const only = onlyEpisodes === "1" || onlyEpisodes === "true" || onlyEpisodes === "yes";
+    const { filename, content } = await this.novels.exportText(spaceId, ntId, only);
+    reply.header("content-type", "text/markdown; charset=utf-8");
+    reply.header("content-disposition", `attachment; filename="export.md"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    reply.code(200);
+    return reply.send(content);
   }
 
   // ── 2. 内容分析：世界观 + 角色卡（content-analysis 子链）──────

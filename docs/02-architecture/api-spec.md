@@ -4358,3 +4358,69 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 2. `ai upscale` 的默认分辨率取 1080p（价目表第一档），不是「最优档」；要 4K 须显式传。
 3. `resource extract-wait` 的轮询间隔与 `task wait` 一致（2s），没有做自适应退避。
 4. 本批未改任何服务端校验、计费或幂等语义 —— 只是把既有契约正确地用起来。
+## 17.47 小说域的第 90 批单点形状：导出、编辑态探针与裂变总纲（第 90 批）
+
+### 47.1 为什么进 API 文档
+
+竞品把小说改编链挂在 `/web/v1/df/novel/:nt_id/...`（102 条 METHOD+path），我方按 ADR-009 直接 `/novel/:ntId/...`。前缀差异已逐条登记在 `competitor-route-parity.spec.ts` 的 `NOVEL_PAIRS`；本批新增的 13 条**是能力补充**（不是别名）：此前这些操作要么只能拿整张列表做，要么被记成「有意不做」。
+
+### 47.2 新增端点一览
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/novel/:ntId/download` | 整本导出 markdown；`?only_episodes=1` 只导分集剧本 |
+| GET | `/v1/novel/:ntId/script_edit_agent` | 编辑态只读探针：`active` / `session` / `pending_count` / `in_flight` |
+| POST | `/v1/novel/:ntId/original_script/materials` | 手工建素材（`manual:true`） |
+| GET | `/v1/novel/:ntId/original_script/materials/:nmId` | 素材单条详情 |
+| GET | `/v1/novel/:ntId/original_script/characters/:ncId` | 角色卡单条 |
+| POST | `/v1/novel/:ntId/original_script/characters/batch-rename` | 批量改名（整批校验，未知 id 全拒） |
+| POST | `/v1/novel/:ntId/original_script/characters/:ncId/delete` | 删除角色卡（硬删） |
+| PATCH | `/v1/novel/:ntId/original_script/episodes_outline/:neoId` | 原创链集纲单点编辑 |
+| GET | `/v1/novel/:ntId/fission_script/summary_outline` | 裂变总纲（未生成回 `null`） |
+| PATCH | `/v1/novel/:ntId/fission_script/summary_outline` | 改标题/卖点/主题/结构（`beats` 不可改） |
+| POST | `/v1/novel/:ntId/fission_script/idea` | 重生成 3 条创意（同 `nonce` 幂等） |
+| PATCH | `/v1/novel/:ntId/fission_script/idea/:niId` | 单条改 `title/logline/genre/tone` |
+| PATCH | `/v1/novel/:ntId/fission_script/characters/:ncId` | 裂变链角色卡改 |
+
+### 47.3 导出的契约
+
+响应 `content-type: text/markdown; charset=utf-8`，`content-disposition: attachment; filename="export.md"; filename*=UTF-8''<encoded>`（中文书名必须走 `filename*`，否则浏览器落盘是乱码名）。
+
+正文节结构固定：`# <书名>` → `## 章节正文`（`### 第 N 章 <标题>` + 正文）→ `## 分集剧本`（`### 第 N 集 <标题>` + 剧本）。`only_episodes` 为真时整体省略「章节正文」节，文件名加 `-episodes` 后缀。
+
+### 47.4 编辑态探针的三态
+
+| 场景 | 返回 |
+|---|---|
+| 没有 ACTIVE 会话 | `200` + `{ active: false, session: null, pending_count: 0, in_flight: false }` |
+| 有会话、空闲 | `200` + `{ active: true, session, pending_count: n, in_flight: false }` |
+| 有会话、正在跑一轮 | `200` + `{ …, in_flight: true }`（读 Redis 轮次锁 `novel:agent:turn:<sid>`，多副本唯一真相） |
+
+**不返回 400**：探针的用途是「前端判断要不要显示编辑条」，没会话是正常状态。与 `heartbeat`（无会话即 400）刻意不同。
+
+### 47.5 角色卡删除与批量改名
+
+`novel_characters` **没有软删列**，所以删除是硬删，`POST …/:ncId/delete` 只是竞品形状的入口；已删再删回 `400102`。
+
+批量改名只接受 `name`：竞品这条的 `requestDataJsonSchema` 是 `{}`，改 `roleType`/`prompt`/`description` 会让已生成的角色卡失效。**整批校验**：任何一个 `nc_id` 不存在就整单 `404`（返回未知 id 列表），不做半批。
+
+### 47.6 裂变总纲与创意方案
+
+- `GET summary_outline`：未生成时 `summary_outline: null`（不是 404）、`generated: false`；
+- `PATCH summary_outline`：只合并 `title/logline/theme/structure` 四个标量，**`beats` 不可改**——它是 `POST …/episode_outline/generate` 的输入，改了会让集纲与总纲漂移；只给 `beats` 会被 schema 剥成空 patch → `400101`；
+- `POST idea`：非裂变本子 → `400100`（`BAD_REQUEST`，不是 `400101`）；同 `nonce` 复现同一批（`seedOf` 确定性）；重生成后 `selected_ni_id` 置空；
+- `PATCH idea/:niId`：不动 `ni_id`/`angle`（这两个决定了后续裂变链的引用）。
+
+### 47.7 与竞品 102 条的对应关系
+
+- **58 条纯前缀偏离**（剥掉 `/df` 即同形）→ `NOVEL_PAIRS` 的 `ours` 字段；
+- **32 条结构性偏离**（方法/命名/入口不同）：21 条登记偏离，13 条即本节新增的端点；
+- **12 条无模型豁免**：`buy/*` 7 条（无买断表）+ 本子级协作组/权限/分发 5 条（协作是团队级、分发在运营侧），记 `B 类`，理由写在 `NOVEL_WAIVED`。
+
+### 47.8 边界
+
+1. 守卫只比 METHOD + path，不校验 query/body；
+2. 导出是 markdown，竞品的文件流/压缩包形状无证据；
+3. 12 条豁免一旦产品决定建表，必须立刻改成偏离并补实现；
+4. 新增 13 条端点暂无前端页面消费（UI 接法留待页面批次），接口先立契约；
+5. `only_episodes` 只认 `1/true/yes`，其余按 false。

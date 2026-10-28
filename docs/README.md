@@ -127,6 +127,80 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.44 · 第 90 批：#2 小说改编链 —— 竞品 102 条 `/df/novel/*` 里 0 条同形，13 条是「该有的单点形状」、12 条连模型都没有 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+`#2 小说改编链` 记 98%、权重 8，缺口栏从第 62 批起只有两句：「`original_script/characters/*` 5 条有意不单列」「结局分支字段取证」。**它从来没有用竞品全集验过** —— 而前几批已经反复证明：缺口栏本身会写错（第 87 批证伪了 #11 两条「具名能力」、第 84 批发现 #12 的「竞品 29+12」重复记账）。
+
+本批把竞品 `/web/v1/df/novel/*` 的形状逐条对。第一个坑是**范围**：`/df/novel` 子串会连带捕到 `/df/novel_market/*`（剧本广场，29 条，第 84 批已归 #12）——不排除就会把别人的缺口算到 #2 头上。排除后是 **102 条**。
+
+第二个坑是**归一化**：竞品把小说链挂在 `/df/novel/:nt_id/...`，我方按 ADR-009 直接 `/novel/:ntId/...`；守卫的 `normalize()` 只剥 `/web/v1`、不剥 `/df`，所以这一组的「同形」**必然是 0**。0 同形不等于「全缺」——前缀差异本身就是一条必须登记的偏离。
+
+### 二、102 条怎么分
+
+| 分类 | 条数 | 处理 |
+|---|---:|---|
+| 「剥掉 `/df` 就同形」的纯前缀偏离 | **58** | 登记 `NOVEL_PAIRS`，`ours` 逐条写过 |
+| 结构性偏离（方法/命名/入口不同） | **32** | 21 条登记偏离；**13 条按竞品形状补成真端点**（见下节） |
+| **无数据模型豁免** | **12** | 不造假接口，记为 `B 类`（见第四节） |
+
+方法级偏离的典型：竞品 `POST :nt_id/delete` → 我方 `DELETE /novel/:ntId`；竞品 `POST :nt_id/summary` → 我方 `GET /novel/:ntId/summary`；竞品 `PUT …/episodes_outline/:neo_id` → 我方 `PATCH /novel/:ntId/original_script/episodes_outline/:neoId`（PUT→PATCH 一族共 10 条）；竞品 `GET :nt_id/point` → 我方 `POST /credits/quote`（它有 `step`/`episode_count`/`chapter_start` 等预估参数，本质是报价）。
+
+### 三、13 条「该有的单点形状」
+
+旧缺口栏把那 5 条 `characters/*` 写成「有意不单列」——但竞品确实有单点读/删/改名，前端做角色卡编辑时不需要拿整张列表。这批按竞品形状补齐：
+
+| 端点 | 与竞品的关系 |
+|---|---|
+| `GET /novel/:ntId/download?only_episodes=` | 竞品同路径；返回 **markdown**（`text/markdown` + `filename*=UTF-8''`） |
+| `GET /novel/:ntId/script_edit_agent` | 竞品同路径；只读探针，无会话回 `active:false` 而不是 400 |
+| `GET|POST /novel/:ntId/original_script/materials` | 素材单点读 + 手工建（`manual:true`，与 LLM 抽取区分） |
+| `GET /novel/:ntId/original_script/materials/:nmId` | 单条详情，形状与列表行逐字段相同 |
+| `GET /novel/:ntId/original_script/characters/:ncId` | 单条角色卡 |
+| `POST …/characters/:ncId/delete` | 竞品是 POST delete（我方 `novel_characters` 无软删列 → 硬删） |
+| `POST …/characters/batch-rename` | 竞品同路径；只改 `name`（唯一不引起下游重生成的字段） |
+| `GET|PATCH /novel/:ntId/fission_script/summary_outline` | 总纲读写；`beats` 不可改（它是 `episode_outline/generate` 的输入） |
+| `POST /novel/:ntId/fission_script/idea` | 重生成 3 条创意，同 `nonce` 复现同一批（可测） |
+| `PATCH …/fission_script/idea/:niId` | 单条改 `title/logline/genre/tone`，不动 `ni_id`/`angle` |
+| `PATCH …/fission_script/characters/:ncId` | 裂变链角色卡改 |
+| `PATCH …/original_script/episodes_outline/:neoId` | 原创链集纲单点编辑 |
+
+### 四、12 条豁免为什么硬补不了
+
+| 族 | 条数 | 为什么 |
+|---|---:|---|
+| `buy/*`（买断/授权） | 7 | 没有「买断记录」这个概念的表：`schema.ts` 里没有 buy 表，`novel_chapters`/`novel_characters` 也没有 buyer 维度。竞品这 7 条的两个 schema 都是 `{}`，连字段形状都没给 |
+| 本子级协作组/权限/分发 | 5 | 我方团队协作是**团队级**（`team.controller.ts` 的 `/cam/permissions`），分发只有运营侧 `/op/distributor/*`；没有「单个小说本的成员组」模型 |
+
+这 12 条是**能力不在**，不是**形状不同**。造一个 `GET /novel/:id/buy/detail` 返回空对象比缺接口更坏：调用方会以为买断功能存在。
+
+### 五、为什么分数是往下调
+
+#2 从 **98% → 97%**（7.84 → 7.76，缺口 0.16 → 0.24）：
+
+- **+0.16 归 B 类**：那 12 条无模型端点。这不是「没排期」，是「要不要建 buy/协作组表」的产品口径；
+- **0.08 留 E 类**：结局分支字段仍需竞品响应体证据（102 条里没有这条）；
+- 旧缺口栏里「`characters/*` 5 条有意不单列」这条**作废**（已补成单点形状）。
+
+全站 202.56 → **202.48**、剩余 3.44 → **3.52**、核心 107.67 → **107.59（97.8%）**、首发 130.57 → **130.49（98.1%）**、E 2.53 → **2.45**、B 0.915 → **1.075**。
+
+### 六、守卫与验证
+
+- 守卫从十五组 461 条扩到**十六组 563 条 / 19 例**：`NOVEL_SHAPES`(102) + `NOVEL_PAIRS`(90) + `NOVEL_WAIVED`(12)，并断言「剥掉 `/df` 后同形的恰好 58 条」——这防止以后有人把 `/df` 前缀归一化掉、让 102 条静默变成「同形全覆盖」。
+- 新功能测试 `novel-shapes.spec.ts` **8 例**：导出节结构、探针三态、详情与列表行 `Object.keys` 深等、批量改名整批拒（未知 id 不做半批）、素材手建 `manual:true`、总纲 `beats` 不可改、同 nonce 幂等、主链本子重生成回 **400100**。
+- 反向验证：把 `@Get(":ntId/download")` 改名 → parity **2 红**（`deviation target missing: GET /df/novel/{}/download → GET /novel/{}/download`）+ 功能 **1 红**；restore 后 27 绿。
+- 门禁 12/12；api **86 文件 965 例**、总用例 **1,376**；端点 **765**（+13）。
+
+### 七、诚实边界
+
+1. 守卫只比 METHOD + path，**不校验 query / body 语义**：导出的 markdown 层级、批量改名是否触发下游重算都不在守卫里。
+2. 12 条豁免是「没有模型」——一旦产品决定建 buy/协作表，这批要立刻从 `WAIVED` 改成 `PAIRS` 并补实现，不能长期挂着。
+3. 58 条前缀偏离只是**命名口径**：竞品调用方把 base path 从 `/df` 去掉还要改 `:nt_id` 的大小写习惯，不是零成本。
+4. `download` 返回 markdown 而不是竞品的压缩包/文件流（竞品 `responseBodyType` 无证据）；`only_episodes` 只接受 `1/true/yes`。
+5. 批量改名只允许改 `name`：竞品 schema 是 `{}`，其余字段（roleType/prompt/description）改名会牵动角色卡重生成，不该跟批处理走。
+6. 这批没有动前端页面：13 条新端点的 UI 接法留待页面批次（角色卡刚需的「单点读」已具备）。
+
 ## 变更登记（v6.43 · 第 89 批：#9 CLI 骨架逐条复查 —— 40 条里 7 条是「后端早就有、CLI 没接」 · 2026-10-28）
 
 ### 一、这批在回答什么问题
