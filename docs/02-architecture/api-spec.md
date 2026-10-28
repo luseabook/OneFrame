@@ -3587,3 +3587,111 @@ data: {"id":"<frame_id>","type":"<type>","seq":<n>,"payload":{...}}
 - 真链路：起 3002 栈、真登录、真 SSE，`--follow` 收到 `model_step` + `agent_message`，`agent exit` 后 `status=2`。
 - 边界：不做自动重连（游标续传能力有，重连策略没有）；`--ndjson` 仍是 `--json` 别名；`ping` 目前只记帧不做「连接健康度」展示；
   真实模型下「一轮多久」取决于上游，`--timeout` 默认 120s 可能偏短。
+
+### 17.36 BYOK 第三方 Key / 项目关联用户 / 项目维度积分 / 成员凭据（第 79 批）
+
+> 本节记录 §17.36 的 10 个端点。它们的共同点：**竞品有路由、没有字段形状**（`requestDataJsonSchema` 与 `responseDataJsonSchema` 全是 `{}`），所以契约由我方定义并在此登记，后续拿到竞品证据再对齐。
+
+#### 36.1 为什么这批端点要写进 API 文档
+
+因为它们都属于「**别人会照着写客户端**」的端点，而不是页面内部实现：
+
+- BYOK 的 `api_key` 一旦被前端当成「可回传字段」，就会有实现直接把它 `GET` 出来渲染；
+- 项目维度积分的 `project_id|project_title` 允许 `null`（任务已删/未关联剧集），客户端若把 null 当成「数据缺失」会丢账；
+- 成员凭据的 `has_password:false` 是**显式否定**，不写进文档就会被读成「字段还没做」。
+
+#### 36.2 端点与权限
+
+全部走 `@Controller("cam")`，`ctx(req)` = 登录态判空（401）+ `requireMember(spaceId, userId)`（非成员 400102）。BYOK 五个端点额外**以 `(spaceId, userId)` 双条件收口**：只能看/改自己的。
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/v1/cam/user/third/key/list` | 自己的第三方 Key 列表 |
+| POST | `/v1/cam/user/third/key/add` | 新增（`provider` 必填，同 provider 重复 → 400101） |
+| GET | `/v1/cam/user/third/key/:id/info` | 单条（非本人/跨空间 → 400102） |
+| PUT | `/v1/cam/user/third/key/:id/update` | 改 provider/label/api_key/status |
+| DELETE | `/v1/cam/user/third/key/:id/delete` | **硬删**（停用请 `PUT status=2`） |
+| GET | `/v1/cam/linked-users?sp_id=` | 项目关联用户（`team_member_projects` × `space_members` × `users` × `script_projects`） |
+| GET | `/v1/cam/team/project-points-flow/list` | 项目维度消耗流水（`page/page_size/create_time_start/create_time_end/op_user_name`） |
+| GET | `/v1/cam/team/project-points-flow/export` | CSV 导出（上限 5,000 行，带 BOM，7 天签名 URL） |
+| POST | `/v1/cam/team/project-points-ranking` | 项目维度消耗排行（body `{limit?, create_time_start?, create_time_end?}`，limit ≤ 100） |
+| GET | `/v1/cam/team/member/:user_id/credential` | 成员登录凭据（打码账号 + `has_password:false`） |
+
+#### 36.3 DTO 契约
+
+**第三方 Key（`thirdKeyDto`）**
+
+```ts
+{
+  id: string;
+  provider: string;
+  label: string;
+  api_key_masked: string;   // 明文解密后打码：<12 位整串 *，否则 前4…后4；解密失败为 "******"
+  status: 1 | 2;            // 1 启用 / 2 停用
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+**不变量**：任何响应都**不出现明文 `api_key`**；`api_key_masked` 是唯一可回传形态；`add` 的响应同样只有打码值。
+
+**项目维度消耗流水（`listProjectPointsFlows`）**
+
+```ts
+{
+  list: Array<{
+    id: string;
+    project_id: string | null;      // 归不到项目时保留 null（不丢账）
+    project_title: string | null;
+    points: number;                 // = -delta，正数表示消耗
+    kind: "settle";
+    ref_task_id: string | null;
+    op_user_id: string | null;
+    created_at: string;
+  }>;
+  total: number; page: number; page_size: number;
+  unattributed_scoped: false;       // 明确：未归属项目不是被"限定掉"，而是本来就没有
+}
+```
+
+**排行（`projectPointsRanking`）**：`{list: [{rank, project_id, project_title, points, flow_count}], }`，按 `points` 降序，`limit` 默认 20、上限 100。
+
+**成员凭据（`memberCredential`）**
+
+```ts
+{
+  user_id: string; nickname: string; role_code: string; member_status: number;
+  login_methods: Array<{ provider: string; account_masked: string }>;  // 手机号 前3****后4
+  has_password: false;          // 显式：本版本无子账号密码
+  can_reset_password: false;
+  note: "members sign in with their own phone number; this build has no sub-account password";
+}
+```
+
+#### 36.4 三条口径（写死在这里，避免下轮再争）
+
+| 口径 | 决定 | 理由 |
+|---|---|---|
+| 明文可回传性 | **永不可回传** | 凭据可读 = XSS 直接拿到密钥 |
+| 项目维度积分的 `kind` | **只算 `settle`** | `recharge/gift/freeze/unfreeze/adjust/refund` 是过程量或非消耗量，计入会重复/虚高 |
+| 归不上项目的账 | **保留 `project_id: null`** | 按 join 过滤会让合计小于真实消耗——账目不能因为「归属字段缺」而消失 |
+
+#### 36.5 与竞品的两处明确差异
+
+1. **路径参数名**：竞品 `member_id`，我方 `user_id`（我方成员就是 `users` 行）；
+2. **子账号密码 2 条未实现**：`PUT .../member/:member_id/password`、`POST .../member/batch/change-password`。我方团队是「手机号邀请真实用户」，无子账号体系；只存哈希而无登录路径即死代码。已在主台账 #7 缺口栏登记为 B 类 0.10。
+
+#### 36.6 测试与验证
+
+- `app/apps/api/test/team-byok-points.spec.ts` **6 例**：BYOK 全链（打码/查重/跨用户 400102/`abc` 400101/硬删后 400102）、linked-users（真绑定端点 + `sp_id` 过滤 + 非法 `sp_id` 400101）、成员凭据（打码匹配 `^\d{3}\*{4}\d{4}$`、响应不出现完整手机号、非成员 400102）、项目维度积分（只算 settle、未归属 null、`op_user_name` 过滤、未来时间 total 0、分页 total 不变）、排行（聚合、`project_id:null` 单列、limit 生效与 400101）、导出（`row_count`/`filename`/`file_uri`/`expires_at`）；
+- **反向验证**：在 DTO 里塞 `leaked_plain: decryptSecret(...)` → 打码断言红（`expected true to be false`），撤掉即绿——证明「明文不出网」这条有测试守着，不是注释承诺；
+- api 全量 83 文件 **922 例**，总用例 1,323；门禁 12/12。
+
+#### 36.7 诚实边界
+
+1. 竞品这 12 条路由的**响应体形状全部无证据**（`{}`），本契约是我方自定；
+2. `linked-users` 默认只列 `project_kind = 1`（脚本项目）；影视版（`project_kind = 2`）的关联用户未在此表口径内；
+3. 项目维度积分依赖 `ref_task_id → tasks.episode_id → episodes.project_id` 这条链，任务被删后该流水会落到 `project_id: null`（这是刻意保留，不是 bug）；
+4. 导出的 CSV 上限 5,000 行，超出会截断（未分页导出的取舍写在 service 注释里）；
+5. 成员凭据不返回密码哈希、不返回完整手机号——**只有打码账号**；「能不能改密码」这件事本版本答案是「不能，因为没有子账号」。

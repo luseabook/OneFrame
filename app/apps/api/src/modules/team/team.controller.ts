@@ -105,6 +105,30 @@ const rolePermissionsBody = z.object({
   module_id_list: z.unknown().optional(),
 });
 
+/**
+ * BYOK 第三方 Key（对齐参照 `cam/user/third/key/*`）。
+ *
+ * 参照的 `requestDataJsonSchema` 是空对象 —— 只有路由、没有字段形状，
+ * 所以字段名与上限由我方自定（已登记 api-spec §17.36）。`api_key` 上限 400
+ * 是因为主流供应商的 key 都在 200 以内，400 足够且能挡住误贴整段 JSON。
+ */
+const thirdKeyAdd = z.object({
+  provider: z.string().min(1).max(40),
+  label: z.string().max(60).optional(),
+  api_key: z.string().min(1).max(400),
+  status: z.number().int().min(1).max(2).optional(),
+});
+const thirdKeyUpdate = thirdKeyAdd.partial().extend({
+  // 编辑时允许显式清空备注（`null`），新增时不必写
+  label: z.string().max(60).nullable().optional(),
+});
+/** 项目维度积分排行入参（参照是 POST + body，不是 query） */
+const projectPointsRankingBody = z.object({
+  limit: z.number().int().min(1).max(100).optional(),
+  create_time_start: z.string().max(40).optional(),
+  create_time_end: z.string().max(40).optional(),
+});
+
 @Controller("cam")
 export class TeamController {
   constructor(@Inject(TeamService) private readonly team: TeamService) {}
@@ -447,5 +471,104 @@ export class TeamController {
     this.team.requirePrivilege(c, "unbind project member");
     const input = parseOrThrow(bindProjectBody.pick({ user_id: true, project_kind: true }), body);
     return this.team.unbindMemberProject(c.spaceId, { ...input, project_id: projectId });
+  }
+
+  // ── 成员登录凭据（对齐参照 `GET cam/team/member/:member_id/credential`）──
+  /**
+   * 成员用哪个号登录。我方没有子账号密码，所以显式回 `has_password:false` /
+   * `can_reset_password:false`（不编假字段），账号只回打码值。
+   */
+  @Get("team/member/:user_id/credential")
+  async memberCredential(@Req() req: AuthedRequest, @Param("user_id") userId: string) {
+    const c = await this.ctx(req);
+    return this.team.memberCredential(c.spaceId, userId);
+  }
+
+  // ── 项目关联用户（对齐参照 `GET /cam/linked-users`）──────────
+  /**
+   * 「这个项目上有哪些人」。数据源是成员↔项目绑定表，不是在线名单；
+   * 权限只要求"是本 space 成员"（读的是编制表，不含任何凭据）。
+   */
+  @Get("linked-users")
+  async linkedUsers(@Req() req: AuthedRequest, @Query("sp_id") spId?: string) {
+    const c = await this.ctx(req);
+    return this.team.linkedUsers(c.spaceId, spId);
+  }
+
+  // ── 项目维度积分（对齐参照 cam/team/project-points-*）────────
+  @Get("team/project-points-flow/list")
+  async projectPointsFlows(
+    @Req() req: AuthedRequest,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
+    @Query("create_time_start") start?: string,
+    @Query("create_time_end") end?: string,
+    @Query("op_user_name") opUserName?: string,
+  ) {
+    const c = await this.ctx(req);
+    return this.team.listProjectPointsFlows(c.spaceId, {
+      page: page === undefined ? undefined : Number(page),
+      page_size: pageSize === undefined ? undefined : Number(pageSize),
+      create_time_start: start,
+      create_time_end: end,
+      op_user_name: opUserName,
+    });
+  }
+
+  /** 项目消耗流水导出（CSV，返回现签链接，1h 有效；上限 5000 行） */
+  @Get("team/project-points-flow/export")
+  async exportProjectPointsFlows(
+    @Req() req: AuthedRequest,
+    @Query("create_time_start") start?: string,
+    @Query("create_time_end") end?: string,
+    @Query("op_user_name") opUserName?: string,
+  ) {
+    const c = await this.ctx(req);
+    return this.team.exportProjectPointsFlows(c.spaceId, {
+      create_time_start: start,
+      create_time_end: end,
+      op_user_name: opUserName,
+    });
+  }
+
+  @Post("team/project-points-ranking")
+  async projectPointsRanking(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    return this.team.projectPointsRanking(c.spaceId, parseOrThrow(projectPointsRankingBody, body));
+  }
+
+  // ── BYOK 第三方 Key（对齐参照 cam/user/third/key/*）──────────
+  /** 列表：**只含自己的** Key（团队管理员也看不到别人的，见 service 注释） */  @Get("user/third/key/list")
+  async thirdKeys(@Req() req: AuthedRequest) {
+    const c = await this.ctx(req);
+    return this.team.listThirdKeys(c.spaceId, c.userId);
+  }
+
+  @Post("user/third/key/add")
+  async addThirdKey(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    return this.team.addThirdKey(c.spaceId, c.userId, parseOrThrow(thirdKeyAdd, body));
+  }
+
+  @Get("user/third/key/:id/info")
+  async thirdKeyInfo(@Req() req: AuthedRequest, @Param("id") id: string) {
+    const c = await this.ctx(req);
+    return this.team.thirdKeyInfo(c.spaceId, c.userId, id);
+  }
+
+  @Put("user/third/key/:id/update")
+  async updateThirdKey(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const c = await this.ctx(req);
+    const input = parseOrThrow(thirdKeyUpdate, body);
+    return this.team.updateThirdKey(c.spaceId, c.userId, id, {
+      ...input,
+      label: input.label === null ? "" : input.label,
+    });
+  }
+
+  @Delete("user/third/key/:id/delete")
+  async deleteThirdKey(@Req() req: AuthedRequest, @Param("id") id: string) {
+    const c = await this.ctx(req);
+    return this.team.deleteThirdKey(c.spaceId, c.userId, id);
   }
 }

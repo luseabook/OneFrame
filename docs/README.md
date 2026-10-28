@@ -127,6 +127,83 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.33 · 第 79 批：审计「满分」模块 —— #7 团队的 100% 是拿自己的 33 条当全集 · 2026-10-28）
+
+> 这一批不补缺口，**怀疑自己的账**。上一批收尾时提过一个疑点：11 个模块标着 100%，其中三个 XL(20)（团队 #7 / 影视版 #8 / 活动创作者 #10）占了 60 权重。100% 只应出现在「竞品路由逐条对过、一条不缺」的地方——那就去对。
+
+### 一、怎么查的，以及为什么「跑个 diff」不管用
+
+先试机械比对（`_acceptance/_r79_cam_diff.py`，把竞品 `/web/v1/cam/*` 的 40 条路径与我方 `team.controller.ts` 的 33 条按归一化路径比）：
+
+| 做法 | 结果 | 为什么不行 |
+|---|---|---|
+| 归一 `:param` 后比路径 | **40 条全判成缺失** | 竞品路径带 `team/:team_id` 前缀、参数叫 `member_id`；我方是扁平路径 + 叫 `user_id`。命名体系不同，机械比对只会给出 100% 假阳性 |
+
+所以改成**逐条人工对照**（40 条竞品路由 × 我方 33 条端点，一条一条读语义）。结论：**12 条确实没有**。
+
+| 类别 | 条数 | 竞品路由 |
+|---|---:|---|
+| BYOK 第三方 Key | 5 | `GET/POST /cam/user/third/key/{list,add}`、`GET/PUT/DELETE /cam/user/third/key/:id/{info,update,delete}` |
+| 项目关联用户 | 1 | `GET /cam/linked-users?sp_id` |
+| 项目维度积分 | 3 | `GET /cam/team/project-points-flow/{list,export}`、`POST /cam/team/project-points-ranking` |
+| 子账号密码 / 凭据 | 3 | `PUT /cam/team/:team_id/member/:member_id/password`、`POST .../member/batch/change-password`、`GET .../member/:member_id/credential` |
+
+证据强度也要说清：这 12 条在竞品 bundle（`core-lib-CKH7gQsw.js`，1,100,087 B）里都能找到 `requestConfig`，但 **`requestDataJsonSchema:{}` / `responseDataJsonSchema:{}` 全空**——只有路由与 query 名，没有字段形状。与我方第 73/75 批的处理口径一致：形状自定、在 api-spec 登记。
+
+### 二、补的 10 条：两条「有表没入口」的发现
+
+- **BYOK 5 条 —— 表早就建好了，只是没人写过**：`packages/db/src/schema.ts:889` 的 `userThirdKeys`（`provider`/`label`/`keyCipher`/`keyHash`/`status`）在**迁移 0013** 就建了表，`team.service.ts:14` 也 import 了它，但全仓**只有 `tempInfo` 读过一次**（`count(*)` 用来派发 `api_key_white` 权益）。有表、无写入口——正是「看起来支持 BYOK，其实只能看数量」的典型。
+- **成员凭据 1 条 —— 诚实实现而不是造一个假的**：竞品的 `credential` 配合子账号密码体系才有意义。我方返回 `{login_methods:[{provider, account_masked}], has_password:false, can_reset_password:false, note:"members sign in with their own phone number; this build has no sub-account password"}`——**显式说没有**，而不是回一个空密码字段让人以为能改。
+
+### 三、三个不显然的决定
+
+| 决定 | 反面 | 理由 |
+|---|---|---|
+| BYOK **明文永不回传**（`api_key_masked` 由解密后打码得出，解密失败退 `******`） | 回传明文最省事 | 凭据一旦能读出，前端 XSS 就等于拿到密钥；打码足够让用户认出「是哪一把 key」 |
+| BYOK **只能看自己的**（`and(spaceId, userId)`），团队管理员也不行 | 管理员能导出团队成员的 key 便于排障 | 排障需求可以由「成员自己看」满足；让管理员能导出等于把「个人凭据」变成「团队资产」 |
+| BYOK **硬删**（`DELETE` 真删行） | 软删保留审计 | 注释写在这里：「这是凭据，软删等于密文还在库里；要停用请 PUT status=2」。停用与删除是两件事 |
+
+另外两条口径：
+
+- **项目维度积分只算 `settle`**：`credit_flows` 里有 `recharge/gift/freeze/settle/unfreeze/adjust/refund`，项目维度的「消耗」只应含 `settle`；冻结/解冻是过程量，算进去会重复计。
+- **归不上项目的行保留 `project_id:null`，不丢**：`credit_flows.ref_task_id → tasks.episode_id → episodes.project_id`，任务可能已被删或从未关联剧集。**如果按 join 过滤掉，账目合计会少于真实消耗**——所以列表里保留这些行并标 null，前端可以单列「未归属」。
+
+### 四、留的 2 条：为什么是「产品口径」而不是「没做」
+
+竞品的子账号密码（`member/:id/password`、`member/batch/change-password`）背后是「一个账号下多个子账号」的模型。我方团队模型是**手机号邀请真实用户**（`addMembers` 按 `identities.phoneHash` 查人，默认 `role_code="project_executor"`），没有子账号体系——只存一个密码哈希而无登录路径就是**死代码**，做了也不会被用到。所以判 **B 类（产品一句话）0.10**，而不是硬凑一个端点。
+
+### 五、分数据实下调（这一批唯一动分数的地方，而且是往下）
+
+| 项 | 之前 | 现在 | 说明 |
+|---|---:|---:|---|
+| #7 团队 | 100% / 20.00 | **99.5% / 19.90** | 12 条缺失里补了 10 条，留 2 条 B 类 |
+| 生态组 | 94.95 | **94.85** | #7 属生态组（权重 96，10 个模块） |
+| 全站 | 202.54 | **202.44** | 权重 206 |
+| 剩余 | 3.46 | **3.56** | 98.3% → 98.3%（四舍五入不变） |
+| 首发口径 | 130.59 / 98.2% | **130.49 / 98.1%** | #7 保留在首发口径内 |
+| B 类总额 | 0.635 | **0.735** | E 仍 2.83、I 仍 0 |
+
+**为什么不「补完 10 条就当 100%」**：剩下 2 条是真缺口，只是解法要产品先定。把 100% 留着会让台账在最需要准确的地方撒谎——*发现缺口就据实降分*，这是这份台账唯一的价值。
+
+### 六、验证
+
+| 项 | 结果 |
+|---|---|
+| `app/apps/api/test/team-byok-points.spec.ts` | **6 例全绿**（BYOK 全链含打码/查重/跨用户不可见/硬删；linked-users；成员凭据；项目维度积分筛选与分页；排行聚合与 limit；CSV 导出） |
+| 反向验证 | `_r79_break.py break` 在 DTO 里塞 `leaked_plain` → **1 例红**（`expected true to be false`）；`restore` 后 6/6 绿 |
+| api 全量 | 83 文件 **922 例**（原 82/916）；总用例 1,317 → **1,323** |
+| 规模 | endpoints **712 → 722**；controllers 52 / migrations 45 / tables 112 / cli 204 不变 |
+| 门禁 | `pwsh _acceptance\verify-round.ps1` → **12/12 全绿**（`Cached: 11 cached`，只有 cli 真跑） |
+
+### 七、诚实边界
+
+1. 竞品这 12 条的响应体形状**全部无证据**（`requestDataJsonSchema` 是 `{}`），字段是我方自定的，已在 api-spec §17.36 逐条登记；
+2. **只审计了 #7**。同为 XL(20) 的**影视版 #8（100%）与活动/创作者 #10（100%）尚未做同样的逐条审计**——按本批的发现方式，它们同样可能把「我实现的条数」当成全集。这是下一批的活。
+3. 子账号密码 2 条未实现（B 类），成员凭据因此显式 `has_password:false`；
+4. 项目维度积分的 `project_title` 依赖 `script_projects.title`，影视版项目（`project_kind=2`）不在 `team_member_projects` 的脚本口径内，`linked-users` 默认只列 `project_kind=1`；
+5. `sp_type` 这类字段仍是「只透传不解释」。
+
+
 ## 变更登记（v6.32 · 第 78 批：#9 的 `agent enter`/`run` —— 「SSE 未接」不是缺能力，是缺客户端 · 2026-10-28）
 
 **一句话**：CLI 有两条骨架命令的 reason 写着「交互式 REPL 未实现」「`POST /agent/task/chat` 是 SSE 流（CLI 未接流式）」，但后端这两个端点早就在；

@@ -1,22 +1,25 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, sql } from "drizzle-orm";
 import {
   creditAccounts,
   creditFlows,
+  episodes,
   identities,
   models,
+  scriptProjects,
   spaceMembers,
   spaces,
   tasks,
   teamGroups,
   teamMemberProjects,
   teamRoles,
+  users,
   userThirdKeys,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { toBigId } from "../../common/bigid";
-import { hashPhone } from "../auth/crypto";
+import { decryptPhone, decryptSecret, encryptSecret, hashPhone, hashSecret, maskSecret } from "../auth/crypto";
 import { StorageService } from "../../storage/storage.service";
 import {
   codesToPowerList,
@@ -1367,6 +1370,482 @@ export class TeamService {
         vendors: [...new Set(visibleModels.map((m) => m.vendor))].sort(),
       },
     };
+  }
+
+  // ── 项目↔成员关联（对齐参照 `GET /cam/linked-users`）────────────
+  /**
+   * `GET /cam/linked-users[?sp_id]` —— 哪些成员在哪些项目上。
+   *
+   * 数据源是 `team_member_projects`（成员被授权参与哪些项目），**不是登录态**
+   * ——"关联用户"在参照里是给项目负责人看的编制表，不是在线名单。
+   * 一个成员参与多个项目就是多行；`sp_id` 给了就只看那一个项目。
+   */
+  async linkedUsers(spaceId: string, spId?: string) {
+    const cond = [eq(teamMemberProjects.spaceId, BigInt(spaceId))];
+    if (spId) cond.push(eq(teamMemberProjects.projectId, toBigId(spId, "sp_id")));
+    const rows = await db
+      .select({
+        userId: teamMemberProjects.userId,
+        projectKind: teamMemberProjects.projectKind,
+        projectId: teamMemberProjects.projectId,
+        participationType: teamMemberProjects.participationType,
+        memberNickname: spaceMembers.nickname,
+        roleCode: spaceMembers.roleCode,
+        memberStatus: spaceMembers.status,
+        userName: users.nickname,
+        projectTitle: scriptProjects.title,
+      })
+      .from(teamMemberProjects)
+      .leftJoin(
+        spaceMembers,
+        and(
+          eq(spaceMembers.spaceId, teamMemberProjects.spaceId),
+          eq(spaceMembers.userId, teamMemberProjects.userId),
+        ),
+      )
+      .leftJoin(users, eq(users.id, teamMemberProjects.userId))
+      .leftJoin(
+        scriptProjects,
+        and(
+          eq(scriptProjects.id, teamMemberProjects.projectId),
+          eq(teamMemberProjects.projectKind, 1),
+        ),
+      )
+      .where(and(...cond))
+      .orderBy(desc(teamMemberProjects.createdAt))
+      .limit(1000);
+    const userIds = [...new Set(rows.map((r) => String(r.userId)))];
+    return {
+      list: rows.map((r) => ({
+        user_id: String(r.userId),
+        nickname: r.memberNickname ?? r.userName ?? null,
+        role_code: r.roleCode ?? null,
+        member_status: r.memberStatus ?? null,
+        project_kind: r.projectKind,
+        project_id: String(r.projectId),
+        project_title: r.projectTitle ?? null,
+        participation_type: r.participationType,
+      })),
+      user_count: userIds.length,
+      total: rows.length,
+    };
+  }
+
+  // ── 项目维度积分（对齐参照 cam/team/project-points-*）──────────
+  /**
+   * 消耗流水本来就只记到"任务"（`credit_flows.ref_task_id`），项目维度得靠
+   * `tasks.episode_id → episodes.project_id → script_projects.title` 反查。
+   *
+   * 两个刻意的取舍：
+   * 1. 只取 `kind='settle'`：冻结/解冻/回收是同一笔钱的不同阶段，全算进来会把
+   *    一次生成计成三次消耗（对齐参照"项目消耗"语义）。
+   * 2. 反查不到项目时**保留该行**、`project_id/project_title` 记 `null`，
+   *    而不是丢掉——丢掉会让"消耗总额 > 各项目之和"这种账对不上，且看不出缺口在哪。
+   */
+  private projectPointsCond(
+    spaceId: string,
+    opts: { create_time_start?: string; create_time_end?: string; op_user_name?: string } = {},
+  ) {
+    const cond = [eq(creditFlows.spaceId, BigInt(spaceId)), eq(creditFlows.kind, "settle")];
+    const from = this.timeOrNull(opts.create_time_start);
+    const to = this.timeOrNull(opts.create_time_end);
+    if (from) cond.push(gte(creditFlows.createdAt, from));
+    if (to) cond.push(lte(creditFlows.createdAt, to));
+    if (opts.op_user_name) cond.push(ilike(users.nickname, `%${opts.op_user_name}%`));
+    return and(...cond);
+  }
+
+  private timeOrNull(raw?: string): Date | null {
+    if (!raw) return null;
+    const t = new Date(raw);
+    return Number.isNaN(t.getTime()) ? null : t;
+  }
+
+  async listProjectPointsFlows(
+    spaceId: string,
+    opts: {
+      page?: number;
+      page_size?: number;
+      create_time_start?: string;
+      create_time_end?: string;
+      op_user_name?: string;
+    } = {},
+  ) {
+    const p = Math.max(1, opts.page ?? 1);
+    const ps = Math.min(100, Math.max(1, opts.page_size ?? 20));
+    const where = this.projectPointsCond(spaceId, opts);
+    const rows = await db
+      .select({
+        id: creditFlows.id,
+        delta: creditFlows.delta,
+        taskId: creditFlows.refTaskId,
+        opUserId: creditFlows.opUserId,
+        opUserName: users.nickname,
+        projectId: episodes.projectId,
+        projectTitle: scriptProjects.title,
+        createdAt: creditFlows.createdAt,
+      })
+      .from(creditFlows)
+      .leftJoin(tasks, eq(tasks.id, creditFlows.refTaskId))
+      .leftJoin(episodes, eq(episodes.id, tasks.episodeId))
+      .leftJoin(
+        scriptProjects,
+        and(eq(scriptProjects.id, episodes.projectId), eq(scriptProjects.spaceId, BigInt(spaceId))),
+      )
+      .leftJoin(users, eq(users.id, creditFlows.opUserId))
+      .where(where)
+      .orderBy(desc(creditFlows.createdAt))
+      .limit(ps)
+      .offset((p - 1) * ps);
+    const [cnt] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(creditFlows)
+      .leftJoin(tasks, eq(tasks.id, creditFlows.refTaskId))
+      .leftJoin(episodes, eq(episodes.id, tasks.episodeId))
+      .leftJoin(
+        scriptProjects,
+        and(eq(scriptProjects.id, episodes.projectId), eq(scriptProjects.spaceId, BigInt(spaceId))),
+      )
+      .leftJoin(users, eq(users.id, creditFlows.opUserId))
+      .where(where);
+    return {
+      list: rows.map((r) => ({
+        id: String(r.id),
+        project_id: r.projectId ? String(r.projectId) : null,
+        project_title: r.projectTitle ?? null,
+        task_id: r.taskId ? String(r.taskId) : null,
+        op_user_id: r.opUserId ? String(r.opUserId) : null,
+        op_user_name: r.opUserName ?? null,
+        points: -r.delta,
+        created_at: r.createdAt.toISOString(),
+      })),
+      total: cnt?.n ?? 0,
+      page: p,
+      page_size: ps,
+      unattributed_scoped: false,
+    };
+  }
+
+  /** 项目消耗流水导出（CSV；上限 5000 行，理由同 `exportPointsFlows`） */
+  async exportProjectPointsFlows(
+    spaceId: string,
+    opts: { create_time_start?: string; create_time_end?: string; op_user_name?: string } = {},
+  ) {
+    const where = this.projectPointsCond(spaceId, opts);
+    const rows = await db
+      .select({
+        id: creditFlows.id,
+        delta: creditFlows.delta,
+        taskId: creditFlows.refTaskId,
+        opUserId: creditFlows.opUserId,
+        opUserName: users.nickname,
+        projectId: episodes.projectId,
+        projectTitle: scriptProjects.title,
+        createdAt: creditFlows.createdAt,
+      })
+      .from(creditFlows)
+      .leftJoin(tasks, eq(tasks.id, creditFlows.refTaskId))
+      .leftJoin(episodes, eq(episodes.id, tasks.episodeId))
+      .leftJoin(
+        scriptProjects,
+        and(eq(scriptProjects.id, episodes.projectId), eq(scriptProjects.spaceId, BigInt(spaceId))),
+      )
+      .leftJoin(users, eq(users.id, creditFlows.opUserId))
+      .where(where)
+      .orderBy(desc(creditFlows.createdAt))
+      .limit(5000);
+    const esc = (v: unknown): string => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      "id",
+      "project_id",
+      "project_title",
+      "task_id",
+      "op_user_id",
+      "op_user_name",
+      "points",
+      "created_at",
+    ];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push(
+        [
+          String(r.id),
+          r.projectId ? String(r.projectId) : "",
+          r.projectTitle ?? "",
+          r.taskId ? String(r.taskId) : "",
+          r.opUserId ? String(r.opUserId) : "",
+          r.opUserName ?? "",
+          -r.delta,
+          r.createdAt.toISOString(),
+        ]
+          .map(esc)
+          .join(","),
+      );
+    }
+    const csv = `\uFEFF${lines.join("\n")}`;
+    const stamp = Date.now();
+    const key = `u/${spaceId}/exports/project-points-flow-${stamp}.csv`;
+    await this.storage.put(key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
+    const ttl = 3600;
+    const url = await this.storage.signDownload(key, ttl);
+    return {
+      file_uri: url,
+      filename: `project-points-flow-${stamp}.csv`,
+      expires_at: new Date(Date.now() + ttl * 1000).toISOString(),
+      row_count: rows.length,
+    };
+  }
+
+  /** 项目消耗排行（`POST cam/team/project-points-ranking`，取消耗最多的前 N 个项目） */
+  async projectPointsRanking(
+    spaceId: string,
+    opts: { limit?: number; create_time_start?: string; create_time_end?: string } = {},
+  ) {
+    const cond = [eq(creditFlows.spaceId, BigInt(spaceId)), eq(creditFlows.kind, "settle")];
+    const from = this.timeOrNull(opts.create_time_start);
+    const to = this.timeOrNull(opts.create_time_end);
+    if (from) cond.push(gte(creditFlows.createdAt, from));
+    if (to) cond.push(lte(creditFlows.createdAt, to));
+    const rows = await db
+      .select({
+        projectId: episodes.projectId,
+        projectTitle: scriptProjects.title,
+        points: sql<number>`sum(-${creditFlows.delta})::int`,
+        flows: sql<number>`count(*)::int`,
+      })
+      .from(creditFlows)
+      .leftJoin(tasks, eq(tasks.id, creditFlows.refTaskId))
+      .leftJoin(episodes, eq(episodes.id, tasks.episodeId))
+      .leftJoin(
+        scriptProjects,
+        and(eq(scriptProjects.id, episodes.projectId), eq(scriptProjects.spaceId, BigInt(spaceId))),
+      )
+      .where(and(...cond))
+      .groupBy(episodes.projectId, scriptProjects.title)
+      .orderBy(desc(sql`sum(-${creditFlows.delta})`))
+      .limit(Math.min(100, Math.max(1, opts.limit ?? 20)));
+    return {
+      list: rows.map((r, i) => ({
+        rank: i + 1,
+        project_id: r.projectId ? String(r.projectId) : null,
+        project_title: r.projectTitle ?? null,
+        points: Number(r.points ?? 0),
+        flow_count: Number(r.flows ?? 0),
+      })),
+    };
+  }
+
+  // ── 成员登录凭据（对齐参照 `GET cam/team/member/:member_id/credential`）──
+  /**
+   * 成员的"登录凭据"。
+   *
+   * 参照里这个接口大概率是给**子账号体系**发账号/查初始密码用的；我方团队模型是
+   * 「手机号邀请真实用户」（`addMembers` 按 `identities.phone_hash` 找人），
+   * **没有子账号密码**。所以这里只诚实返回：登录方式 + 打码账号，
+   * 并显式给出 `has_password:false` / `can_reset_password:false` ——
+   * 不编一个假密码字段出来让前端以为可以"重置密码"。
+   *
+   * 只回打码值：调用方是需要看"这个人用哪个号登录"的团队管理员，
+   * 不是需要完整手机号的业务场景（完整号码要单独授权，见隐私口径）。
+   */
+  async memberCredential(spaceId: string, memberUserId: string) {
+    const uid = toBigId(memberUserId, "member_id");
+    const [member] = await db
+      .select({
+        userId: spaceMembers.userId,
+        nickname: spaceMembers.nickname,
+        roleCode: spaceMembers.roleCode,
+        status: spaceMembers.status,
+        userName: users.nickname,
+      })
+      .from(spaceMembers)
+      .leftJoin(users, eq(users.id, spaceMembers.userId))
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, uid)));
+    if (!member) throw new AppError(ErrorCode.NOT_FOUND, "member not in this team");
+
+    const rows = await db
+      .select({ provider: identities.provider, phoneCipher: identities.phoneCipher })
+      .from(identities)
+      .where(eq(identities.userId, uid))
+      .orderBy(asc(identities.createdAt));
+
+    const methods = rows.map((r) => {
+      if (r.provider !== "phone") return { provider: r.provider, account_masked: null };
+      if (!r.phoneCipher) return { provider: "phone", account_masked: null };
+      try {
+        const phone = decryptPhone(r.phoneCipher);
+        const masked =
+          phone.length >= 7
+            ? `${phone.slice(0, 3)}****${phone.slice(-4)}`
+            : "*".repeat(phone.length);
+        return { provider: "phone", account_masked: masked };
+      } catch {
+        // 换过 PHONE_ENC_KEY 时旧密文解不开：给 null 而不是 500
+        return { provider: "phone", account_masked: null };
+      }
+    });
+
+    return {
+      user_id: String(uid),
+      nickname: member.nickname ?? member.userName ?? null,
+      role_code: member.roleCode ?? null,
+      member_status: member.status,
+      login_methods: methods,
+      has_password: false,
+      can_reset_password: false,
+      note: "members sign in with their own phone number; this build has no sub-account password",
+    };
+  }
+
+  // ── BYOK 第三方 Key（对齐参照 cam/user/third/key/*）────────────
+  /**
+   * 只返回**自己的** Key。
+   *
+   * `user_third_keys` 存的是个人 API Key（BYOK），管理员能列出别人的就等于
+   * 团队里放了一台"Key 收割机"。表上带 `space_id` 是为了同一用户在多团队
+   * 各配一份互不串——不是为了让别人的 space 看见。
+   *
+   * 明文永不回传：只回 `api_key_masked`（`sk-ab…wxyz`）。
+   */
+  async listThirdKeys(spaceId: string, userId: string) {
+    const rows = await db
+      .select()
+      .from(userThirdKeys)
+      .where(
+        and(eq(userThirdKeys.spaceId, BigInt(spaceId)), eq(userThirdKeys.userId, BigInt(userId))),
+      )
+      .orderBy(desc(userThirdKeys.createdAt));
+    return { list: rows.map((r) => this.thirdKeyDto(r)) };
+  }
+
+  private thirdKeyDto(row: typeof userThirdKeys.$inferSelect) {
+    let masked = "******";
+    try {
+      masked = maskSecret(decryptSecret(row.keyCipher));
+    } catch {
+      // 密文坏了（换过 PHONE_ENC_KEY）不该让整页 500：给占位并让用户重填
+      masked = "******";
+    }
+    return {
+      id: String(row.id),
+      provider: row.provider,
+      label: row.label,
+      api_key_masked: masked,
+      status: row.status,
+      last_used_at: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
+      created_at: row.createdAt.toISOString(),
+      updated_at: row.updatedAt ? row.updatedAt.toISOString() : null,
+    };
+  }
+
+  /** 查自己的 Key；别人的 / 别的 space 的一律 `not found`（不告诉"它存在但你没权"） */
+  private async findThirdKey(spaceId: string, userId: string, id: string) {
+    const kid = toBigId(id, "id");
+    const [row] = await db
+      .select()
+      .from(userThirdKeys)
+      .where(
+        and(
+          eq(userThirdKeys.id, kid),
+          eq(userThirdKeys.spaceId, BigInt(spaceId)),
+          eq(userThirdKeys.userId, BigInt(userId)),
+        ),
+      );
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "third key not found");
+    return row;
+  }
+
+  async thirdKeyInfo(spaceId: string, userId: string, id: string) {
+    return { third_key: this.thirdKeyDto(await this.findThirdKey(spaceId, userId, id)) };
+  }
+
+  async addThirdKey(
+    spaceId: string,
+    userId: string,
+    input: { provider: string; label?: string; api_key: string; status?: number },
+  ) {
+    const keyHash = hashSecret(input.api_key);
+    const [dup] = await db
+      .select({ id: userThirdKeys.id })
+      .from(userThirdKeys)
+      .where(
+        and(
+          eq(userThirdKeys.spaceId, BigInt(spaceId)),
+          eq(userThirdKeys.userId, BigInt(userId)),
+          eq(userThirdKeys.provider, input.provider),
+          eq(userThirdKeys.keyHash, keyHash),
+        ),
+      );
+    if (dup) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "this key is already registered for the provider", {
+        field: "api_key",
+      });
+    }
+    const id = newId();
+    await db.insert(userThirdKeys).values({
+      id,
+      userId: BigInt(userId),
+      spaceId: BigInt(spaceId),
+      provider: input.provider,
+      label: input.label?.trim() ?? "",
+      keyCipher: encryptSecret(input.api_key),
+      keyHash,
+      status: input.status ?? 1,
+    });
+    return { third_key: this.thirdKeyDto(await this.findThirdKey(spaceId, userId, String(id))) };
+  }
+
+  async updateThirdKey(
+    spaceId: string,
+    userId: string,
+    id: string,
+    input: { provider?: string; label?: string; api_key?: string; status?: number },
+  ) {
+    const row = await this.findThirdKey(spaceId, userId, id);
+    const patch: Partial<typeof userThirdKeys.$inferInsert> = { updatedAt: new Date() };
+    if (input.provider !== undefined) patch.provider = input.provider;
+    if (input.label !== undefined) patch.label = input.label.trim();
+    if (input.status !== undefined) patch.status = input.status;
+    if (input.api_key !== undefined) {
+      const keyHash = hashSecret(input.api_key);
+      const provider = input.provider ?? row.provider;
+      // 换成"同 provider 下另一行已用过的同一把 key"要拒，否则查重形同虚设
+      const sameHash = await db
+        .select({ id: userThirdKeys.id })
+        .from(userThirdKeys)
+        .where(
+          and(
+            eq(userThirdKeys.spaceId, BigInt(spaceId)),
+            eq(userThirdKeys.userId, BigInt(userId)),
+            eq(userThirdKeys.provider, provider),
+            eq(userThirdKeys.keyHash, keyHash),
+          ),
+        );
+      if (sameHash.some((r) => String(r.id) !== String(row.id))) {
+        throw new AppError(
+          ErrorCode.INVALID_PARAM,
+          "this key is already registered for the provider",
+          { field: "api_key" },
+        );
+      }
+      patch.keyCipher = encryptSecret(input.api_key);
+      patch.keyHash = keyHash;
+    }
+    await db.update(userThirdKeys).set(patch).where(eq(userThirdKeys.id, row.id));
+    return { third_key: this.thirdKeyDto(await this.findThirdKey(spaceId, userId, id)) };
+  }
+
+  /**
+   * 硬删而不是软删：这是**凭据**，留一行软删记录意味着密文还在库里躺着。
+   * 想停用请 PUT `status=2`（保留 key 但不再参与派发）。
+   */
+  async deleteThirdKey(spaceId: string, userId: string, id: string) {
+    const row = await this.findThirdKey(spaceId, userId, id);
+    await db.delete(userThirdKeys).where(eq(userThirdKeys.id, row.id));
+    return { deleted: true, id: String(row.id) };
   }
 }
 
