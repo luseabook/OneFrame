@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq } from "drizzle-orm";
-import { createDb, skus, subscriptions } from "@app/db";
+import { createDb, orders, skus, subscriptions } from "@app/db";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
@@ -100,6 +100,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.delete(subscriptions).where(eq(subscriptions.spaceId, BigInt(spaceId)));
+  // 第 97 批新增的下单用例会造 orders 行，它们外键指向 skus —— 必须清在 skus 之前
+  await db.delete(orders).where(eq(orders.spaceId, BigInt(spaceId)));
   for (const sku of [monthSku, yearSku, cheapSku]) {
     await db.delete(skus).where(eq(skus.sku, sku));
   }
@@ -157,5 +159,42 @@ describe("升级补差价报价", () => {
     await setSubscription(monthSku, monthSkuId, 30);
     const res = await inject("GET", "/billing/upgrade-quote?sku=does-not-exist");
     expect(res.body.code).not.toBe(0);
+  });
+
+  /**
+   * 第 97 批：**下单真的应用折抵**（此前只报价不折抵 —— 用户会被多收钱）。
+   *
+   * 修之前的失效模式：`GET /billing/upgrade-quote` 老老实实算出「补 ¥160」，
+   * 前端照报价显示，但 `POST /billing/orders` 一律按 `sku.priceCents` 全额下单 → 实收 ¥199。
+   * 报价与下单两套算法并存，属于"算对了但没用上"，比算错更难发现（因为报价本身是对的）。
+   */
+  it("下单应用升级折抵：实付金额 = 报价 payable_cents（不是 SKU 全额）", async () => {
+    await setSubscription(monthSku, monthSkuId, 30);
+
+    // 先拿报价（月卡 3900 满月 → 折抵 3900，年卡 19900 → 应付 16000）
+    const quote = await inject("GET", `/billing/upgrade-quote?sku=${yearSku}`);
+    expect(quote.body.data.is_upgrade).toBe(true);
+    expect(quote.body.data.payable_cents).toBe(16000);
+
+    // 下单：实付必须等于报价的 payable_cents
+    const order = await inject("POST", "/billing/orders", { sku: yearSku, channel: "mock" });
+    expect(order.body.code).toBe(0);
+    expect(order.body.data.amount_cents).toBe(16000);
+    // 与 SKU 标价对不上才是对的（19900 是标价，16000 是折后价）
+    expect(order.body.data.amount_cents).not.toBe(19900);
+  });
+
+  it("无生效订阅时下单不折抵（全额），否则等于没买也能打折", async () => {
+    await setSubscription("", "", 0);
+    const order = await inject("POST", "/billing/orders", { sku: yearSku, channel: "mock" });
+    expect(order.body.code).toBe(0);
+    expect(order.body.data.amount_cents).toBe(19900);
+  });
+
+  it("同档续费不折抵（同档不是升级，否则反复下单能把价格抵到 0）", async () => {
+    await setSubscription(monthSku, monthSkuId, 30);
+    const order = await inject("POST", "/billing/orders", { sku: monthSku, channel: "mock" });
+    expect(order.body.code).toBe(0);
+    expect(order.body.data.amount_cents).toBe(3900);
   });
 });

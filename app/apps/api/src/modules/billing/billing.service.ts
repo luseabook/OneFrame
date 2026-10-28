@@ -464,6 +464,27 @@ export class BillingService {
       });
     }
 
+    /**
+     * 第 97 批：先把**本次应付额**算出来，再决定是复用还是新建。
+     *
+     * 修之前有两个缺陷（同一个根因：金额在"复用判断"之后才算，或干脆不算）：
+     * 1. `createOrder()` 一律按 `sku.priceCents` 全额下单，**完全忽略** `quoteUpgrade()` 已经
+     *    算好的折抵 —— 前端照报价显示「补 ¥160」，用户实付 ¥199；
+     * 2. 60s 内复用未支付订单时直接返回旧行。如果这一分钟里订阅状态变了
+     *    （订阅到期 / 刚买过月卡），复用的订单会带着**过期价格**被支付。
+     *
+     * 现在：`amountCents` 在两条分支之前统一算好；复用分支发现金额不一致就
+     * **关闭旧单、按新价重开**（而不是拿旧价收钱，也不是把旧单改价——
+     * 真实渠道那边已经按旧金额创建过支付单，改价会让渠道侧与本地不一致）。
+     */
+    let amountCents = sku.priceCents;
+    if (sku.kind === "vip") {
+      const quote = await this.quoteUpgrade(spaceId, sku.sku);
+      if (quote.is_upgrade && quote.credit_cents > 0) {
+        amountCents = quote.payable_cents;
+      }
+    }
+
     // 60s 内同 sku + 同渠道未支付订单复用（防止双击重复下单）
     const [recent] = await db
       .select()
@@ -479,23 +500,38 @@ export class BillingService {
       )
       .orderBy(desc(orders.createdAt))
       .limit(1);
-    if (recent) {
-      // 真实渠道订单若尚未拿到支付参数（上次下单失败/旧数据），补齐后再返回
+    if (recent && recent.amountCents === amountCents) {
+      // 金额一致才是同一笔单；真实渠道若尚未拿到支付参数（上次下单失败/旧数据），补齐后再返回
       if (channel !== "mock" && !recent.payParams) {
         return this.attachPayParams(recent, input);
       }
       return this.toOrderDto(recent);
     }
+    if (recent) {
+      // 金额变了：关掉旧单，别让它以过期价格被支付
+      await db
+        .update(orders)
+        .set({ status: OrderStatus.CLOSED, closedAt: new Date(), updatedAt: new Date() })
+        .where(eq(orders.id, recent.id));
+    }
 
     const orderId = newId();
     const payToken = randomBytes(18).toString("base64url");
+
+    /**
+     * 折抵不另存列：`orders.amount_cents` 已经记下实付额，而 `sku.price_cents` 是可查的标价，
+     * 「为什么这单少于标价」= `sku.price_cents - amount_cents`，按天折算的口径由
+     * `quoteUpgrade()` 一元定义 —— 再存一份 `proration` 快照会出现"订单里的折抵"与
+     * "按当日报价重算的折抵"两个数，退款对账时反而要判哪个为准。
+     * （若将来要审计留痕，应加 `orders.credit_applied_cents` 列而不是 jsonb 影子数据。）
+     */
     await db.insert(orders).values({
       id: orderId,
       spaceId: BigInt(spaceId),
       userId: BigInt(userId),
       skuId: sku.id,
       sku: sku.sku,
-      amountCents: sku.priceCents,
+      amountCents,
       credits: sku.credits,
       channel,
       status: OrderStatus.PENDING,
@@ -511,7 +547,7 @@ export class BillingService {
     try {
       const created = await this.channels.get(channel).createPayment({
         outTradeNo: String(orderId),
-        amountCents: sku.priceCents,
+        amountCents,
         description: `一帧 ${sku.label}`,
         clientIp: input.clientIp,
         openid: input.openid,
