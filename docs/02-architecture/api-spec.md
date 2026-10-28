@@ -5272,3 +5272,62 @@ Content-Type: application/json
 > **已知不一致（不影响拦截，待修）**：`POST /v1/cam/team/batch-points-allocation`
 > 调了 `requirePermission("member.points")` 但**未登记**在声明表 —— 所以它照拦，
 > 但 `GET /cam/permissions` 的清单里看不到这个端点。属后端自记账不完整。
+
+## 17.58 两条结算路径的互斥约定（第 101 批 · 计费链路）
+
+本批**不新增/不修改端点**（778 不变）。这一节把一个**此前只存在于实现细节里的隐式约定**
+写成契约级事实 —— 它一旦被误改，会导致同一笔冻结被结算两次。
+
+### 58.1 两条路径
+
+`settleCredits` 全仓只有**两个**调用点，代表两条互斥的结算路径：
+
+| 路径 | 触发方式 | 结算金额来源 | 代表端点 |
+| --- | --- | --- | --- |
+| **异步（worker）** | API 建任务并入队 → worker 消费 → 成功后结算 | `tasks.credits_frozen`（**冻结时的快照，不重算**） | `POST /v1/generations`、`POST /v1/projects/:id/episodes/:eid/storyboards/generate-videos` |
+| **同步（API 内）** | API 进程内直接跑完并结算 | 同一次请求内的 `priced.credits` | ad-drama 各动作（`/v1/ad-drama/projects/:id/*`） |
+
+### 58.2 互斥靠什么维持
+
+**一个隐式约定**，写在两边的 status 取值上：
+
+| 链路 | 建任务时 status | 是否入队 |
+| --- | --- | --- |
+| 异步 | `PENDING(1)` | **是**（`queue.enqueueTask`） |
+| 同步（ad-drama） | `RUNNING(2)` | **否**（绝不入队） |
+
+worker **只消费队列**（不扫表按 status 取任务），所以 `RUNNING` 的 ad-drama 任务天然不会被 worker 碰到。
+
+### 58.3 破坏它会怎样（这是本节存在的理由）
+
+若有人把 ad-drama 的建任务 status 改成 `PENDING`（看起来更"标准"），**或**给它加一句 `enqueueTask`：
+
+1. worker 会领到这个任务并尝试执行；
+2. 执行成功后 worker 调 `settleCredits(cost: fresh.creditsFrozen)`；
+3. 而 ad-drama 自己已经 settle 过一次；
+4. 第二次结算时 `credit_accounts.frozen` 已不足 → `settleCredits` 抛 `frozen balance underflow`，
+   或（若金额凑巧够）把别的任务的冻结额吃掉 → **账目与 `balance == Σdelta` 不变式被破坏**。
+
+这类问题**在单测里很难自然暴露**：需要 worker 与 API 同时运行同一批任务。
+
+### 58.4 守卫
+
+`app/apps/api/test/settle-paths.spec.ts` **4 例**（源码形态断言）：
+
+1. ad-drama 建任务必须是 `TASK_STATUS.RUNNING`、不出现 `PENDING`、自己调 `settleCredits`、
+   **绝不**出现 `enqueueTask` / `submitQueue.add`；
+2. 走队列的链路必须是 `PENDING`（或字面量 `1`）+ `enqueueTask`（抽样 `generations`、`script` 分镜批量）；
+3. worker 的 executor **不按 status 扫表取任务**（只吃队列）；
+4. `settleCredits` 的调用点**恰好两个文件各 1 处** —— 新增第三条路径必须重新论证互斥性。
+
+> **注意写法差异**：`generations.service.ts` 的 status 是**字面量 `1`**，
+> `script.service.ts` 分镜批量是 `TaskStatus.PENDING` 枚举。守卫两种都认，
+> 否则会把「写法差异」误判成「约定被破坏」。
+
+### 58.5 边界（诚实说明）
+
+1. 守卫守的是**源码形态**，不是运行时行为。真正证明「不会双重结算」需要 worker + API 同跑同一批任务，
+   本批未做。
+2. `ad-drama` 是**同步**执行 + 结算 —— 若 API 进程在 freeze 与 settle 之间崩溃，冻结会悬空
+   （现有 `catch` 分支会 `unfreezeCredits` 补偿，但进程被 kill 时补偿不会执行）。
+   这是已知的、与本节互斥性无关的独立风险，登记在此不解决。
