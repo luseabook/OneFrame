@@ -855,7 +855,7 @@ onUnmounted(() => {
         :tutorial-open="guideOpen"
         @select="addNodeAtCenter"
         @toggle-tutorial="guideOpen = !guideOpen"
-        :select-tutorial="toast.info(t('canvasUi.tutorialPending'))"
+        @select-tutorial="toast.info(t('canvasUi.tutorialPending'))"
       />
 
       <!-- 浮动顶栏 -->
@@ -881,7 +881,7 @@ onUnmounted(() => {
         :active-count="selectedIds.length"
         @update:mode="mode = $event"
         @add="addNodeAtCenter"
-        :layers="toast.info(t('canvasUi.layersPending'))"
+        @layers="toast.info(t('canvasUi.layersPending'))"
         @templates="templateOpen = true"
         @materials="materialOpen = true"
         @downloads="downloadOpen = true"
