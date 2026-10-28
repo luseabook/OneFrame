@@ -3948,3 +3948,89 @@ X-Space-Id: <space_id>
 3. `GET /tasks` 的 `folder_id` / `is_star` / `request_type` 三个筛选未实现，与豁免同源；
 4. 守卫是**快照式**：竞品新增 task 路由时需人工加进 `TASK_SHAPES`；
 5. 本批**不改动**单条 `download-url` 的响应形状（仍 `{url, filename, expires_in}`），只新增批量端点。
+## 17.40 三块「没有独立域」的模块与竞品管理面：守卫口径、方法偏离与标签改名（第 83 批）
+
+### 40.1 为什么这条进 API 文档
+
+第 80–82 批把「竞品路由逐条对照」写成了守卫测试（`apps/api/test/competitor-route-parity.spec.ts`）。到第 83 批，
+该项目已经覆盖 178 条竞品操作，其中有三组的**竞品路由并不回 `/web/v1` 家族**：
+
+- #1 首页工作台：5 条散在 `crc/*`、`op/abtest/hit`、`msg/exist-unread`；
+- #26 分享：5 条散在 `task/*/share*`、`crc/assets/share`、`agent/task/share/*/sse`；
+- #27 运营后台：18 条全部在 **`/v1/rmadminsrv/novel_market/*`**（第三个前缀，既不是 `/web/v1`，也不是我方 `/ops/admin`）。
+
+调用方如果按「域名 = 模块」的直觉去找，会找不到，或者找错（比如把 `/v1/rmadminsrv` 当成运营后台全量）。
+本节把这三块的**对账口径**和**唯一的接口变更**（标签改名）写清。
+
+### 40.2 唯一新增端点：`PATCH /ops/market/tags/:id`
+
+竞品形状：`PUT /v1/rmadminsrv/novel_market/tags/{tag_id}`（`requestDataJsonSchema` / `responseDataJsonSchema` 均为 `{}`）。
+
+| 项 | 契约 |
+|---|---|
+| 方法 / 路径 | `PATCH /v1/ops/market/tags/:id`（局部更新统一 PATCH，与分类/推广位同风格） |
+| 鉴权 | 运营后台 token（普通用户 403101、无凭证 401101） |
+| 请求体 | `{ "name": string }`，`trim` 后 1–40 字符；只允许改名（`market_tags` 只有 `name` 可改） |
+| 响应 | `{ "tag": { "id": string, "name": string, "status": 1 } }` |
+| 重名 | `400101 tag name already exists`（名字是全局唯一键；查重排除自身，改成自己现名幂等通过） |
+| 不存在 | `400102 market tag not found` |
+| id 非法 | `400101 invalid tag` |
+| 空名 | `400101`（zod 层 `trim().min(1)` 拦下） |
+
+为什么只改名：`market_tags` 只有 `name` 一列可改（`status` 恒 1，没有排序/图标列）。竞品两个 schema 都是 `{}`，
+没有字段证据就不造空壳字段 —— 这条口径与第 79 批 BYOK、第 82 批任务豁免一致。
+
+### 40.3 三类偏离（8 条，全部显式登记、不提供别名）
+
+| 偏离类型 | 具体条目 | 我方形状 | 依据 |
+|---|---|---|---|
+| **读端点用 GET** | `POST …/dashboard/scripts`、`POST …/scripts/list` | `GET /ops/market/dashboard/scripts`、`GET /ops/market/scripts/list` | 读端点不该有副作用 |
+| **局部更新用 PATCH** | `PUT …/tags/{id}`、`PUT …/categories/{id}`、`PUT …/promotions/{id}` | `PATCH /ops/market/{tags,categories,promotions}/:id` | 我方统一「局部更新 = PATCH」，`PUT` 留给整体替换 |
+| **审核结果是写动作** | `GET …/scripts/{id}/review-result` | `POST /ops/market/scripts/:id/review-result` | 审核结果要落审计日志 |
+| **首页未读是长轮询** | `GET /msg/exist-unread` | `GET /home/unread` | 立即探针 `?since=<iso>&timeout_ms=1`（1ms 截断即返回 `timed_out:true`） |
+| **分享用不可猜 token** | `GET /task/share/{id}/info`、`POST /task/share/{id}/batch-download` | `GET /share/:token`、`POST /share/:token/batch-download` | `task_shares.token` 24 字节 base64url，匿名只读 |
+| **分享页 SSE 不在 agent 命名空间** | `GET /agent/task/share/{id}/sse` | `GET /share/:token/stream` | 分享是匿名语义，不能挂到要登录态的 agent 路径下 |
+
+### 40.4 守卫怎么表达「前缀不同」与「方法不同」
+
+`normalize()` 只剥 `/web/v1` 前缀，所以 `/v1/rmadminsrv/...` 的形状**一条都对不上**我方路由表，18 条全部要走登记表。
+为避免「形状改了、等价物没改」或反之，18 条用 `NOVEL_ADMIN_PAIRS` 成对声明：
+
+```ts
+const NOVEL_ADMIN_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  ["PUT /v1/rmadminsrv/novel_market/tags/{tag_id}", "PATCH /ops/market/tags/{}", "…"],
+  // …18 条
+];
+for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)] = { ours, reason };
+```
+
+两个容易踩的点：① 键必须是 `shapeOf()` **归一化后**的形状（`{tag_id}` 与 `:tag_id` 都折成 `{}`）；
+② 登记的我方形状必须真的在路由表里（`missing()` 会断言），否则改名会静默通过 —— 白名单不能自证。
+
+### 40.5 与第 81 批「补别名」的分界
+
+| | 第 81 批（kds） | 第 83 批（本批） |
+|---|---|---|
+| 差什么 | **METHOD**（竞品 POST、我方只有 GET） | 命名 / 语义 / 方法习惯（读 GET、局部 PATCH） |
+| 调用方能否自行改通 | 不能（按竞品形状发请求直接 404） | 能（改一行路径/方法即可） |
+| 处理 | 补 8 条 POST 别名，共用 private 实现 | 不补别名，显式登记偏离 |
+
+**别名是给「改不动」的调用方的，不是给「名字不同」的调用方的。**
+
+### 40.6 测试与反向验证
+
+| 项 | 内容 |
+|---|---|
+| 守卫 | `HOME_SHAPES`(5) / `SHARE_SHAPES`(5) / `OPS_MARKET_SHAPES`(18)；总计 **178 条 / 12 例** |
+| 新增用例 | #1「4 同形 + 1 偏离」、#26「1 同形 + 4 偏离」、#27「18 条全登记、12 同方法 + 6 方法偏离」 |
+| 功能用例 | `market.spec.ts` 新增 1 例：改名生效 / 重名 400101 / 不存在 400102 / 坏 id 400101 / 空名 400101 / 改回自己名字幂等 |
+| 反向验证 | `@Patch("tags/:id")` → `-BROKEN`：3 例红（含 `deviation target missing: PUT /v1/rmadminsrv/novel_market/tags/{} → PATCH /ops/market/tags/{}`），改回 31/31 绿 |
+
+### 40.7 边界
+
+1. 只比方法 + 路径，不比 query / body：`op/abtest/hit` 的 query 名差异（我方 `key` vs 竞品 `wsid`/`op_user_id`）靠本文档记录；
+2. `/v1/rmadminsrv` 18 条的 schema 全空，除标签改名外的字段语义无证据；
+3. #28 架构竞品 0 条对应端点（主动决策：模块化单体），**不入守卫**，不是已对账；
+4. `.tsv` 里的 `/v1/rmopsrv/abtest/consume`（1 行）意图无证据，`/v1/rmdfsrv/*`（4 行）、`/v1/rmaisrv/*`（2 行）属 #2/#4 侧，
+   本批未归属；
+5. 守卫是快照式：竞品新增 `/v1/rmadminsrv/*` 路由要人工加进 `NOVEL_ADMIN_PAIRS`。

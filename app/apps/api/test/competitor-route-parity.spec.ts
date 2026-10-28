@@ -10,9 +10,10 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的五组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 /
- * kds 13，共 133 条，来自 `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，
- * 归一化去参数名），然后解析我方 controller 源码建路由表逐条比对。三种结局：
+ * 本文件把竞品的九组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18，共 178 条，来自
+ * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
+ * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
  *   2. 在 `DEVIATIONS` 里显式登记了「我方等价形状 + 理由」→ 覆盖（且被登记的形状
  *      必须真的存在于我方路由表，改名改路径会让本测试红，避免白名单变垃圾场）；
@@ -23,8 +24,9 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：五组共 133 条竞品操作。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #8 / #10 / #21 三行的「逐条对照」说法。
+ * 数字口径：九组共 178 条竞品操作。改这些数组就得同步改
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #8 / #10 / #21 / #24 / #26 / #27 七行的
+ * 「逐条对照」说法。
  */
 
 const API_SRC = join(__dirname, "..", "src");
@@ -229,6 +231,126 @@ const TASK_SHAPES = [
  * 与 DEVIATIONS 的区别：DEVIATIONS 是「能力在、形状不同」（有 ours 可指向）；
  * WAIVED 是「能力不在」（没有 ours）。
  */
+
+/** 首页工作台：竞品 5 条（第 83 批）——竞品没有 `/web/v1/home` 域，这 5 条散在 crc / op / msg 三个域里 */
+const HOME_SHAPES = [
+  "GET /web/v1/crc/home/list",
+  "GET /web/v1/crc/banner_list",
+  "GET /web/v1/crc/pop_up",
+  "GET /web/v1/op/abtest/hit",
+  "GET /web/v1/msg/exist-unread",
+];
+
+/** 分享：竞品 5 条（第 83 批）——3 条任务分享、1 条作品分享、1 条分享页 SSE */
+const SHARE_SHAPES = [
+  "POST /web/v1/task/:task_id/share",
+  "GET /web/v1/task/share/:share_id/info",
+  "POST /web/v1/task/share/:share_id/batch-download",
+  "POST /web/v1/crc/assets/share",
+  "GET /web/v1/agent/task/share/:share_id/sse",
+];
+
+/**
+ * 运营后台（剧本广场管理面）：竞品 `/v1/rmadminsrv/novel_market/*` 18 条（第 83 批）。
+ *
+ * 这一批的竞品路由**不是** `/web/v1` 前缀，`normalize()` 不会剥掉它，所以 18 条全部要登记
+ * 「我方等价形状」。用 PAIRS 成对写而不是手写 18 条 DEVIATIONS：形状和等价物必须一起改，
+ * 分开放迟早漂移成「登记了形状、指向一个不存在的路径」。
+ */
+const NOVEL_ADMIN_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  [
+    "POST /v1/rmadminsrv/novel_market/dashboard/scripts",
+    "GET /ops/market/dashboard/scripts",
+    "只读看板用 GET：竞品把查询一律写成 POST，我方按 REST 语义保证读端点无副作用（ADR-009）",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/scripts/list",
+    "GET /ops/market/scripts/list",
+    "同上：作品列表是读操作",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/scripts/save-draft",
+    "POST /ops/market/scripts/save-draft",
+    "同为 POST（保存草稿有副作用）",
+  ],
+  [
+    "GET /v1/rmadminsrv/novel_market/scripts/{nm_id}/source-original-script",
+    "GET /ops/market/scripts/{}/source-original-script",
+    "同为 GET；路径参数名 nm_id → id，形状同构",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/scripts/{nm_id}/submit-review",
+    "POST /ops/market/scripts/{}/submit-review",
+    "同为 POST",
+  ],
+  [
+    "GET /v1/rmadminsrv/novel_market/scripts/{nm_id}/review-result",
+    "POST /ops/market/scripts/{}/review-result",
+    "竞品用 GET 读审核结果，我方用 POST：审核结果是要落审计日志的写动作（第 83 批核对后保留该差异，不为了对齐形状把它改成读）",
+  ],
+  [
+    "GET /v1/rmadminsrv/novel_market/tags",
+    "GET /ops/market/tags",
+    "同为 GET",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/tags",
+    "POST /ops/market/tags",
+    "同为 POST（建标签，同名幂等）",
+  ],
+  [
+    "PUT /v1/rmadminsrv/novel_market/tags/{tag_id}",
+    "PATCH /ops/market/tags/{}",
+    "第 83 批新增能力：标签改名（竞品用 PUT 全量替换，我方统一 PATCH 局部更新）",
+  ],
+  [
+    "DELETE /v1/rmadminsrv/novel_market/tags/{tag_id}",
+    "DELETE /ops/market/tags/{}",
+    "同为 DELETE（物理删 + 从作品 tag_ids 摘除）",
+  ],
+  [
+    "GET /v1/rmadminsrv/novel_market/categories",
+    "GET /ops/market/categories",
+    "同为 GET",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/categories",
+    "POST /ops/market/categories",
+    "同为 POST",
+  ],
+  [
+    "PUT /v1/rmadminsrv/novel_market/categories/{category_id}",
+    "PATCH /ops/market/categories/{}",
+    "局部更新统一 PATCH（竞品 PUT）",
+  ],
+  [
+    "DELETE /v1/rmadminsrv/novel_market/categories/{category_id}",
+    "DELETE /ops/market/categories/{}",
+    "同为 DELETE（我方是停用 status=2，不物理删）",
+  ],
+  [
+    "GET /v1/rmadminsrv/novel_market/promotions",
+    "GET /ops/market/promotions",
+    "同为 GET",
+  ],
+  [
+    "POST /v1/rmadminsrv/novel_market/promotions",
+    "POST /ops/market/promotions",
+    "同为 POST",
+  ],
+  [
+    "PUT /v1/rmadminsrv/novel_market/promotions/{promotion_id}",
+    "PATCH /ops/market/promotions/{}",
+    "局部更新统一 PATCH（竞品 PUT）",
+  ],
+  [
+    "DELETE /v1/rmadminsrv/novel_market/promotions/{promotion_id}",
+    "DELETE /ops/market/promotions/{}",
+    "同为 DELETE（我方软停，保留投放历史）",
+  ],
+];
+const OPS_MARKET_SHAPES = NOVEL_ADMIN_PAIRS.map(([shape]) => shape);
+
 const WAIVED: Record<string, string> = {
   "GET /task/is_first/interact":
     "我方没有「结果互动」概念，`task_events` 也没有 user_id 列 —— 算不出「这个人的首次互动」，硬回一个 true 就是假数据",
@@ -311,6 +433,26 @@ const DEVIATIONS: Record<string, { ours: string; reason: string }> = {
   },
 };
 
+// 第 83 批：#27 运营后台 18 条（前缀是 `/v1/rmadminsrv`，全部登记我方 `/ops/market/*` 等价物）
+for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)] = { ours, reason };
+
+// 第 83 批：#1 首页 1 条 —— 能力在、形状不同（竞品是「查一次有没有未读」，我方是长轮询）
+DEVIATIONS["GET /msg/exist-unread"] = {
+  ours: "GET /home/unread",
+  reason:
+    "竞品 `exist-unread` 是查一次就返回；我方 `/home/unread` 是长轮询（`since` + `timeout_ms`，默认挂到 25s 上限）。" +
+    "立即探针 `?since=<iso>&timeout_ms=1` 就是等价调用：`home.service.ts` 在 `timeoutMsRaw>0` 时按它截断，1ms 即返回 `timed_out:true`，" +
+    "等价性由 `home-config.spec.ts` 的 timeout 语义用例守着",
+};
+
+// 第 83 批：#26 分享 1 条 —— 分享页 SSE 挂在 `/share/{token}/stream`（匿名、只读），不挂在 agent 命名空间下
+DEVIATIONS["GET /agent/task/share/{}/sse"] = {
+  ours: "GET /share/{}/stream",
+  reason:
+    "#4 的分享页实时流是自建口径：匿名 token 直接映射 `/share/{token}/stream`（只读 SSE），" +
+    "不跟竞品一样把分享挂在 `agent/task/share/...` 下 —— 那条路径要求登录态，与分享的匿名语义冲突",
+};
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -318,6 +460,9 @@ const EXPECTED_COUNTS: Record<string, number> = {
   campaign: CAMPAIGN_SHAPES.length,
   kds: KDS_SHAPES.length,
   task: TASK_SHAPES.length,
+  home: HOME_SHAPES.length,
+  share: SHARE_SHAPES.length,
+  ops_market: OPS_MARKET_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -412,18 +557,35 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // 第 82 批：任务结果批量下载（新增能力；竞品形状是单数 `/task/{id}/download`，登记在 DEVIATIONS）
     expect(ROUTES.has("POST /tasks/{}/download")).toBe(true);
     expect(ROUTES.has("POST /tasks/batch-download")).toBe(true);
+    // 第 83 批：运营后台标签改名（竞品 PUT → 我方 PATCH）、首页长轮询、分享页 SSE
+    expect(ROUTES.has("PATCH /ops/market/tags/{}")).toBe(true);
+    expect(ROUTES.has("GET /home/unread")).toBe(true);
+    expect(ROUTES.has("GET /share/{}/stream")).toBe(true);
   });
 
-  it("竞品六组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17）", () => {
-    expect(EXPECTED_COUNTS).toEqual({ film: 48, crc: 30, op: 35, campaign: 7, kds: 13, task: 17 });
+  it("竞品九组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18）", () => {
+    expect(EXPECTED_COUNTS).toEqual({
+      film: 48,
+      crc: 30,
+      op: 35,
+      campaign: 7,
+      kds: 13,
+      task: 17,
+      home: 5,
+      share: 5,
+      ops_market: 18,
+    });
     expect(
       FILM_SHAPES.length +
         CRC_SHAPES.length +
         OP_SHAPES.length +
         CAMPAIGN_SHAPES.length +
         KDS_SHAPES.length +
-        TASK_SHAPES.length,
-    ).toBe(150);
+        TASK_SHAPES.length +
+        HOME_SHAPES.length +
+        SHARE_SHAPES.length +
+        OPS_MARKET_SHAPES.length,
+    ).toBe(178);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -432,6 +594,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       campaign: CAMPAIGN_SHAPES,
       kds: KDS_SHAPES,
       task: TASK_SHAPES,
+      home: HOME_SHAPES,
+      share: SHARE_SHAPES,
+      ops_market: OPS_MARKET_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -485,9 +650,54 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     }
   });
 
+
+  it("#1 首页工作台：5 条里 4 条同形 + 1 条偏离（msg/exist-unread → /home/unread）", () => {
+    expect(HOME_SHAPES.length).toBe(5);
+    expect(missing(HOME_SHAPES)).toEqual([]);
+    const deviated = HOME_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    expect(deviated).toEqual(["GET /web/v1/msg/exist-unread"]);
+    // 偏离必须写清「等价调用长什么样」，否则下一批又会当成缺口重查一遍
+    expect(DEVIATIONS["GET /msg/exist-unread"]!.reason).toContain("timeout_ms=1");
+  });
+
+  it("#26 分享：5 条里 1 条同形 + 4 条偏离（token 而非 share_id），0 缺口", () => {
+    expect(SHARE_SHAPES.length).toBe(5);
+    expect(missing(SHARE_SHAPES)).toEqual([]);
+    const exact = SHARE_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = SHARE_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    expect(exact).toEqual(["POST /web/v1/crc/assets/share"]);
+    expect(deviated.length).toBe(4);
+    // 其中 3 条是 #24 已经登记过的任务分享形状，这里只是复用；第 4 条是分享页 SSE
+    expect(DEVIATIONS["GET /agent/task/share/{}/sse"]!.ours).toBe("GET /share/{}/stream");
+  });
+
+  it("#27 运营后台：18 条全部登记等价物（12 条同方法 + 6 条方法偏离），0 缺口", () => {
+    expect(OPS_MARKET_SHAPES.length).toBe(18);
+    expect(missing(OPS_MARKET_SHAPES)).toEqual([]);
+    // 前缀不同（/v1/rmadminsrv vs /ops/market），所以 18 条全走 DEVIATIONS；
+    // 其中 12 条方法与竞品一致，6 条是「读改 GET / 全量改局部」的方法偏离
+    const deviated = OPS_MARKET_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    expect(deviated.length).toBe(18);
+    const sameMethod = OPS_MARKET_SHAPES.filter((raw) => {
+      const shape = shapeOf(raw);
+      return DEVIATIONS[shape]!.ours.startsWith(`${shape.split(" ")[0]} `);
+    });
+    expect(sameMethod.length).toBe(12);
+    expect(OPS_MARKET_SHAPES.length - sameMethod.length).toBe(6);
+  });
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
-      [...FILM_SHAPES, ...CRC_SHAPES, ...OP_SHAPES, ...CAMPAIGN_SHAPES, ...KDS_SHAPES, ...TASK_SHAPES].map(shapeOf),
+      [
+        ...FILM_SHAPES,
+        ...CRC_SHAPES,
+        ...OP_SHAPES,
+        ...CAMPAIGN_SHAPES,
+        ...KDS_SHAPES,
+        ...TASK_SHAPES,
+        ...HOME_SHAPES,
+        ...SHARE_SHAPES,
+        ...OPS_MARKET_SHAPES,
+      ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);

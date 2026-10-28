@@ -1582,6 +1582,11 @@ export class MarketService {
     return db.transaction(async (tx) => this.taxonomy.createTag(tx, input));
   }
 
+  /** 改标签名（第 83 批）；与分类改名同口径：走事务，重名 400101、不存在 400102 */
+  async adminPatchTag(id: string, input: { name: string }) {
+    return db.transaction(async (tx) => ({ tag: await this.taxonomy.patchTag(tx, id, input) }));
+  }
+
   /** 删标签 = 物理删 + 从所有作品 `tag_ids` 摘除（返回受影响的按品数） */
   async adminDeleteTag(id: string) {
     return db.transaction(async (tx) => {

@@ -836,6 +836,42 @@ describe("market e2e", () => {
     expect((workAfter.data as { category_id: string | null }).category_id).toBe(categoryId);
   });
 
+  it("运营后台改标签名：PATCH 生效、重名 400101、不存在 400102、非法 id 400101", async () => {
+    const suffix = String(Date.now()).slice(-8);
+    const a = await inject("POST", "/ops/market/tags", { name: `改名A-${suffix}` }, adminToken);
+    expect(a.code).toBe(0);
+    const aId = (a.data as { tag: { id: string } }).tag.id;
+    createdTagIds.push(BigInt(aId));
+    const b = await inject("POST", "/ops/market/tags", { name: `改名B-${suffix}` }, adminToken);
+    expect(b.code).toBe(0);
+    const bId = (b.data as { tag: { id: string } }).tag.id;
+    createdTagIds.push(BigInt(bId));
+
+    const renamed = await inject("PATCH", `/ops/market/tags/${aId}`, { name: `改名A2-${suffix}` }, adminToken);
+    expect(renamed.code).toBe(0);
+    expect((renamed.data as { tag: { name: string } }).tag.name).toBe(`改名A2-${suffix}`);
+    const list = await inject("GET", "/ops/market/tags", undefined, adminToken);
+    const found = (list.data as { list: Array<{ id: string; name: string }> }).list.find((t) => t.id === aId);
+    expect(found!.name).toBe(`改名A2-${suffix}`);
+
+    // 改成别人的名字 → 400101（同名标签会让「回车即建」的幂等语义失效）
+    const dup = await inject("PATCH", `/ops/market/tags/${aId}`, { name: `改名B-${suffix}` }, adminToken);
+    expect(dup.code).toBe(400101);
+    expect(dup.msg).toContain("tag name already exists");
+
+    // 改成自己现在的名字 → 幂等通过（查重要排除自身，否则前端重复提交会莫名 400）
+    const self = await inject("PATCH", `/ops/market/tags/${aId}`, { name: `改名A2-${suffix}` }, adminToken);
+    expect(self.code).toBe(0);
+
+    // 不存在 / 非法 id / 空名
+    const notFound = await inject("PATCH", "/ops/market/tags/999999999999", { name: "随便" }, adminToken);
+    expect(notFound.code).toBe(400102);
+    const badId = await inject("PATCH", "/ops/market/tags/not-a-number", { name: "随便" }, adminToken);
+    expect(badId.code).toBe(400101);
+    const blank = await inject("PATCH", `/ops/market/tags/${bId}`, { name: "   " }, adminToken);
+    expect(blank.code).toBe(400101);
+  });
+
   it("推广位：admin 建 → C 端可见 → 停用后不可见", async () => {
     const user = await loginNewUser("52");
     const created = await inject(

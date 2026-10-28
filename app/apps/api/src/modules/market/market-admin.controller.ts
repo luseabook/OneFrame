@@ -218,6 +218,17 @@ export class MarketAdminController {
     return this.market.adminCreateTag(parseOrThrow(tagBody, body ?? {}));
   }
 
+  /**
+   * 14b. 改标签名（第 83 批）。
+   *
+   * 竞品是 `PUT /v1/rmadminsrv/novel_market/tags/{tag_id}`；我方统一用 PATCH 做局部更新
+   * （分类/推广位同风格），方法差异登记在 `competitor-route-parity.spec.ts` 的 DEVIATIONS。
+   */
+  @Patch("tags/:id")
+  patchTag(@Param("id") id: string, @Body() body: unknown) {
+    return this.market.adminPatchTag(id, parseOrThrow(tagBody, body ?? {}));
+  }
+
   /** 15. 删标签 */
   @Delete("tags/:id")
   deleteTag(@Param("id") id: string) {

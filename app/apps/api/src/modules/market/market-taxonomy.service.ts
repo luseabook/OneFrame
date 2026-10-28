@@ -120,6 +120,24 @@ export class MarketTaxonomyService {
     return { id: String(tagId), affected_works: affected.length };
   }
 
+  /**
+   * 改标签名（第 83 批：竞品 `PUT /v1/rmadminsrv/novel_market/tags/{tag_id}` 的等价物）。
+   *
+   * 为什么只改名字：`market_tags` 只有 `name` 一处可改（`status` 恒为 1，没有排序/图标列），
+   * 竞品那两条 schema 都是 `{}` —— 没有字段证据就不造空壳字段。
+   * 名字是全局唯一键（建标签靠 `onConflictDoNothing(name)` 兜住），改名必须查重：
+   * 否则会出现两条同名标签，`POST /ops/market/tags` 的「回车即建」幂等语义直接失效。
+   */
+  async patchTag(tx: Tx, id: string, input: { name: string }): Promise<MarketTag> {
+    const tagId = requireId(id, "tag");
+    const name = requireName(input.name, "tag");
+    const [existing] = await tx.select().from(marketTags).where(eq(marketTags.id, tagId));
+    if (!existing) throw new AppError(ErrorCode.NOT_FOUND, "market tag not found");
+    if (name !== existing.name) await assertTagNameFree(tx, name, tagId);
+    const [row] = await tx.update(marketTags).set({ name }).where(eq(marketTags.id, tagId)).returning();
+    return { id: String(row!.id), name: row!.name, status: 1 };
+  }
+
   // ── 作品引用校验 ─────────────────────────────────────────
   /**
    * 校验作品要挂的分类/标签都存在（分类必须是启用态）。
@@ -193,5 +211,12 @@ async function assertCategoryNameFree(tx: Tx, name: string, excludeId?: bigint):
     .where(eq(marketCategories.name, name));
   if (rows.some((r) => String(r.id) !== (excludeId ? String(excludeId) : ""))) {
     throw new AppError(ErrorCode.INVALID_PARAM, "category name already exists", { field: "name" });
+  }
+}
+
+async function assertTagNameFree(tx: Tx, name: string, excludeId?: bigint): Promise<void> {
+  const rows = await tx.select({ id: marketTags.id }).from(marketTags).where(eq(marketTags.name, name));
+  if (rows.some((r) => String(r.id) !== (excludeId ? String(excludeId) : ""))) {
+    throw new AppError(ErrorCode.INVALID_PARAM, "tag name already exists", { field: "name" });
   }
 }

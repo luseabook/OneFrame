@@ -127,6 +127,146 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.37 · 第 83 批：审计完剩下的三个满分模块 —— #27 的「竞品 12 条」是记账错误，实际 18 条且在别的域下 · 2026-10-28）
+
+### 一、这批要回答的问题
+
+第 80–82 批把 #8 影视版、#10 活动/创作者、#21 数据看板、#24 任务系统的 100% 都用竞品路由钉住了。
+台账上还没被钉过的满分模块只剩四个：**#1 首页工作台（S(1)）、#26 分享（S(1)）、#27 运营后台（M(3)）、#28 架构（S(1)）**。
+
+这批要回答的是：**这四个 100% 里，还有没有「凭我方自己的端点自证」的？**
+
+答案分两半：
+
+- **#28 架构**：竞品侧**一条对应端点都没有**（它不是一个功能域，是「模块化单体 + 4 个包」的主动决策）。没有可对账的形状，
+  本批只在文档里说明它为什么不入守卫 —— 这不是漏查。
+- **#1 / #26 / #27**：三块都能找到竞品形状，而且**找的过程本身暴露了一个记账错误**（见第三节）。
+
+### 二、这三块竞品路由是怎么「归属」出来的
+
+竞品（ReelMate）的接口清单里**没有** `/web/v1/home`、`/web/v1/share`、`/web/v1/ops` 这些域。所以不能按域名 grep，
+只能按语义往回找。实际归属结果（来自 `_acceptance/competitor_endpoints.tsv` 的 905 行）：
+
+| 模块 | 竞品路由在哪 | 条数 |
+|---|---|---:|
+| #1 首页工作台 | `crc/home_list`、`crc/banner_list`、`crc/pop_up`、`op/abtest/hit`、`msg/exist-unread`（散在 3 个域） | 5 |
+| #26 分享 | `task/{id}/share`、`task/share/{id}/info`、`task/share/{id}/batch-download`、`crc/assets/share`、`agent/task/share/{id}/sse` | 5 |
+| #27 运营后台 | **`/v1/rmadminsrv/novel_market/*`**（不是 `/web/v1` 前缀，也不是我方 `/ops/admin/*` 的对账对象） | 18 |
+
+`/v1/rmadminsrv` 这个前缀是这批的关键发现：它一共 18 行，全部是剧本广场的**内容管理面**（6 scripts + 4 tags + 4 categories
++ 4 promotions，`requestDataJsonSchema` / `responseDataJsonSchema` 全空）。这 18 行与我方 `/ops/market/*` 对应；
+台账此前写的「#27 竞品 12 条」既**少算了 6 条**，又把它当成了我方 `/ops/admin/*` 24 端点的对账对象 ——
+那批行其实属「剧本广场内容审核」，与 #12 的 admin 12 是同一批行，属**重复记账**。
+
+### 三、逐条对账结果
+
+**#1 首页 5 条**（4 同形 + 1 偏离，0 缺口）：
+
+| 竞品 | 我方 | 结论 |
+|---|---|---|
+| `GET /crc/home/list` | `GET /crc/home/list` | 同形 |
+| `GET /crc/banner_list?type=&scene=` | `GET /crc/banner_list`（zod 就要 `type`/`scene`） | 同形（含 query 名） |
+| `GET /crc/pop_up?type=` | `GET /crc/pop_up` | 同形 |
+| `GET /op/abtest/hit?wsid=&op_user_id=` | `GET /op/abtest/hit` | **方法+路径同形、query 名不同**（我方要 `key`） |
+| `GET /msg/exist-unread` | `GET /home/unread`（长轮询） | **偏离**：立即探针 `?since=<iso>&timeout_ms=1` |
+
+最后两条要特别说：竞品 `exist-unread` 是「查一次就返回」，我方 `/home/unread` 是长轮询（`HOME_UNREAD_TIMEOUT_MS` 上限 25s）。
+两者的**等价调用**是 `?since=<当前游标>&timeout_ms=1` —— `home.service.ts` 在 `timeoutMsRaw > 0` 时按它截断，1ms 即返回
+`timed_out: true`。这条等价关系不是猜测，`home-config.spec.ts` 的「没有增量时挂到 timeout_ms 才返回 timed_out」用例就在守它。
+
+**#26 分享 5 条**（1 同形 + 4 偏离，0 缺口）：同形的是 `POST /crc/assets/share`；4 条偏离里 3 条是**任务分享**
+（创建/详情/批量下载，竞品用 server 生成的 `share_id`，我方用 24 字节不可猜 token），第 4 条是**分享页 SSE**
+（竞品挂在 `agent/task/share/{id}/sse`，我方挂在 `/share/{token}/stream` —— 分享是匿名语义，不能挂到要登录态的 agent 命名空间下）。
+前 3 条**第 82 批已经登记过**（#24 的 `DEVIATIONS`），这批只是复用。
+
+**#27 运营后台 18 条**（12 同方法 + 6 方法偏离，0 缺口）：
+
+| 方法偏离的 6 条（竞品 → 我方） | 为什么 |
+|---|---|
+| `POST dashboard/scripts` → `GET /ops/market/dashboard/scripts` | 只读看板用 GET，读端点不该有副作用 |
+| `POST scripts/list` → `GET /ops/market/scripts/list` | 同上 |
+| `GET scripts/{id}/review-result` → `POST /ops/market/scripts/:id/review-result` | 审核结果要落审计日志，是写动作 |
+| `PUT tags/{id}` → `PATCH /ops/market/tags/:id` | 局部更新统一 PATCH（且这条**我方原先真的没有**） |
+| `PUT categories/{id}` → `PATCH /ops/market/categories/:id` | 同上 |
+| `PUT promotions/{id}` → `PATCH /ops/market/promotions/:id` | 同上 |
+
+其余 12 条（save-draft / source-original-script / submit-review / tags GET+POST+DELETE / categories GET+POST+DELETE /
+promotions GET+POST+DELETE）方法与路径尾段都对得上，只是前缀不同。
+
+### 四、这批唯一真补的东西：标签改名
+
+`market_tags` 一直只有「建 / 删」两个入口（`POST /ops/market/tags` 靠 `onConflictDoNothing(name)` 做同名幂等、
+`DELETE` 是物理删 + 从所有作品 `tag_ids` 里 `array_remove`）。竞品有 `PUT …/tags/{tag_id}`，我方没有 —— 这是真缺口，不是口径。
+
+补的是 `PATCH /ops/market/tags/:id`，三个决定：
+
+1. **只改名字**：`market_tags` 只有 `name` 一处可改（`status` 恒 1、没有排序/图标列），竞品那两条 schema 都是 `{}` ——
+   没有字段证据就不造空壳字段；
+2. **改名必须查重**：名字是全局唯一键（建标签靠 `onConflictDoNothing(name)` 兜住）。若不查重会出现两条同名标签，
+   `POST /ops/market/tags` 的「回车即建」幂等语义立刻失效。查重要**排除自身**，否则前端重复提交会莫名 400；
+3. **错误码与其它管理端点同族**：重名 `400101 tag name already exists`、不存在 `400102`、id 非法 `400101`、空名 `400101`。
+
+### 五、为什么这 8 条偏离不补别名（和第 81 批 kds 的分界线）
+
+第 81 批给数据看板补了 8 条 POST 别名，这批 8 条偏离却一条别名都不补。分界线是**客户端能不能自己改通**：
+
+- **kds**：竞品调 `POST`、我方只有 `GET`。客户端按竞品形状发请求会拿到 **404**，把方法改成 GET 之外没有别的办法，
+  所以补别名是**降低对接成本**；
+- **本批**：差的不是「方法导致的 404」，而是命名/语义（复数 vs 单数、`token` vs `share_id`、读用 GET / 全量 PUT 改局部 PATCH）。
+  客户端改一行路径就能通，而给 8 条都加别名会把 `/ops/market/*` 变成竞品形状的复印机，还多 8 条要长期维护的兼容路径。
+
+一句话：**别名是给「改不动」的调用方的，不是给「名字不同」的调用方的。**
+
+### 六、守卫从 150 条扩到 178 条
+
+`apps/api/test/competitor-route-parity.spec.ts` 新增三组：
+
+- `HOME_SHAPES`(5)、`SHARE_SHAPES`(5) —— 普通数组，偏离逐条写进 `DEVIATIONS`；
+- `OPS_MARKET_SHAPES`(18) —— 用 **`NOVEL_ADMIN_PAIRS` 成对登记** `[竞品形状, 我方形状, 理由]`，再 `map` 出形状数组、
+  循环灌进 `DEVIATIONS`。成对写的原因是：形状和等价物必须一起改，分开放迟早漂移成「登记了形状、指向一个不存在的路径」。
+  这里还踩了一个小坑：`DEVIATIONS` 的键必须是 **`shapeOf()` 归一化后**的形状（`{tag_id}` / `:tag_id` 都会折成 `{}`），
+  最初直接把原始字符串当键，死条目检查立刻报了 9 条。
+
+继承的三条断言：组内无重复形状、登记表无死条目、`WAIVED` 的键必须 ⊆ `TASK_SHAPES`（豁免只对 #24 开过口子）。
+新增 3 例用例：#1「5 条里 4 同形 + 1 偏离」、#26「1 同形 + 4 偏离」（并断言偏离指向 `GET /share/{}/stream`）、
+#27「18 条全部登记等价物、12 同方法 + 6 方法偏离」。
+
+反向验证：把 `@Patch("tags/:id")` 改成 `@Patch("tags/:id-BROKEN")` →
+
+```
+deviation target missing: PUT /v1/rmadminsrv/novel_market/tags/{} → PATCH /ops/market/tags/{}: expected false to be true
+Tests  3 failed | 28 passed (31)
+```
+
+改回即 31/31 绿。功能用例另补 1 例（改名生效 / 重名 400101 / 不存在 400102 / 坏 id 400101 / 空名 400101 / 改回自己名字幂等）。
+
+### 七、验证与数字
+
+| 项 | 结果 |
+|---|---|
+| api typecheck | 干净 |
+| eslint src | 退出 0 |
+| `competitor-route-parity.spec.ts` | **12 例**（原 9） |
+| `market.spec.ts` | **19 例**（原 18） |
+| api 全量 | **84 文件 941 例**（原 937） |
+| 门禁 `verify-round.ps1` | **12/12 全绿**（api 真跑 941，166s） |
+| 端点 | 737 → **738**（+`PATCH /ops/market/tags/:id`） |
+| 用例总数 | 1,338 → **1,342** |
+| 分数 | **202.43 / 98.3% / 剩余 3.57 —— 不变** |
+
+分数不变是诚实的结论：#1/#26/#27 三块能力都在，本批补的是「那个 100% 现在有守卫」+ 1 条漏记的端点。
+#27 的竞品端点列从 12 改成 18 是**修正记账**，不是加能力。
+
+### 八、诚实边界
+
+1. 守卫只比**方法 + 路径形状**，不比 query / body：#1 里 `op/abtest/hit` 的 query 名差异（我方 `key` vs 竞品 `wsid`/`op_user_id`）
+   守卫看不出来，只能靠文档记录；
+2. #27 的 18 条竞品 schema 全空，除「标签改名」外的字段语义仍**无证据** —— 这批没有去猜它们；
+3. #28 架构仍是「竞品 0 条对应端点」，属主动决策，**不是已对账**；
+4. 我方的额外端点（如 `/ops/admin/*` 24 条、`/crm` 等）不在守卫范围内 —— 多给的能力不扣分，也不证明对齐；
+5. 守卫是快照式：竞品新增 `/v1/rmadminsrv/*` 路由时需要人工加进 `NOVEL_ADMIN_PAIRS`。
+
+
 ## 变更登记（v6.36 · 第 82 批：审计「满分」模块 #24 任务系统 —— 17 条竞品路由里，1 条是真缺、12 条只是换了名字、4 条连模型都没有 · 2026-10-28）
 
 ### 一、这批在回答什么问题
