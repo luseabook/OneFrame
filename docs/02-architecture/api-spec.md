@@ -4165,3 +4165,64 @@ for (const [shape, ours, reason] of NOVEL_ADMIN_PAIRS) DEVIATIONS[shapeOf(shape)
 3. 8 条豁免是模型/凭据层面不存在，不是排期问题。
 4. 真实渠道联调与账号合并未做，#22 停在 98%。
 5. 守卫是快照式登记，竞品或我方改路由需人工同步。
+
+### 17.43 工具箱的客户端契约：`GET /generations/tools` + `POST /generations` 与竞品 64 条 `/ai/*`（第 86 批）
+
+#### 43.1 为什么这件事进 API 文档
+
+调用方（前端、CLI、外部集成）最容易踩的坑是：**参照站的工具箱是一个工具一条路由，我方是一条生成端点 + 目录**。按路径字面移植代码会在第一步就 404，而这不是「缺接口」，是 ADR-003「差异在参数不在端点」。本节把 64 条竞品形状与我方两条路由的对应关系固定下来，并写清哪 5 条是**已知缺口**、哪 12 条**不在范围内**。
+
+#### 43.2 我方对外形状
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /v1/generations/tools` | 目录：`{ cards: [...19], tools: [...15] }`。`cards` 是 UI 卡（key/title/desc/surface），`tools` 是工具 mode 的接线声明（含模型、价、参数面板、输入约束） |
+| `POST /v1/generations` | 唯一生成端点。必须带 `Idempotency-Key`；body 用 `toolGenerationRequest`（`generationRequest` 的超集） |
+| `GET /v1/models?capability=speech` | 音色/说话人目录（对应竞品 `text-to-speech/voice/list`、`timbre-category/list`、`timbre/list`） |
+| `GET /v1/models`（按 `capability`） | 同上；竞品把「音色列表」和「音色分类」拆成三条查询，我方合并为一条目录 + 客户端过滤 |
+
+`POST /v1/generations` 的能力由两个字段决定：
+
+```jsonc
+{
+  "capability": "video" | "image" | "text" | "speech" | "music",  // 5 类
+  "mode": "<35 个枚举之一>",                                      // 见 43.3
+  "options": { /* tool 层额外参数：voice/speed/inpaint/ranges/strategy/timbre/strength/... */ }
+}
+```
+
+#### 43.3 竞品 64 条 → 我方 47 条偏离 + 17 条豁免
+
+**A. 27 条收敛到 `POST /generations`**（差异只在 `capability` + `mode` 两个字段）：
+
+| 竞品形状 | 我方 mode |
+|---|---|
+| `POST /ai/text-to-video`、`/image-to-video`、`/refer-image-to-video`、`/refer-video-to-video`、`/refer-media-to-video`、`/video-to-video` | `VideoMode`：`text2video` / `image2video` / `universal_reference` / `video_edit` … |
+| `POST /ai/video-crop`、`/video-convert`、`/video-soundtrack`、`/video-subtitle-erase`、`/video-super-resolution`、`/video-audio-separation`、`/fps-duration-unify`、`/effect`、`/advanced-lip`、`/audio-timbre-modify` | `VideoToolMode`：`video_upscale` / `lip_sync` / `video_effects` / `de_subtitle_auto` / `video_slicing` / `fps_duration_unify` / `video_audio_separation` … |
+| `POST /ai/text-to-image`、`/refer-image-to-image`、`/redraw-to-image`、`/image-super-resolution`、`/image-batch-super-resolution` | `ImageMode`：`text2image` / `multi_reference` / `upscale` / `outpaint` / `inpaint` … |
+| `POST /ai/text-to-audio`、`/text-to-music`、`/text-to-sfx`、`/text-to-speech`、`/voice-clone` | `SpeechMode`（`tts` / `voice_clone`）、`AudioToolMode`（`text2music` / `text2sfx` / `auto_bgm` / `audio_timbre_modify`） |
+| `POST /ai/prompt-optimize` | `TextMode.script_optimization` |
+
+**B. 20 条由别的模块承接**（跨域调用，不是工具箱内部）：对话 8 条 → `POST /agent/task/chat`、`POST /agent/task/chat-end`、`/canvas/canvases/{canvas_id}/chat/sessions*`；素材匹配 3 条 → `POST /canvas/canvases/{id}/nodes/{node_id}/storyboard-asset-match` 及其 `task`/`cancel`；`point-calculate` → `POST /credits/quote`；`file-sign-url` → `POST /assets/upload`；`publish` → `POST /projects/{id}/episodes/{id}/timeline/publish`；`ip-template/list` → `GET /subjects/templates`；`ip-template-to-video` → `POST /subjects/{id}/apply-template`；`task/strategy-info` → `GET /tasks/{id}`；音色三条 → `GET /models`。
+
+**C. 5 条已知缺口（B 类，未实现）**：`GET /ai/voice-clone-list`、`GET /ai/voice-clone/{task_id}`、`DELETE /ai/voice-clone/{task_id}`、`POST /ai/voice-clone/rename`、`POST /ai/timbre/collect`。原因是 `voice_clone` 只透传供应商、不落库，「我的音色」没有可管理对象；补的代价是新建 `voice_clones` / `timbre_favorites` 两张表，而竞品这 5 条 schema 全空。**调用方若需要「我的音色」管理，当前只能自己保存 `task_id`。**
+
+**D. 12 条范围外**：`image-recognition`、`face-recognition`、`identify-face`、`style-extraction`、`image-to-text`、`world-generate`、`check-language`、`audio-slicing`、`video-subtitle-voice-edit`、`video-process-session/{create,detail,update-edit}`。
+
+#### 43.4 契约约束
+
+1. `POST /generations` 的 `mode` 必须在目录里声明过；未声明 → 400101。
+2. `capability` 与 `mode` 必须匹配（`video` × `VideoMode`/`VideoToolMode`，`image` × `ImageMode`，`speech` × `SpeechMode`，`music` × `AudioToolMode`，`text` × `TextMode`）。
+3. 计价：`model_prices` 里按 `resolution='per_call'` 取价（唯二例外：`video_upscale` 用真实分辨率档、`image upscale` 同理）。
+4. 幂等：同一 `Idempotency-Key` 重放返回同一任务，不重复扣费。
+
+#### 43.5 守卫
+
+`apps/api/test/competitor-route-parity.spec.ts` 的 `AI_SHAPES`(64) + `AI_GENERIC_TOOLS`(27) + `AI_MODULE_PAIRS`(20) + `AI_WAIVED`(17) + `AI_IN_SCOPE_GAPS`(5)；总形状 247 → **311**。豁免理由必须用 `B 类：` / `范围外：` 前缀自证，含糊写「暂未实现」会红。
+
+#### 43.6 边界
+
+- 只比 METHOD + path，不比每个 mode 的参数面。
+- 12 条范围外是产品范围判断；产品若决定做，需重开缺口。
+- 5 条 B 类确实会 404；本文档的意义是让调用方知道「这不是忘了，是没模型」。
+- 音色三条竞品查询合并成 `GET /models`，query 名不同（`lang_code`/`platform_id`/`only_collected` → 客户端过滤）。

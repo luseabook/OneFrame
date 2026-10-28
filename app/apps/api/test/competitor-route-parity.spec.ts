@@ -10,8 +10,8 @@ import { join } from "node:path";
  * 项目维度积分、项目关联用户、子账号密码）。「100%」此前来自「照我方的 33 条
  * 自评」，而不是「拿竞品的全集对过一遍」——**自己的全集证明不了自己没有缺口**。
  *
- * 本文件把竞品的十二组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
- * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28，共 247 条，来自
+ * 本文件把竞品的十三组路由逐条内联进来（film 48 / crc 30 / op 35 / campaign 7 / kds 13 /
+ * task 17 / home 5 / share 5 / ops_market 18 / novel_market 29 / agent 12 / account 28 / ai 64，共 311 条，来自
  * `_acceptance/competitor_endpoints.tsv` 的 METHOD + path，归一化去参数名），
  * 然后解析我方 controller 源码建路由表逐条比对。三种结局：
  *   1. 同 METHOD 同路径 → 覆盖；
@@ -24,10 +24,15 @@ import { join } from "node:path";
  * 依旧要靠人读契约（第 79 批就是这么读出「只存哈希没有登录路径 = 死代码」的）。
  * 也不覆盖我方的额外端点（多给的能力不扣分）。
  *
- * 数字口径：十二组共 247 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
+ * 数字口径：十三组共 311 条竞品操作（各组独立计数；分享类的几条同时出现在 #4/#24/#26 三组的视角里，
  * 属于「同一个形状被三个模块引用」，不是重复记账）。改这些数组就得同步改
- * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #8 / #10 / #12 / #21 / #22 / #24 / #26 / #27 十行的
+ * `docs/07-plan/implement-progress-vs-reelmate.md` 里 #1 / #4 / #6 / #8 / #10 / #12 / #21 / #22 / #24 / #26 / #27 十一行的
  * 「逐条对照」说法。
+ *
+ * 第 86 批（#6 工具箱）的特殊之处：竞品是「一个工具一条 `/ai/*` 路由」（64 条），我方是
+ * ADR-003「差异在参数不在端点」——只有 `GET /generations/tools`（目录）+ `POST /generations`
+ * （body 里 `capability` + `mode`）。所以这一组的 47 条覆盖全部是**结构性偏离**（多条竞品形状
+ * 指向同一个我方形状），剩下 17 条按「缺模型」或「产品范围外」豁免，逐条点名。
  */
 
 const API_SRC = join(__dirname, "..", "src");
@@ -458,6 +463,79 @@ const ACCOUNT_SHAPES = [
   "GET /web/v1/config",
 ];
 
+/**
+ * 工具箱：竞品 `/web/v1/ai/*` 64 操作（ADR-003：竞品一工具一路由，我方一条 `POST /generations` + mode）
+ *
+ * 证据只到「方法 + 路径」（两个 schema 全空）。所以这里的判断不是「像不像」，而是
+ * 「这个工具背后的能力，我方有没有对应的 mode / 模块」。
+ */
+const AI_SHAPES = [
+  "POST /web/v1/ai/ip-template-to-video",
+  "POST /web/v1/ai/ip-template/list",
+  "GET /web/v1/ai/task/strategy-info",
+  "POST /web/v1/ai/prompt-optimize",
+  "GET /web/v1/ai/chat-msg-list",
+  "GET /web/v1/ai/chat-sess-list",
+  "POST /web/v1/ai/chat/completion",
+  "POST /web/v1/ai/chat/abort",
+  "POST /web/v1/ai/chat/session/create",
+  "POST /web/v1/ai/chat/session/list",
+  "POST /web/v1/ai/chat/session/clean",
+  "POST /web/v1/ai/asset-match",
+  "POST /web/v1/ai/asset-match/result",
+  "POST /web/v1/ai/asset-match/{task_id}/cancel",
+  "POST /web/v1/ai/text-to-video",
+  "POST /web/v1/ai/image-to-video",
+  "POST /web/v1/ai/refer-image-to-video",
+  "POST /web/v1/ai/refer-video-to-video",
+  "POST /web/v1/ai/refer-media-to-video",
+  "POST /web/v1/ai/video-to-video",
+  "POST /web/v1/ai/video-crop",
+  "POST /web/v1/ai/video-convert",
+  "POST /web/v1/ai/video-soundtrack",
+  "POST /web/v1/ai/video-audio-separation",
+  "POST /web/v1/ai/video-subtitle-erase",
+  "POST /web/v1/ai/video-subtitle-voice-edit",
+  "POST /web/v1/ai/video-super-resolution",
+  "POST /web/v1/ai/fps-duration-unify",
+  "POST /web/v1/ai/effect",
+  "POST /web/v1/ai/advanced-lip",
+  "POST /web/v1/ai/audio-timbre-modify",
+  "POST /web/v1/ai/audio-slicing",
+  "POST /web/v1/ai/text-to-image",
+  "POST /web/v1/ai/refer-image-to-image",
+  "POST /web/v1/ai/redraw-to-image",
+  "POST /web/v1/ai/image-super-resolution",
+  "POST /web/v1/ai/image-batch-super-resolution",
+  "POST /web/v1/ai/text-to-audio",
+  "POST /web/v1/ai/text-to-music",
+  "POST /web/v1/ai/text-to-sfx",
+  "POST /web/v1/ai/text-to-speech",
+  "POST /web/v1/ai/voice-clone",
+  "GET /web/v1/ai/text-to-speech/voice/list",
+  "GET /web/v1/ai/voice-clone-list",
+  "GET /web/v1/ai/voice-clone/{task_id}",
+  "DELETE /web/v1/ai/voice-clone/{task_id}",
+  "POST /web/v1/ai/voice-clone/rename",
+  "GET /web/v1/ai/timbre-category/list",
+  "GET /web/v1/ai/timbre/list",
+  "POST /web/v1/ai/timbre/collect",
+  "POST /web/v1/ai/check-language",
+  "POST /web/v1/ai/world-generate",
+  "POST /web/v1/ai/image-recognition",
+  "POST /web/v1/ai/image-to-text",
+  "POST /web/v1/ai/face-recognition",
+  "POST /web/v1/ai/identify-face",
+  "POST /web/v1/ai/style-extraction",
+  "POST /web/v1/ai/file-sign-url",
+  "POST /web/v1/ai/point-calculate",
+  "POST /web/v1/ai/publish",
+  "POST /web/v1/ai/text-to-text",
+  "POST /web/v1/ai/video-process-session/create",
+  "POST /web/v1/ai/video-process-session/detail",
+  "POST /web/v1/ai/video-process-session/update-edit",
+];
+
 const WAIVED: Record<string, string> = {
   "GET /task/is_first/interact":
     "我方没有「结果互动」概念，`task_events` 也没有 user_id 列 —— 算不出「这个人的首次互动」，硬回一个 true 就是假数据",
@@ -607,6 +685,134 @@ for (const [shape, ours, reason] of ACCOUNT_DEVIATIONS) {
   DEVIATIONS[shapeOf(shape)] = { ours, reason };
 }
 
+/**
+ * 工具箱里「一个工具一条路由」的那些工具：我方统一由 `POST /generations` 承接，
+ * 具体是哪条能力由 body 的 `capability` + `mode` 决定（ADR-003）。
+ *
+ * 27 条全部指向同一个我方形状 —— 这不是「一条覆盖 27 条」的偷懒记账，而是
+ * 我方**有意**把 27 个入口收敛成一条生成端点：参数面板由 `GET /generations/tools`
+ * 的目录驱动，前端不需要为每个工具写一套请求代码。
+ */
+const AI_GENERIC_TOOLS = [
+  "text-to-video",
+  "image-to-video",
+  "refer-image-to-video",
+  "refer-video-to-video",
+  "refer-media-to-video",
+  "video-to-video",
+  "video-crop",
+  "video-convert",
+  "video-soundtrack",
+  "video-audio-separation",
+  "video-subtitle-erase",
+  "video-super-resolution",
+  "fps-duration-unify",
+  "effect",
+  "advanced-lip",
+  "audio-timbre-modify",
+  "text-to-image",
+  "refer-image-to-image",
+  "redraw-to-image",
+  "image-super-resolution",
+  "image-batch-super-resolution",
+  "text-to-audio",
+  "text-to-music",
+  "text-to-sfx",
+  "text-to-speech",
+  "voice-clone",
+  "prompt-optimize",
+];
+
+/** 工具箱里由**别的模块**承接的工具/查询（形状不同，能力在） */
+const AI_MODULE_PAIRS: Array<[shape: string, ours: string, reason: string]> = [
+  ["POST /web/v1/ai/chat/completion", "POST /agent/task/chat", "对话回合由创作 Agent 承接（流式走 GET/POST /agent/task/stream）"],
+  ["POST /web/v1/ai/text-to-text", "POST /agent/task/chat", "没有独立的「文本到文本」工具，文案类对话走创作 Agent"],
+  ["POST /web/v1/ai/chat/abort", "POST /agent/task/chat-end", "中止一轮对话 = 结束会话（chat.end），我方把 abort 与会话收尾合并"],
+  ["POST /web/v1/ai/chat/session/create", "POST /canvas/canvases/{}/chat/sessions", "会话挂在画布下（会话是画布的对话记录）"],
+  ["POST /web/v1/ai/chat/session/list", "GET /canvas/canvases/{}/chat/sessions", "列表用 GET（竞品用 POST 传分页，属方法偏离）"],
+  ["POST /web/v1/ai/chat/session/clean", "DELETE /canvas/canvases/{}/chat/sessions/{}", "清空 = 删除该会话（我方没有「保留会话但清消息」的第二态）"],
+  ["GET /web/v1/ai/chat-msg-list", "GET /canvas/canvases/{}/chat/sessions/{}/messages", "消息列表挂在会话下，路径多两级归属"],
+  ["GET /web/v1/ai/chat-sess-list", "GET /canvas/canvases/{}/chat/sessions", "与 session/list 同一个我方形状（竞品有两条重复列表端点）"],
+  ["POST /web/v1/ai/asset-match", "POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match", "素材匹配是画布节点动作（需要节点上下文才能落结果）"],
+  ["POST /web/v1/ai/asset-match/result", "GET /canvas/canvases/{}/nodes/{}/task/{}", "匹配结果按任务 id 查（竞品另一条 POST 也是按 task_id 取）"],
+  ["POST /web/v1/ai/asset-match/{task_id}/cancel", "POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match/cancel", "取消挂在节点动作下（需要节点归属才能校验）"],
+  ["POST /web/v1/ai/point-calculate", "POST /credits/quote", "算价入口是报价单（返回 line_items + 余额校验），不是单点数字"],
+  ["POST /web/v1/ai/file-sign-url", "POST /assets/upload", "签发上传凭据是资产上传的第一步；我方返回资产 id + 直传信息"],
+  ["POST /web/v1/ai/publish", "POST /projects/{}/episodes/{}/timeline/publish", "发布是剧集时间轴动作（要发布的是某一集的成片）"],
+  ["POST /web/v1/ai/ip-template/list", "GET /subjects/templates", "IP 模板 = 主体模板库（subjects.templates）"],
+  ["POST /web/v1/ai/ip-template-to-video", "POST /subjects/{}/apply-template", "模板生视频 = 把模板套到主体上再走生成"],
+  ["GET /web/v1/ai/task/strategy-info", "GET /tasks/{}", "任务详情里带 model/options/strategy —— 策略不是独立资源，是任务的字段"],
+  ["GET /web/v1/ai/text-to-speech/voice/list", "GET /models", "音色 = 模型目录里 capability=speech 的行（运营可热更）"],
+  ["GET /web/v1/ai/timbre-category/list", "GET /models", "音色分类复用模型目录的 mode/capability 维度"],
+  ["GET /web/v1/ai/timbre/list", "GET /models", "音色列表同上（GET /models?capability=speech）"],
+];
+
+/**
+ * 工具箱这一组里**没有等价物**的 17 条。分两类，写清楚哪类是哪类：
+ *   - 5 条是「我方该有但没有」的支撑面（音色库/收藏）→ 记 B 类，已在台账里据实降分；
+ *   - 12 条是竞品的**其它产品面**（人脸识别、世界模型、音频切片、视频处理会话…），
+ *     不在我方「影视创作工具箱」范围内 → 属范围外，不计入缺口。
+ */
+const AI_WAIVED: Record<string, string> = {
+  "GET /web/v1/ai/voice-clone-list":
+    "B 类：我的音色列表需要持久化用户克隆记录；我方 voice_clone 只把参数透传给供应商，没有落库，列表无处可查",
+  "GET /web/v1/ai/voice-clone/{task_id}":
+    "B 类：同上 —— 没有克隆记录表，单条详情没有查询对象",
+  "DELETE /web/v1/ai/voice-clone/{task_id}":
+    "B 类：同上 —— 没有克隆记录表，删除没有落点（只能在供应商侧删）",
+  "POST /web/v1/ai/voice-clone/rename":
+    "B 类：同上 —— 改名要改的是我方的克隆记录，供应商侧没有改名接口可透传",
+  "POST /web/v1/ai/timbre/collect":
+    "B 类：音色收藏需要 timbre_favorites 表（用户 × 音色）；我方音色来自 models 目录，没有收藏关系",
+  "POST /web/v1/ai/video-subtitle-voice-edit":
+    "范围外：逐句字幕配音重录需要字幕级时间轴编辑器；我方去字幕只做擦除（de_subtitle_auto/region），不做重配音",
+  "POST /web/v1/ai/audio-slicing":
+    "范围外：音频切片需要独立音频时间轴；我方 video_slicing 只切视频轨",
+  "POST /web/v1/ai/image-recognition":
+    "范围外：图像理解不在工具箱口径内 —— 我方分析能力只有 video_parse（分析视频），没有 image_parse 模式，也没有对应工具箱卡",
+  "POST /web/v1/ai/image-to-text":
+    "范围外：同上，图像到文本没有 mode、没有卡、没有产品入口",
+  "POST /web/v1/ai/face-recognition":
+    "范围外：人脸识别是竞品独立工具面（人脸库 + 检索）；我方产品范围是影视创作，不做人脸资产库",
+  "POST /web/v1/ai/identify-face":
+    "范围外：同 face-recognition —— 没有人脸库就没有「识别这个人是谁」的落点",
+  "POST /web/v1/ai/style-extraction":
+    "范围外：风格提取是竞品的风格资产化工作流；我方 multi_reference 只做参考图生图，不产出可复用风格资产",
+  "POST /web/v1/ai/world-generate":
+    "范围外：世界模型生成是竞品另一条产品线，我方不做",
+  "POST /web/v1/ai/check-language":
+    "范围外：提示词语言校验是竞品独立工具；我方 moderation/text-detect 只做敏感词，不做语言判定",
+  "POST /web/v1/ai/video-process-session/create":
+    "范围外：视频处理会话是多步处理的上下文对象；我方用任务链（task → task）表达，没有独立会话资源",
+  "POST /web/v1/ai/video-process-session/detail":
+    "范围外：同上 —— 没有会话对象就没有详情",
+  "POST /web/v1/ai/video-process-session/update-edit":
+    "范围外：同上 —— 编辑状态挂在任务结果上，不挂在会话上",
+};
+
+for (const tool of AI_GENERIC_TOOLS) {
+  DEVIATIONS[shapeOf(`POST /web/v1/ai/${tool}`)] = {
+    ours: "POST /generations",
+    reason: "ADR-003：竞品一工具一条路由，我方收敛成一条生成端点（body 的 capability + mode 决定能力；目录见 GET /generations/tools）",
+  };
+}
+for (const [shape, ours, reason] of AI_MODULE_PAIRS) {
+  DEVIATIONS[shapeOf(shape)] = { ours, reason };
+}
+for (const [shape, reason] of Object.entries(AI_WAIVED)) {
+  WAIVED[shapeOf(shape)] = reason;
+}
+
+/** 这 5 条是「我方该有但没有」的支撑面（其余 12 条是范围外）—— 台账据此把 #6 从 97% 降到 96.5% */
+const AI_IN_SCOPE_GAPS = [
+  "GET /web/v1/ai/voice-clone-list",
+  "GET /web/v1/ai/voice-clone/{task_id}",
+  "DELETE /web/v1/ai/voice-clone/{task_id}",
+  "POST /web/v1/ai/voice-clone/rename",
+  "POST /web/v1/ai/timbre/collect",
+];
+
+
 const EXPECTED_COUNTS: Record<string, number> = {
   film: FILM_SHAPES.length,
   crc: CRC_SHAPES.length,
@@ -620,6 +826,7 @@ const EXPECTED_COUNTS: Record<string, number> = {
   novel_market: NOVEL_MARKET_SHAPES.length,
   agent: AGENT_SHAPES.length,
   account: ACCOUNT_SHAPES.length,
+  ai: AI_SHAPES.length,
 };
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
@@ -733,9 +940,17 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("GET /user/credits-dashboard")).toBe(true);
     expect(ROUTES.has("GET /user/credits-dashboard/flows")).toBe(true);
     expect(ROUTES.has("POST /buy/sku-price")).toBe(true);
+    // 第 86 批：工具箱的 47 条覆盖全部落在这 7 个我方形状上（少一个就会有一批偏离报「ours 不存在」）
+    expect(ROUTES.has("GET /generations/tools")).toBe(true);
+    expect(ROUTES.has("POST /generations")).toBe(true);
+    expect(ROUTES.has("GET /models")).toBe(true);
+    expect(ROUTES.has("POST /assets/upload")).toBe(true);
+    expect(ROUTES.has("GET /subjects/templates")).toBe(true);
+    expect(ROUTES.has("POST /canvas/canvases/{}/nodes/{}/storyboard-asset-match")).toBe(true);
+    expect(ROUTES.has("POST /projects/{}/episodes/{}/timeline/publish")).toBe(true);
   });
 
-  it("竞品十二组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28）", () => {
+  it("竞品十三组路由条数与台账口径一致（film 48 / crc 30 / op 35 / campaign 7 / kds 13 / task 17 / home 5 / share 5 / ops 18 / novel_market 29 / agent 12 / account 28 / ai 64）", () => {
     expect(EXPECTED_COUNTS).toEqual({
       film: 48,
       crc: 30,
@@ -749,6 +964,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       novel_market: 29,
       agent: 12,
       account: 28,
+      ai: 64,
     });
     expect(
       FILM_SHAPES.length +
@@ -762,8 +978,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         OPS_MARKET_SHAPES.length +
         NOVEL_MARKET_SHAPES.length +
         AGENT_SHAPES.length +
-        ACCOUNT_SHAPES.length,
-    ).toBe(247);
+        ACCOUNT_SHAPES.length +
+        AI_SHAPES.length,
+    ).toBe(311);
     // 去重后再数一遍：数组里不该有重复写两遍的形状（会虚增覆盖数）
     for (const [name, shapes] of Object.entries({
       film: FILM_SHAPES,
@@ -778,6 +995,7 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
       novel_market: NOVEL_MARKET_SHAPES,
       agent: AGENT_SHAPES,
       account: ACCOUNT_SHAPES,
+      ai: AI_SHAPES,
     })) {
       const unique = new Set(shapes.map(shapeOf));
       expect(unique.size, `${name} has duplicated shapes`).toBe(shapes.length);
@@ -927,6 +1145,47 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(WAIVED[shapeOf("GET /web/v1/weixin/token")]).toContain("appid");
   });
 
+
+  it("#6 工具箱：64 条里 47 条结构性偏离 + 17 条豁免（5 条该有、12 条范围外）", () => {
+    expect(AI_SHAPES.length).toBe(64);
+    expect(missing(AI_SHAPES)).toEqual([]);
+    const exact = AI_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
+    const deviated = AI_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
+    const waived = AI_SHAPES.filter((raw) => WAIVED_SHAPES.has(shapeOf(raw)));
+    // 我方没有任何 `/ai/*` 路由（ADR-003 有意为之），所以同形必须是 0
+    expect(exact).toEqual([]);
+    expect(deviated.length).toBe(47);
+    expect(waived.length).toBe(17);
+    expect(exact.length + deviated.length + waived.length).toBe(AI_SHAPES.length);
+    // 27 条「一个工具一条路由」全部收敛到同一条生成端点
+    const generic = AI_SHAPES.filter((raw) => {
+      const d = DEVIATIONS[shapeOf(raw)];
+      return d?.ours === "POST /generations";
+    });
+    expect(generic.length).toBe(27);
+    // 其余 20 条由别的模块承接，且每条都要写清「为什么是那个模块」
+    const moduleCovered = AI_SHAPES.filter((raw) => {
+      const d = DEVIATIONS[shapeOf(raw)];
+      return d !== undefined && d.ours !== "POST /generations";
+    });
+    expect(moduleCovered.length).toBe(20);
+    for (const raw of moduleCovered) {
+      expect(DEVIATIONS[shapeOf(raw)]!.reason.length, `reason too short: ${raw}`).toBeGreaterThan(10);
+    }
+    // 5 条「该有但没有」必须就是台账里记 B 类的那 5 条（音色库 + 音色收藏），不能悄悄多算
+    const inScope = AI_SHAPES.filter((raw) => AI_IN_SCOPE_GAPS.includes(raw));
+    expect(inScope.length).toBe(5);
+    for (const raw of AI_IN_SCOPE_GAPS) {
+      expect(WAIVED[shapeOf(raw)]!.startsWith("B 类"), `in-scope gap must be honest: ${raw}`).toBe(true);
+    }
+    // 其余 12 条必须显式写「范围外」，而不是含糊的「暂未实现」
+    const outOfScope = waived.filter((raw) => !AI_IN_SCOPE_GAPS.includes(raw));
+    expect(outOfScope.length).toBe(12);
+    for (const raw of outOfScope) {
+      expect(WAIVED[shapeOf(raw)]!.startsWith("范围外"), `out-of-scope gap must say so: ${raw}`).toBe(true);
+    }
+  });
+
   it("偏离与豁免登记表都没有死条目（每条都对应竞品真实形状）", () => {
     const all = new Set(
       [
@@ -942,14 +1201,18 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
         ...NOVEL_MARKET_SHAPES,
         ...AGENT_SHAPES,
         ...ACCOUNT_SHAPES,
+        ...AI_SHAPES,
       ].map(shapeOf),
     );
     expect(Object.keys(DEVIATIONS).filter((shape) => !all.has(shape))).toEqual([]);
     expect(Object.keys(WAIVED).filter((shape) => !all.has(shape))).toEqual([]);
-    // 豁免只在三个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
-    // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）。
+    // 豁免只在四个域开过口子：#24 任务（缺数据模型）、#4 Agent（有意不做 + 外部凭据）、
+    // #22 账号（缺模型/外部依赖：邮箱通道、欠费模型、火山用量、微信签名、运行时 config）、
+    // #6 工具箱（5 条音色库支撑面 + 12 条竞品其它产品面）。
     // 以后想给别的域用，必须显式改这条断言并在台账记账。
-    const waiverScope = new Set([...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES].map(shapeOf));
+    const waiverScope = new Set(
+      [...TASK_SHAPES, ...AGENT_SHAPES, ...ACCOUNT_SHAPES, ...AI_SHAPES].map(shapeOf),
+    );
     expect(Object.keys(WAIVED).filter((shape) => !waiverScope.has(shape))).toEqual([]);
   });
 });

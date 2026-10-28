@@ -127,6 +127,73 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 ---
 
 
+## 变更登记（v6.40 · 第 86 批：审计 #6 工具箱 —— 竞品 64 条 `/ai/*` 里，5 条「该有但没有」 · 2026-10-28）
+
+### 一、这批在回答什么问题
+
+第 79–85 批把「满分模块」逐个用竞品路由钉住、又把 #22 账号从 95% 补到 98% 之后，台账里最没底的一行是 **#6 工具箱（97%，0.60）**——它的缺口栏只有一句话：
+
+> 真实供应商 Key（全 mock，外部依赖）
+
+这句话可能对，也可能掩盖了别的东西：**竞品工具箱面到底有多少条路由，从没逐条对过**。本批就是把这 64 条 `/web/v1/ai/*` 全部落到「我方哪条路由 / 为什么不落 / 属不属于我们的产品面」上。
+
+### 二、竞品 `/ai/*` 64 条的归属
+
+| 归属 | 条数 | 例子 |
+|---|---:|---|
+| **收敛到 `POST /generations`**（能力由 body 的 `capability`+`mode` 决定） | **27** | `text-to-video`、`image-to-video`、`refer-image-to-video`、`video-to-video`、`video-crop`、`video-convert`、`video-super-resolution`、`video-audio-separation`、`fps-duration-unify`、`text-to-image`、`redraw-to-image`、`image-batch-super-resolution`、`text-to-music`、`text-to-sfx`、`text-to-speech`、`voice-clone`、`prompt-optimize` … |
+| **由别的模块承接** | **20** | 对话 8 条（`chat/completion`→`POST /agent/task/chat`、`chat/abort`→`POST /agent/task/chat-end`、会话 CRUD→`/canvas/canvases/{}/chat/sessions`、`chat-msg-list`→`…/messages`）；素材匹配 3 条→画布节点动作；`point-calculate`→`POST /credits/quote`；`file-sign-url`→`POST /assets/upload`；`publish`→剧集时间轴 publish；`ip-template/*`→`/subjects/templates` + `/subjects/{}/apply-template`；`task/strategy-info`→`GET /tasks/{}`；音色/分类列表→`GET /models` |
+| **没有等价物** | **17** | 见下节，再拆「该有但没有 5 条」+「范围外 12 条」 |
+
+**关键事实：我方一条 `/ai/*` 路由都没有，这不是漏了，而是 ADR-003「差异在参数不在端点」。** 工具箱对外只有两条路由：
+
+- `GET /v1/generations/tools` —— 目录（19 张卡 + 15 个工具 mode 的接线声明）
+- `POST /v1/generations` —— 一条生成端点，能力由 body 里的 `capability` + `mode` 决定（35 个 mode）
+
+所以 27 条竞品路由指向同一个我方形状，是**设计**，不是记账技巧：参数面板由目录驱动，新增一个工具只加一层 mode 声明，不加一条路由。
+
+### 三、那 17 条：5 条「该有但没有」+ 12 条「范围外」
+
+| 类 | 条数 | 具体 | 为什么 |
+|---|---:|---|---|
+| **B 类：该有但没有** | **5** | `GET /ai/voice-clone-list`、`GET /ai/voice-clone/{task_id}`、`DELETE /ai/voice-clone/{task_id}`、`POST /ai/voice-clone/rename`、`POST /ai/timbre/collect` | `voice_clone` 只把参数**透传给供应商**、不落库，所以「我的音色」没有可查、可改、可删的对象；收藏同理。要补得先建 `voice_clones` / `timbre_favorites` 表，而竞品这 5 条的 `requestDataJsonSchema` / `responseDataJsonSchema` **都是 `{}`** —— 字段形状无证据 |
+| **范围外：不是我们的产品面** | **12** | `image-recognition`、`face-recognition`、`identify-face`、`style-extraction`、`image-to-text`、`world-generate`、`check-language`、`audio-slicing`、`video-subtitle-voice-edit`、`video-process-session/{create,detail,update-edit}` | 人脸识别 / 身份识别 / 世界模型 / 图像理解 / 音频切片 / 逐句字幕配音 / 视频处理会话，属竞品其它产品面，不在「影视创作工具箱」范围内 |
+
+**为什么 5 条不硬补**：建表要有字段，字段要有证据；把猜测固化成 schema 比缺 5 条接口更坏（同一口径见第 82 批 #24 那 4 条豁免）。所以它们进 `WAIVED`，理由以 `B 类：` 开头，并且 `AI_IN_SCOPE_GAPS` 精确锁住「该有的必须正好是这 5 条」——下一批想扩或缩记账，必须改断言。
+
+### 四、守住「97% → 96.5%」这件事
+
+守卫 `apps/api/test/competitor-route-parity.spec.ts` 新增：
+
+- `AI_SHAPES`（64 条完整竞品形状）
+- `AI_GENERIC_TOOLS`（27 条 → `POST /generations`）
+- `AI_MODULE_PAIRS`（20 条 `[竞品形状, 我方路由, 理由]` 成对登记）
+- `AI_WAIVED`（17 条，前缀区分 `B 类：` / `范围外：`）
+- `AI_IN_SCOPE_GAPS`（5 条，反向锁）
+
+新增用例 `#6 工具箱：64 条里 47 条结构性偏离 + 17 条豁免（5 条该有、12 条范围外）` 断言：`exact === []`、`deviated === 47`、`waived === 17`、三者相加 = 64、`POST /generations` 恰好承接 27 条、其余 20 条理由长度 > 10、5 条 B 类豁免以 `B 类` 开头、12 条范围外以 `范围外` 开头。总形状从 **247 → 311（十三组）**。
+
+### 五、验证与数字
+
+| 项 | 结果 |
+|---|---|
+| `competitor-route-parity.spec.ts` | **16 passed**（原 15） |
+| api 全量 | **85 文件 952 例**（原 951，+1） |
+| 门禁 `verify-round.ps1` | **12/12 全绿** |
+| 端点 | **748**（不变 —— 本批没加路由，只是把「没有 `/ai/*`」这件事说清楚） |
+| 用例总数 | **1,353**（api 952 + adapters 164 + cli 118 + worker 61 + db 26 + shared 26 + storage 6） |
+| **#6 工具箱** | **97% → 96.5%**（19.40 → **19.30**），缺口 0.60 → **0.70 = E 0.60 + B 0.10** |
+| 全站 | **202.52 → 202.42**（98.3%），剩余 **3.48 → 3.58** |
+| 核心 / 首发 | 核心 107.67 → **107.57（97.8%）**；首发 130.57 → **130.47（98.1%）** |
+
+### 六、四条诚实边界
+
+1. **只比形状，不比字段**：27 条指向同一个 `POST /generations`，具体每个 mode 的参数是否覆盖竞品的每个 query/body 字段，不在本批判据内。
+2. **12 条「范围外」是产品范围判断，不是「以后可能做」**：如果产品决定做视频处理会话，这 12 条要重新进缺口表。
+3. **5 条 B 类仍是缺口**：它们被记账、被锁住，但确实没有实现 —— 客户端按竞品形状调「我的音色」会 404。
+4. **`/ai/*` 一条都没有是设计，但客户端不会自动适配**：按竞品路径写死的客户端在我方会 404，必须读 `GET /generations/tools` 的目录。这条差异已写进 api-spec §17.43。
+
+
 ## 变更登记（v6.39 · 第 85 批：拿竞品形状去量自己的「95%」—— #22 账号/鉴权 28 条里 9 条真缺 · 2026-10-28）
 
 ### 一、这批在回答什么问题
