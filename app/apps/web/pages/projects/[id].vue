@@ -41,6 +41,30 @@ const modelName = ref("wan-3.0");
 const budget = ref(1000);
 const shotCount = ref(10);
 const tab = ref<"outline" | "characters" | "storyboards" | "batch" | "timeline" | "confirm">("storyboards");
+
+/**
+ * 进入项目时该落在哪一步（第 105 批 QA 修）。
+ *
+ * 原来 `tab` 无条件初始化成 `storyboards`（分镜），于是**刚导入小说、还没有分集**的项目
+ * 一进来就是第 ③ 步：左边「分镜(0)」、中间写着「选择左上『AI拆分镜』」，
+ * 而页面自己的 banner 却在提示「先在 第 ① 步点『生成大纲』」——
+ * 等于把用户放进一个做不了任何事的房间，再让他自己找门。
+ *
+ * 正确口径：**落到第一个未完成的步骤**（与 banner 的指引一致）：
+ *   无分集 → 大纲；无角色 → 角色；无分镜 → 分镜（与原来行为一致，不影响成熟项目）。
+ * 另外支持 `?tab=outline` 这类深链，便于其它流程精确跳转。
+ */
+const TAB_KEYS = ["outline", "characters", "storyboards", "batch", "timeline", "confirm"] as const;
+
+function initialTab(): (typeof TAB_KEYS)[number] {
+  const wanted = String(route.query.tab ?? "");
+  if ((TAB_KEYS as readonly string[]).includes(wanted)) {
+    return wanted as (typeof TAB_KEYS)[number];
+  }
+  if (!episodes.value.length) return "outline";
+  if (!characters.value.length) return "characters";
+  return "storyboards";
+}
 const busy = ref("");
 const error = ref("");
 const info = ref("");
@@ -466,6 +490,8 @@ onMounted(async () => {
     await loadProjectAssets();
     await loadVideoModels();
   });
+  // 数据到齐后再决定落点（见 initialTab 的注释：原来无条件进分镜会让新项目无处下手）
+  tab.value = initialTab();
   // 首次进入空项目时给一条可行动提示（PRD 增补 §3.2 空态引导）
   if (!episodes.value.length) {
     info.value = t("projectDetail.noEpisodesHint");
