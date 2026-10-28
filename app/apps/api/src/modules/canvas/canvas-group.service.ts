@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasGroupTemplates, canvasGroups, canvasNodes, canvasPinGroups, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 
 /**
  * 固定组（C10）+ 节点组模板（C11）
@@ -27,7 +28,7 @@ export class CanvasGroupService {
     const [canvas] = await db
       .select()
       .from(canvases)
-      .where(and(eq(canvases.id, BigInt(canvasId)), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
+      .where(and(eq(canvases.id, toBigId(canvasId, "canvas_id")), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
     if (!canvas) throw new AppError(ErrorCode.NOT_FOUND, "canvas not found");
     return canvas;
   }

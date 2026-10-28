@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasDownloadLists, canvasNodes } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { StorageService } from "../../storage/storage.service";
 import { TasksService } from "../tasks/tasks.service";
 
@@ -48,7 +49,7 @@ export class CanvasDownloadService {
     }
     let cid: bigint;
     try {
-      cid = BigInt(canvasId);
+      cid = toBigId(canvasId, "canvas_id");
     } catch {
       throw new AppError(ErrorCode.INVALID_PARAM, "invalid canvas_id", { field: "canvas_id" });
     }
@@ -167,7 +168,7 @@ export class CanvasDownloadService {
     const offset = (Math.max(1, page) - 1) * size;
     const where = and(
       eq(canvasDownloadLists.spaceId, BigInt(spaceId)),
-      eq(canvasDownloadLists.canvasId, BigInt(canvasId)),
+      eq(canvasDownloadLists.canvasId, toBigId(canvasId, "canvas_id")),
     );
     const rows = await db
       .select()
@@ -209,7 +210,7 @@ export class CanvasDownloadService {
         and(
           eq(canvasDownloadLists.id, id),
           eq(canvasDownloadLists.spaceId, BigInt(spaceId)),
-          eq(canvasDownloadLists.canvasId, BigInt(canvasId)),
+          eq(canvasDownloadLists.canvasId, toBigId(canvasId, "canvas_id")),
         ),
       );
     if (!row) {

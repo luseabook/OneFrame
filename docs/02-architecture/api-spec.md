@@ -2859,3 +2859,55 @@ api 全量 77 文件 **891 例**。
 `gen-skill` 重写 3 个文件；**ready 140 → 144、骨架 57 → 53**；
 `apps/cli/test/registry-routes.spec.ts`（读 api controller 源码建路由表逐条比对）复跑 `missing: 0`。
 
+
+## 17.27 路径参数里的坏 id：统一 400101（第 69 批）
+
+### 27.1 发现方法与数据
+
+| 步骤 | 做法 | 结果 |
+|---|---|---|
+| 抽路由 | `_acceptance/_r69_routes.py`：52 个 controller 的 `@Get(*)` 拼上 `@Controller` 前缀，`:param` → `abc` | **248** 条唯一 GET 路径 |
+| 打一遍 | `_acceptance/_r69_probe.js`：`sms-code` → `login` 取 token，带 `authorization`+`x-space-id` 逐条 GET | 修前 `internal(500): 18` |
+| 修完复跑 | 同一脚本 | `internal(500): 0` |
+
+修前的 18 条响应一律是 `HTTP 500` + `{"code":500000,"msg":"Internal Server Error"}`。
+
+### 27.2 契约：`toBigId(raw, field)`（`apps/api/src/common/bigid.ts`）
+
+| 输入 | 行为 |
+|---|---|
+| `"12"` / `"  42  "` / `42`（number） | 去空格后转 `bigint` |
+| `"0"` / `"-1"` / `""` / `" "` / `"abc"` / `"12abc"` / `"1.5"` / `"1e3"` / `"0x10"` / 全角数字 / 含换行 | `AppError(400101, "invalid <field>", {field})` |
+| 超过 20 位的数字串 | 同上（主键是雪花 id；`BigInt` 吃得下也不代表合法） |
+
+业务错误一律 **HTTP 200 + 非零 code**（§1 信封规则），字段名进 `msg`（`fail()` 不带 `details`）。
+
+### 27.3 为什么不做全局 `APP_PIPE`
+
+判定「这个参数是不是 id」只能靠名字；实际参数名里 `chapterNo`/`n`/`provider`/`slot`/`token`/`version` 都不是 id。
+误判的后果是把合法请求打成 400101 —— 比现状的 500 更难排查。路径参数也不经 zod（`@Param` 直接是字符串），
+所以只能在服务入口逐个替换。
+
+### 27.4 改动清单（8 个 service）
+
+| 文件 | 位置 | 覆盖端点 |
+|---|---|---|
+| `canvas-group.service.ts` | `private mustGetCanvas` | `/canvas/canvases/:id/pin-groups`、`/group-templates` ×2 |
+| `canvas-material.service.ts` | `mustGetCanvas` + 6 处 `cnId` + `q.node_id`/`q.uid` | `/materials`、`/comment-nodes` ×3 |
+| `canvas-node-tasks.service.ts` | `mustGetCanvasAndNode` | `/running-nodes`、`/nodes/:n/task/:t`、`/nodes/:n/video-parse/:t` |
+| `canvas-download.service.ts` | `list` | `/canvas/canvases/:id/download-lists` |
+| `canvas-template.service.ts` | `getVisible` | `/canvas/templates/:id`、`/instantiate` |
+| `kds.service.ts` | `memberPointConsumeDetail`、`memberPointQuotaDetail`（4 处） | `/kds/da/team/member/:u/point-*-detail` ×2 |
+| `team.service.ts` | `groupStats`、`getRolePermissions`、`memberDetail` | `/cam/team/group/:g/stats`、`/cam/roles/:r/permissions`、`/cam/team/member/:u` |
+| `billing.service.ts` | `getOrder` | `/billing/orders/:id` |
+
+### 27.5 测试（`apps/api/test/bigid-path-params.spec.ts`，6 例）
+
+18 条路径逐条断言 400101 且 `msg` 字段名匹配；造真画布后测 `cn_id`/`node_id` 这一层；
+22 条 URL 的「不再 500000」锚点；`toBigId` 的合法/非法/超长三组。
+注意「`abc` 同时充当所有 param 时先炸的是 `canvas_id`」，以及 `listComments(spaceId, cnId)` 不校验 canvas 归属。
+
+### 27.6 诚实边界
+
+写接口 body 里的 `BigInt(input.x)` 同类风险约 **80 处**未在本批处理（`team`/`market`/`knowledge`/`subject` 等），
+传非数字仍是 500。定位命令：`grep 'BigInt\((q|input|body|params)\.' apps/api/src`。本批只收口路径参数层。

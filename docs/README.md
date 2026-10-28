@@ -126,6 +126,99 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.23 · 第 69 批：路径里的 id 写错时不再返回 500 —— 248 条 GET 探针抓出的 18 条 · 2026-10-28）
+
+> 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.2**（同一批；本文件与主台账各有一套编号，勿混）。
+
+**这一批不是补功能，是修一类会持续制造 5xx 的实现缺陷。** 用户面差别只有一句话：
+以前把 URL 里的 id 拼错（`/canvas/canvases/abc/materials`）会看到「服务器内部错误」，现在看到的是
+`400101 invalid canvas_id`；对监控来说，客户端拼错参数不再计入 5xx。**分数不动（仍 98.3% / 202.45 / 剩余 3.55）**。
+
+### 一、怎么发现的：把每个 GET 的 `:param` 换成 `abc`
+
+不靠读代码猜，靠跑一遍。两步（脚本都在 `_acceptance/`，可复跑）：
+
+1. `_r69_routes.py`：扫 52 个 `*.controller.ts`，抽出全部 `@Get(...)` 的完整路径（拼上 `@Controller` 前缀），
+   把路径里的 `:param` 一律替换成 `abc` → **248 条唯一 GET 路径**（`_acceptance/out_get_routes.json`）。
+2. `_r69_probe.js`：`POST /v1/auth/sms-code` 取 `debug_code` → `POST /v1/auth/login` 拿 token →
+   带 `authorization` + `x-space-id` 逐条 GET，只记录 HTTP ≥ 500 的。
+
+结果（**修前**）：
+
+```
+probed: 248  internal(500): 18
+```
+
+18 条里有 12 条在 canvas 家族，另有计费、团队、KDS。响应是
+`{"code":500000,"msg":"Internal Server Error"}` + HTTP 500 —— 也就是**用户拼错 URL 被报成我们的故障**。
+（同类探针第 65 批用在 CLI 路径上、第 66/67 批用在前端路径上；这一批复用同一套「机械一跑」的手法。）
+
+### 二、为什么 `BigInt("abc")` 会变成 500
+
+`BigInt("abc")` 抛的是 **`SyntaxError`**，不是我们自己的 `AppError`。而 `AllExceptionsFilter` 只把
+`isAppError(exception)` 映射成「HTTP 200 + 业务 code」，其余非 `HttpException` 一律走末尾的
+「未知异常」分支（`apps/api/src/common/http/exception.filter.ts:45`）：`res.status(500).send(fail(INTERNAL, "Internal Server Error"))`。
+所以这类错误的**形态就不对**：它既不是业务错误（400101），也不该是服务端故障（5xx）。
+
+### 三、修法：一个入口函数，不做全局 pipe
+
+新增 `app/apps/api/src/common/bigid.ts`：
+
+```ts
+export function toBigId(raw: unknown, field = "id"): bigint {
+  const text = typeof raw === "string" ? raw.trim() : typeof raw === "number" ? String(raw) : "";
+  if (!/^\d{1,20}$/.test(text)) throw new AppError(ErrorCode.INVALID_PARAM, `invalid ${field}`, { field });
+  const value = BigInt(text);
+  if (value <= 0n) throw new AppError(ErrorCode.INVALID_PARAM, `invalid ${field}`, { field });
+  return value;
+}
+```
+
+**为什么不是全局 `APP_PIPE` / 全局拦截器**：那要靠「参数名长得像不像 id」来判定，而实际的路由参数名里有
+`chapterNo`、`n`、`provider`、`slot`、`token`、`version` 这些**不是 id** 的；误判的代价是把合法请求打成 400101 ——
+比现在的 500 更难查。定向替换点少、语义清楚、每处都能对应到具体路由，风险小得多。
+
+**为什么不在 zod 层统一做**：zod 校验的是 body/query，路径参数不经 zod（`@Param` 直接是字符串），
+而这一批 18 条里绝大多数错误来自**路径参数**。
+
+### 四、改了哪些地方（8 个 service）
+
+| 文件 | 位置 | 覆盖到的路由 |
+|---|---|---|
+| `canvas-group.service.ts` | `private mustGetCanvas` | `pin-groups`、`group-templates` 等 |
+| `canvas-material.service.ts` | `mustGetCanvas` + 6 处 `cnId` + `q.node_id`/`q.uid` | `materials`、`comment-nodes`、`comment-nodes/:cn/comments` |
+| `canvas-node-tasks.service.ts` | `mustGetCanvasAndNode`（canvas_id + node_id） | `running-nodes`、`nodes/:n/task/:t`、`nodes/:n/video-parse/:t` |
+| `canvas-download.service.ts` | `list` | `canvases/:id/download-lists` |
+| `canvas-template.service.ts` | `private getVisible` | `templates/:id`、`templates/:id/instantiate` |
+| `kds.service.ts` | 4 处 `opUserId` | `team/member/:u/point-consume-detail`、`point-quota-detail` |
+| `team.service.ts` | `groupStats`、`getRolePermissions`、`memberDetail` | `team/group/:g/stats`、`roles/:r/permissions`、`team/member/:u` |
+| `billing.service.ts` | `getOrder` | `billing/orders/:id` |
+
+两个**本来就没中**的，可作为写法参照：`canvas.service.ts` 的 `mustGetCanvas`/`mustGetNode`、
+`canvas-derive.service.ts` 的 `requireNode` 早就自己 try/catch 了。复跑探针：`probed: 248  internal(500): 0`。
+
+### 五、测试：6 例，把 18 条路径钉住
+
+`app/apps/api/test/bigid-path-params.spec.ts`：
+
+| 用例 | 断言什么 |
+|---|---|
+| 「修前 500 的 18 条 GET」 | 逐条 `code === 400101`，且 `msg` 里的字段名对得上（`invalid canvas_id` 之类）—— 字段名不对说明是在别的层被打回来的，不算修好 |
+| 「第二层 id」 | 先造一张**真**画布，再让 `cn_id`/`node_id` 非法 → 仍 400101（不造真画布测不到这一层：`abc` 同时充当所有 param 时先炸的总是 `canvas_id`） |
+| 「不再出现 500000」 | 22 条 URL 全扫，回归锚点 |
+| `toBigId` 边界 ×3 | 12 个非法输入（空串/空格/`12abc`/`-1`/`0`/`1.5`/`1e3`/`0x10`/全角数字/换行）、21 位超长数字、合法值去空格 |
+
+（顺带发现：`listComments(spaceId, cnId)` 的签名里没有 canvas，它不校验 canvas 归属 ——
+所以那条 URL 的错是 `cn_id` 报的，不是 `canvas_id`。）
+
+### 六、诚实边界
+
+这一批**只收了「路径参数」这一层**。同一类形态在**写接口 body** 里还有约 **80 处** `BigInt(input.x)`
+（`team` 的成员改派 / `market` 的 `novel_id` / `knowledge` 的 `dir_id` / `subject` 的 `asset_id` 等），
+传非数字仍然是 500。没一次改完的理由是它们都在写路径上、每处都要单独判断「该不该在 zod 层就拒」。
+已用 `grep 'BigInt\((q|input|body|params)\.'` 定位并写进主台账 §5 表下附注，留作后续批次逐模块收口。
+**不计分**：这是修实现缺陷，不是补缺口；全站仍 98.3%、剩余 3.55。
+
 ## 变更登记（v6.22 · 第 68 批：分镜手动增删改 —— 唯一索引逼出来的两段式改号 · 2026-10-28）
 
 > 主台账见 `docs/07-plan/implement-progress-vs-reelmate.md` §9 **v9.1**（同一批；本文件与主台账各有一套编号，勿混）。

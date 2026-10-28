@@ -15,6 +15,7 @@ import { AppError, ErrorCode, newId } from "@app/shared";
 import { randomBytes } from "node:crypto";
 import { env } from "../../config/env";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { ChannelService } from "./channels/channel.service";
 import { isChannelError } from "./channels/errors";
 import type { PaymentChannelId, PaymentMode } from "./channels/types";
@@ -580,7 +581,7 @@ export class BillingService {
     const [row] = await db
       .select()
       .from(orders)
-      .where(and(eq(orders.id, BigInt(orderId)), eq(orders.spaceId, BigInt(spaceId))));
+      .where(and(eq(orders.id, toBigId(orderId, "order_id")), eq(orders.spaceId, BigInt(spaceId))));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "order not found");
     return this.toOrderDto(row);
   }
@@ -666,7 +667,7 @@ export class BillingService {
       const [row] = await tx
         .select()
         .from(orders)
-        .where(and(eq(orders.id, BigInt(orderId)), eq(orders.spaceId, BigInt(spaceId))))
+        .where(and(eq(orders.id, toBigId(orderId, "order_id")), eq(orders.spaceId, BigInt(spaceId))))
         .for("update");
       if (!row) throw new AppError(ErrorCode.NOT_FOUND, "order not found");
       if (row.status !== OrderStatus.PENDING) {

@@ -3,6 +3,7 @@ import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { canvasNodes, canvasTemplates, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 
 /**
  * 整画布模板库（C2，8 条端点收敛为 `/canvas-templates`）
@@ -110,7 +111,7 @@ export class CanvasTemplateService {
     const [row] = await db
       .select()
       .from(canvasTemplates)
-      .where(eq(canvasTemplates.id, BigInt(templateId)));
+      .where(eq(canvasTemplates.id, toBigId(templateId, "template_id")));
     // 已下架（status=3）等同不存在：否则用户"删了还能按 id 打开"，
     // 与列表里消失的事实矛盾（软删必须对读取路径一致生效）
     if (!row || row.status !== 2) throw new AppError(ErrorCode.NOT_FOUND, "template not found");
@@ -228,7 +229,7 @@ export class CanvasTemplateService {
 
   /** 个人模板删除（只能删自己的） */
   async removePersonal(spaceId: string, userId: string, templateId: string) {
-    const [row] = await db.select().from(canvasTemplates).where(eq(canvasTemplates.id, BigInt(templateId)));
+    const [row] = await db.select().from(canvasTemplates).where(eq(canvasTemplates.id, toBigId(templateId, "template_id")));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "template not found");
     if (row.tplScope === 1) {
       throw new AppError(ErrorCode.FORBIDDEN, "official template cannot be deleted");

@@ -4,6 +4,7 @@ import { canvasNodes, canvases, tasks } from "@app/db";
 import { AppError, ErrorCode, TaskStatus } from "@app/shared";
 import { generationRequestSchema } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { CreditsService } from "../credits/credits.service";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
@@ -243,12 +244,12 @@ export class CanvasNodeTasksService {
     const [canvas] = await db
       .select()
       .from(canvases)
-      .where(and(eq(canvases.id, BigInt(canvasId)), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
+      .where(and(eq(canvases.id, toBigId(canvasId, "canvas_id")), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
     if (!canvas) throw new AppError(ErrorCode.NOT_FOUND, "canvas not found");
     const [node] = await db
       .select()
       .from(canvasNodes)
-      .where(and(eq(canvasNodes.id, BigInt(nodeId)), eq(canvasNodes.canvasId, canvas.id), isNull(canvasNodes.deletedAt)));
+      .where(and(eq(canvasNodes.id, toBigId(nodeId, "node_id")), eq(canvasNodes.canvasId, canvas.id), isNull(canvasNodes.deletedAt)));
     if (!node) throw new AppError(ErrorCode.NOT_FOUND, "node not found");
     return { canvas, node };
   }
@@ -398,7 +399,7 @@ export class CanvasNodeTasksService {
     const [canvas] = await db
       .select()
       .from(canvases)
-      .where(and(eq(canvases.id, BigInt(canvasId)), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
+      .where(and(eq(canvases.id, toBigId(canvasId, "canvas_id")), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
     if (!canvas) throw new AppError(ErrorCode.NOT_FOUND, "canvas not found");
 
     const rows = await db

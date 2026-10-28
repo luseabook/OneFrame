@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasCommentNodes, canvasComments, canvasMaterials, canvasNodes, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 
 /**
  * 画布素材 + 批注（C8/C9）
@@ -28,7 +29,7 @@ export class CanvasMaterialService {
     const [canvas] = await db
       .select()
       .from(canvases)
-      .where(and(eq(canvases.id, BigInt(canvasId)), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
+      .where(and(eq(canvases.id, toBigId(canvasId, "canvas_id")), eq(canvases.spaceId, BigInt(spaceId)), isNull(canvases.deletedAt)));
     if (!canvas) throw new AppError(ErrorCode.NOT_FOUND, "canvas not found");
     return canvas;
   }
@@ -46,7 +47,7 @@ export class CanvasMaterialService {
     const conditions = [eq(canvasMaterials.canvasId, canvas.id), isNull(canvasMaterials.deletedAt)];
     if (q.material_type) conditions.push(eq(canvasMaterials.materialType, q.material_type));
     if (q.source !== undefined) conditions.push(eq(canvasMaterials.source, q.source));
-    if (q.node_id) conditions.push(eq(canvasMaterials.nodeId, BigInt(q.node_id)));
+    if (q.node_id) conditions.push(eq(canvasMaterials.nodeId, toBigId(q.node_id, "node_id")));
 
     const rows = await db
       .select()
@@ -205,7 +206,7 @@ export class CanvasMaterialService {
     const conditions = [eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)];
     if (q.scope) conditions.push(eq(canvasCommentNodes.scope, q.scope));
     if (q.resolved !== undefined) conditions.push(eq(canvasCommentNodes.resolved, q.resolved));
-    if (q.uid) conditions.push(eq(canvasCommentNodes.createdBy, BigInt(q.uid)));
+    if (q.uid) conditions.push(eq(canvasCommentNodes.createdBy, toBigId(q.uid, "uid")));
 
     const rows = await db
       .select()
@@ -295,7 +296,7 @@ export class CanvasMaterialService {
     const [row] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     return { comment_node: this.toCommentNodeDto(row) };
   }
@@ -311,7 +312,7 @@ export class CanvasMaterialService {
     const [row] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     await db
       .update(canvasCommentNodes)
@@ -330,7 +331,7 @@ export class CanvasMaterialService {
     const [row] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.canvasId, canvas.id), isNull(canvasCommentNodes.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     if (row.createdBy === null || String(row.createdBy) !== userId) {
       throw new AppError(ErrorCode.FORBIDDEN, "you can only delete your own comment");
@@ -347,7 +348,7 @@ export class CanvasMaterialService {
     const [cn] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
     if (!cn) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     const rows = await db
       .select()
@@ -366,7 +367,7 @@ export class CanvasMaterialService {
     const [cn] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
     if (!cn) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     if (!input.content.trim()) {
       throw new AppError(ErrorCode.BAD_REQUEST, "content is required", { field: "content" });
@@ -420,7 +421,7 @@ export class CanvasMaterialService {
     const [row] = await db
       .select()
       .from(canvasCommentNodes)
-      .where(and(eq(canvasCommentNodes.id, BigInt(cnId)), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
+      .where(and(eq(canvasCommentNodes.id, toBigId(cnId, "cn_id")), eq(canvasCommentNodes.spaceId, BigInt(spaceId)), isNull(canvasCommentNodes.deletedAt)));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "comment node not found");
     await db
       .update(canvasCommentNodes)

@@ -9,6 +9,7 @@ import {
 } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { TeamService } from "../team/team.service";
 
 /**
@@ -395,7 +396,7 @@ export class KdsService {
     const offset = (page - 1) * pageSize;
     const conds = [
       eq(creditFlows.spaceId, BigInt(spaceId)),
-      eq(tasks.userId, BigInt(opUserId)),
+      eq(tasks.userId, toBigId(opUserId, "op_user_id")),
       eq(creditFlows.kind, "settle"),
     ];
 
@@ -450,7 +451,7 @@ export class KdsService {
       })
       .from(spaceMembers)
       .where(
-        and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(opUserId))),
+        and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, toBigId(opUserId, "op_user_id"))),
       )
       .limit(1);
     if (!m) throw new AppError(ErrorCode.NOT_FOUND, "member not found");
@@ -463,7 +464,7 @@ export class KdsService {
       .where(
         and(
           eq(creditFlows.spaceId, BigInt(spaceId)),
-          eq(tasks.userId, BigInt(opUserId)),
+          eq(tasks.userId, toBigId(opUserId, "op_user_id")),
           eq(creditFlows.kind, "settle"),
         ),
       );
@@ -475,7 +476,7 @@ export class KdsService {
       .where(
         and(
           eq(creditFlows.spaceId, BigInt(spaceId)),
-          eq(creditFlows.refUserId, BigInt(opUserId)),
+          eq(creditFlows.refUserId, toBigId(opUserId, "op_user_id")),
           eq(creditFlows.kind, "adjust"),
         ),
       );

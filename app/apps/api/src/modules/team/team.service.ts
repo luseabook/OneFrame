@@ -15,6 +15,7 @@ import {
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
+import { toBigId } from "../../common/bigid";
 import { hashPhone } from "../auth/crypto";
 import { StorageService } from "../../storage/storage.service";
 import {
@@ -517,7 +518,7 @@ export class TeamService {
   }
 
   async updateGroup(spaceId: string, groupId: string, input: { name?: string; leader_user_id?: string | null; sort?: number; status?: number }) {
-    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, BigInt(groupId)));
+    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, toBigId(groupId, "group_id")));
     if (!group || String(group.spaceId) !== spaceId) throw new AppError(ErrorCode.NOT_FOUND, "group not found");
     await db
       .update(teamGroups)
@@ -535,7 +536,7 @@ export class TeamService {
   }
 
   async deleteGroup(spaceId: string, groupId: string) {
-    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, BigInt(groupId)));
+    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, toBigId(groupId, "group_id")));
     if (!group || String(group.spaceId) !== spaceId) throw new AppError(ErrorCode.NOT_FOUND, "group not found");
     // 有子组或成员时拒绝（避免悬挂引用）
     const [child] = await db
@@ -559,7 +560,7 @@ export class TeamService {
    * 不用个人空间的余额，否则"组消耗"会把成员自己在别处的花费算进来。
    */
   async groupStats(spaceId: string, groupId: string) {
-    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, BigInt(groupId)));
+    const [group] = await db.select().from(teamGroups).where(eq(teamGroups.id, toBigId(groupId, "group_id")));
     if (!group || String(group.spaceId) !== spaceId) {
       throw new AppError(ErrorCode.NOT_FOUND, "group not found");
     }
@@ -681,7 +682,7 @@ export class TeamService {
     const [row] = await db
       .select()
       .from(spaceMembers)
-      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(userId))));
+      .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, toBigId(userId, "user_id"))));
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "member not found");
     return this.toMemberDto(row);
   }
@@ -1234,7 +1235,7 @@ export class TeamService {
     const [role] = await db
       .select()
       .from(teamRoles)
-      .where(and(eq(teamRoles.id, BigInt(roleId)), eq(teamRoles.spaceId, BigInt(spaceId))));
+      .where(and(eq(teamRoles.id, toBigId(roleId, "role_id")), eq(teamRoles.spaceId, BigInt(spaceId))));
     if (!role) throw new AppError(ErrorCode.NOT_FOUND, "role not found");
     const codes = powerListToCodes(role.powerList);
     return {
@@ -1267,7 +1268,7 @@ export class TeamService {
     const [role] = await db
       .select()
       .from(teamRoles)
-      .where(and(eq(teamRoles.id, BigInt(roleId)), eq(teamRoles.spaceId, BigInt(spaceId))));
+      .where(and(eq(teamRoles.id, toBigId(roleId, "role_id")), eq(teamRoles.spaceId, BigInt(spaceId))));
     if (!role) throw new AppError(ErrorCode.NOT_FOUND, "role not found");
     if (role.roleCode === "master") {
       throw new AppError(ErrorCode.INVALID_PARAM, "owner role permissions are fixed（owner_role_immutable）", {
