@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import { adminAuditLogs } from "@app/db";
 import { newId } from "@app/shared";
@@ -15,6 +15,60 @@ export interface AdminAuditEntry {
   ip?: string | null;
   requestId?: string | null;
   payload?: unknown;
+}
+
+/**
+ * 审计写入的重试策略。
+ *
+ * 只重试"可能瞬时恢复"的写库失败（连接抖动、主备切换、deadlock）。业务错误不重试：
+ * 审计这一层见不到业务错误，它唯一的输入是"一条已经成功的运营操作"。
+ */
+export interface AdminAuditRetryPolicy {
+  /** 额外重试次数（默认 2，即最多 3 次尝试） */
+  retries?: number;
+  /** 指数退避基数（毫秒）：第 n 次重试等待 base * 2^(n-1) */
+  baseDelayMs?: number;
+  /** 供测试/CLI 注入的 sleep（避免真实等待） */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_AUDIT_RETRIES = 2;
+const DEFAULT_AUDIT_BASE_DELAY_MS = 50;
+/** Postgres 唯一键冲突：同一条审计（同 id）其实已落库，重试时应按成功处理 */
+const PG_UNIQUE_VIOLATION = "23505";
+
+/** 退化字段的日志上限：action/requestId 来自请求，进日志前截断并压平换行 */
+const LOG_FIELD_LIMIT = 200;
+
+const defaultAuditSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // 旁路退避定时器不该阻止进程退出（与 billing 渠道重试同一约定）
+    (timer as { unref?: () => void }).unref?.();
+  });
+
+/** 从驱动/drizzle 包装过的错误里取 Postgres SQLSTATE（两层形状都认） */
+function sqlState(err: unknown): string | undefined {
+  if (err && typeof err === "object") {
+    const direct = (err as { code?: unknown }).code;
+    if (typeof direct === "string") return direct;
+    const cause = (err as { cause?: unknown }).cause;
+    if (cause && typeof cause === "object") {
+      const nested = (cause as { code?: unknown }).code;
+      if (typeof nested === "string") return nested;
+    }
+  }
+  return undefined;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+}
+
+/** 日志字段一行化：审计日志里出现换行会伪造出第二条日志 */
+function logField(value: string | null | undefined): string {
+  if (!value) return "-";
+  return value.replace(/[\r\n]+/g, " ").slice(0, LOG_FIELD_LIMIT);
 }
 
 /**
@@ -62,30 +116,70 @@ function csvEscape(value: unknown): string {
 /**
  * 管理端操作审计的读写（契约 §3.4）。
  *
- * 为什么 record 内部也吞异常：调用方是全局拦截器，审计落库失败**绝不能**让一次已经成功的
- * 运营操作变成 500（那会让"日志库抖动"升级成"后台不可用"）。这里 catch 掉并静默，
- * 但保留方法签名 async，便于将来换成"落本地文件/重试队列"而不改调用方。
+ * `record` 绝不抛错：调用方是全局拦截器，审计落库失败**绝不能**让一次已经成功的
+ * 运营操作变成 500（那会让"日志库抖动"升级成"后台不可用"）。
  */
 @Injectable()
 export class AdminAuditService {
-  async record(entry: AdminAuditEntry): Promise<void> {
-    try {
-      await db.insert(adminAuditLogs).values({
-        id: newId(),
-        adminId: bigintOrNull(entry.adminId),
-        adminUsername: entry.adminUsername.slice(0, 64),
-        method: entry.method.slice(0, 16),
-        path: entry.path.slice(0, 512),
-        action: entry.action.slice(0, 512),
-        statusCode: entry.statusCode,
-        ok: entry.ok,
-        ip: entry.ip ? entry.ip.slice(0, 64) : null,
-        requestId: entry.requestId ? entry.requestId.slice(0, 64) : null,
-        payload: (entry.payload ?? null) as never,
-      });
-    } catch {
-      // 审计是旁路：写失败即放弃本条，不影响业务响应
+  private readonly logger = new Logger("admin-audit");
+
+  /**
+   * 写一条审计（有界重试）。
+   *
+   * 为什么重试：审计是旁路，但"旁路"不等于"可以丢"。单次写库失败（连接抖动、主备切换）
+   * 就永久丢掉一条运营操作记录，事故复盘时会出现"操作发生了、审计里没有"的黑洞。
+   * 所以失败后按 50/100ms 指数退避再做至多 2 次尝试，全程仍在 `setImmediate` 之后的
+   * 旁路上，不进入本次响应的关键路径。
+   *
+   * 幂等：id 只生成一次并在重试间复用。若上一次其实已提交、只是确认丢失，
+   * 重试会撞唯一键（23505）——说明记录已在库里，直接按成功处理，不重复插入。
+   *
+   * 可观测：重试后成功留 `admin_audit_write_recovered` warn；重试用尽才放弃，
+   * 留 `admin_audit_write_failed` error（带 request_id，可回连请求日志定位"丢了哪一条"）。
+   */
+  async record(entry: AdminAuditEntry, policy: AdminAuditRetryPolicy = {}): Promise<void> {
+    const retries = Math.max(0, policy.retries ?? DEFAULT_AUDIT_RETRIES);
+    const baseDelayMs = Math.max(1, policy.baseDelayMs ?? DEFAULT_AUDIT_BASE_DELAY_MS);
+    const sleep = policy.sleep ?? defaultAuditSleep;
+
+    // 行在循环外构造一次：重试写的是同一条记录（同 id），而不是"每次尝试一条新记录"
+    const row = {
+      id: newId(),
+      adminId: bigintOrNull(entry.adminId),
+      adminUsername: entry.adminUsername.slice(0, 64),
+      method: entry.method.slice(0, 16),
+      path: entry.path.slice(0, 512),
+      action: entry.action.slice(0, 512),
+      statusCode: entry.statusCode,
+      ok: entry.ok,
+      ip: entry.ip ? entry.ip.slice(0, 64) : null,
+      requestId: entry.requestId ? entry.requestId.slice(0, 64) : null,
+      payload: (entry.payload ?? null) as never,
+    };
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (attempt > 0) {
+        // 注入的 sleep 理论上不会 reject；即便抛错也不能让审计把业务变成异常
+        await sleep(baseDelayMs * 2 ** (attempt - 1)).catch(() => undefined);
+      }
+      try {
+        await db.insert(adminAuditLogs).values(row);
+        if (attempt > 0) {
+          this.logger.warn(
+            `admin_audit_write_recovered attempts=${attempt + 1} request_id=${logField(entry.requestId)} action="${logField(entry.action)}"`,
+          );
+        }
+        return;
+      } catch (err) {
+        // 上一次尝试其实已提交（确认丢失）：记录已在库里，按成功处理
+        if (sqlState(err) === PG_UNIQUE_VIOLATION) return;
+        lastError = err;
+      }
     }
+    this.logger.error(
+      `admin_audit_write_failed attempts=${retries + 1} request_id=${logField(entry.requestId)} action="${logField(entry.action)}" err=${logField(errorText(lastError))}`,
+    );
   }
 
   async list(filters: AdminAuditListFilters = {}) {
