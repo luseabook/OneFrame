@@ -84,7 +84,7 @@ const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUp
 <style scoped>
 .tool-page {
   min-height: 100vh;
-  background: var(--bg-app);
+  background: var(--bg-chrome);
   color: var(--text-1);
   display: flex;
   flex-direction: column;
@@ -95,7 +95,7 @@ const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUp
   justify-content: space-between;
   gap: 14px;
   padding: 12px 20px;
-  min-height: 62px;
+  min-height: 64px;
 }
 .left {
   display: flex;
@@ -103,8 +103,8 @@ const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUp
   gap: 14px;
 }
 .back {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-full);
@@ -129,19 +129,19 @@ h1 {
 .actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .mini-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid var(--border-1);
-  background: var(--bg-surface);
+  border: 1px solid #2c2c30;
+  background: #0a0a0e;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 .mini-pill svg {
@@ -153,12 +153,13 @@ h1 {
   cursor: default;
 }
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 40px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border-2);
+  border: 1px solid #2c2c30;
+  background: #0a0a0e;
   color: var(--text-2);
 }
 .icon-btn svg {
@@ -173,13 +174,13 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 36px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid #ffffff24;
-  background: #141414;
-  color: var(--text-2);
-  font-size: 12px;
+  border: 1px solid #e1cea633;
+  background: #1d1a12;
+  color: var(--gold-text);
+  font-size: 13px;
   white-space: nowrap;
 }
 .recharge svg {
@@ -187,25 +188,27 @@ h1 {
   height: 16px;
 }
 .recharge b {
-  color: var(--text-1);
+  color: var(--gold-text);
   font-weight: 600;
 }
 .recharge .sep {
   width: 1px;
   height: 12px;
-  background: var(--border-2);
+  background: #e1cea640;
 }
 .recharge span {
-  color: var(--text-3);
+  font-size: 12px;
+  color: #e1cea6cc;
 }
 .credits {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
-  background: var(--bg-surface);
+  background: #0a0a0e;
+  border: 1px solid #2c2c30;
   color: var(--text-2);
   font-size: 13px;
 }
@@ -213,11 +216,11 @@ h1 {
   color: var(--text-1);
 }
 .spark {
-  color: var(--brand-400);
+  color: var(--brand-500);
 }
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -226,14 +229,14 @@ h1 {
   font-size: 13px;
 }
 .login-btn {
-  height: 34px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 20px;
   border-radius: 999px;
   background: var(--brand-500);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
 }
 .body {
   flex: 1;

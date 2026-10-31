@@ -1,6 +1,7 @@
 import { type MiddlewareConsumer, Module, type NestModule } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { AppController } from "./app.controller";
+import { AdminAuditInterceptor } from "./common/admin-audit.interceptor";
 import { AuthGuard } from "./common/auth.guard";
 import { LoggingModule, RequestLoggingMiddleware } from "./common/logging";
 import { HealthController } from "./health/health.controller";
@@ -91,7 +92,18 @@ import { StorageModule } from "./storage/storage.module";
     VoiceModule,
   ],
   controllers: [AppController, HealthController, MetricsController],
-  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: AuthGuard },
+    /**
+     * 运营后台操作审计（契约 §3.4）。
+     *
+     * 为什么用 APP_INTERCEPTOR 而不是在 main.ts 里 useGlobalInterceptors：审计需要注入
+     * `AdminAuditService`（在 AdminModule 提供），走模块 provider 才能拿依赖；也保证
+     * 测试里 `NestFactory.create(AppModule)` 起的实例同样带审计（e2e 能验证落库）。
+     * 拦截器内部只在"带 adminAuth + /v1/ops/ 写请求"时工作，其余请求零开销透传。
+     */
+    { provide: APP_INTERCEPTOR, useClass: AdminAuditInterceptor },
+  ],
 })
 export class AppModule implements NestModule {
   // 请求日志：全路由生效（request_id 回传 + 单行 JSON 请求日志，observability.md §1）

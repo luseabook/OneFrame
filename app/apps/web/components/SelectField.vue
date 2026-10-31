@@ -45,10 +45,11 @@ const id = useId();
 .select {
   appearance: none;
   width: 100%;
-  height: 34px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-md);
+  /* GL8：与 TextField 同规格（32 高 / #121216 / 1px #2E303A / 圆角 10） */
+  height: var(--control-h-sm);
+  background: var(--control-bg);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-control);
   color: var(--text-1);
   padding: 0 var(--space-8) 0 var(--space-3);
   font-size: var(--text-base);
@@ -63,7 +64,6 @@ const id = useId();
 }
 .select:focus {
   border-color: var(--brand-500);
-  box-shadow: 0 0 0 3px #7e70ff2e;
 }
 .select:disabled {
   background: var(--bg-sunken);

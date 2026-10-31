@@ -207,16 +207,50 @@ describe("publish.transcode worker consumer", () => {
     const sourceKey = `u/${spaceId}/exports/race-${String(id)}.mp4`;
     await storage.put(sourceKey, Buffer.from("race-source-bytes"), "video/mp4");
 
-    const [a, b] = await Promise.all([
-      runPublishTranscodeJob(
-        { db, storage, log },
-        { publicationId: String(id), spaceId: String(spaceId), sourceKey },
-      ),
-      runPublishTranscodeJob(
-        { db, storage, log },
-        { publicationId: String(id), spaceId: String(spaceId), sourceKey },
-      ),
-    ]);
+    /**
+     * 竞态必须**被控制**，不能靠调度运气。
+     *
+     * 直接 `Promise.all` 两条 job 时，慢机器上 A 可能连转码带落库全部跑完，
+     * B 的 `loadPublication` 直接看到终态 3 → skipped 原因写的是 "terminal"，
+     * 于是断言 `toContain("claimed")` 偶发失败（本机全量并发跑时实际发生过一次）。
+     * 那并不是代码回归，而是**测试没锁住它想测的窗口**。
+     *
+     * 这里把 A 卡在「已抢占、刚进 readSource」这一瞬间：等到 B 走完自己的
+     * markTranscoding（必然抢不到）再放行 A。这样测到的就一定是抢占路径。
+     */
+    let releaseRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let markClaimed = () => {};
+    const claimed = new Promise<void>((resolve) => {
+      markClaimed = resolve;
+    });
+    const gatedStorage = new Proxy(storage, {
+      get(target, prop, receiver) {
+        if (prop === "read") {
+          return async (key: string) => {
+            markClaimed();
+            await readGate;
+            return target.read(key);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    const aPromise = runPublishTranscodeJob(
+      { db, storage: gatedStorage, log },
+      { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+    );
+    // A 已把 status 抢成 2（否则 readSource 不会被调用），此刻才起 B
+    await claimed;
+    const b = await runPublishTranscodeJob(
+      { db, storage, log },
+      { publicationId: String(id), spaceId: String(spaceId), sourceKey },
+    );
+    releaseRead();
+    const a = await aPromise;
 
     const results = [a.result, b.result].sort();
     expect(results).toEqual(["ready", "skipped"]);

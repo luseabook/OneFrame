@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createDb, modelPrices, models, tasks } from "@app/db";
 import { GenerationMode } from "@app/shared";
 import {
@@ -25,6 +25,7 @@ import {
   TOOL_MODES,
   ensureToolCatalog,
   publicToolCatalog,
+  resetToolCatalogMemoForTest,
 } from "../src/modules/generations/tool-catalog";
 
 /**
@@ -216,18 +217,121 @@ describe("工具箱目录：20 卡 + 16 个工具 mode 的单一数据源", () =
   });
 });
 
+describe("工具箱目录 ensure 不覆盖运营改动（契约 §2.10）", () => {
+  /**
+   * 这是"价格后台可调、不写死"的最小护栏。
+   *
+   * `ensureToolCatalog()` 会在每次 `GET /generations/tools` 与工具投递路径上惰性触发，
+   * 如果它顺手把运营改过的 `visible`/`sort`/金额/上下架写回代码常量，现象就是
+   * "后台改了价，下一次请求就变回去，而且没有任何报错"——线上极难排查。
+   * 用例直接改库 → 重置 ensure 记忆 → 再跑 ensure，验证运营字段原样保留、定义字段仍被同步。
+   */
+  it("运营改价/下架/改排序后，再跑 ensureToolCatalog 仍保留", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    // 取一个按次计价的工具（只有 1 档价，断言最干净）：TOOL_MODES[0] 是「视频对口型」
+    const tool = TOOL_MODES.find((item) => item.mode !== "video_upscale")!;
+    try {
+      const [modelRow] = await db.select().from(models).where(eq(models.name, tool.model.name));
+      expect(modelRow, "目录模型行应先由 ensureToolCatalog 落库").toBeTruthy();
+      const [priceRow] = await db
+        .select()
+        .from(modelPrices)
+        .where(
+          and(
+            eq(modelPrices.modelId, modelRow!.id),
+            eq(modelPrices.mode, tool.mode),
+            eq(modelPrices.resolution, tool.prices[0]!.resolution),
+            isNull(modelPrices.durationS),
+          ),
+        );
+      expect(priceRow, "目录价目行应先由 ensureToolCatalog 落库").toBeTruthy();
+
+      // 共享 dev 库：先记原值，用例结束原样还回去，不留被改过的价/可见性
+      const original = {
+        visible: modelRow!.visible,
+        sort: modelRow!.sort,
+        credits: priceRow!.credits,
+        strikeCredits: priceRow!.strikeCredits,
+        active: priceRow!.active,
+      };
+      const changedCredits = original.credits + 7;
+      const changedStrike = (original.strikeCredits ?? 0) + 9;
+      try {
+        await db.update(models).set({ visible: true, sort: 42 }).where(eq(models.id, modelRow!.id));
+        await db
+          .update(modelPrices)
+          .set({ credits: changedCredits, strikeCredits: changedStrike, active: false })
+          .where(eq(modelPrices.id, priceRow!.id));
+
+        // ensure 有进程内记忆，不重置的话会直接 return，等于什么都没测
+        resetToolCatalogMemoForTest();
+        await ensureToolCatalog();
+
+        const [afterModel] = await db.select().from(models).where(eq(models.id, modelRow!.id));
+        const [afterPrice] = await db.select().from(modelPrices).where(eq(modelPrices.id, priceRow!.id));
+        // 运营字段：原样保留
+        expect(afterModel!.visible).toBe(true);
+        expect(afterModel!.sort).toBe(42);
+        expect(afterPrice!.credits).toBe(changedCredits);
+        expect(afterPrice!.strikeCredits).toBe(changedStrike);
+        expect(afterPrice!.active).toBe(false);
+        // 定义字段：仍然按代码同步（否则档位定义变更在已有库上永不生效）
+        expect((afterModel!.modes as Record<string, unknown>)[tool.mode]).toEqual(tool.modeConfig);
+      } finally {
+        await db
+          .update(models)
+          .set({ visible: original.visible, sort: original.sort })
+          .where(eq(models.id, modelRow!.id));
+        await db
+          .update(modelPrices)
+          .set({ credits: original.credits, strikeCredits: original.strikeCredits, active: original.active })
+          .where(eq(modelPrices.id, priceRow!.id));
+        // 还原后再跑一次 ensure，把进程内记忆恢复成"已 ensure 过"（后续用例依赖它）
+        resetToolCatalogMemoForTest();
+        await ensureToolCatalog();
+      }
+    } finally {
+      await pool.end();
+    }
+  });
+});
+
 describe("工具箱报价：每个 mode 都能报出目录价", () => {
-  it("16 个工具 mode 逐个报价，金额等于目录里的初始价", async () => {
-    for (const tool of TOOL_MODES) {
-      const res = await inject("POST", "/credits/quote", quoteBody(tool.key));
-      expect(res.code, `${tool.mode} quote: ${res.msg}`).toBe(0);
-      // 按次能力的价目在 resolution=per_call 档；超清按真实画质档（1080p/2K/4K）
-      const expected =
-        tool.mode === "video_upscale"
-          ? tool.prices.find((price) => price.resolution === tool.modeConfig.default_resolution)!.credits
-          : tool.prices.find((price) => price.resolution === "per_call")!.credits;
-      expect(res.data.credits, `${tool.mode} credits`).toBe(expected);
-      expect(res.data.quote_id).toBeTruthy();
+  it("16 个工具 mode 逐个报价，金额等于 DB 里的当前价目", async () => {
+    /**
+     * 金额断言必须读 **DB 当前价**，不能读 `TOOL_MODES[].prices`。
+     *
+     * 契约 §2.10 起 `ensureToolCatalog` 不再覆盖运营改过的价，代码里的 `prices` 只是
+     * "首次落库默认值"。继续拿代码常量断言的话，运营在后台调一次价这条用例就会红，
+     * 而红的原因是"常量过时"而不是"报价错了"——那会让门禁变成噪音。
+     */
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      for (const tool of TOOL_MODES) {
+        const res = await inject("POST", "/credits/quote", quoteBody(tool.key));
+        expect(res.code, `${tool.mode} quote: ${res.msg}`).toBe(0);
+        // 按次能力的价目在 resolution=per_call 档；超清按真实画质档（1080p/2K/4K）
+        const resolution = tool.mode === "video_upscale" ? tool.modeConfig.default_resolution : "per_call";
+        const rows = await db
+          .select({ credits: modelPrices.credits })
+          .from(modelPrices)
+          .innerJoin(models, eq(models.id, modelPrices.modelId))
+          .where(
+            and(
+              eq(models.name, tool.model.name),
+              eq(modelPrices.mode, tool.mode),
+              eq(modelPrices.resolution, resolution),
+              // NULL=按次：必须显式带这个条件，否则会同时匹配到按秒档（这里目前没有，
+              // 但一旦未来给该 mode 加了 durations，不带就会变成"随机一条价"）
+              isNull(modelPrices.durationS),
+            ),
+          );
+        expect(rows.length, `${tool.mode} 价目行应唯一`).toBe(1);
+        expect(res.data.credits, `${tool.mode} credits`).toBe(rows[0]!.credits);
+        expect(res.data.quote_id).toBeTruthy();
+      }
+    } finally {
+      await pool.end();
     }
   });
 

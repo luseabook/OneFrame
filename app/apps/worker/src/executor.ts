@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { assets, canvasNodes, models, projectAssets, settleCredits, storyboards, taskEvents, tasks, unfreezeCredits } from "@app/db";
+import { assets, canvasNodes, models, projectAssets, releaseFrozen, storyboards, taskEvents, tasks } from "@app/db";
 import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
@@ -27,6 +27,16 @@ export interface ExecutorDeps {
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 轮询上游生成结果的最长等待（P1-16）。
+ *
+ * 为什么是 15 分钟：真实视频生成 2–10 分钟是常态（5s/1080p 起步 3–6 分钟），
+ * 原来 120s 的默认值意味着「按默认配置上线，绝大多数视频任务都会在超时后被判失败」——
+ * 虽然会解冻不扣费，但用户体验是「点了没反应然后失败」，并会污染失败率告警。
+ * 15 分钟覆盖 P99 并留余量；供应商更慢时可以调 `POLL_MAX_MS`。
+ */
+export const DEFAULT_MAX_POLL_MS = 15 * 60_000;
 
 /**
  * 任务产物落库的 Content-Type / 扩展名。
@@ -144,14 +154,15 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
         updatedAt: new Date(),
       })
       .where(eq(tasks.id, task.id));
-    if (fresh.creditsFrozen > 0) {
-      await settleCredits(tx, {
-        spaceId: fresh.spaceId,
-        cost: fresh.creditsFrozen,
-        taskId: fresh.id,
-        memo: "task succeeded settle",
-      });
-    }
+    // 冻结收尾（PR-03）：成功后是 **settle**，额度按 credit_flows 的 outstanding 算，
+    // 并按同一口径把 tasks.credits_frozen 归零（此前全仓 0 处归零，导致该字段恒 >0）。
+    // 这里**不能**换成 unfreeze：赠送额度是 delta=0/frozen_delta=-N，换成解冻会凭空多出可用余额。
+    await releaseFrozen(tx, {
+      spaceId: fresh.spaceId,
+      taskId: fresh.id,
+      disposition: "settle",
+      memo: "task succeeded settle",
+    });
     // 定妆图任务：成功结果自动资产化并置角色定稿（未定稿角色不得被分镜引用）
     if (fresh.capability === "image" && labeled[0]?.uri) {
       const [portrait] = await tx
@@ -266,15 +277,22 @@ async function fail(
   await deps.db.transaction(async (tx) => {
     const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for("update");
     if (!fresh) return;
-    if (fresh.status === TaskStatus.SUCCEEDED || fresh.status === TaskStatus.FAILED) return;
-    if (fresh.creditsFrozen > 0) {
-      await unfreezeCredits(tx, {
-        spaceId: fresh.spaceId,
-        cost: fresh.creditsFrozen,
-        taskId: fresh.id,
-        memo: "task failed refund",
-      });
+    // 三个终态都要挡：漏掉 CANCELED 会让「用户取消 → 已解冻」之后又被这里再退一次
+    //（凭空造积分）。与 succeed() 的守卫保持同一集合，不许只改一处。
+    if (
+      fresh.status === TaskStatus.CANCELED ||
+      fresh.status === TaskStatus.SUCCEEDED ||
+      fresh.status === TaskStatus.FAILED
+    ) {
+      return;
     }
+    // 失败/审核拒绝 → 按流水 unfreeze（幂等：已释放过的任务不会再退一次）
+    await releaseFrozen(tx, {
+      spaceId: fresh.spaceId,
+      taskId: fresh.id,
+      disposition: "unfreeze",
+      memo: "task failed refund",
+    });
     // PRD F7：审核拒绝 → 输出审核错误码 745802；其余失败 → 供应商错误 745900
     const errorCode =
       status === TaskStatus.REVIEW_REJECTED || error.kind === "output_rejected" ? 745802 : 745900;
@@ -391,7 +409,7 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
       .where(eq(tasks.id, id));
 
     const interval = deps.pollIntervalMs ?? 1000;
-    const deadline = Date.now() + (deps.maxPollMs ?? 120_000);
+    const deadline = Date.now() + (deps.maxPollMs ?? DEFAULT_MAX_POLL_MS);
     for (;;) {
       const state = await adapter.poll(submitted.vendor_task_id);
       if (state.status === "succeeded") {

@@ -330,6 +330,20 @@
       "when": 1793185303247,
       "tag": "0046_uneven_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793238250636,
+      "tag": "0047_fair_sphinx",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793239532436,
+      "tag": "0048_amusing_mandarin",
+      "breakpoints": true
     }
   ]
 }

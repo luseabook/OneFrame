@@ -133,6 +133,11 @@ POST /waitlist  {phone, source?}                   // 无需登录(P0-05)；限 
   ← {position: 当前等待人数, remaining: 余量(当周可发码数)}
 ```
 
+> **refresh 轮换是原子的（P1-10，2026-10-30）**：`POST /auth/refresh` 用一段 Lua 在 Redis 内
+> `GET 当前 jti → 匹配才 DEL 全部相关键`（`redis.delIfCurrent`），不是「先读后删」两跳。
+> 因此同一枚 refresh 被并发重放时**恰好一个**请求成功，其余全部 401101；旧写法在两跳之间留有窗口，
+> 8 路并发能全部通过（`test/token-refresh-rotation.spec.ts` 钉住单次消费、并发唯一、旧指针不可用）。
+
 ## 3. me / spaces
 
 ```
@@ -229,7 +234,32 @@ POST /share/{token}/report {reason,detail?,contact?}   // 公开举报(按 token
 ```
 
 status 枚举即 database §3；轮询接口响应加 `ETag`，3s 内重复轮询 304（配合 Redis 缓存）。
+
+**服务端取文件的安全边界（PR-04，2026-10-30）**：`/tasks/batch-download`、`/share/{token}/batch-download`
+与画布 `/canvas/nodes/batch-download` 都要由服务端去取「结果 URI」再打包，因此**共享同一套取文件守卫**
+（`apps/api/src/modules/canvas/canvas-download.guard.ts`）：
+
+| 判据 | 规则 |
+|---|---|
+| 协议 | 只允许 `http:`/`https:`；`file:`/`gopher:`/`data:`/`ftp:` 一律拒 |
+| 凭据 | URL 里带 `user:pass@` 直接拒（防 `http://evil.com@127.0.0.1/` 混淆） |
+| host | 必须命中 `CANVAS_DOWNLOAD_HOST_ALLOWLIST`（支持 `*.example.com`，只覆盖子域不含裸域）；未配置时**只允许存储自身 host**，两者皆空 = 全拒 |
+| 内网地址 | `0/8`、`10/8`、`127/8`、`172.16/12`、`192.168/16`、`169.254/16`、`100.64/10`、`198.18/15`、`224+`、`::1`、`::`、`fc00::/7`、`fe80::/10` 全拒；**IPv4-mapped IPv6 内嵌地址同样识别**（`::ffff:a9fe:a9fe` = `169.254.169.254`） |
+| DNS | 先 `dns.lookup(all)` 逐地址校验再请求（缓解 rebinding）；解析失败按业务错误而非 500 |
+| 可信 origin 豁免 | **仅**存储/站点自身配置的精确 origin（含端口）可绕过内网黑名单 —— 否则内网 MinIO/VPC S3 会全部跳过、用户拿到空 zip；通配符与 allowlist 不产生豁免，跳转后按新 URL 重算 |
+| 超时/体积 | `AbortSignal.timeout(10s)`；`CANVAS_DOWNLOAD_MAX_BYTES`（默认 200MiB）流式计数越限即中止 |
+| 重定向 | `manual` + 每一跳重新走完整校验（≤3 跳） |
+
+> 单文件失败**不使整包失败**（保持原语义），但必须留结构化日志（`reason`/`host`/`status`，URI 去 query）。
+> 守卫单测：`apps/api/test/canvas-download-ssrf.spec.ts`（91 例）。
 MVP 不提供任务删除/regenerate/feedback（RE 有 `task delete/regenerate`）；如 v1.1 需要，新增端点并补 tasks 软删字段，不得复用 cancel 语义。
+
+> **已实现（第 72 批，2026-10-28）**：`DELETE /tasks/{id}` 软删（`deleted_at`），只允许终态、不动 share 行。
+> **判据在 P1-1（2026-10-30）改为流水口径**：拒绝删除的条件是
+> `Σ credit_flows.frozen_delta where ref_task_id = id > 0`（还有悬着的冻结），
+> **不是** `tasks.credits_frozen > 0`。后者在 PR-03 之前从未归零、恒真，
+> 表现为「任何计价 > 0 的任务永久删不掉」；历史脏行则相反（字段非 0 但流水早已结清，被误拒）。
+> 判定与软删在同一事务里、对任务行加锁后复查，避免"判完就被别人解冻"。
 
 ## 7. files（OSS 直传，ADR-005）
 
@@ -563,8 +593,15 @@ POST /billing/orders/{id}/mock-pay        ← mock 渠道确认（PAYMENT_LIVE=t
 ```
 POST /billing/notify/wechat    // header: Wechatpay-Timestamp/Nonce/Signature（APIv3）
 POST /billing/notify/alipay    // application/x-www-form-urlencoded，参数含 sign/sign_type（RSA2）
-POST /billing/notify/mock      // 仅联调，PAYMENT_LIVE=true 时 HTTP 403
+POST /billing/notify/mock      // 仅联调；NODE_ENV=production 一律 HTTP 403（与 PAYMENT_LIVE 取值无关），PAYMENT_LIVE=true 时也 403
 ```
+
+> **PR-02（2026-10-30）**：mock 两端的关闭条件从「业务开关 `PAYMENT_LIVE=true`」改为
+> **「生产环境无条件硬拒」**——不能拿业务开关当安全开关（样例环境里 `PAYMENT_LIVE` 默认 false，
+> 旧实现等于把 mock 入账端点开在公网）。`PAYMENT_LIVE=true` 的拒绝是叠加条件（真收款环境不许"模拟支付"），
+> 不是替代。另外 `mock-pay` 增加**订单归属校验**：必须传 `space_id` 且与订单一致，
+> 不一致按 `400102 order not found`（不 disclose 他人订单是否存在）；mock 渠道的 `amount_cents` 改为**必填**，
+> 缺失即 `400101`（此前省略该字段可完全跳过金额比对）。
 
 回调响应体**必须**符合渠道协议，因此这两个端点用 `@Res` 直写并绕过全局信封：
 
@@ -623,6 +660,7 @@ ALIPAY_GATEWAY（默认生产网关，沙箱需显式覆盖）
 
 ```
 GET  /ops/admin/orders?status=&page=&page_size=   // 运营查单（含退款留痕字段）
+GET  /ops/admin/orders.csv?status=&from=&to=      // 退款对账导出（CSV，16 列，≤5000 行）
 POST /ops/admin/orders/{id}/refund                // 管理端鉴权（AdminGuard）
      body { reason?: string, amount_cents?: int }  // amount_cents 仅用于声明/校验，必须等于订单金额
   ← {order_id, status:4, status_label:"已退款", refund_no, refund_status, refund_amount_cents, refunded_at, idempotent, channel_refund_id?}
@@ -640,7 +678,9 @@ POST /ops/admin/orders/{id}/refund                // 管理端鉴权（AdminGuar
 `NODE_ENV=production` 时 `buildEnv()` 在启动阶段聚合校验并拒绝启动（错误信息只含变量名，不含值）：
 
 - `JWT_SECRET` / `PHONE_HMAC_PEPPER` / `PHONE_ENC_KEY` 必须显式配置且不等于仓库默认值；
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 必须显式配置，且密码不能是开发默认值；`COOKIE_SECURE` 必须显式设置；
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 必须显式配置，且密码不能是开发默认值；`COOKIE_SECURE` 必须显式设置（HTTPS 部署为 `true`，内网 HTTP 需显式 `false`，不再默认 false 静默放行）；
+- `METRICS_TOKEN`（≥16 字符）生产必须显式设置：`GET /v1/metrics` 含任务与资金指标，不能匿名抓取；
+  未配置时 handler 一律 401（`WWW-Authenticate: Bearer`，纯文本），比较用 `timingSafeEqual`；
 - `PAYMENT_LIVE=true` 时：至少一个渠道凭据齐全；任何"已配置但缺项"的渠道会列出缺失变量（如微信缺 `WECHAT_APP_ID`）并拒绝启动。
 
 worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至少配置 `ARK_API_KEY` / `DEEPSEEK_API_KEY` / `HTTP_VIDEO_BASE_URL` 之一，否则拒绝启动。
@@ -655,30 +695,100 @@ worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至�
 ## 11. ops / admin（独立鉴权 admin_users）
 
 ```
-GET  /ops/config/{key}?module=&lang=      // 公开(公告/横幅/定价页文案)
-PUT  /ops/admin/config/{key}              // 管理端
-GET  /ops/admin/dashboard                 // 失败率/队列深度/adapter 延迟
-GET  /ops/admin/models                    // 模型目录（含 modes / capabilities）
-PATCH /ops/admin/models/{id}              // 上下架/排序
-GET  /ops/admin/model-prices?model_id=    // 价目列表
-POST /ops/admin/model-prices              // **新增价目**（档位必须已存在于模型目录的 modes）
+# ── 公开配置读（未登录前端可用；只按键读，不提供列表/通配）──
+GET  /ops/config/{key}?module=&lang=      // 公告/横幅/定价页文案；lang 以 module 后缀隔离（home@en），未命中回落无语言 module
+
+# ── 概览 / 运营位 / 首页配置 / 导出审计 / 分享 / 举报 / 创作者审核 ──
+GET  /ops/admin/dashboard                 // 失败率/队列深度/adapter 延迟/任务状态分布
+GET  /ops/admin/queues                    // gen.submit · export.zip 的 wait/active/failed/completed/delayed
+GET  /ops/admin/promo-slots · POST · PUT /{id} · DELETE /{id}   // banner/pop_up/activity/creator 四类；列表回 active_now
+GET  /ops/admin/home-config · POST /ops/admin/home-config       // global 层首页板块；乐观锁 version
+GET  /ops/admin/exports?page=&page_size=  // 导出任务审计
+GET  /ops/admin/shares?page=&page_size=   // 分享列表
+POST /ops/admin/shares/{id}/revoke        // 运营下线分享
+GET  /ops/admin/reports?status=&page=&page_size= · POST /ops/admin/reports/{id}/resolve {action:takedown|dismiss}
+GET  /ops/admin/creator-audits?status=&q=&page=&page_size= · POST /ops/admin/creator-audits/{id}/review {action:approve|reject|offline,note?}
+
+# ── 模型 / 参数枚举 / 价目 ──
+GET  /ops/admin/models                    // 模型目录（含 modes / types / capabilities）
+PATCH /ops/admin/models/{id}              // {visible?,sort?,modes?}；modes 为**整体替换**（1..20 键、≤32KB、档位校验）
+GET  /ops/admin/model-prices?model_id=&active=&page=&page_size=   // 含 model_name/active/updated_at
+POST /ops/admin/model-prices              // 新增价目（档位必须已存在于模型目录的 modes；active 默认 true）
 PATCH /ops/admin/model-prices/{id}        // 改金额 / active=false 下架
 DELETE /ops/admin/model-prices/{id}       // 删除误配档位（追溯用下架，不用删除）
-GET  /ops/admin/task-metrics              // 失败率 + 错误码分布 + adapter avg/p95 延迟
-GET  /ops/admin/failed-tasks.csv          // 失败任务清单导出(CSV, ≤1000 行)
-GET  /ops/admin/funnel                    // 流水线漏斗：建项→大纲→角色定稿→分镜→批量→成功(含转化率)
-GET  /ops/admin/reports · POST /ops/admin/reports/{id}/resolve {action:takedown|dismiss}
+
+# ── 任务看板 / 导出 ──
+GET  /ops/admin/tasks?status=&model_id=&mode=&page=&page_size=   // 含 model_name/adapter_code/error_code/error_message/finished_at
+GET  /ops/admin/task-metrics?model_id=&from=&to=   // 失败率 + 错误码分布 + adapter avg/p95；同一组筛选作用于全部聚合
+GET  /ops/admin/failed-tasks.csv?model_id=&from=&to=   // ≤1000 行；表头前缀 task_id,space_id,model,mode,status 保持不变
+GET  /ops/admin/funnel                    // 6 段项目维度：建项→大纲确认→角色定稿→分镜确认→批量投递→完集
+                                          // 每段 count/conversion_from_previous/dropoff_from_previous/avg_hours_from_previous/avg_hours_from_project_created
+
+# ── 订单 / 退款 / 对账 ──
 GET  /ops/admin/orders?status=&page=&page_size=   // 订单列表（含退款留痕）
 POST /ops/admin/orders/{id}/refund {reason?,amount_cents?}   // 全额退款（api-spec §10.5）
+GET  /ops/admin/orders.csv?status=&from=&to=      // 退款对账导出（16 列、≤5000 行）
+
+# ── 管理员账号 / 操作审计 / 配置中心（仅 super 管账号）──
+GET  /ops/admin/admins · POST /ops/admin/admins {username,password≥8,role?}
+PATCH /ops/admin/admins/{id} {role?,status?,password?}   // 最后一个启用 super 不可降级/停用；改密或启停 token_version++
+GET  /ops/admin/audit-logs?admin_id=&action=&from=&to=&page=&page_size=   // 非 GET 的 /v1/ops/* 成功操作自动落库
+GET  /ops/admin/audit-logs.csv?admin_id=&action=&from=&to=   // 同口径导出，≤5000 行
+GET  /ops/admin/configs?page=&page_size=&module=&q=          // 服务端分页；module 精确、q 对 key 模糊
+PUT  /ops/admin/config/{key} {value,module?,description?} · DELETE /ops/admin/config/{key}?module=
+                                       // DELETE 寻址粒度 = 列表行粒度（key,module）：?module=home@en 只删该语言行；
+                                       // ?module= 只删默认域那一行（空串是合法地址，不能折叠成"删全部"）；
+                                       // 不带查询参数才是删整个 key（批量清理）。响应含 deleted_count
+
+# ── 用户 / 等待名单 / 邀请码 / AI 标识审计（P2）──
+GET  /ops/admin/users?q=&status=&deleted=&page=&page_size=   // q：昵称 / 用户 ID / 11 位手机号（HMAC 等值）
+PATCH /ops/admin/users/{id} {status:1|2}                     // 封禁/解封；已注销 → 400101
+POST /ops/admin/users/{id}/restore {nickname?}               // 注销恢复；昵称/头像已匿名化不可还原
+GET  /ops/admin/waitlist?invited=0|1&page=&page_size=        // 只回 phone_hash_prefix（平台无明文手机号）
+POST /ops/admin/waitlist/{id}/invite                         // 标记 invited_at（幂等）
+GET  /ops/admin/invite-codes?status=&page=&page_size= · POST /ops/admin/invite-codes {credits?,max_uses?,expires_at?,count?} · PATCH /ops/admin/invite-codes/{id} {status:1|2}
+GET  /ops/admin/ai-labels?from=&to=&only_missing=&page=&page_size= · GET /ops/admin/ai-labels.csv?from=&to=&only_missing=
 ```
 
 > 鉴权：/ops/admin/* 需 admin_users 独立 JWT；无凭证 → 401101，携带普通用户 token → **403101**。
+> 角色 `super|ops|viewer`：viewer 对非 GET 一律 403101；`/ops/admin/admins*` 仅 super。
+> JWT 带 `ver`（= `admin_users.token_version`），改密/停用后旧 token 立即失效（401101，需重登）；
+> 存量库升级时迁移 0047 会把「首个管理员」提升为 super（否则无人能管账号）。
+> 登录失败限流：同（用户名+真实客户端 IP）5 分钟内 10 次失败 → `429101`（Redis 计数，成功登录即清零）。
+>
+> **操作审计**：`/v1/ops/` 下的**写操作**（非 GET/HEAD/OPTIONS）成功后异步落 `admin_audit_logs`
+> （admin_id / action / method / path / ip / ua / metadata）。三条边界：只记成功（失败不是「改了什么」的证据，
+> 失败原因已由错误码与请求日志承载）；fire-and-forget，审计库抖动不影响运营操作返回；
+> 入参按键名脱敏（password/token/secret/cookie… 一律 `***`），URL 只存**去掉查询串**的路径，
+> payload 超 8KB 截断。读请求不记 —— 后台列表页每刷新一次就写一条会把真正的写操作淹没。
 
-> **定价可写是硬要求（2026-10-26）**：`PATCH` 只能改已存在的行；模型目录里加了新模式
-> （如文本类 `script_optimization`）之后，如果控制台只能改不能建，运营就只能等发版才能上架定价，
-> "价格后台可调、不写死"就是空话。因此补 `POST`/`DELETE`，并做**档位合法性校验**
-> （mode 必须在该模型的 `modes` 里、resolution/duration 必须取自该 mode 声明的档位）；
-> 金额本身完全由运营决定，代码里不出现任何能力单价常量。
+> **定价与参数枚举可写是硬要求**：`PATCH /ops/admin/models/{id}` 支持 `modes` 整体替换
+> （深合并无法表达"下架一个分辨率档位"）；`POST/DELETE /ops/admin/model-prices` 支持建/删档位，
+> 并做**档位合法性校验**（mode 必须在该模型的 `modes` 里、resolution/duration 必须取自该 mode 声明的档位）；
+> 金额本身完全由运营决定。工具模型（`toolbox-*`）的 `modes` 由 `tool-catalog.ts` 的 `TOOL_MODES`
+> 定义、每次目录同步会覆盖，故 `PATCH modes` 对这类模型返回 `400101`（要改档位请改目录定义）；
+> 其上下架/排序/价目仍归运营。工具模型的价目/上下架/排序**不再被进程启动覆盖**
+> （仅缺失行落代码默认值；`CATALOG_SYNC_TOOLS=true` 才强制同步，属测试/应急开关）。
+
+> **漏斗口径**：数据源为现有业务表的时间戳（不是埋点事件）：大纲取 `episodes.status=2` 的最早
+> `updated_at`、角色取 `project_assets.finalized_at`、分镜取 `storyboards.status>=2` 的最早
+> `updated_at`、批量取 `tasks.mode=universal_reference` 的最早 `created_at`、完集取"该集有分镜且
+> 无 `status<>5`"的最晚 `updated_at`。`avg_hours_from_previous` 只在两环节都到达的项目上计算。
+> 与 metrics §2 埋点事件口径的差异已登记在 `docs/07-plan/implement-progress-vs-reelmate.md`（D2）。
+
+> **用户/邀请/AI 标识口径（2026-10-29 P2）**：
+> - `users` 列表**只回 `phone_masked`**（`138****1234`），不出明文；`q` 支持昵称 / 用户 ID /
+>   11 位手机号（HMAC 等值），手机号没注册过返回空页而不是退化成昵称搜。注销恢复只清
+>   `deleted_at/status`，昵称与头像在注销时已匿名化、不可还原（可传新 `nickname`）。
+> - `waitlist` 只存 `phone_hash`（HMAC），平台无明文/解密路径，因此只回 `phone_hash_prefix`；
+>   `invite` 只标记 `invited_at`，系统不会发短信（没有手机号）。
+> - `invite-codes` 的 `status=3`（耗尽）是**派生值**（`status=1 且 used_count>=max_uses`），
+>   库里不写 3；列表按 1/2/3 过滤时服务端翻译成同一口径条件，避免"筛 3 看不到用满的码"。
+> - `ai-labels` 数据源是 `tasks.results[].meta.ai_label`（worker 生成时写入，**不建第二套埋点表、
+>   不做回填**）：`has_ai_label` 与 `enabled` 是两个维度（`{enabled:false}` 也算有标签）；
+>   `only_missing=1` 用于抽验"成功但没打标"的产出；单次扫描 ≤5000 行，total 是该上限内的总数。
+
+
 
 ## 12. 版本与废弃策略
 
@@ -1150,6 +1260,10 @@ mock 形状一致的产出（产出 JSON 与真实路径同形）；接真实能
 > **偏离原设计的点**：原写"一次性 ≤60s"。一次性会让**每一次断线重连都必然 401**，而 ADR-012 明确要求
 > 断线可回落、可重连；故改为短 TTL 可复用 + 可选绑定 `session_id`（签令牌前校验会话归属，
 > 防止拿 A 会话的令牌去连 B）。令牌与 access token 的 audience 不同，两套互不可用。
+> **P1-9（2026-10-30）收窄**：`AuthGuard` 只在标了 `@AllowStreamToken()` 的处理器上接受 `?stream_token=`
+> （当前 4 个 SSE 处理器：`GET/POST /agent/task/stream`、`GET /agent/sessions/{session_id}/stream`、`GET /canvas/chat/sessions/{session_id}/stream`），
+> 其余受保护路由一律要求 `Authorization: Bearer`。理由：stream token 短时效、无 `jti`、无法单独吊销，
+> 若全局接受查询参数，等于给所有接口开了一个不能吊销的后门。
 
 ### 14.7 限流（四域新增基线）
 

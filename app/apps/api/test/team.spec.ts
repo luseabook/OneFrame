@@ -165,6 +165,13 @@ describe("team (cam) e2e", () => {
     expect(alloc.team_balance).toBe(teamBal0 - 250);
     expect(alloc.member_balance).toBe(memberBal0 + 250);
 
+    // credits_quota 随分配原子累加（并发批量分配不能靠事务外读回写）
+    const quotaAfterAlloc = (await db.execute(sql`
+      select credits_quota from space_members
+      where space_id = ${BigInt(teamSpaceId)} and user_id = ${BigInt(member.userId)}
+    `)) as { rows?: Array<{ credits_quota: number }> };
+    expect(Number(quotaAfterAlloc.rows?.[0]?.credits_quota)).toBe(250);
+
     // 关键：全系统 Σdelta 不变（成对转账互相抵消）
     const after = (await db.execute(sql`
       select
@@ -179,6 +186,12 @@ describe("team (cam) e2e", () => {
     const rec = await svc.recover(teamSpaceId, owner.userId, { user_id: member.userId, amount: 100 });
     expect(rec.team_balance).toBe(teamBal0 - 150);
     expect(rec.member_balance).toBe(memberBal0 + 150);
+
+    const quotaAfterRecover = (await db.execute(sql`
+      select credits_quota from space_members
+      where space_id = ${BigInt(teamSpaceId)} and user_id = ${BigInt(member.userId)}
+    `)) as { rows?: Array<{ credits_quota: number }> };
+    expect(Number(quotaAfterRecover.rows?.[0]?.credits_quota)).toBe(150);
 
     const after2 = (await db.execute(sql`
       select coalesce(sum(delta),0)::bigint as sum_delta from credit_flows

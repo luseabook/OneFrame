@@ -4,19 +4,36 @@ x-app-env: &app-env
   NODE_ENV: production
   DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@postgres:5432/app
   REDIS_URL: redis://redis:6379
-  JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-me}
+  # ── 密钥类变量（PR-01/PR-02/PR-05）──────────────────────────────────────
+  # 一律用 `${VAR:?}` 强制必填：**不给生产密钥留默认值**。
+  # 缺一个变量时 `docker compose up` 会在解析阶段直接报错（比 api 容器 CrashLoop 好排查得多）。
+  # 这些值同时也可从 `env_file: ./.env` 读入；写在这里是为了"缺了就报错"的强约束。
+  JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (see .env.production.example)}"
+  # 管理端 token 专用密钥（PR-05）：生产必填，且不得与 JWT_SECRET 相同（用户域密钥泄露不得导致 admin 可伪造）
+  ADMIN_JWT_SECRET: "${ADMIN_JWT_SECRET:?ADMIN_JWT_SECRET is required (see .env.production.example)}"
+  # PIPL 加密/散列密钥（PR-01）：缺失时 env.ts 生产守卫会拒绝启动
+  PHONE_HMAC_PEPPER: "${PHONE_HMAC_PEPPER:?PHONE_HMAC_PEPPER is required}"
+  PHONE_ENC_KEY: "${PHONE_ENC_KEY:?PHONE_ENC_KEY is required}"
+  STORAGE_SIGN_SECRET: "${STORAGE_SIGN_SECRET:?STORAGE_SIGN_SECRET is required}"
+  # 支付开关必须显式声明（PR-02）：缺省会让生产默认落在 mock 渠道上
+  PAYMENT_LIVE: "${PAYMENT_LIVE:?PAYMENT_LIVE is required (true|false)}"
   ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
-  # 本地 compose 为 HTTP 部署，Cookie 不能带 Secure（否则浏览器不保存 → 刷新掉登录）。
-  # 生产 HTTPS 部署请设为 true（.env.production.example 已注明）。
-  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  # 本地 HTTP 部署与生产 HTTPS 的差异必须由部署者显式声明（P1-11）：
+  # 原来默认 false，照抄 prod compose 上 HTTPS 会得到"登录后刷新即掉线"，
+  # 反过来在内网 HTTP 上强行 true 则根本存不下 Cookie。缺省不再替人决定。
+  COOKIE_SECURE: "${COOKIE_SECURE:?COOKIE_SECURE is required (true for HTTPS, false for intranet HTTP)}"
+  # `/v1/metrics` 抓取令牌（P1-12）：指标含任务与资金异常，不能匿名可读。
+  # 缺失时 api 启动守卫也会拒绝启动（env.ts），这里提前在 compose 解析阶段报错。
+  METRICS_TOKEN: "${METRICS_TOKEN:?METRICS_TOKEN is required (see .env.production.example)}"
   STORAGE_DRIVER: s3
   STORAGE_S3_BUCKET: ${S3_BUCKET:-app-results}
   STORAGE_S3_REGION: ${S3_REGION:-us-east-1}
   STORAGE_S3_ENDPOINT: http://minio:9000
   STORAGE_S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
-  STORAGE_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-minioadmin}
-  STORAGE_S3_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-minioadmin}
+  # minioadmin 是公开已知口令（PR-05）：不再作为默认值，必须显式配置
+  STORAGE_S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY:?S3_ACCESS_KEY is required (minioadmin is a public known password)}"
+  STORAGE_S3_SECRET_ACCESS_KEY: "${S3_SECRET_KEY:?S3_SECRET_KEY is required (minioadmin is a public known password)}"
   STORAGE_S3_FORCE_PATH_STYLE: "true"
   # LLM 步骤（大纲/角色/剧本/分镜）：real 走 DeepSeek，mock 为确定性假文案。
   # 显式透传而非隐式默认：NODE_ENV=production 下若设 LLM_MODE=real 而缺 DEEPSEEK_API_KEY，
@@ -57,8 +74,8 @@ services:
     image: minio/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: "${S3_ACCESS_KEY:?S3_ACCESS_KEY is required (minioadmin is a public known password)}"
+      MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY:?S3_SECRET_KEY is required (minioadmin is a public known password)}"
     volumes:
       - miniodata:/data
     ports:
@@ -72,7 +89,7 @@ services:
       - minio
     entrypoint: >
       /bin/sh -c "
-      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin}; do echo 'waiting minio'; sleep 2; done;
+      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required} ${S3_SECRET_KEY:?S3_SECRET_KEY is required}; do echo 'waiting minio'; sleep 2; done;
       mc mb --ignore-existing local/${S3_BUCKET:-app-results};
       echo 'minio bucket ready';
       "
@@ -93,6 +110,11 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    # PR-01：此前容器只拿到 environment 里显式列出的变量，PHONE_* 等从未进入容器
+    # → env.ts 生产守卫直接抛错 → api CrashLoop。env_file 让 .env 全量进容器，
+    # environment 仍覆盖同名键（必填校验留在上面那段 x-app-env 里）。
+    env_file:
+      - ./.env
     environment: *app-env
     depends_on:
       migrate:
@@ -118,6 +140,8 @@ services:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
+    env_file:
+      - ./.env
     environment:
       <<: *app-env
       AI_LABEL_ENABLED: ${AI_LABEL_ENABLED:-true}

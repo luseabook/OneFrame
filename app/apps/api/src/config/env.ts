@@ -37,6 +37,9 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+  // `/v1/metrics` 的 Prometheus 抓取令牌（Bearer）。指标含业务与资金异常，
+  // 生产必须显式设置；开发/测试不配则端点一律 401。
+  METRICS_TOKEN: z.string().min(16).optional(),
 
   // Alpha 准入 / 新人礼包
   AUTH_REQUIRE_INVITE: z
@@ -173,7 +176,30 @@ const envSchema = z.object({
   // 运营后台（独立 admin_users；生产必须显式配置）
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
+  /**
+   * 管理端 JWT 专用密钥（PR-05：与用户域 `JWT_SECRET` **物理分离**）。
+   *
+   * 为什么必须拆：原先后台 token 与用户 token 同一把密钥。用户侧密钥的暴露面远大于
+   * 后台（日志、前端构建产物、备份、第三方集成、本地开发机……），一旦泄露，后果不是
+   * "能伪造用户"，而是**能直接伪造 admin token**。
+   *
+   * - 生产：必填（见 `collectProductionProblems`），并受占位符黑名单 + 强度下限约束；
+   * - 开发/测试：缺省回落到 `JWT_SECRET`（`resolveAdminJwtSecret`），
+   *   本地/CI 不必多配一个变量；回落这件事由 `admin-auth.service` 启动时打 warn。
+   */
+  ADMIN_JWT_SECRET: z.string().min(16).optional(),
   ADMIN_JWT_TTL_S: z.coerce.number().int().min(300).default(7200),
+  /**
+   * 工具目录（`tool-catalog.ts`）是否用代码定义强制覆盖库内工具模型/价目。
+   *
+   * 默认 **false**：工具模型也是运营资产，后台改价/上下架/排序必须能持久
+   * （此前每次进程启动都会被代码目录覆盖，等于"改了重启就回滚"）。
+   * 只有需要"代码即真相"的测试/应急场景才打开；正常运营不要开。
+   */
+  CATALOG_SYNC_TOOLS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   // 内容安全（MVP 敏感词；供应商审核 P2）
   MODERATION_ENABLED: z
@@ -198,6 +224,22 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+
+  // ── 画布批量下载：用户可控产物 URI 的服务端拉取守卫（PR-04 SSRF 收口）──
+  /**
+   * 允许服务端 fetch 的 host 清单：逗号分隔，支持 `*.example.com` 通配（**不**含裸域）。
+   * 留空 = **只允许存储自身 host**（由 `STORAGE_PUBLIC_BASE` / `STORAGE_S3_*` 推导），
+   * 绝不默认放行任意 host。内网/保留地址永远拒绝——写进白名单也不放行。
+   * 配置了本项就只认本项：产物托管在自己的 CDN 时，请把该 host 一并写上。
+   */
+  CANVAS_DOWNLOAD_HOST_ALLOWLIST: z.string().default(""),
+  /** 单个远程产物拉取的大小上限（字节）：默认 200MiB，超限立刻中止（已读字节不落盘） */
+  CANVAS_DOWNLOAD_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1024 * 1024 * 1024)
+    .default(200 * 1024 * 1024),
 });
 
 // ── 生产启动守卫（fail fast；纯函数便于单测）──────────────────────────────
@@ -224,6 +266,134 @@ function rawValue(raw: RawEnv, key: string): string | undefined {
 
 function missingFrom(raw: RawEnv, keys: string[]): string[] {
   return keys.filter((key) => rawValue(raw, key) === undefined);
+}
+
+/**
+ * 占位符/示例值黑名单（PR-05）。
+ *
+ * 为什么不能再只认 `INSECURE_DEFAULTS` 那 4 个仓库默认值：`.env.production.example`
+ * 给的是 `change-me-*` / `minioadmin`，长度全部满足 `min(16)`/`min(8)`，
+ * 于是**照抄模板上线 = 公开已知密钥**（可伪造任意用户/管理员 token、可读写对象存储）。
+ * 这里改为"长得像占位符就拒"，与长度无关；`<...>` 覆盖 `<your-secret>` 这类写法。
+ */
+export const PLACEHOLDER_SECRET_PATTERN =
+  /change[-\s_]?me|dev-only|minioadmin|example|placeholder|your[-\s_]|<[^>]*>/i;
+
+/**
+ * 密钥熵下限的落地形式：字符类别数（PR-05）。
+ *
+ * 为什么不用香农熵：它需要采样长度、对短密钥不稳定，运维也无法从报错里反推"该怎么改"。
+ * 字符类别数（大写/小写/数字/符号）能被一句话说清，且 `openssl rand -base64 32`
+ * 天然满足 3 类以上。长度下限沿用 schema 里既有的 `min()`，不在这里重复。
+ */
+export const SECRET_CHAR_CLASSES = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/] as const;
+export const MIN_SECRET_CHAR_CLASSES = 3;
+
+/** 返回强度不足的原因（null = 通过）；纯函数便于单测 */
+export function secretStrengthProblem(value: string): string | null {
+  const classes = SECRET_CHAR_CLASSES.filter((pattern) => pattern.test(value)).length;
+  if (classes < MIN_SECRET_CHAR_CLASSES) {
+    return `只用到了 ${classes} 类字符（大写/小写/数字/符号），至少需要 ${MIN_SECRET_CHAR_CLASSES} 类`;
+  }
+  return null;
+}
+
+/**
+ * 生产必须**显式配置**且必须是随机值的签名/加密密钥。
+ *
+ * `ADMIN_JWT_SECRET`：PR-05 新增（admin 与用户拆密钥）；
+ * `STORAGE_SIGN_SECRET`：与它们同类——仓库里有 `dev-only-storage-sign-secret` 默认值，
+ *   生产沿用即等于公开签名密钥，任何人可伪造存储直链（PR-05 的"占位密钥盲区"同源）。
+ */
+export const REQUIRED_SECRET_KEYS = [
+  "JWT_SECRET",
+  "ADMIN_JWT_SECRET",
+  "PHONE_HMAC_PEPPER",
+  "PHONE_ENC_KEY",
+  "STORAGE_SIGN_SECRET",
+] as const;
+
+/** 缺失时的额外说明（解释"为什么这把密钥不能省"），只写变量名与原因，绝不写值 */
+const REQUIRED_SECRET_NOTES: Record<(typeof REQUIRED_SECRET_KEYS)[number], string> = {
+  JWT_SECRET: "当前会回退到仓库默认值",
+  ADMIN_JWT_SECRET: "非生产会回落到 JWT_SECRET，生产必须独立：用户域密钥泄露不得导致 admin token 可伪造",
+  PHONE_HMAC_PEPPER: "当前会回退到仓库默认值",
+  PHONE_ENC_KEY: "当前会回退到仓库默认值",
+  STORAGE_SIGN_SECRET: "当前会回退到仓库默认值 dev-only-storage-sign-secret",
+};
+
+/**
+ * 密钥类问题（PR-05）：缺失 / 仍是仓库默认值 / 命中占位符 / 强度不足。
+ * 顺序刻意如此：先报"没配"，再报"配了但等于没配"，最后报"配了但太弱"。
+ */
+export function collectSecretProblems(raw: RawEnv): string[] {
+  const problems: string[] = [];
+  const insecureValues: string[] = Object.values(INSECURE_DEFAULTS);
+  for (const key of REQUIRED_SECRET_KEYS) {
+    const value = rawValue(raw, key);
+    if (value === undefined) {
+      problems.push(`${key} 必须显式配置（${REQUIRED_SECRET_NOTES[key]}）`);
+      continue;
+    }
+    if (insecureValues.includes(value)) {
+      problems.push(`${key} 仍是仓库默认值，生产必须替换`);
+      continue;
+    }
+    if (PLACEHOLDER_SECRET_PATTERN.test(value)) {
+      problems.push(`${key} 命中占位符黑名单（change-me/example/minioadmin/your- 一类模板值），生产必须替换为随机值`);
+      continue;
+    }
+    const strength = secretStrengthProblem(value);
+    if (strength !== null) {
+      problems.push(`${key} 强度不足：${strength}（建议 openssl rand -base64 32）`);
+    }
+  }
+
+  // 对象存储凭据：不强制要求存在（compose 已用 ${VAR:?} 卡住缺失），
+  // 但只要出现就必须不是"公开已知口令"——样例里的 `minioadmin` 正是这一类。
+  for (const key of ["STORAGE_S3_ACCESS_KEY_ID", "STORAGE_S3_SECRET_ACCESS_KEY"] as const) {
+    const value = rawValue(raw, key);
+    if (value !== undefined && PLACEHOLDER_SECRET_PATTERN.test(value)) {
+      problems.push(`${key} 命中占位符黑名单（minioadmin 等公开口令），生产必须替换`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * 支付开关必须显式声明（PR-02）。
+ *
+ * 背景：`PAYMENT_LIVE` 缺省回落到 false → "生产默认就是 mock 渠道"，而 mock 经销
+ * 正是这次 P0 的敞口来源。安全边界已经改成 `NODE_ENV==="production"` 一律硬拒 mock
+ * （业务开关不再当安全开关），但"生产到底要不要真收款"必须是**部署者的显式决定**，
+ * 不能靠一个默认值替他决定。
+ */
+export function collectPaymentModeProblems(raw: RawEnv): string[] {
+  const value = rawValue(raw, "PAYMENT_LIVE");
+  if (value === undefined) {
+    return ["PAYMENT_LIVE 必须显式设置（true 真实收款 / false 仅 mock 联调；生产不允许依赖 false 默认值）"];
+  }
+  if (value !== "true" && value !== "false") {
+    return ["PAYMENT_LIVE 只能是 true 或 false（其它值既过不了 schema，也让支付链路状态不可判定）"];
+  }
+  return [];
+}
+
+/**
+ * 管理端 token 密钥解析（PR-05）。
+ *
+ * 生产由守卫强制 `ADMIN_JWT_SECRET` 显式配置；非生产缺省回落到 `JWT_SECRET`，
+ * 让本地/CI 不必多配一个变量。但"回落到与用户域同密钥"必须**可见**，所以额外返回
+ * `fallback`，由 `admin-auth.service` 启动时打 warn —— 否则会出现
+ * "以为拆了、其实只是靠生产守卫兜住"的错觉。
+ */
+export function resolveAdminJwtSecret(source: {
+  ADMIN_JWT_SECRET?: string;
+  JWT_SECRET: string;
+}): { secret: string; fallback: boolean } {
+  const own = typeof source.ADMIN_JWT_SECRET === "string" ? source.ADMIN_JWT_SECRET.trim() : "";
+  if (own !== "") return { secret: own, fallback: false };
+  return { secret: source.JWT_SECRET, fallback: true };
 }
 
 /** 支付渠道凭据完整性（PAYMENT_LIVE=true 时） */
@@ -286,19 +456,8 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
   if (nodeEnv !== "production") return [];
 
   const problems: string[] = [];
-  const requiredSecrets: Array<{ key: string; insecure: string }> = [
-    { key: "JWT_SECRET", insecure: INSECURE_DEFAULTS.JWT_SECRET },
-    { key: "PHONE_HMAC_PEPPER", insecure: INSECURE_DEFAULTS.PHONE_HMAC_PEPPER },
-    { key: "PHONE_ENC_KEY", insecure: INSECURE_DEFAULTS.PHONE_ENC_KEY },
-  ];
-  for (const { key, insecure } of requiredSecrets) {
-    const value = rawValue(raw, key);
-    if (value === undefined) {
-      problems.push(`${key} 必须显式配置（当前会回退到仓库默认值）`);
-    } else if (value === insecure) {
-      problems.push(`${key} 仍是仓库默认值，生产必须替换`);
-    }
-  }
+  // PR-05：仓库默认值 / 占位符黑名单 / 字符类别强度，三个口径一起判（含 ADMIN_JWT_SECRET）
+  problems.push(...collectSecretProblems(raw));
 
   if (rawValue(raw, "ADMIN_USERNAME") === undefined) {
     problems.push("ADMIN_USERNAME 必须显式配置（生产不允许默认管理员）");
@@ -308,10 +467,20 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
     problems.push("ADMIN_PASSWORD 必须显式配置（生产不允许默认管理员）");
   } else if (adminPassword === INSECURE_DEFAULTS.ADMIN_PASSWORD) {
     problems.push("ADMIN_PASSWORD 仍是开发默认值，生产必须替换");
+  } else if (PLACEHOLDER_SECRET_PATTERN.test(adminPassword)) {
+    // 口令类不做字符类别强制（运维习惯不同），但"照抄样例"必须拦住
+    problems.push("ADMIN_PASSWORD 命中占位符黑名单（change-me 一类模板值），生产必须替换");
   }
+
+  // PR-02：支付开关必须显式声明（不要用默认值替部署者决定生产走不走真实收款）
+  problems.push(...collectPaymentModeProblems(raw));
 
   if (rawValue(raw, "COOKIE_SECURE") === undefined) {
     problems.push("COOKIE_SECURE 必须显式设置（HTTPS 部署为 true；内网 HTTP 需显式 false）");
+  }
+
+  if (rawValue(raw, "METRICS_TOKEN") === undefined) {
+    problems.push("METRICS_TOKEN 必须显式设置（/v1/metrics 含任务与资金指标，不能匿名抓取）");
   }
 
   problems.push(...collectLlmProblems(raw));

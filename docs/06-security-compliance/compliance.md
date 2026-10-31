@@ -32,7 +32,10 @@
   - 隐式：结果旁车 `<key>.ai.json` + task result `meta.ai_label`；导出 manifest 汇总 `ai_label`；
   - 无 ffmpeg/媒体不可解码：降级为仅隐式并写入 `explicit_reason`，不阻断出片；
 - 开关：`AI_LABEL_ENABLED`（上线必须 true）、`AI_LABEL_TEXT`、`AI_LABEL_FONT_PATH`、`FFMPEG_PATH`；
-- 待办：真实供应商结果/图片显式抽验、运营后台标识审计导出。
+- 待办：真实供应商结果/图片显式抽验；
+- **运营后台标识审计导出（2026-10-29 已补）**：`GET /ops/admin/ai-labels` / `.csv`
+  （数据源 `tasks.results[].meta.ai_label`，`only_missing=1` 可抽验"成功但未打标"的产出；
+  单次扫描 ≤5000 行、不在列表里回填改数据）。
 
 ## C. 内容安全义务
 

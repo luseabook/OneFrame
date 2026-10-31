@@ -72,6 +72,31 @@ export class RedisService implements OnModuleDestroy {
     await this.client.del(...keys);
   }
 
+  /**
+   * 原子「比较并删除」：仅当 `guardKey` 的当前值等于 `guardValue` 时，
+   * 删除 `guardKey` 与 `keys` 中的所有键，返回是否删除。
+   *
+   * 为什么必须是原子的：refresh 轮换是「读当前 jti → 比对 → 删两把键」，
+   * 分开的 GET + DEL 会让两个并发续期都读到同一个 jti、都成功轮换，
+   * 于是同一枚 refresh token 被用两次（重放检测失效），且后写的会话把先写的顶掉。
+   * Lua 在 Redis 单线程内执行，天然互斥。
+   */
+  async delIfCurrent(guardKey: string, guardValue: string, ...keys: string[]): Promise<boolean> {
+    await this.ready();
+    const script =
+      "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end\n" +
+      "for i = 1, #KEYS do redis.call('DEL', KEYS[i]) end\n" +
+      "return 1";
+    const result = (await this.client.eval(
+      script,
+      1 + keys.length,
+      guardKey,
+      ...keys,
+      guardValue,
+    )) as number;
+    return result === 1;
+  }
+
   async incrWithTtl(key: string, ttlSeconds: number): Promise<number> {
     await this.ready();
     const value = await this.client.incr(key);

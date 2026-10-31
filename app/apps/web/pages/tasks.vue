@@ -231,11 +231,10 @@ onMounted(() => {
         </div>
         <div class="head-actions">
           <Button variant="ghost" size="sm" @click="batchDownload">{{ t("tasks.batchDownload") }}</Button>
-          <LangSwitcher />
         </div>
       </header>
 
-      <!-- 状态筛选：沿用 projects/index.vue 的下划线 tab 范式 -->
+      <!-- 状态筛选：下划线 tab（GL9 已改白字白线） -->
       <nav class="tabs">
         <button
           v-for="s in statusTabs"
@@ -353,11 +352,14 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 页内容容器：与 home/tools 同一套 padding 节奏，最大宽度对齐 projects/index.vue */
+/* GL2：竞品内容区是**圆角面板 #191A22**，右缩 10 / 下缩 22（task.png x240–1589 / y64–977，圆角 12）。
+   全站只有 /tasks 与 /novel-market 有面板，其余页面内容区是平色 #0B0B10，故本规则只留在本页。 */
 .tasks {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 32px 72px 80px;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  margin: 0 10px 22px 0;
+  padding: 28px 40px 40px;
+  min-height: calc(100vh - 64px - 22px);
 }
 .head {
   display: flex;
@@ -370,7 +372,8 @@ onMounted(() => {
   min-width: 0;
 }
 .head h1 {
-  font-size: var(--text-2xl);
+  /* GL16：有 h1 的页面统一 26px/700 */
+  font-size: 26px;
   font-weight: 700;
   color: var(--text-1);
 }
@@ -386,12 +389,12 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* tabs：沿用 projects/index.vue 的下划线范式（激活 2px brand + text-1） */
+/* GL9：Tab 选中 = 白字 #FFFFFF + 白 2px 下划线（宽=文字宽、无内缩），容器无全宽底线。
+   旧值 15px/600 + 紫下划线是"另一个产品"的语言（竞品 pricing-full.png 下划线 y90–91 为 #FFFFFF）。 */
 .tabs {
   display: flex;
   align-items: center;
   gap: 28px;
-  border-bottom: 1px solid var(--border-1);
   margin-bottom: var(--space-6);
 }
 .tab {
@@ -399,9 +402,9 @@ onMounted(() => {
   padding: 10px 2px 12px;
   border: 0;
   background: transparent;
-  color: var(--text-3);
-  font-size: 15px;
-  font-weight: 600;
+  color: #9d9d9f;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   transition: color var(--duration-fast) var(--ease-out);
 }
@@ -409,17 +412,17 @@ onMounted(() => {
   color: var(--text-1);
 }
 .tab.on {
-  color: var(--text-1);
+  color: #ffffff;
 }
 .tab.on::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 .total {
   margin-left: auto;

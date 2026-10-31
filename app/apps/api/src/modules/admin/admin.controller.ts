@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode, reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
+import { clientIp } from "../../common/client-ip";
 import { parseOrThrow } from "../../common/zod";
 import { BillingService } from "../billing/billing.service";
 import { AdminAuthService } from "./admin-auth.service";
@@ -20,9 +21,94 @@ const refundOrderSchema = z.object({
   amount_cents: z.number().int().positive().optional(),
 });
 
+/**
+ * 查询串里的空值归一。
+ *
+ * 为什么必须做：`?status=` 拿到的是空串，若直接 `z.coerce.number()` 会变成 0 并通过校验，
+ * 于是"没筛"被静默当成"筛 status=0"（结果是空表）。统一按"没传"处理。
+ */
+const emptyToUndefined = (value: unknown) => (value === "" || value === null ? undefined : value);
+
+/** 雪花 id 入参（query 里是十进制字符串）：非数字直接 400101，别让 `BigInt()` 冒成 500 */
+const numericIdQuery = z.preprocess(emptyToUndefined, z.string().regex(/^\d+$/, "must be numeric id").optional());
+
+/** ISO 时间入参：非法直接 400101（契约 §2.7/§2.8），不要让它退化成"扫全表但结果为空" */
+const isoDateTime = (field: string) =>
+  z.string().min(1).refine((value) => Number.isFinite(Date.parse(value)), `${field} must be ISO datetime`);
+
+/** 分页参数：`page_size ≤100`（后台表格一页 100 行足够，再大只会拖慢查询） */
+const paginationQuery = {
+  page: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).optional()),
+  page_size: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(100).optional()),
+};
+
+/**
+ * 任务报表筛选（指标卡与失败 CSV 导出**共用同一组入参**）。
+ *
+ * 共用是为了让"指标卡上的数字"与"导出的 CSV 行"永远同口径——两处各写一份 schema
+ * 是这类报表最常见的口径漂移来源。
+ */
+const taskFilterQuerySchema = z.object({
+  model_id: numericIdQuery,
+  from: z.preprocess(emptyToUndefined, isoDateTime("from").optional()),
+  to: z.preprocess(emptyToUndefined, isoDateTime("to").optional()),
+});
+
+const modelModesMaxBytes = 32 * 1024;
+
+/**
+ * 单个 mode 的运营字段。
+ *
+ * `.passthrough()` 是**必须**的：别的键（`endpoint`/`counts`/`default_count`/`media_limits`…）
+ * 由模型目录维护，后台只改枚举档位时不能把它们抹掉——zod 默认会裁掉未知键，那等于
+ * "改一次分辨率就把 endpoint 删了"，任务投递会直接报"mode 不支持"。
+ */
+const modelModeConfigSchema = z
+  .object({
+    resolution_options: z
+      .array(
+        z
+          .object({
+            value: z.string().min(1).max(32),
+            label: z.string().max(64).optional(),
+          })
+          .passthrough(),
+      )
+      .max(20)
+      .optional(),
+    // 按秒档的档位（1..600 秒）：超出这个范围前端滑块也选不出来，属于配错
+    durations: z.array(z.number().int().min(1).max(600)).max(20).optional(),
+    default_resolution: z.string().max(32).optional(),
+  })
+  .passthrough();
+
+/**
+ * `models.modes` 整体替换的校验（契约 §2.2）。
+ *
+ * 键数 1..20 / 键长 ≤64 / 体积 ≤32KB 三条是"防止后台把模型目录写坏"的底线：
+ * modes 是 JSONB 且被计价链路直接读，塞进巨大对象会让每次报价都反序列化一遍。
+ */
+const modelModesSchema = z
+  .record(z.string().min(1).max(64), modelModeConfigSchema)
+  .refine((modes) => {
+    const count = Object.keys(modes).length;
+    return count >= 1 && count <= 20;
+  }, "modes must have 1..20 keys")
+  .refine(
+    (modes) => Buffer.byteLength(JSON.stringify(modes), "utf8") <= modelModesMaxBytes,
+    "modes payload must be <=32KB",
+  );
+
 const modelPatchSchema = z.object({
   visible: z.boolean().optional(),
   sort: z.number().int().min(0).max(9999).optional(),
+  /**
+   * 参数枚举热更：**整体替换** `models.modes`，不做深合并。
+   *
+   * 深合并只能加不能删，而运营真实动作里包含"下架某个分辨率档位"；删不掉的档位会变成
+   * 永远报不出价的黑档（前端能选、后端找不到价目）。整体替换让"删档位"可表达。
+   */
+  modes: modelModesSchema.optional(),
 });
 
 const pricePatchSchema = z.object({
@@ -52,6 +138,8 @@ const priceCreateSchema = z.object({
   strikeCredits: z.number().int().min(0).optional(),
   memberCredits: z.number().int().min(0).nullable().optional(),
   timeLimitedCredits: z.number().int().min(0).nullable().optional(),
+  /** 契约 §2.4：默认上架；"先建价、后放量"时传 false */
+  active: z.boolean().optional(),
 });
 
 /**
@@ -83,9 +171,10 @@ export class AdminAuthController {
 
   @Public()
   @Post("login")
-  async login(@Body() body: unknown) {
+  async login(@Body() body: unknown, @Req() req: FastifyRequest) {
     const input = parseOrThrow(loginSchema, body);
-    return this.auth.login(input.username, input.password);
+    // 限流按真实客户端 IP：反向代理后 req.ip 是代理节点，会把所有运营算成同一个人
+    return this.auth.login(input.username, input.password, clientIp(req));
   }
 }
 
@@ -98,6 +187,22 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(BillingService) private readonly billing: BillingService,
   ) {}
+
+  /**
+   * 解析任务报表筛选（指标卡 / CSV 导出共用）。
+   *
+   * 放在一起的原因：这两处必须**同口径**——运营从指标卡看到"某模型 37 条失败"、
+   * 点导出却拿到 900 行，是最典型的报表信任崩塌。所以入参 schema 与 Date/bigint
+   * 转换都只写一份（schema 见 `taskFilterQuerySchema`）。
+   */
+  private taskFilters(query: unknown) {
+    const q = parseOrThrow(taskFilterQuerySchema, query ?? {});
+    return {
+      modelId: q.model_id === undefined ? undefined : BigInt(q.model_id),
+      from: q.from === undefined ? undefined : new Date(q.from),
+      to: q.to === undefined ? undefined : new Date(q.to),
+    };
+  }
 
   /**
    * 平台运营的创作者审核队列（模块 #10 收尾）。
@@ -184,14 +289,22 @@ export class AdminController {
     return this.admin.queues();
   }
 
+  /**
+   * 任务指标：支持 `model_id` / `from` / `to` 筛选（契约 §2.7）。
+   * 返回体结构不变，只新增 `filters` 回显，页面才能标出"当前看的是哪个口径"。
+   */
   @Get("task-metrics")
-  taskMetrics() {
-    return this.admin.taskMetrics();
+  taskMetrics(@Query() query: unknown) {
+    return this.admin.taskMetrics(this.taskFilters(query));
   }
 
+  /**
+   * 失败任务 CSV：与指标卡共用同一组筛选（契约 §2.8）。
+   * 表头保留 `task_id,space_id,model,mode,status` 前缀，新列追加在末尾。
+   */
   @Get("failed-tasks.csv")
-  async failedTasksCsv(@Res() res: FastifyReply): Promise<void> {
-    const csv = await this.admin.failedTasksCsv();
+  async failedTasksCsv(@Query() query: unknown, @Res() res: FastifyReply): Promise<void> {
+    const csv = await this.admin.failedTasksCsv(this.taskFilters(query));
     res
       .header("content-type", "text/csv; charset=utf-8")
       .header("content-disposition", 'attachment; filename="failed-tasks.csv"')
@@ -204,12 +317,16 @@ export class AdminController {
   }
 
   @Get("reports")
-  reports(
-    @Query("status") status?: string,
-    @Query("page") page?: string,
-    @Query("page_size") pageSize?: string,
-  ) {
-    return this.admin.listReports(Number(page ?? 1), Number(pageSize ?? 20), status ? Number(status) : undefined);
+  reports(@Query() query: unknown) {
+    const q = parseOrThrow(
+      z.object({
+        // 举报状态：1 待处理 / 2 已下线 / 3 已驳回；非法值不再退化成 NaN 下传 SQL
+        status: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(3).optional()),
+        ...paginationQuery,
+      }),
+      query ?? {},
+    );
+    return this.admin.listReports(q.page ?? 1, q.page_size ?? 20, q.status);
   }
 
   @Post("reports/:id/resolve")
@@ -232,13 +349,28 @@ export class AdminController {
     return this.admin.updateModel(id, parseOrThrow(modelPatchSchema, body));
   }
 
+  /**
+   * 价目列表（契约 §2.3）：新增 `active` 过滤与 `model_name`/`active`/`updated_at` 回显。
+   *
+   * `active` 必须能单独筛：下架的档位不删行（保留对账追溯），不筛就只能翻页找。
+   */
   @Get("model-prices")
-  prices(
-    @Query("model_id") modelId?: string,
-    @Query("page") page?: string,
-    @Query("page_size") pageSize?: string,
-  ) {
-    return this.admin.listPrices(modelId, Number(page ?? 1), Number(pageSize ?? 20));
+  prices(@Query() query: unknown) {
+    const q = parseOrThrow(
+      z.object({
+        model_id: numericIdQuery,
+        // 契约只允许 1/0：`?active=true` 之类写法不猜，直接 400101
+        active: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1).optional()),
+        ...paginationQuery,
+      }),
+      query ?? {},
+    );
+    return this.admin.listPrices({
+      modelId: q.model_id,
+      active: q.active === undefined ? undefined : q.active === 1,
+      page: q.page,
+      pageSize: q.page_size,
+    });
   }
 
   @Patch("model-prices/:id")
@@ -258,19 +390,43 @@ export class AdminController {
     return this.admin.deletePrice(id);
   }
 
+  /**
+   * 任务列表（契约 §2.6）：`status` / `model_id` / `mode` + 分页。
+   *
+   * 三个筛选缺一不可：只按状态筛，运营看到的是全平台失败任务（几十页）；
+   * 只按模型筛，又分不清"模型普遍慢"还是"某个 mode 的提示词有问题"。
+   */
   @Get("tasks")
-  tasks(@Query("status") status?: string, @Query("page") page?: string, @Query("page_size") pageSize?: string) {
-    return this.admin.listTasks(Number(page ?? 1), Number(pageSize ?? 20), status ? Number(status) : undefined);
+  tasks(@Query() query: unknown) {
+    const q = parseOrThrow(
+      z.object({
+        status: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(7).optional()),
+        model_id: numericIdQuery,
+        mode: z.preprocess(emptyToUndefined, z.string().min(1).max(64).optional()),
+        ...paginationQuery,
+      }),
+      query ?? {},
+    );
+    return this.admin.listTasks({
+      page: q.page,
+      pageSize: q.page_size,
+      status: q.status,
+      modelId: q.model_id,
+      mode: q.mode,
+    });
   }
 
   @Get("exports")
-  exports(@Query("page") page?: string, @Query("page_size") pageSize?: string) {
-    return this.admin.listExports(Number(page ?? 1), Number(pageSize ?? 20));
+  exports(@Query() query: unknown) {
+    // 旧实现用 Number() 直接转：`?page=abc` → NaN → SQL 报错 500；这里统一走分页 schema
+    const q = parseOrThrow(z.object({ ...paginationQuery }), query ?? {});
+    return this.admin.listExports(q.page ?? 1, q.page_size ?? 20);
   }
 
   @Get("shares")
-  shares(@Query("page") page?: string, @Query("page_size") pageSize?: string) {
-    return this.admin.listShares(Number(page ?? 1), Number(pageSize ?? 20));
+  shares(@Query() query: unknown) {
+    const q = parseOrThrow(z.object({ ...paginationQuery }), query ?? {});
+    return this.admin.listShares(q.page ?? 1, q.page_size ?? 20);
   }
 
   @Post("shares/:id/revoke")
@@ -313,8 +469,16 @@ export class AdminController {
   // ── 订单 / 退款（api-spec §10.5；运营审核后操作，工单与退款记录留痕） ──
 
   @Get("orders")
-  orders(@Query("status") status?: string, @Query("page") page?: string, @Query("page_size") pageSize?: string) {
-    return this.admin.listOrders(Number(page ?? 1), Number(pageSize ?? 20), status ? Number(status) : undefined);
+  orders(@Query() query: unknown) {
+    const q = parseOrThrow(
+      z.object({
+        // 订单状态：1 待支付 / 2 已支付 / 3 已关闭 / 4 已退款
+        status: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(4).optional()),
+        ...paginationQuery,
+      }),
+      query ?? {},
+    );
+    return this.admin.listOrders(q.page ?? 1, q.page_size ?? 20, q.status);
   }
 
   @Post("orders/:id/refund")

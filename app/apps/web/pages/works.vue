@@ -468,7 +468,7 @@ onMounted(() => {
   bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 .total {
   margin-left: auto;

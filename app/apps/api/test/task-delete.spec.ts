@@ -7,6 +7,7 @@ import {
   createDb,
   creditAccounts,
   creditFlows,
+  freezeCredits,
   models,
   spaces,
   taskEvents,
@@ -208,10 +209,33 @@ describe("删除任务记录（软删）", () => {
   });
 
   it("带冻结积分的任务拒绝删除（否则那笔钱永远悬着）", async () => {
-    const taskId = await seedTask(TaskStatus.FAILED, "frozen", { creditsFrozen: 10 });
+    // 判据是**流水**，所以夹具必须造一条真实的 freeze 流水 —— 只把字段写成 10
+    // 那是"生产不会出现的状态"（正是这条用例此前一直假绿的原因：它断言的行为碰巧对，
+    // 但用的是线上不存在的夹具，教给后来者的是错的默认值）。
+    const taskId = await seedTask(TaskStatus.FAILED, "frozen");
+    await db.transaction((tx) =>
+      freezeCredits(tx, {
+        spaceId: BigInt(spaceId),
+        cost: 10,
+        taskId: BigInt(taskId),
+        memo: "spec delete guard freeze",
+      }),
+    );
     const res = await inject("DELETE", `/tasks/${taskId}`);
     expect(res.body.code).toBe(400101);
     expect(String(res.body.msg)).toContain("frozen");
+  });
+
+  it("字段残留但流水已结清：允许删除（P1-1：按字段判会让任何计价任务永久删不掉）", async () => {
+    // 复现历史脏行形状：`credits_frozen` 留着旧值，但 credit_flows 里没有未释放冻结。
+    // 修复前这里会被拒（`creditsFrozen > 0` 恒真），表现为"用户永远删不掉自己的任务"。
+    const taskId = await seedTask(TaskStatus.SUCCEEDED, "stale-frozen", { creditsFrozen: 10 });
+    const res = await inject("DELETE", `/tasks/${taskId}`);
+    expect(res.body.code).toBe(0);
+    expect((res.body.data as { deleted?: boolean }).deleted).toBe(true);
+    // 软删：行还在，只是读不到（流水与资产链没被剪断）
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, BigInt(taskId)));
+    expect(row?.deletedAt).not.toBeNull();
   });
 
   it("坏 id / 不存在 / 重复删 / 跨 space：400101 或 400102，绝不 500", async () => {

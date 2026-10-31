@@ -305,6 +305,18 @@ describe("agent e2e", () => {
     );
     expect(viaToken.code).toBe(746004);
 
+    // 2b) P1-9：同一枚短令牌不得当普通 Bearer 用 —— 只有显式标注 @AllowStreamToken()
+    //     的 SSE 端点才接受查询参数通道，其余受保护路由一律 401（无 jti、不可吊销）。
+    //     注：AppError 走「HTTP 200 + 信封非 0 code」（对齐竞品信封，见 exception.filter），
+    //     所以这里断言 code，而不是 HTTP 状态码。
+    const viaTokenOnNormalRoute = await inject(
+      "GET",
+      `/me?stream_token=${encodeURIComponent(issued.data.token)}`,
+      undefined,
+      "",
+    );
+    expect(viaTokenOnNormalRoute.code).toBe(401101);
+
     // 3) 令牌绑定的不是这个会话时不该签出（避免拿 A 会话令牌连 B）
     const foreign = await inject("POST", "/agent/stream-token", { session_id: "123456789" });
     expect(foreign.code).toBe(400102);

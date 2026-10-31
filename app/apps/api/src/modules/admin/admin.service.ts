@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import {
   adminUsers,
   contentReports,
@@ -21,6 +21,7 @@ import {
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
+import { computeFunnel, emptyFunnelStageTimestamps, mergeEarliest, mergeLatest, toEpochMs } from "./admin-funnel";
 
 function pageArgs(page?: number, pageSize?: number) {
   const p = Math.max(1, page ?? 1);
@@ -184,42 +185,73 @@ export class AdminService {
     };
   }
 
-  // 任务指标（PRD F8）：失败率 + adapter 延迟（task.running → task.succeeded/failed）
-  async taskMetrics() {
-    const [total] = await db.select({ count: sql<number>`count(*)::int` }).from(tasks);
+  /**
+   * 任务筛选条件（契约 §2.7/§2.8 共用）。
+   *
+   * 为什么用 `sql` 片段而不是 drizzle 的 `eq()`：adapter 延迟那段是**原生 SQL**
+   * （要 `percentile_cont ... within group`，drizzle 查询构造器表达不了），两处必须是
+   * **同一份条件**，否则会出现"总览按模型筛了、延迟没筛"的自相矛盾报表。
+   * 列名用 `${tasks.xxx}` 插值（渲染成 `"tasks"."xxx"`），原生 SQL 那边表名也不加别名，
+   * 于是同一份片段在两个世界里都成立。
+   */
+  private taskFilterClauses(filters: TaskFilterInput): SQL[] {
+    const clauses: SQL[] = [];
+    if (filters.modelId !== undefined) clauses.push(sql`${tasks.modelId} = ${filters.modelId}`);
+    // 契约明确按 `tasks.created_at` 过滤：报表要回答"这段时间**产生**了什么"，
+    // 按 updated_at 筛会把"三个月前建、今天才失败"的老任务算进今天的失败率。
+    if (filters.from) clauses.push(sql`${tasks.createdAt} >= ${filters.from}`);
+    if (filters.to) clauses.push(sql`${tasks.createdAt} <= ${filters.to}`);
+    return clauses;
+  }
+
+  /**
+   * 任务指标（PRD F8）：失败率 + adapter 延迟（task.running → task.succeeded/failed）。
+   *
+   * 筛选（model_id / from / to）必须同时作用于**全部**聚合口径（总览计数、错误码分布、
+   * adapter 延迟），否则运营按模型筛完看到"总览 3 条、错误码分布 900 条"会直接失去信任。
+   */
+  async taskMetrics(filters: TaskFilterInput = {}) {
+    const clauses = this.taskFilterClauses(filters);
+
+    const [total] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(clauses.length > 0 ? and(...clauses) : undefined);
     const [succeeded] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(tasks)
-      .where(eq(tasks.status, 3));
+      .where(and(eq(tasks.status, 3), ...clauses));
     const [failed] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(tasks)
-      .where(sql`${tasks.status} in (4, 7)`);
+      .where(and(sql`${tasks.status} in (4, 7)`, ...clauses));
     const [canceled] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(tasks)
-      .where(eq(tasks.status, 5));
+      .where(and(eq(tasks.status, 5), ...clauses));
     const finished = (succeeded?.count ?? 0) + (failed?.count ?? 0);
 
     // adapter 延迟：按 adapter_code 聚合 created_at→finished_at 的平均耗时
     const latencyResult = await db.execute(sql`
-      select m.adapter_code as adapter,
+      select models.adapter_code as adapter,
              count(*)::int as samples,
-             round(avg(extract(epoch from (t.finished_at - t.created_at))) * 1000)::int as avg_ms,
-             round(percentile_cont(0.95) within group (order by extract(epoch from (t.finished_at - t.created_at))) * 1000)::int as p95_ms
-      from tasks t
-      join models m on m.id = t.model_id
-      where t.finished_at is not null
-      group by m.adapter_code
+             round(avg(extract(epoch from (tasks.finished_at - tasks.created_at))) * 1000)::int as avg_ms,
+             round(percentile_cont(0.95) within group (order by extract(epoch from (tasks.finished_at - tasks.created_at))) * 1000)::int as p95_ms
+      from tasks
+      join models on models.id = tasks.model_id
+      where tasks.finished_at is not null
+      ${clauses.length > 0 ? sql`and ${sql.join(clauses, sql` and `)}` : sql``}
+      group by models.adapter_code
       order by avg_ms desc
     `);
     const latencyRows = (latencyResult as unknown as { rows?: Array<Record<string, unknown>> }).rows ?? [];
 
+    const errorCodeExpr = sql<string>`coalesce(${tasks.error}->>'code','unknown')`;
     const errorByCode = await db
-      .select({ code: sql<string>`coalesce(${tasks.error}->>'code','unknown')`, count: sql<number>`count(*)::int` })
+      .select({ code: errorCodeExpr, count: sql<number>`count(*)::int` })
       .from(tasks)
-      .where(sql`${tasks.status} in (4, 7)`)
-      .groupBy(sql`coalesce(${tasks.error}->>'code','unknown')`)
+      .where(and(sql`${tasks.status} in (4, 7)`, ...clauses))
+      .groupBy(errorCodeExpr)
       .orderBy(desc(sql`count(*)`));
 
     return {
@@ -235,41 +267,77 @@ export class AdminService {
         p95_ms: Number(row.p95_ms ?? 0),
       })),
       errors_by_code: errorByCode.map((row) => ({ code: row.code, count: row.count })),
+      // 回显生效的筛选，页面才能在"指标卡片"上标出当前口径（null = 未筛）
+      filters: {
+        model_id: filters.modelId === undefined ? null : String(filters.modelId),
+        from: filters.from ? filters.from.toISOString() : null,
+        to: filters.to ? filters.to.toISOString() : null,
+      },
     };
   }
 
-  // 失败任务清单导出（CSV）
-  async failedTasksCsv() {
+  /**
+   * 失败任务清单导出（CSV）。
+   *
+   * 表头**保留前缀** `task_id,space_id,model,mode,status`：既有页面与测试按这个前缀对齐列序，
+   * 改顺序等于把导出表格的结构改掉；契约要求的新列一律**追加在末尾**。
+   * 仍限制 ≤1000 行（一次导出不该把运营的 Excel 打死），仍做 CSV 转义。
+   */
+  async failedTasksCsv(filters: TaskFilterInput = {}) {
+    const clauses = this.taskFilterClauses(filters);
     const rows = await db
-      .select()
+      .select({
+        id: tasks.id,
+        spaceId: tasks.spaceId,
+        modelId: tasks.modelId,
+        mode: tasks.mode,
+        status: tasks.status,
+        error: tasks.error,
+        createdAt: tasks.createdAt,
+        finishedAt: tasks.finishedAt,
+        // model 列仍是 model_id（前缀契约），人可读名字单独占一列追加在后面
+        modelName: models.name,
+        adapterCode: models.adapterCode,
+      })
       .from(tasks)
-      .where(sql`${tasks.status} in (4, 7)`)
+      .innerJoin(models, eq(models.id, tasks.modelId))
+      .where(and(sql`${tasks.status} in (4, 7)`, ...clauses))
       .orderBy(desc(tasks.updatedAt))
       .limit(1000);
-    const header = "task_id,space_id,model,mode,status,error_code,error_message,created_at,finished_at";
+    const header =
+      "task_id,space_id,model,mode,status,model_name,adapter_code,error_code,error_message,created_at,finished_at";
     const escape = (value: unknown): string => {
       const text = value === null || value === undefined ? "" : String(value);
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    const lines = rows.map((row) =>
-      [
+    const lines = rows.map((row) => {
+      const error = (row.error ?? null) as { code?: unknown; message?: unknown } | null;
+      return [
         String(row.id),
         String(row.spaceId),
         String(row.modelId),
-        row.mode,
+        escape(row.mode),
         row.status,
-        escape((row.error as { code?: unknown } | null)?.code ?? ""),
-        escape((row.error as { message?: unknown } | null)?.message ?? ""),
+        escape(row.modelName),
+        escape(row.adapterCode),
+        escape(jsonText(error?.code)),
+        escape(jsonText(error?.message)),
         row.createdAt.toISOString(),
         row.finishedAt ? row.finishedAt.toISOString() : "",
-      ].join(","),
-    );
+      ].join(",");
+    });
     return `${header}\n${lines.join("\n")}\n`;
   }
 
-  async listModels() {
-    const rows = await db.select().from(models).orderBy(models.sort);
-    return rows.map((row) => ({
+  /**
+   * 模型目录的运营视图。
+   *
+   * `modes`/`types` 是契约 §2.1 新增的：`modes` 决定"这个模型能选哪些分辨率/时长档位"，
+   * 是计价与参数面板的共同上游；之前后台看不到它，运营只能靠改价试探。
+   * `modes` 原样返回（可能是 `{}`），不做归一，避免后台"看到的"与计价读到的不是同一份。
+   */
+  private modelDto(row: typeof models.$inferSelect) {
+    return {
       id: String(row.id),
       name: row.name,
       display_name: row.displayName,
@@ -279,25 +347,96 @@ export class AdminService {
       sort: row.sort,
       adapter_code: row.adapterCode,
       vip: row.needVip,
-    }));
+      modes: row.modes,
+      types: row.types,
+    };
   }
 
-  async updateModel(id: string, input: { visible?: boolean; sort?: number }) {
+  async listModels() {
+    const rows = await db.select().from(models).orderBy(models.sort);
+    return rows.map((row) => this.modelDto(row));
+  }
+
+  /**
+   * 改模型运营字段（可见/排序/档位）。
+   *
+   * `modes` 是**整体替换**而不是深合并：深合并无法表达"删掉某个分辨率档位"这种运营动作
+   * （合并只能加不能减），而档位是计价的支点，删不掉就等于上线了一个永远报不出价的黑档。
+   * 校验（键数/键长/体积/每档字段）全部在 controller 的 zod 层做，这里只负责落库。
+   */
+  async updateModel(id: string, input: { visible?: boolean; sort?: number; modes?: Record<string, unknown> }) {
+    const targetId = idBigint(id);
+    const [existing] = await db.select({ name: models.name }).from(models).where(eq(models.id, targetId));
+    if (!existing) throw new AppError(ErrorCode.NOT_FOUND, "model not found");
+    /**
+     * 工具模型（`toolbox-*`）的 `modes` 由 `tool-catalog.ts` 的 `TOOL_MODES` 定义，
+     * 每进程首次目录请求都会把定义同步回库（代码负责参数枚举，DB 负责运营字段）。
+     *
+     * 所以后台改这类模型的 modes 会被下一次同步覆盖 —— 与其让运营"改了没生效"且无报错，
+     * 不如在这里明确拒绝：要改工具档位请改目录定义（发版），后台只负责上下架/排序/价格。
+     */
+    if (input.modes !== undefined && existing.name.startsWith("toolbox-")) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        "tool models' parameter catalog is code-managed (tool-catalog.ts); edit the catalog itself instead",
+        { field: "modes", model: existing.name },
+      );
+    }
+    const patch: Partial<typeof models.$inferInsert> = { updatedAt: new Date() };
+    if (input.visible !== undefined) patch.visible = input.visible;
+    if (input.sort !== undefined) patch.sort = input.sort;
+    if (input.modes !== undefined) patch.modes = input.modes;
     const [row] = await db
       .update(models)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(models.id, BigInt(id)))
+      .set(patch)
+      // 非法 id 走 400101 而不是 BigInt() 抛错冒成 500
+      .where(eq(models.id, targetId))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "model not found");
-    return { id: String(row.id), visible: row.visible, sort: row.sort };
+    return this.modelDto(row);
   }
 
-  async listPrices(modelId?: string, page?: number, pageSize?: number) {
-    const { page: p, pageSize: ps, offset } = pageArgs(page, pageSize);
-    const where = modelId ? eq(modelPrices.modelId, BigInt(modelId)) : undefined;
+  /**
+   * 价目运营视图（契约 §2.3/§2.4/§2.5 统一形状）。
+   *
+   * 为什么把 `model_name` 一起带出来：价目表是按 `model_id` 外键组织的，运营在页面上
+   * 看到一串雪花 id 根本没法判断"这条价是不是我要改的那个模型"。名字来自 join，
+   * 不缓存，避免模型改名后价目表显示旧名。
+   */
+  private priceDto(row: typeof modelPrices.$inferSelect, modelName: string) {
+    return {
+      id: String(row.id),
+      model_id: String(row.modelId),
+      model_name: modelName,
+      mode: row.mode,
+      resolution: row.resolution,
+      duration_s: row.durationS,
+      credits: row.credits,
+      strike_credits: row.strikeCredits,
+      member_credits: row.memberCredits,
+      time_limited_credits: row.timeLimitedCredits,
+      active: row.active,
+      updated_at: row.updatedAt.toISOString(),
+    };
+  }
+
+  /** 按 id 取模型名（价目写操作的返回要带 model_name；模型行是 FK 保证存在的） */
+  private async modelNameOf(modelId: bigint): Promise<string> {
+    const [row] = await db.select({ name: models.name }).from(models).where(eq(models.id, modelId));
+    return row?.name ?? "";
+  }
+
+  async listPrices(opts: { modelId?: string; active?: boolean; page?: number; pageSize?: number } = {}) {
+    const { page: p, pageSize: ps, offset } = pageArgs(opts.page, opts.pageSize);
+    const conds: SQL[] = [];
+    if (opts.modelId) conds.push(eq(modelPrices.modelId, BigInt(opts.modelId)));
+    // `active=false` 的档位不能删（保留对账追溯），所以列表必须能显式筛出来看
+    if (opts.active !== undefined) conds.push(eq(modelPrices.active, opts.active));
+    const where = conds.length > 0 ? and(...conds) : undefined;
     const rows = await db
-      .select()
+      .select({ price: modelPrices, modelName: models.name })
       .from(modelPrices)
+      .innerJoin(models, eq(models.id, modelPrices.modelId))
       .where(where)
       .orderBy(modelPrices.modelId, modelPrices.mode)
       .limit(ps)
@@ -307,23 +446,19 @@ export class AdminService {
       .from(modelPrices)
       .where(where);
     return {
-      list: rows.map((row) => ({
-        id: String(row.id),
-        model_id: String(row.modelId),
-        mode: row.mode,
-        resolution: row.resolution,
-        duration_s: row.durationS,
-        credits: row.credits,
-        strike_credits: row.strikeCredits,
-        member_credits: row.memberCredits,
-        time_limited_credits: row.timeLimitedCredits,
-      })),
+      list: rows.map((row) => this.priceDto(row.price, row.modelName)),
       total: countRow?.count ?? 0,
       page: p,
       page_size: ps,
     };
   }
 
+  /**
+   * 改价目。
+   *
+   * 返回**补全后的完整档位**（而不是只回显改动字段）：运营改完一次价，页面要用返回体
+   * 就地刷新整行；只回 4 个字段的话前端还得再发一次列表请求，且并发下可能读到别人的改动。
+   */
   async updatePrice(
     id: string,
     input: {
@@ -336,16 +471,11 @@ export class AdminService {
   ) {
     const [row] = await db
       .update(modelPrices)
-      .set(input)
-      .where(eq(modelPrices.id, BigInt(id)))
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(modelPrices.id, idBigint(id)))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "price not found");
-    return {
-      id: String(row.id),
-      credits: row.credits,
-      strike_credits: row.strikeCredits,
-      active: row.active,
-    };
+    return this.priceDto(row, await this.modelNameOf(row.modelId));
   }
 
   /**
@@ -367,6 +497,8 @@ export class AdminService {
     strikeCredits?: number;
     memberCredits?: number | null;
     timeLimitedCredits?: number | null;
+    /** 契约 §2.4：默认上架；运营要"先建价、后放量"时可传 false */
+    active?: boolean;
   }) {
     let modelId: bigint;
     try {
@@ -423,16 +555,11 @@ export class AdminService {
           strikeCredits: input.strikeCredits ?? null,
           memberCredits: input.memberCredits ?? null,
           timeLimitedCredits: input.timeLimitedCredits ?? null,
+          active: input.active ?? true,
         })
         .returning();
-      return {
-        id: String(row!.id),
-        model_id: String(row!.modelId),
-        mode: row!.mode,
-        resolution: row!.resolution,
-        duration_s: row!.durationS,
-        credits: row!.credits,
-      };
+      // 返回补全后的档位（含 model_name/active）：契约 §2.4 要求前端拿到就能就地渲染新行
+      return this.priceDto(row!, model.name);
     } catch (error) {
       // Postgres 唯一键冲突（23505）：同一档位重复定价，属于参数问题而不是 500
       if ((error as { code?: string }).code === "23505") {
@@ -456,27 +583,67 @@ export class AdminService {
     return { ok: true, id: String(row.id) };
   }
 
-  async listTasks(page?: number, pageSize?: number, status?: number) {
-    const { page: p, pageSize: ps, offset } = pageArgs(page, pageSize);
-    const where = status !== undefined ? eq(tasks.status, status) : undefined;
+  /**
+   * 任务列表（契约 §2.6）。
+   *
+   * DTO 从"只有 task_id/mode/status/金额"扩到运营真正需要的字段：
+   * - `model_name`/`adapter_code`：判断"是这个模型的问题还是这个适配器的问题"——只看
+   *   `model_id` 定位不到适配器（同一适配器服务多个模型，故障时整族一起挂）；
+   * - `error_code`/`error_message`：从 `tasks.error` JSON 摊平，否则前端只能显示"失败"；
+   * - `finished_at`：配 `created_at` 才能算单条耗时，也是失败排查的时间锚点。
+   */
+  async listTasks(
+    opts: { page?: number; pageSize?: number; status?: number; modelId?: string; mode?: string } = {},
+  ) {
+    const { page: p, pageSize: ps, offset } = pageArgs(opts.page, opts.pageSize);
+    const conds: SQL[] = [];
+    if (opts.status !== undefined) conds.push(eq(tasks.status, opts.status));
+    if (opts.modelId) conds.push(eq(tasks.modelId, BigInt(opts.modelId)));
+    if (opts.mode) conds.push(eq(tasks.mode, opts.mode));
+    const where = conds.length > 0 ? and(...conds) : undefined;
     const rows = await db
-      .select()
+      .select({
+        id: tasks.id,
+        spaceId: tasks.spaceId,
+        modelId: tasks.modelId,
+        mode: tasks.mode,
+        status: tasks.status,
+        error: tasks.error,
+        creditsFrozen: tasks.creditsFrozen,
+        creditsSettled: tasks.creditsSettled,
+        createdAt: tasks.createdAt,
+        finishedAt: tasks.finishedAt,
+        modelName: models.name,
+        adapterCode: models.adapterCode,
+      })
       .from(tasks)
+      // tasks.model_id 是 NOT NULL + FK，innerJoin 不会丢行；宁可让"模型行缺失"这种
+      // 数据损坏暴露成 0 行，也不要静默返回 model_name=null 让运营以为模型没名字
+      .innerJoin(models, eq(models.id, tasks.modelId))
       .where(where)
       .orderBy(desc(tasks.createdAt))
       .limit(ps)
       .offset(offset);
     const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(tasks).where(where);
     return {
-      list: rows.map((row) => ({
-        task_id: String(row.id),
-        space_id: String(row.spaceId),
-        mode: row.mode,
-        status: row.status,
-        credits_frozen: row.creditsFrozen,
-        credits_settled: row.creditsSettled,
-        created_at: row.createdAt.toISOString(),
-      })),
+      list: rows.map((row) => {
+        const error = (row.error ?? null) as { code?: unknown; message?: unknown } | null;
+        return {
+          task_id: String(row.id),
+          space_id: String(row.spaceId),
+          model_id: String(row.modelId),
+          model_name: row.modelName,
+          adapter_code: row.adapterCode,
+          mode: row.mode,
+          status: row.status,
+          error_code: jsonText(error?.code),
+          error_message: jsonText(error?.message),
+          credits_frozen: row.creditsFrozen,
+          credits_settled: row.creditsSettled,
+          created_at: row.createdAt.toISOString(),
+          finished_at: row.finishedAt ? row.finishedAt.toISOString() : null,
+        };
+      }),
       total: countRow?.count ?? 0,
       page: p,
       page_size: ps,
@@ -587,43 +754,83 @@ export class AdminService {
     return { ok: true };
   }
 
-  // 流水线漏斗（PRD F8）：建项→大纲→角色定稿→分镜→批量→成功
+  /**
+   * 流水线漏斗（PRD F8；口径见契约 §2.9）。
+   *
+   * ## 为什么全部改成"项目维度 + 时间戳"
+   *
+   * 旧实现每段各写一个 `count(*)`，混了三种量纲：项目数（建项/大纲/角色）、分镜**条数**
+   * （storyboards）、任务条数（批量/成功）。6 段拼起来看会出现"转化率 300%"这种数字，
+   * 运营看不出到底哪一步在漏。新实现每段都回答同一个问题——**有多少个项目走到了这里**，
+   * 于是转化率/流失率/耗时才有意义。
+   *
+   * ## 取数方式
+   *
+   * 分 6 条聚合查询（每条只吐 `project_id + 时间`），在 JS 里按项目合并。
+   * 不写巨型 CTE 的原因：这些表各自被大量索引服务，单条聚合都能走索引；一个 6 段 JOIN
+   * 的 CTE 反而会把执行计划打散，且出错时无法定位是哪一段。项目量级对运营后台完全够用。
+   *
+   * 每个环节取"该项目**最早**到达时间"，只有完集取"最晚"（最后一集出片才算完集）。
+   */
   async funnel() {
-    const [projects] = await db.select({ count: sql<number>`count(*)::int` }).from(scriptProjects);
-    const [outlines] = await db
-      .select({ count: sql<number>`count(distinct ${episodes.projectId})::int` })
-      .from(episodes)
-      .where(eq(episodes.status, 2));
-    const [characters] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(projectAssets)
-      .where(and(eq(projectAssets.kind, "character"), eq(projectAssets.status, 2)));
-    const [shots] = await db.select({ count: sql<number>`count(*)::int` }).from(storyboards);
-    const [batch] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(tasks)
-      .where(eq(tasks.mode, "universal_reference"));
-    const [succeeded] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(tasks)
-      .where(eq(tasks.status, 3));
-    const stages = [
-      { key: "projects", label: "建项", count: projects?.count ?? 0 },
-      { key: "outlines", label: "大纲确认", count: outlines?.count ?? 0 },
-      { key: "characters", label: "角色定稿", count: characters?.count ?? 0 },
-      { key: "storyboards", label: "分镜生成", count: shots?.count ?? 0 },
-      { key: "batch", label: "批量投递", count: batch?.count ?? 0 },
-      { key: "succeeded", label: "镜头成功", count: succeeded?.count ?? 0 },
-    ];
-    return stages.map((stage, index) => ({
-      ...stage,
-      conversion_from_previous:
-        index === 0
-          ? null
-          : stages[index - 1]!.count > 0
-            ? Math.round((stage.count / stages[index - 1]!.count) * 1000) / 10
-            : 0,
-    }));
+    const stages = emptyFunnelStageTimestamps();
+    const [projectRows, outlineRows, characterRows, storyboardRows, batchRows, completedEpisodeRows] =
+      await Promise.all([
+        // 建项：全部项目
+        db.select({ projectId: scriptProjects.id, ts: scriptProjects.createdAt }).from(scriptProjects),
+        // 大纲确认：episodes.status=2
+        db
+          .select({ projectId: episodes.projectId, ts: sql<Date>`min(${episodes.updatedAt})` })
+          .from(episodes)
+          .where(eq(episodes.status, 2))
+          .groupBy(episodes.projectId),
+        // 角色定稿：project_assets.kind='character' 且 status=2；finalized_at 为空的先排除，
+        // 否则"定稿了但没写时间"会被 min() 忽略后整组消失，运营看到的定稿数偏少
+        db
+          .select({ projectId: projectAssets.projectId, ts: sql<Date>`min(${projectAssets.finalizedAt})` })
+          .from(projectAssets)
+          .where(
+            and(
+              eq(projectAssets.kind, "character"),
+              eq(projectAssets.status, 2),
+              isNotNull(projectAssets.finalizedAt),
+            ),
+          )
+          .groupBy(projectAssets.projectId),
+        // 分镜确认：存在 status>=2 的分镜（join episodes 才能拿到 project_id）
+        db
+          .select({ projectId: episodes.projectId, ts: sql<Date>`min(${storyboards.updatedAt})` })
+          .from(storyboards)
+          .innerJoin(episodes, eq(episodes.id, storyboards.episodeId))
+          .where(gte(storyboards.status, 2))
+          .groupBy(episodes.projectId),
+        // 批量投递：mode=universal_reference 且挂在集上的任务（innerJoin 天然排除 episode_id is null）
+        db
+          .select({ projectId: episodes.projectId, ts: sql<Date>`min(${tasks.createdAt})` })
+          .from(tasks)
+          .innerJoin(episodes, eq(episodes.id, tasks.episodeId))
+          .where(eq(tasks.mode, "universal_reference"))
+          .groupBy(episodes.projectId),
+        // 完集：以**集**为单位判断——该集有分镜且不存在 status<>5 的分镜
+        // （having 里 `count(*)` 由分组本身保证 ≥1）
+        db
+          .select({ projectId: episodes.projectId, ts: sql<Date>`max(${storyboards.updatedAt})` })
+          .from(storyboards)
+          .innerJoin(episodes, eq(episodes.id, storyboards.episodeId))
+          .groupBy(episodes.projectId, episodes.id)
+          .having(sql`count(*) filter (where ${storyboards.status} <> 5) = 0`),
+      ]);
+
+    for (const row of projectRows) mergeEarliest(stages.projects, String(row.projectId), toEpochMs(row.ts));
+    for (const row of outlineRows) mergeEarliest(stages.outlines, String(row.projectId), toEpochMs(row.ts));
+    for (const row of characterRows) mergeEarliest(stages.characters, String(row.projectId), toEpochMs(row.ts));
+    for (const row of storyboardRows) mergeEarliest(stages.storyboards, String(row.projectId), toEpochMs(row.ts));
+    for (const row of batchRows) mergeEarliest(stages.batch, String(row.projectId), toEpochMs(row.ts));
+    // 完集取最晚：一个项目可能有 3 集，只有最后一集也出完片才算"完集"
+    for (const row of completedEpisodeRows) mergeLatest(stages.completed, String(row.projectId), toEpochMs(row.ts));
+
+    // 顶层仍是数组（既有页面与测试依赖 `toHaveLength(6)`），纯计算在 admin-funnel.ts 里单测
+    return computeFunnel(stages);
   }
 
   async listReports(page?: number, pageSize?: number, status?: number) {
@@ -931,6 +1138,31 @@ function idBigint(id: string): bigint {
   } catch {
     throw new AppError(ErrorCode.INVALID_PARAM, "invalid id", { field: "id" });
   }
+}
+
+/**
+ * 任务报表的筛选入参（契约 §2.7/§2.8 共用）。
+ *
+ * 时间用 `Date` 而不是原始字符串：zod 层已把非法 ISO 挡成 400101，再 `Date.parse` 一次
+ * 只会让"哪一层负责校验"变模糊；传 `Date` 给 `>= created_at` 也能正常走 timestamptz 索引。
+ */
+export interface TaskFilterInput {
+  modelId?: bigint;
+  from?: Date;
+  to?: Date;
+}
+
+/**
+ * `tasks.error` JSON 里的可展示文本。
+ *
+ * 只接受标量：`code` 有时被写成数字，`String()` 后仍可读；对象/数组强行 `String`
+ * 会得到 "[object Object]"，那比 null 更误导（运营会以为错误码就叫这个）。
+ */
+function jsonText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
 }
 
 /** 运营身份 id → bigint；非数字（历史脏 token）时退化为不落操作人，而不是 500 */

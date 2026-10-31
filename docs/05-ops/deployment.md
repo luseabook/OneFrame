@@ -27,6 +27,14 @@
 
 > 实现参考：`app/docker-compose.prod.yml`（已落地并通过全栈冒烟：postgres/redis/minio/minio-init/migrate/api/worker/web/nginx；
 > 镜像见 `app/apps/{api,worker,web}/Dockerfile`；nginx 同源反代见 `app/deploy/nginx.conf`；env 模板见 `app/.env.production.example`）。
+>
+> **PR-01（2026-10-30）**：compose 的 api/worker 必须带 `env_file: [./.env]`，且下列键在 `environment` 里用
+> `${VAR:?message}` **强制必填**（`JWT_SECRET`、`ADMIN_JWT_SECRET`、`PHONE_HMAC_PEPPER`、`PHONE_ENC_KEY`、
+> `STORAGE_SIGN_SECRET`、`PAYMENT_LIVE`，以及 `S3_ACCESS_KEY/S3_SECRET_KEY`）。原因：此前容器只拿到
+> `environment` 里显式列出的键，`PHONE_*` 从未进容器 → `collectProductionProblems` 直接抛错 → api CrashLoop；
+> 而 `JWT_SECRET`/`S3_*` 还带着 `dev-only-*`/`minioadmin` 默认值，会**通过**生产守卫。
+> **这份 compose 至今未在干净机器上真跑过一次 —— PR-01 的关闭条件是「真跑一次 `docker compose up` 并留存日志」。**
+
 
 ```yaml
 services:
@@ -51,6 +59,8 @@ services:
 # 通用
 NODE_ENV / APP_DOMAIN / DATABASE_URL / REDIS_URL
 JWT_SECRET / REFRESH_SECRET
+# 运营后台独立密钥（PR-05，2026-10-30）：生产必填；与用户 JWT 拆开的目的是「用户 token 泄露 ≠ admin token 可伪造」
+ADMIN_JWT_SECRET
 # 存储（S3 兼容：OSS / MinIO；ADR-005）
 STORAGE_DRIVER=local|s3
 STORAGE_DIR / STORAGE_PUBLIC_BASE / STORAGE_SIGN_SECRET
@@ -59,6 +69,10 @@ STORAGE_S3_PUBLIC_ENDPOINT   # 预签名 URL 的对外地址（内网 SDK 与公
 STORAGE_S3_ACCESS_KEY_ID / STORAGE_S3_SECRET_ACCESS_KEY / STORAGE_S3_FORCE_PATH_STYLE
 # P10：real 模式出站素材（reference_uris/first_frame_uri/last_frame_uri）签名有效期（秒），默认 21600=6h
 ADAPTER_URI_TTL_SECONDS=21600
+# 服务端取结果文件的守卫（PR-04，2026-10-30；api-spec §2 同名小节）
+# 空值 = 只允许存储自身 host，绝不默认放行任意 host；对外 CDN/OSS 域名必须显式列出，否则批量下载会全部跳过
+CANVAS_DOWNLOAD_HOST_ALLOWLIST=
+CANVAS_DOWNLOAD_MAX_BYTES=209715200   # 200MiB，单文件流式上限
 # 供应商（仅 worker.env）
 VOLC_AK / VOLC_SK / VOLC_MODEL_ENDPOINT
 ARK_API_KEY / ARK_BASE_URL / ARK_MODEL_MAP     # 火山方舟专用适配器（volcengine:* 任务）
@@ -109,6 +123,26 @@ ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
 > **运维铁律**：备份不等于可用。每次备份后跑 `verify-backup.ps1`，只有能恢复的备份才算备份。
 > 已验证：27 张表全量恢复、关键表数据完整。
 
+## 5.9 网关安全响应头与体积上限（P1-10，2026-10-30）
+
+`app/deploy/nginx.conf` 的 `server` 块已启用下列头（`always`，错误响应也带）：
+
+| 头 | 值 | 为什么不能更严 |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | — |
+| `X-Frame-Options` | `SAMEORIGIN` | 画面预览/分享页要被同源 iframe 嵌入，`DENY` 会打断 |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 分享链接里的 token 不能经 Referer 外泄 |
+| `Permissions-Policy` | `camera=(), geolocation=(), payment=(), usb=()` | **未限制 microphone**：语音输入走浏览器 MediaRecorder，限了会挂 |
+| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups` | 微信/Apple OAuth 走弹窗回跳，`same-origin` 会切断 window.opener |
+| `Cross-Origin-Resource-Policy` | `same-site` | — |
+
+**仍为注释、不要急着打开的两条**：
+
+- `Strict-Transport-Security`：当前只有 `listen 80`，TLS 由外层 LB/CDN 终止。HSTS 只在 HTTPS 生效，且一旦下发错就难以回退——**确认外层证书与 80→443 跳转后再开**。
+- `Content-Security-Policy`：Nuxt hydration 需要内联脚本，未接 nonce 前启用会白屏。模板已写在 `nginx.conf` 末尾（含 `nonce-<INJECT>` 占位）。
+
+**体积上限**：`client_max_body_size` 已从 `12m` 对齐到 **48m**（= API 的 `bodyLimit`）。两者不一致时，大图 base64 上传会被网关先 413，而应用侧日志里**什么都看不到**（请求没到 api），是最难排查的一类"功能时好时坏"。
+
 ## 6. 健康检查与指标（`/v1`）
 
 | 端点 | 语义 | 行为 |
@@ -117,6 +151,8 @@ ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
 | `GET /healthz/ready` | **readiness** | db+redis 都可用才 200；否则 **503**；停机中返回 503（`shutting_down`） |
 | `GET /healthz` | 聚合详情 | 依赖不可用时同样 503，供人工排查 |
 | `GET /metrics` | Prometheus 文本 | 任务状态分布 / 15min 失败率 / 待支付超时 / **已支付未入账**（应恒为 0）/ 进程指标 |
+
+> **`/metrics` 需要 Bearer 鉴权（P1-12，2026-10-30）**：`METRICS_TOKEN`（≥16 字符）生产必须显式设置（compose 用 `${METRICS_TOKEN:?…}` 强制，缺失即拒绝启动）。抓取时未带或带错 →`401` + `WWW-Authenticate: Bearer`（纯文本，不返回任何指标）；比较走 `timingSafeEqual`，避免按字节计时爆破。Prometheus 侧配置 `authorization: { credentials: <token> }`（或 `bearer_token_file`），token 只放 Secret、不进仓库；`/healthz/*` 保持匿名可探。
 
 **探针配置建议**：
 ```yaml

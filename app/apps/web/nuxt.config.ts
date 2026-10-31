@@ -100,6 +100,12 @@ export default defineNuxtConfig({
     "/video-redraw/**": { ssr: false },
     "/watch": { ssr: false },
     "/watch/**": { ssr: false },
+    // 分享页（补 P1-14）：`pages/share/[token].vue` 的 `definePageMeta({ssr:false})` 只影响该页的
+    // **组件**渲染，不改变服务端首帧；而分享链接是最容易被**匿名直开**的入口（预览/举报），
+    // 首帧与服务端结果不一致时整页空白。与第 105 批 `/team/**` 是同一类缺陷。
+    // 守卫：`apps/api/test/web-route-rules.spec.ts`（每个 pages/ 顶层路由都必须在 routeRules 里）。
+    "/share": { ssr: false },
+    "/share/**": { ssr: false },
   },
   app: {
     head: {

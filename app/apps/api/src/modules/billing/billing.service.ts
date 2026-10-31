@@ -11,7 +11,7 @@ import {
   skus,
   subscriptions,
 } from "@app/db";
-import { AppError, ErrorCode, newId } from "@app/shared";
+import { AppError, ErrorCode, newId, type ErrorCodeValue } from "@app/shared";
 import { randomBytes } from "node:crypto";
 import { env } from "../../config/env";
 import { db } from "../../db/database";
@@ -37,6 +37,93 @@ export function mapChannelRefundStatus(status: string | undefined): "processing"
   const normalized = status.trim().toUpperCase();
   if (normalized === "SUCCESS" || normalized === "SUCCEEDED" || normalized === "Y") return "succeeded";
   return "processing";
+}
+
+/**
+ * 支付回调载荷校验（PR-02）。**纯函数**：本机没有 PG/Redis 也要能测（见 test/payment-guard.spec.ts）。
+ *
+ * 修的是什么：原来金额只在 `amountCents !== undefined` 时才比对，于是
+ * 「请求方直接省略该字段即可完全跳过金额校验」。mock 渠道没有渠道签名，
+ * 载荷本身就是全部证据，所以这里把金额变成硬性要求：
+ * - mock：`amountCents` 必填（缺失/非整数/负数一律拒）；
+ * - 真实渠道（wechat/alipay）：金额来自渠道签名载荷，这里不做必填约束，
+ *   金额比对仍由 `decidePaymentAction` 完成（载荷金额 vs 下单快照）。
+ */
+export type PaymentPayloadCheck =
+  | { ok: true }
+  | { ok: false; code: ErrorCodeValue; message: string; details?: Record<string, unknown> };
+
+export function checkPaymentPayload(params: {
+  channel: string;
+  channelOrderId?: unknown;
+  amountCents?: unknown;
+}): PaymentPayloadCheck {
+  if (typeof params.channelOrderId !== "string" || params.channelOrderId.trim() === "") {
+    return {
+      ok: false,
+      code: ErrorCode.INVALID_PARAM,
+      message: "channel_order_id is required",
+      details: { field: "channel_order_id" },
+    };
+  }
+  if (params.channel === "mock") {
+    const amount = params.amountCents;
+    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) {
+      return {
+        ok: false,
+        code: ErrorCode.INVALID_PARAM,
+        message: "amount_cents is required for mock channel",
+        details: { field: "amount_cents" },
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/** 订单行中与"能否入账"相关的字段子集：纯函数单测可直接构造，不依赖 drizzle 类型 */
+export interface PayableOrderRow {
+  spaceId: bigint;
+  status: number;
+  amountCents: number;
+  credits: number;
+}
+
+export type PaymentDecision =
+  | { kind: "credit" }
+  | { kind: "already-paid" }
+  | { kind: "reject"; code: ErrorCodeValue; message: string; details?: Record<string, unknown> };
+
+/**
+ * 「这笔回调该不该入账」的判定（PR-02）。**纯函数**，与 SQL 解耦，便于无库穷举边界。
+ *
+ * 归属校验口径（P1-14）：`spaceId` 只在**服务端给出**（登录态 / mock 自助确认）时校验；
+ * 真实渠道回调没有 spaceId（`undefined`），按渠道签名载荷走，不做归属约束——
+ * 渠道回调的完整性由验签负责，拿空间归属去卡它会直接打断真实收款。
+ * 归属不符与"订单不存在"返回同一个 NOT_FOUND：不向调用方泄露订单是否存在。
+ */
+export function decidePaymentAction(
+  row: PayableOrderRow | undefined,
+  params: { spaceId?: string; amountCents?: number },
+): PaymentDecision {
+  if (!row) return { kind: "reject", code: ErrorCode.NOT_FOUND, message: "order not found" };
+  if (params.spaceId !== undefined && String(row.spaceId) !== String(params.spaceId)) {
+    return { kind: "reject", code: ErrorCode.NOT_FOUND, message: "order not found" };
+  }
+  // 金额校验：渠道回调金额必须与下单快照一致，否则拒绝入账（防篡改）
+  if (params.amountCents !== undefined && params.amountCents !== row.amountCents) {
+    return {
+      kind: "reject",
+      code: ErrorCode.INVALID_PARAM,
+      message: "amount mismatch",
+      details: { expected: row.amountCents, got: params.amountCents },
+    };
+  }
+  // 幂等：已入账的订单重复回调直接返回，不重复发放
+  if (row.status === OrderStatus.PAID) return { kind: "already-paid" };
+  if (row.status !== OrderStatus.PENDING) {
+    return { kind: "reject", code: ErrorCode.INVALID_PARAM, message: `order not payable (status=${row.status})` };
+  }
+  return { kind: "credit" };
 }
 
 export interface CreateOrderInput {
@@ -145,8 +232,12 @@ export class BillingService {
    *
    * 续期起点取 `max(现在, 当前到期日)`：过期后再买不能从过去补，
    * 否则用户"断档三个月后再买一个月"只买到一段早已过去的区间。
-   * 升级档位（同 space 换更高档）直接改写 sku 字段并在回报里登记为已知简化
-   * ——竞品的按比例补差价规则未取证，不臆造。
+   *
+   * 升级换档（同 space 换更高档）例外：报价按旧档**剩余天数**折抵，旧周期剩余价值
+   * 已经折进这一单的实付额，所以新周期从**今天**起算。若仍按续期顺延，月卡第 1 天
+   * 升级年卡会得到「年卡 + 29 天」，等于把已折抵过的剩余天数又送一遍。
+   * 判定只看「实付 < 牌价」：createOrder 里唯一的降价路径就是升级折抵（活动价下单
+   * 也按 sku.priceCents 计价），不需要再引入第二个状态位。
    */
   private async activateSubscription(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -157,6 +248,10 @@ export class BillingService {
       sku: string;
       period: string | null;
       orderId: bigint;
+      /** 本单实付（orders.amount_cents） */
+      paidAmountCents: number;
+      /** 本档牌价（skus.price_cents） */
+      listPriceCents: number;
     },
   ): Promise<void> {
     const now = new Date();
@@ -168,7 +263,9 @@ export class BillingService {
       .for("update")
       .limit(1);
     if (existing) {
-      const base = existing.endAt.getTime() > now.getTime() ? existing.endAt : now;
+      // 实付低于牌价 = 升级折抵单：旧周期剩余价值已折进实付额，新周期从今天起算
+      const isUpgrade = input.paidAmountCents < input.listPriceCents;
+      const base = isUpgrade ? now : new Date(Math.max(now.getTime(), existing.endAt.getTime()));
       const endAt = new Date(base.getTime() + days * 86_400_000);
       await tx
         .update(subscriptions)
@@ -629,32 +726,52 @@ export class BillingService {
    * 1) 只有 status=1（待支付）才会流转到 2，重复回调直接返回当前状态；
    * 2) 行级锁 SELECT ... FOR UPDATE 防并发双写；
    * 3) credit_flows.refOrderId 唯一性由业务保证（同一订单只入账一次）。
+   *
+   * PR-02 收口（2026-10-29）：
+   * - mock 渠道的 `amountCents` 变成**必填**（见 `checkPaymentPayload`），堵掉
+   *   "省略字段即跳过金额校验"；
+   * - 新增 `spaceId` 可选归属约束：登录态 / 自助确认路径必须传，查询按 space 过滤，
+   *   且 `decidePaymentAction` 再判一次（双保险）。真实渠道回调没有 spaceId，
+   *   按渠道签名载荷走，不受影响。
    */
   async markPaid(params: {
     orderId?: string;
     channel: string;
     channelOrderId: string;
     amountCents?: number;
+    /** 归属校验：**仅服务端可知**的 space（登录态/自助确认）。渠道回调不传 */
+    spaceId?: string;
   }): Promise<{ orderId: string; credited: boolean; credits: number }> {
-    return db.transaction(async (tx) => {
-      const where = params.orderId
-        ? and(eq(orders.id, BigInt(params.orderId)), eq(orders.channel, params.channel))
-        : and(eq(orders.channel, params.channel), eq(orders.channelOrderId, params.channelOrderId));
-      const [row] = await tx.select().from(orders).where(where).for("update").limit(1);
-      if (!row) throw new AppError(ErrorCode.NOT_FOUND, "order not found");
+    // 先在开启事务之前把载荷口径判掉：非法载荷不该占用一把行锁
+    const payloadCheck = checkPaymentPayload(params);
+    if (!payloadCheck.ok) {
+      throw new AppError(payloadCheck.code, payloadCheck.message, payloadCheck.details);
+    }
+    // spaceId 来自鉴权上下文，仍统一走 toBigId：非法值应该是 400101 而不是 500
+    const spaceBigId = params.spaceId === undefined ? undefined : toBigId(params.spaceId, "space_id");
 
-      // 金额校验：渠道回调金额必须与下单快照一致，否则拒绝入账（防篡改）
-      if (params.amountCents !== undefined && params.amountCents !== row.amountCents) {
-        throw new AppError(ErrorCode.INVALID_PARAM, "amount mismatch", {
-          expected: row.amountCents,
-          got: params.amountCents,
-        });
-      }
-      if (row.status === OrderStatus.PAID) {
+    return db.transaction(async (tx) => {
+      const conditions = [
+        params.orderId
+          ? eq(orders.id, toBigId(params.orderId, "order_id"))
+          : eq(orders.channelOrderId, params.channelOrderId),
+        eq(orders.channel, params.channel),
+      ];
+      if (spaceBigId !== undefined) conditions.push(eq(orders.spaceId, spaceBigId));
+
+      const [row] = await tx
+        .select()
+        .from(orders)
+        .where(and(...conditions))
+        .for("update")
+        .limit(1);
+
+      const decision = decidePaymentAction(row, { spaceId: params.spaceId, amountCents: params.amountCents });
+      if (decision.kind === "reject") throw new AppError(decision.code, decision.message, decision.details);
+      // decidePaymentAction 只在 row 存在时返回 credit/already-paid
+      if (!row) throw new AppError(ErrorCode.NOT_FOUND, "order not found");
+      if (decision.kind === "already-paid") {
         return { orderId: String(row.id), credited: false, credits: row.credits };
-      }
-      if (row.status !== OrderStatus.PENDING) {
-        throw new AppError(ErrorCode.INVALID_PARAM, `order not payable (status=${row.status})`);
       }
 
       await tx
@@ -687,6 +804,8 @@ export class BillingService {
           sku: skuRow.sku,
           period: skuRow.period,
           orderId: row.id,
+          paidAmountCents: row.amountCents,
+          listPriceCents: skuRow.priceCents,
         });
       }
 

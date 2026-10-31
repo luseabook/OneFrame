@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const API_SRC = join(__dirname, "..", "src");
 const WORKER_SRC = join(__dirname, "..", "..", "worker", "src");
+const DB_SRC = join(__dirname, "..", "..", "..", "packages", "db", "src");
 
 /** 把注释剥掉（保留行号），避免注释里的字符串被当成代码 —— 第 100 批踩过的坑 */
 function stripComments(src: string): string {
@@ -70,6 +71,7 @@ function walk(dir: string, suffix = ".ts"): string[] {
 describe("结算路径互斥：PENDING+入队 vs RUNNING+不同步结算（第 101 批守卫）", () => {
   const apiFiles = walk(API_SRC);
   const workerFiles = walk(WORKER_SRC).filter((p) => !p.endsWith(".spec.ts"));
+  const dbFiles = walk(DB_SRC);
 
   const read = (p: string) => stripComments(readFileSync(p, "utf8"));
 
@@ -82,8 +84,12 @@ describe("结算路径互斥：PENDING+入队 vs RUNNING+不同步结算（第 1
     expect(ad).toMatch(/status:\s*TASK_STATUS\.RUNNING/);
     expect(ad).not.toMatch(/status:\s*TASK_STATUS\.PENDING/);
 
-    // 2) 它自己 settle（同步路径），证明它是「自己负责结算」的那一类
-    expect(ad).toMatch(/\bsettleCredits\s*\(/);
+    // 2) 它自己结算（同步路径），证明它是「自己负责结算」的那一类。
+    //    PR-03 之后结算入口统一收敛到 `releaseFrozen(..., "settle")`：
+    //    业务侧**不许**再直接调 `settleCredits`（额度必须按流水 outstanding 算并归零字段）。
+    expect(ad).toMatch(/\breleaseFrozen\s*\(/);
+    expect(ad).toMatch(/disposition:\s*"settle"/);
+    expect(ad).not.toMatch(/\bsettleCredits\s*\(/);
 
     // 3) 它**绝不能**把任务塞进队列 —— 一旦入队，worker 也会去结算同一个 task
     expect(ad).not.toMatch(/enqueueTask\s*\(/);
@@ -120,14 +126,39 @@ describe("结算路径互斥：PENDING+入队 vs RUNNING+不同步结算（第 1
     expect(ex).not.toMatch(/eq\(tasks\.status,\s*TaskStatus\.PENDING\)/);
   });
 
-  it("settleCredits 的调用点只有两处（worker + ad-drama），新增时必须同步本守卫", () => {
-    const settlleSites: string[] = [];
+  it("settleCredits 只能在 packages/db/ledger.ts 内部被调用（收尾入口唯一）", () => {
+    const callers: string[] = [];
+    for (const p of [...apiFiles, ...workerFiles, ...dbFiles]) {
+      const code = read(p).replace(
+        /export\s+async\s+function\s+settleCredits\s*\(/,
+        "function settleCredits(",
+      );
+      if (/\bsettleCredits\s*\(/.test(code)) callers.push(p.split(/[\\/]/).pop()!);
+    }
+    // 唯一调用者是 `releaseFrozen` 自己。业务侧直接调它 = 绕过「按流水算额度 + 归零字段」，
+    // 就是 PR-03 的原始缺陷形态，必须红。
+    expect(callers).toEqual(["ledger.ts"]);
+  });
+
+  it("releaseFrozen 的调用点与预期一一对应（新增收尾路径必须同步本守卫）", () => {
+    // 8 个终态写入点里，7 个走 releaseFrozen（见 unarch 报告「处置方向表」）：
+    //   executor 成功=settle、executor 失败=unfreeze、tasks.cancel=unfreeze、
+    //   generations 入队失败=unfreeze、ad-drama DONE=settle、ad-drama FAILED=unfreeze、
+    //   auth 注销=unfreeze。
+    // 第 8 个是 `worker/maintenance.ts` 的看门狗：它按流水内联 unfreeze（同一口径、同一归零），
+    // 不走 helper，所以不在此表里 —— 它只能 unfreeze，不能 settle。
+    const counts: Record<string, number> = {};
     for (const p of [...apiFiles, ...workerFiles]) {
       const code = read(p);
-      const n = (code.match(/\bsettleCredits\s*\(/g) ?? []).length;
-      for (let i = 0; i < n; i += 1) settlleSites.push(p.split(/[\\/]/).pop()!);
+      const n = (code.match(/\breleaseFrozen\s*\(/g) ?? []).length;
+      if (n > 0) counts[p.split(/[\\/]/).pop()!] = n;
     }
-    // 两条结算路径 = 两个文件各 1 处；新增第三条路径意味着要重新论证互斥性
-    expect(settlleSites.sort()).toEqual(["ad-drama.service.ts", "executor.ts"]);
+    expect(Object.fromEntries(Object.entries(counts).sort())).toEqual({
+      "ad-drama.service.ts": 2,
+      "auth.service.ts": 1,
+      "executor.ts": 2,
+      "generations.service.ts": 1,
+      "tasks.service.ts": 1,
+    });
   });
 });

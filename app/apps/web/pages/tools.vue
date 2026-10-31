@@ -35,8 +35,6 @@ const tabs = computed<Array<{ key: TabKey; label: string }>>(() => [
 const active = ref<TabKey>("all");
 const shown = computed(() => (active.value === "all" ? cards.value : cards.value.filter((c) => c.category === active.value)));
 
-const showTip = ref(true);
-
 async function load(): Promise<void> {
   loading.value = true;
   loadError.value = "";
@@ -60,13 +58,10 @@ onMounted(() => {
     <header class="head">
       <h1>{{ t("tools.title") }}</h1>
       <div class="head-right">
-        <div v-if="showTip" class="tip">
-          <button class="tip-close" type="button" :aria-label="t('tools.tipClose')" @click="showTip = false">✕</button>
-          <p class="tip-title">{{ t("tools.tipTitle") }}</p>
-          <p class="tip-text">{{ t("tools.tipText") }}</p>
-        </div>
+        <!-- TB1（02 §11 批次 2「删 :136-143 提示框」）：竞品页头右上**只有一个按钮**
+             （tools-recheck.png x1276–1405 / y80–116），我方多出的提示卡用 3 个体系外色值
+             （#2a1744 / #d9d2ff / #a78bfa）且占 280px，与"页头只留主 CTA"的构型冲突。 -->
         <NuxtLink to="/assets" class="asset-btn">{{ t("tools.assetsLink") }}</NuxtLink>
-        <LangSwitcher />
       </div>
     </header>
 
@@ -89,11 +84,10 @@ onMounted(() => {
       <button type="button" class="retry" @click="load">{{ t("common.retry") }}</button>
     </div>
 
+    <!-- TB1：5 列正方形封面卡（竞品 tools-recheck.png：列距 12，卡 1:1）。
+         卡片数据仍来自 `/generations/tools`，封面为程序化渐变（见 components/ToolCard.vue）。 -->
     <div v-else-if="shown.length" class="grid">
-      <NuxtLink v-for="card in shown" :key="card.key" :to="card.route" class="tool-card">
-        <h3>{{ card.title }}</h3>
-        <p>{{ card.desc }}</p>
-      </NuxtLink>
+      <ToolCard v-for="card in shown" :key="card.key" :card="card" />
     </div>
     <EmptyState
       v-else
@@ -123,7 +117,8 @@ onMounted(() => {
 
 h1 {
   margin: 0;
-  font-size: 24px;
+  /* GL16：有 h1 的页面统一 26px/700（竞品「工具箱」墨迹 y88–109，单字宽 26） */
+  font-size: 26px;
   font-weight: 700;
 }
 
@@ -131,40 +126,6 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-}
-
-.tip {
-  position: relative;
-  width: 280px;
-  padding: 10px 30px 10px 14px;
-  border-radius: 8px;
-  background: #2a1744;
-  color: #d9d2ff;
-}
-
-.tip-close {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  border: 0;
-  background: transparent;
-  color: #b9aeff;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.tip-title {
-  margin: 0 0 4px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #a78bfa;
-}
-
-.tip-text {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.6;
-  opacity: 0.85;
 }
 
 .asset-btn {
@@ -213,51 +174,15 @@ h1 {
   font-weight: 600;
 }
 
+/* TB1：竞品是 5 列 × 212×212 正方形封面卡，列距/行距 12
+   （tools-recheck.png：卡 x184–395 / 407–618 / 630–841 / 853–1064 / 1076–1287，列距 12）。 */
 .grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-content: start;
-  gap: 20px;
+  gap: 12px;
   padding: 20px 0 0;
-}
-
-.tool-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  height: 84px;
-  padding: 16px 16px;
-  border-radius: 16px;
-  border: 0;
-  background: linear-gradient(180deg, #060608, #020203);
-  text-align: left;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.15s;
-}
-
-.tool-card:hover {
-  background: linear-gradient(180deg, #0d0d12, #050507);
-  transform: translateY(-1px);
-}
-
-h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-1);
-}
-
-.tool-card p {
-  margin: 0;
-  font-size: 13px;
-  color: #ffffff80;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .state {
@@ -281,22 +206,27 @@ h3 {
   cursor: pointer;
 }
 
+/* 断点（取代旧的 4/2/1 三档）：≥1440 → 5 列，1024–1439 → 4 列，768–1023 → 3 列，<768 → 2 列。
+   正方形卡在窄屏仍是 1:1，故列数减少即可，不需要改卡内结构。 */
+@media (max-width: 1439px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
 @media (max-width: 1100px) {
   .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: start;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .head {
     flex-direction: column;
   }
 }
-
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .page {
     padding: 18px 16px 32px;
   }
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .head-right {
     flex-direction: column;

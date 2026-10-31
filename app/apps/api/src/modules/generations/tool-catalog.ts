@@ -99,7 +99,13 @@ export interface ToolModeDefinition {
     ratios?: string[];
     media_limits?: Record<string, number>;
   };
-  /** 价目（resolution 为 per_call 或真实画质档） */
+  /**
+   * 价目**首次落库的默认值**（resolution 为 per_call 或真实画质档）。
+   *
+   * 只在 `model_prices` 里该档位的**行不存在**时使用；行一旦存在就以 DB 为准，
+   * 运营在 `/ops/admin/model-prices` 改价/下架不会被 `ensureToolCatalog` 覆盖
+   * （契约 §2.10）。要强制回刷需显式设 `CATALOG_SYNC_TOOLS=true`。
+   */
   prices: Array<{ resolution: string; credits: number; strikeCredits: number }>;
   /** 前端不显示、但必须随 options 一起提交的固定参数（例如去字幕的 mode=region） */
   fixedOptions?: Record<string, unknown>;
@@ -1181,15 +1187,31 @@ let ensuredInThisProcess = false;
  * **正在跑的库**补上（本批上线时线上库已有 46 个模型，不可能重跑 seed）；
  * 也不放在模块 `onModuleInit`：API 启动阶段写库会让"DB 只读/维护中"的部署直接起不来。
  * 因此由 `GET /generations/tools` 与工具 mode 的投递路径**惰性触发一次**（进程内记忆）。
+ *
+ * ## 写入边界（契约 §2.10）：代码管「定义」，DB 管「运营」
+ *
+ * 这个函数会在每次目录请求/工具投递上被反复触发，所以它**不能**是最省事的全量覆盖：
+ * - 代码负责的字段（`vendor`/`display_name`/`capability`/`adapter_code`/`modes`…）每次同步，
+ *   因为档位定义变了不刷就会"价目在、却报 no price"；
+ * - 运营负责的字段（`visible`/`sort`、价目的 `credits`/`strike_credits`/`active`）**只在
+ *   行不存在时给初值**。否则运营在后台调完价，下一次 `GET /generations/tools` 就被抹回
+ *   代码常量——现象是"改了没生效"，且没有任何报错，属于最难排查的一类缺陷。
+ * - 需要强制把定义连带运营字段刷回线上（如档位重构后要重置价格），显式设
+ *   `CATALOG_SYNC_TOOLS=true` 恢复旧的"全量覆盖"行为。
  */
 export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
   if (ensuredInThisProcess) return { models_inserted: 0, prices_inserted: 0 };
+  /**
+   * 逃生开关。这里直接读 `process.env` 而不是走 `env.ts`：`env.ts` 由 api-ops 在本批
+   * 同步修改，先读原始环境变量可以让两边独立落地、互不阻塞（契约 §2.10 明确允许）。
+   */
+  const syncOperationalFields = process.env.CATALOG_SYNC_TOOLS === "true";
   let modelsInserted = 0;
   let pricesInserted = 0;
   for (const [index, tool] of TOOL_MODES.entries()) {
     const [existing] = await db.select().from(models).where(eq(models.name, tool.model.name));
     /**
-     * 已存在则**同步定义**（不只是"不重复插入"）。
+     * 代码负责的**定义**字段：已存在也要同步。
      *
      * 为什么必须更新：`modes` 里的档位声明是计价与参数校验的依据（例如"有没有 durations"
      * 决定 `credits.price()` 按次还是按秒档找价目）。只 insert-if-missing 的话，
@@ -1203,24 +1225,25 @@ export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
       capability: tool.capability,
       types: [tool.capability],
       adapterCode: tool.model.adapterCode,
-      /**
-       * ⚠️ `visible=false`：这些是**内部能力行**（后处理/单点工具），不是竞品对齐的
-       * 模型目录条目。放进用户可选模型列表会污染「46 条竞品目录」这条硬契约
-       * （`test/model-catalog.spec.ts`），也让画布/Agent 的模型选择器出现
-       * "deepseek 也能做对口型"这种错配。
-       *
-       * 但 `tasks.model_id` / `model_prices.model_id` 是 NOT NULL + FK，任务必须有
-       * 一条模型行可引用，所以行必须存在、只是不可见；`findByName` 仍能查到
-       * （目录可见性只约束列表，不约束内部按名查找，见 models.service 注释）。
-       */
-      visible: false,
       audioVideoSupport: tool.resultMedia === "video",
-      sort: 900 + index,
       modeOrder: { [tool.mode]: 0 },
       modes: { [tool.mode]: tool.modeConfig },
       sceneModes: {},
       updatedAt: new Date(),
     };
+    /**
+     * 运营字段的**初值**（只在新建行时写入；已存在行的 `visible`/`sort` 归运营）。
+     *
+     * ⚠️ `visible=false`：这些是**内部能力行**（后处理/单点工具），不是竞品对齐的
+     * 模型目录条目。放进用户可选模型列表会污染「46 条竞品目录」这条硬契约
+     * （`test/model-catalog.spec.ts`），也让画布/Agent 的模型选择器出现
+     * "deepseek 也能做对口型"这种错配。
+     *
+     * 但 `tasks.model_id` / `model_prices.model_id` 是 NOT NULL + FK，任务必须有
+     * 一条模型行可引用，所以行必须存在、只是不可见；`findByName` 仍能查到
+     * （目录可见性只约束列表，不约束内部按名查找，见 models.service 注释）。
+     */
+    const operationalDefaults = { visible: false, sort: 900 + index };
     let modelId = existing?.id;
     if (!existing) {
       modelId = newId();
@@ -1234,6 +1257,7 @@ export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
           promotions: [],
           needVip: false,
           ...definition,
+          ...operationalDefaults,
         })
         .onConflictDoNothing({ target: models.name })
         .returning({ id: models.id });
@@ -1241,14 +1265,20 @@ export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
       const [reloaded] = await db.select().from(models).where(eq(models.name, tool.model.name));
       modelId = reloaded?.id ?? modelId;
     } else {
-      await db.update(models).set(definition).where(eq(models.id, existing.id));
+      // 默认只刷定义（保留运营改过的 visible/sort）；开了 CATALOG_SYNC_TOOLS 才连运营字段一起覆盖
+      await db
+        .update(models)
+        .set(syncOperationalFields ? { ...definition, ...operationalDefaults } : definition)
+        .where(eq(models.id, existing.id));
     }
     if (!modelId) continue;
     for (const price of tool.prices) {
       /**
-       * 价目同样"存在即同步金额"：运营改价走 `/ops/admin/model-prices`，
-       * 这里只保证**档位存在**且初始金额等于目录声明（否则首次部署后目录改了价、
-       * 代码与线上定价会长期不一致，而报价读的正是这张表）。
+       * 价目：`tool.prices` 只是**首次落库的默认值**。
+       *
+       * 行已存在时默认什么都不做（运营改价/下架优先）；只有显式开全量同步才把金额与
+       * 启停刷回目录常量。不新增行是为了不破坏 `uq_model_prices_per_call`
+       * 那条"按次档位只能一条"的部分唯一索引。
        */
       const insertedPrices = await db
         .insert(modelPrices)
@@ -1265,8 +1295,7 @@ export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
         .onConflictDoNothing()
         .returning({ id: modelPrices.id });
       pricesInserted += insertedPrices.length;
-      if (insertedPrices.length === 0) {
-        // 已存在：同步金额与启用状态（不新增行，避免破坏 uq_model_prices_per_call）
+      if (insertedPrices.length === 0 && syncOperationalFields) {
         await db
           .update(modelPrices)
           .set({ credits: price.credits, strikeCredits: price.strikeCredits, active: true, updatedAt: new Date() })

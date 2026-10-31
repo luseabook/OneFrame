@@ -44,6 +44,13 @@ const toolPaths = ["/create"];
 // ReelFlow 剪辑台同理：三区布局（左栏 290 + 播放器 + 底部时间线 150）是固定视口高，
 // 套上 240 侧栏 + 64 顶栏后播放区只剩不到 500px 宽，与竞品实测（1424 视口铺满）差太远。
 const blankPaths = ["/canvas", "/reelflow"];
+/**
+ * `/projects/:id`（单集分镜工作台）也走裸壳 —— 对齐竞品 `/series-manage/episode/:id`：
+ * 竞品该页无侧栏、单层 64px 顶栏，三列 160/592/640 铺满 1424。套 app 壳会多出
+ * 240px 侧栏 + 64px 顶栏，实测工作台可用区从 1424×741 缩到 1152×661（右生成台少 180px）。
+ * 注意只匹配详情页，`/projects` 列表仍留在 app 壳内（否则列表页会丢导航）。
+ */
+const immersiveProjectDetail = /^\/projects\/[^/]+\/?$/;
 // 落地页自带独立导航与页脚（含法务入口与 ICP），不再套公共壳层，避免出现两层顶栏/两层页脚
 const barePaths = ["/"];
 
@@ -53,6 +60,8 @@ function matchAny(paths: string[]): boolean {
 
 const layoutName = computed(() => {
   if (matchAny(barePaths)) return "";
+  // 单集分镜工作台走裸壳（无侧栏 + 单一顶栏），与竞品 /series-manage/episode/:id 同构
+  if (immersiveProjectDetail.test(route.path)) return "blank";
   // 画布族必须在 workspacePaths 之前判定：虽然目前 /canvas 不在 workspacePaths 里，
   // 但后续若有人把画布入口并进工作台菜单，提前命中能保证编辑器不会被套上侧栏。
   if (matchAny(blankPaths)) return "blank";

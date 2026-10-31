@@ -15,6 +15,7 @@ import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode, generationRequestSchema } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
+import { AllowStreamToken } from "../../common/allow-stream-token.decorator";
 import { SkipEnvelope } from "../../common/http/skip-envelope.decorator";
 import { signStreamToken, streamTokenExpiresAt, STREAM_TOKEN_TTL_S } from "../../common/stream-token";
 import { parseOrThrow } from "../../common/zod";
@@ -84,6 +85,7 @@ export class AgentController {
    * 断线重连与 `Last-Event-ID` 语义。这里取 GET `?task_id=`，差异已登记。
    */
   @Get("task/stream")
+  @AllowStreamToken()
   @SkipEnvelope()
   async taskStream(
     @Req() req: AuthedRequest,
@@ -104,6 +106,7 @@ export class AgentController {
    * `task_id` 先看 query、再看 body（竞品的 raw body 里也可能带），两处都给时 query 优先。
    */
   @Post("task/stream")
+  @AllowStreamToken()
   @SkipEnvelope()
   async taskStreamPost(
     @Req() req: AuthedRequest,

@@ -900,6 +900,32 @@ export class TeamService {
 
   // ── 团队积分：分配 / 回收（成对记账，ADR-011）──────────────
   /**
+   * 按 spaceId 升序锁两方积分账户。
+   *
+   * `allocate`（团队→成员）与 `recover`（成员→团队）语义方向相反，但**物理加锁顺序
+   * 必须一致**：两边各自"先锁自己、再锁对方"时，并发的一收一放会各持一把锁互等，
+   * PostgreSQL 抛 40P01 死锁，接口表现为随机 500。这里把顺序收敛到唯一入口，
+   * 后续新增的任何双边转账都拿不到相反顺序。
+   */
+  private async lockCreditAccountPair(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    a: bigint,
+    b: bigint,
+  ): Promise<Map<bigint, typeof creditAccounts.$inferSelect>> {
+    const [first, second] = a <= b ? [a, b] : [b, a];
+    const locked = new Map<bigint, typeof creditAccounts.$inferSelect>();
+    for (const spaceId of [first, second]) {
+      const [row] = await tx
+        .select()
+        .from(creditAccounts)
+        .where(eq(creditAccounts.spaceId, spaceId))
+        .for("update");
+      if (row) locked.set(spaceId, row);
+    }
+    return locked;
+  }
+
+  /**
    * 分配：团队 space → 成员个人 space。
    * 必须在一个事务里同时写两条流水，否则 Σdelta 会漂。
    */
@@ -925,12 +951,10 @@ export class TeamService {
     if (!personal) throw new AppError(ErrorCode.INVALID_PARAM, "member has no personal space", { field: "user_id" });
 
     return db.transaction(async (tx) => {
-      // 锁团队账户（余额校验）
-      const [teamAcc] = await tx
-        .select()
-        .from(creditAccounts)
-        .where(eq(creditAccounts.spaceId, BigInt(spaceId)))
-        .for("update");
+      const teamSpaceId = BigInt(spaceId);
+      // 两方账户按 spaceId 升序一次性加锁（与 recover 共用入口，锁序相反会 40P01）
+      const locked = await this.lockCreditAccountPair(tx, teamSpaceId, personal.id);
+      const teamAcc = locked.get(teamSpaceId);
       if (!teamAcc) throw new AppError(ErrorCode.NOT_FOUND, "team credit account missing");
       if (teamAcc.balance < input.amount) {
         throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "Insufficient Balance");
@@ -939,14 +963,9 @@ export class TeamService {
       await tx
         .update(creditAccounts)
         .set({ balance: teamAfter, updatedAt: new Date() })
-        .where(eq(creditAccounts.spaceId, BigInt(spaceId)));
+        .where(eq(creditAccounts.spaceId, teamSpaceId));
 
-      // 锁成员个人账户
-      const [memAcc] = await tx
-        .select()
-        .from(creditAccounts)
-        .where(eq(creditAccounts.spaceId, personal.id))
-        .for("update");
+      const memAcc = locked.get(personal.id);
       if (!memAcc) throw new AppError(ErrorCode.NOT_FOUND, "member credit account missing");
       const memAfter = memAcc.balance + input.amount;
       await tx
@@ -987,10 +1006,12 @@ export class TeamService {
         memo: input.memo ?? `团队分配 ${input.amount}`,
       });
 
-      // 已分配额上限（credits_quota）随分配增长——它不是余额，仅作额度上限记录
+      // 已分配额上限（credits_quota）随分配增长——它不是余额，仅作额度上限记录。
+      // 用 SQL 自增而不是拿事务外读到的 `member.creditsQuota` 回写：
+      // 并发批量分配时两个事务会读到同一个旧值，后写的覆盖先写的（丢更新）。
       await tx
         .update(spaceMembers)
-        .set({ creditsQuota: member.creditsQuota + input.amount, updatedAt: new Date() })
+        .set({ creditsQuota: sql`${spaceMembers.creditsQuota} + ${input.amount}`, updatedAt: new Date() })
         .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(input.user_id))));
 
       return { team_balance: teamAfter, member_balance: memAfter, amount: input.amount };
@@ -1018,11 +1039,10 @@ export class TeamService {
     if (!personal) throw new AppError(ErrorCode.INVALID_PARAM, "member has no personal space", { field: "user_id" });
 
     return db.transaction(async (tx) => {
-      const [memAcc] = await tx
-        .select()
-        .from(creditAccounts)
-        .where(eq(creditAccounts.spaceId, personal.id))
-        .for("update");
+      const teamSpaceId = BigInt(spaceId);
+      // 与 allocate 相同的升序加锁入口（方向相反、锁序必须相同）
+      const locked = await this.lockCreditAccountPair(tx, teamSpaceId, personal.id);
+      const memAcc = locked.get(personal.id);
       if (!memAcc) throw new AppError(ErrorCode.NOT_FOUND, "member credit account missing");
       if (memAcc.balance < input.amount) {
         throw new AppError(ErrorCode.INSUFFICIENT_BALANCE, "member balance insufficient for recovery");
@@ -1033,17 +1053,13 @@ export class TeamService {
         .set({ balance: memAfter, updatedAt: new Date() })
         .where(eq(creditAccounts.spaceId, personal.id));
 
-      const [teamAcc] = await tx
-        .select()
-        .from(creditAccounts)
-        .where(eq(creditAccounts.spaceId, BigInt(spaceId)))
-        .for("update");
+      const teamAcc = locked.get(teamSpaceId);
       if (!teamAcc) throw new AppError(ErrorCode.NOT_FOUND, "team credit account missing");
       const teamAfter = teamAcc.balance + input.amount;
       await tx
         .update(creditAccounts)
         .set({ balance: teamAfter, updatedAt: new Date() })
-        .where(eq(creditAccounts.spaceId, BigInt(spaceId)));
+        .where(eq(creditAccounts.spaceId, teamSpaceId));
 
       const groupId = member.groupId ?? null;
       await tx.insert(creditFlows).values({
@@ -1073,10 +1089,13 @@ export class TeamService {
         memo: input.memo ?? `团队回收 ${input.amount}`,
       });
 
-      const newQuota = Math.max(0, member.creditsQuota - input.amount);
+      // 原子扣减 + 下限 0：事务外读到的 `member.creditsQuota` 在并发批量操作下已过期
       await tx
         .update(spaceMembers)
-        .set({ creditsQuota: newQuota, updatedAt: new Date() })
+        .set({
+          creditsQuota: sql`greatest(0, ${spaceMembers.creditsQuota} - ${input.amount})`,
+          updatedAt: new Date(),
+        })
         .where(and(eq(spaceMembers.spaceId, BigInt(spaceId)), eq(spaceMembers.userId, BigInt(input.user_id))));
 
       return { team_balance: teamAfter, member_balance: memAfter, amount: input.amount };

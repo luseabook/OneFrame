@@ -475,7 +475,14 @@ function onPointerUp(): void {
   if (!state) return;
 
   if (state.kind === "rail") {
-    if (state.shot && state.dropIndex !== null) {
+    if (!state.shot) return;
+    // 纯单击（未移动）= 按文案「点击加入时间线」追加到末尾；
+    // 之前只有拖到轨道才入轨，而左栏三处文案都写"点选/点击加入"，用户会反复点没反应。
+    if (!state.moved) {
+      void addShot(state.shot, clips.value.length);
+      return;
+    }
+    if (state.dropIndex !== null) {
       void addShot(state.shot, state.dropIndex);
     }
     return;
@@ -983,6 +990,7 @@ const episodeLabel = computed(() => {
         <Button class="rf-export" :loading="exporting" :disabled="!clips.length || loading" @click="startExport">
           {{ exporting ? t("editor.composing") : t("editor.export") }}
         </Button>
+        <AccountPills compact />
       </div>
     </header>
 

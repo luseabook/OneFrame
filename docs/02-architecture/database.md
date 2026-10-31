@@ -370,6 +370,21 @@ CREATE INDEX idx_flows_space ON credit_flows(space_id, created_at DESC);
 
 **对账不变式（全库唯一表述，security §3 / testing §2-1 同文）**：`balance == Σ delta` 且 `frozen == Σ frozen_delta`。
 
+**任务冻结的三条派生不变式（PR-03 补充，2026-10-30）**：
+
+1. **`tasks.credits_frozen` 的语义是「当前还冻结着多少」，不是「当初冻结了多少」**。
+   任务进入终态（成功/失败/取消/审核拒绝/看门狗超时/账号注销）时必须归零。
+   该字段此前从插入后再未写回过 0，导致 4 处 `creditsFrozen > 0` 判据恒真（任务删不掉、
+   取消后被二次解冻）。历史额度一律以流水为准，字段只做投影。
+2. **`tasks.credits_frozen == Σ frozen_delta where ref_task_id = task.id`**（专防「只归零不 unfreeze」
+   或「只 unfreeze 不归零」这两种改法各自破坏一边）。
+3. **收尾只有一个入口**：`@app/db` 的 `releaseFrozen(tx, {taskId, disposition: "settle"|"unfreeze"})`。
+   额度按上面的流水求和计算（不读 `tasks.credits_frozen`），幂等（`outstanding<=0` 只归零字段、不写流水），
+   业务侧不得再直接调 `settleCredits`/`unfreezeCredits`。成功后是 **settle 不是 unfreeze**：
+   赠送额度的 `delta=0, frozen_delta=-N`，换成 unfreeze 会凭空多出可用余额。
+   > 守卫：`apps/api/test/ledger-release.spec.ts`（4 例，随机 100 次终态 + 双向不变式）、
+   > `apps/api/test/settle-paths.spec.ts`（入口唯一 + 调用点清单）。
+
 freeze→成功/失败 三行示例流水（初始 balance=100, frozen=0, 任务 cost=8）：
 
 | kind | delta | frozen_delta | balance_after | 说明 |
@@ -544,16 +559,53 @@ CREATE INDEX idx_timeline_exports_episode ON timeline_exports(episode_id, create
 ## 8. 运营
 
 ```sql
-CREATE TABLE configs (                             -- key/module/lang 结构对齐竞品配置中心
-  key TEXT NOT NULL, module TEXT NOT NULL DEFAULT 'web',
-  lang TEXT NOT NULL DEFAULT 'zh-CN', value JSONB NOT NULL,
-  PRIMARY KEY (key, module, lang)
+-- 运营配置中心（迁移 0047；多语言/多作用域用 module 约定后缀表达：home / home@en）
+CREATE TABLE app_configs (
+  id BIGINT PRIMARY KEY,
+  key TEXT NOT NULL,
+  module TEXT NOT NULL DEFAULT '',
+  value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  description TEXT,
+  updated_by BIGINT REFERENCES admin_users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (key, module)                             -- 同一 key 的默认值与 @lang 覆盖可并存（迁移 0048 修正）
 );
+
+-- 管理端操作审计（迁移 0047；只记非 GET 的 /v1/ops/* 成功操作，payload 脱敏 ≤8KB）
+CREATE TABLE admin_audit_logs (
+  id BIGINT PRIMARY KEY,
+  admin_id BIGINT REFERENCES admin_users(id),
+  admin_username TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT '',
+  status_code INTEGER NOT NULL DEFAULT 200,
+  ok BOOLEAN NOT NULL DEFAULT true,
+  ip TEXT,
+  request_id TEXT,
+  payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_admin_audit_logs_created ON admin_audit_logs (created_at DESC);
+CREATE INDEX idx_admin_audit_logs_admin_created ON admin_audit_logs (admin_id, created_at DESC);
+CREATE INDEX idx_admin_audit_logs_action_created ON admin_audit_logs (action, created_at DESC);
+
 CREATE TABLE admin_users (
   id BIGINT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'ops'
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'ops',                -- super 管账号 / ops 运营写 / viewer 只读
+  status SMALLINT NOT NULL DEFAULT 1,              -- 1 启用 / 2 停用（停用后旧 JWT 立即失效）
+  token_version INTEGER NOT NULL DEFAULT 1,        -- JWT ver；改密/启停时 +1
+  last_login_at TIMESTAMPTZ,
+  password_updated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+> 存量库升级：迁移 0047 会把「最早的管理员」提升为 `super`（仅当库内没有 super 时），
+> 否则升级后无人能管理管理员账号。
 
 ## 9. 索引与性能要点
 

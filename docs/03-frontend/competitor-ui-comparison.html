@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>一帧 OneFrame × 竞品 ReelMate · 短剧工作流 UI 对比（2026-10-29）</title>
+<style>
+  :root{
+    --bg:#0b0b10; --panel:rgba(194,204,241,.08); --panel-solid:#191a22; --line:rgba(194,204,241,.14);
+    --text:#ececf2; --muted:#9ea0b3; --brand:#9b46ff; --brand-2:#7e70ff; --ok:#3ecf8e; --warn:#f5a524; --bad:#f06a6a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  a{color:#b9a4ff;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1480px;margin:0 auto;padding:32px 24px 80px}
+  h1{font-size:26px;margin:0 0 6px}
+  h2{font-size:19px;margin:44px 0 12px;padding-top:6px}
+  h3{font-size:15px;margin:22px 0 8px;color:#d9d9e6}
+  .sub{color:var(--muted);font-size:13px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
+  .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 12px;font-size:12px;color:#cfd0dd}
+  .chip b{color:#fff}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:18px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+  .kpi .n{font-size:24px;font-weight:700;letter-spacing:.2px}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px}
+  .kpi .d{color:#cfd0dd;font-size:12px;margin-top:8px}
+  .kpi.bad .n{color:var(--bad)} .kpi.warn .n{color:var(--warn)} .kpi.ok .n{color:var(--ok)}
+  figure{margin:16px 0 8px;background:#101017;border:1px solid var(--line);border-radius:18px;padding:12px}
+  figure img{width:100%;height:auto;border-radius:12px;display:block}
+  figcaption{color:var(--muted);font-size:12px;margin-top:10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:1000px){.two{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  td b{color:#fff}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:#cfd0dd}
+  .tag.p0{color:#ffd7d7;border-color:#f06a6a55;background:#f06a6a1a}
+  .tag.p1{color:#ffe9c4;border-color:#f5a52455;background:#f5a5241a}
+  .tag.p2{color:#d8ffe9;border-color:#3ecf8e55;background:#3ecf8e14}
+  .note{border-left:3px solid var(--brand);padding:10px 14px;background:linear-gradient(90deg,rgba(155,70,255,.14),transparent);border-radius:0 12px 12px 0;color:#e6e4f5;margin:14px 0}
+  .warnbox{border-left:3px solid var(--warn);background:linear-gradient(90deg,rgba(245,165,36,.12),transparent);padding:10px 14px;border-radius:0 12px 12px 0;color:#f6ead8;margin:14px 0}
+  ul{margin:8px 0 8px 18px;padding:0} li{margin:4px 0}
+  .foot{margin-top:48px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:16px}
+  .toc{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;margin-top:14px}
+  .toc a{display:block;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:#dcdcf0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>一帧 OneFrame × 竞品 ReelMate · 短剧工作流 UI 对比</h1>
+  <div class="sub">v1.1 · 2026-10-29（对齐实施后）· 竞品证据 2026-10-25（1424×805 实测）· 我方 2026-10-29 同视口现抓（对齐前 05:3x / 对齐后 06:3x）</div>
+
+  <div class="chips">
+    <span class="chip">v1.1：<b>布局已逐像素对齐</b>（160 / 592 / 640 + 单顶栏 64 + 8px 缝隙 = 竞品坐标）</span>
+    <span class="chip">行为对齐：<b>6 / 12 项完成</b>（单击入轨 · 重生成确认 · 加载更多 · 已剪辑 · 即将开放 chip · 新建回流）</span>
+    <span class="chip">完整报告：<a href="competitor-ui-comparison.md">competitor-ui-comparison.md</a></span>
+    <span class="chip">事实清单：<a href="_ui-audit/ref-facts.md">ref-facts</a> · <a href="_ui-audit/ours-facts.md">ours-facts</a> · <a href="_ui-audit/landscape.md">landscape</a></span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi ok"><div class="n">1424 宽 ✅</div><div class="l">单集工作台可用宽度</div><div class="d">对齐前 1152（侧栏 240）→ 对齐后与竞品 1408 内容区一致</div></div>
+    <div class="kpi ok"><div class="n">640 ✅</div><div class="l">右生成台宽度</div><div class="d">对齐前 460 → 对齐后与竞品 640 一致</div></div>
+    <div class="kpi ok"><div class="n">733 ✅</div><div class="l">可用高度</div><div class="d">对齐前 661（双顶栏）→ 对齐后单顶栏 64，与竞品一致</div></div>
+    <div class="kpi bad"><div class="n">~90 次</div><div class="l">30 镜的逐镜绑定+生成点击（未做）</div><div class="d">竞品「匹配资产」1 击替代；本轮仅把入口标成「即将开放」</div></div>
+    <div class="kpi ok"><div class="n">5 处 ✅</div><div class="l">disabled 占位已透明化</div><div class="d">匹配资产 / 放大编辑 / 更多素材源 / 添加分镜 / AI 提取资产 → 均带「即将开放」chip</div></div>
+    <div class="kpi ok"><div class="n">6 / 12</div><div class="l">行为对齐完成度</div><div class="d">单击入轨·重生成确认·加载更多·已剪辑·chip·新建回流；余 6 项见报告 §10.3</div></div>
+  </div>
+
+  <div class="note"><b>v1.1 一句话：</b>空间与视觉语言已"逐像素是同一个产品"（160/592/640、单顶栏、8px 缝隙）；剩下的是<b>行为与自动化</b>——把「匹配资产」的 90 次点击、批量投递的 <code>mode</code>、两套「已出片」口径修掉，才算真正对齐"怎么做"。</div>
+
+  <div class="toc">
+    <a href="#p01">01 首页 · 双入口</a><a href="#p02">02 项目列表</a><a href="#p03">03 单集分镜工作台（核心）</a>
+    <a href="#p04">04 项目资产</a><a href="#p05">05 资产库 / 剧集资产</a><a href="#p06">06 资产清单校验</a>
+    <a href="#p07">07 剪辑台</a><a href="#p08">08 项目内时间线（我方独有）</a><a href="#p09">09 3D 导演台</a>
+    <a href="#guide">附 · 竞品 coach-mark 引导</a><a href="#fix">改进清单 P0/P1/P2</a>
+  </div>
+
+  <!-- 01 -->
+  <h2 id="p01">01 · 首页双入口</h2>
+  <figure>
+    <img src="evidence/ui-compare/01-home.png" alt="首页双入口：左竞品 ReelMate，右我方 OneFrame" />
+    <figcaption><span>左：竞品 ReelMate（2026-10-24） · 右：我方 OneFrame（2026-10-29）</span><span>1424×805 同视口</span></figcaption>
+  </figure>
+  <div class="two">
+    <div><h3>竞品</h3><ul><li>主卡 640×160 r32（渐变+内发光+1px 描边），副卡 480</li><li>无全局引导条，教学放在工作台 coach-mark</li><li>工具矩阵 7 卡 + <code>上新</code>/<code>即将上线</code></li><li>价格广告位常驻右上 <code>会员订阅 1080P低至0.2元/秒</code></li></ul></div>
+    <div><h3>我方</h3><ul><li>同双入口卡；卡内多一行副标题</li><li>顶部「3 步做出第一集」引导条（可「不再提示」）</li><li>同 7 卡同序；徽标 <code>即将上线</code>/<code>一局会员</code></li><li>价格位 <code>视频低至8积分/条</code></li></ul></div>
+  </div>
+  <div class="note">结论：对齐。引导条是加分项，但在 805 高下占 76px 且只能本机隐藏；建议首访一次后收起，项目内用 coach-mark 接力。</div>
+
+  <!-- 02 -->
+  <h2 id="p02">02 · 项目列表 <code>/reelflow/list</code></h2>
+  <figure>
+    <img src="evidence/ui-compare/02-project-list.png" alt="项目列表：左竞品，右我方" />
+    <figcaption><span>左：竞品 330 单列卡 + FAB · 右：我方 4 列卡 + 出片进度</span><span>同日同视口</span></figcaption>
+  </figure>
+  <div class="two">
+    <div><h3>竞品</h3><ul><li><code>项目 (N)</code> / <code>已导出</code> 双 tab</li><li>330×250 卡：缩略图 310×140、`最后编辑于`、⋮、hover `编辑`</li><li>空态一句话 + 底部胶囊 FAB（236×68）</li></ul></div>
+    <div><h3>我方</h3><ul><li>同双 tab；多 `返回工作台 / 剪辑台` 面包屑</li><li>≈300×250 × 4 列：9:16、类型·集数·时长、`草稿`、<b><code>0/3 已出片</code></b></li><li>列表硬截断 48 条无分页（P1 债）</li></ul></div>
+  </div>
+  <div class="note">结论：我方卡片信息更直接回答"做到哪了"，建议保留；补 hover 编辑/⋮，并加分页。</div>
+
+  <!-- 03 -->
+  <h2 id="p03">03 · 单集分镜工作台（核心页）</h2>
+  <figure>
+    <img src="evidence/ui-compare/03-episode-workspace.png" alt="单集分镜工作台：左竞品，右我方" />
+    <figcaption><span>左：竞品 160/592/640 三列 · 右：我方 176/492/460 + 全站侧栏 240 + 双顶栏</span><span>像素扫描实测</span></figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>区域</th><th>竞品（实测）</th><th>我方（实测）</th><th>差异</th></tr></thead>
+    <tbody>
+      <tr><td>顶栏</td><td>单层 64：← + <code>未开始▾</code> + <code>剧本</code></td><td>双层 128：全局头 + ← + <code>分镜▾</code> + 项目名 + meta/3D/保存</td><td>阶段表达 + 少 64px</td></tr>
+      <tr><td>分镜条</td><td>160；<code>AI拆分镜</code> 136×32 + <code>首次免费</code>；卡 128×128；<code>+添加分镜</code> 可用</td><td>176；<code>AI拆分镜</code>+<code>首次免费</code>；卡≈152；<code>+添加分镜</code> <b>disabled</b></td><td>可用性</td></tr>
+      <tr><td>素材区</td><td>592；<code>分镜描述:</code> 只读 + 铅笔；空态 <code>暂无素材 / 或 本地上传</code></td><td>492；<code>分镜描述</code> 直接可编辑 + 指引文案；<code>本地上传</code> 重复渲染</td><td>−100px；文案 bug</td></tr>
+      <tr><td>生成台</td><td>640：5 模式 / 模型 / 配额 / 两张 140×144 卡 / 提示词 600×300 / 底栏 <code>1080P优惠版…立即生成 ✦63</code></td><td>460：同结构；<code>匹配资产</code>·<code>放大编辑</code> <b>disabled</b>；<code>图片生成</code> 为 EmptyState</td><td><b>−180px / −28%</b></td></tr>
+    </tbody>
+  </table>
+  <div class="note">结论：骨架对齐；差在"把宽度留给操作密度最高的生成台"。这张页是"像不像"的判定页，右台 640→460 是体感最大的一处。</div>
+
+  <!-- 04 -->
+  <h2 id="p04">04 · 项目资产（角色/场景/道具）</h2>
+  <figure>
+    <img src="evidence/ui-compare/04-project-assets.png" alt="项目资产：左竞品抽屉，右我方整页" />
+    <figcaption><span>左：竞品 616 宽覆盖式抽屉 · 右：我方整页「资产」视图</span><span>抽屉保留工作台上下文</span></figcaption>
+  </figure>
+  <div class="two">
+    <div><h3>竞品</h3><ul><li>覆盖式抽屉 616 宽，背后压暗，不打断三列</li><li>3 tab + 搜索 + <code>仅展示主体</code> + 音频限制提示</li><li>空态：<code>✦ 生成</code>（紫渐变）/ <code>⤓ 导入</code>（紫→粉）两卡</li></ul></div>
+    <div><h3>我方</h3><ul><li>整页视图（picker 切走，回分镜再点 2 次）</li><li>4 tab（多「其他」）+ 定妆图张数下拉</li><li>AI 提取大卡<b>「首次免费」但 disabled</b>，副标题自认"后端链路建设中"</li></ul></div>
+  </div>
+  <div class="note">结论：形态差异影响上下文保持 —— 建议项目资产改成右侧抽屉，整页视图留给资产库。搜索框未绑定、缺 <code>仅展示主体</code> 待补。</div>
+
+  <!-- 05 -->
+  <h2 id="p05">05 · 资产库（我方）vs 剧集资产（竞品）</h2>
+  <figure>
+    <img src="evidence/ui-compare/05-asset-library.png" alt="资产库：左竞品剧集资产，右我方全局资产库" />
+    <figcaption><span>左：竞品 <code>/asset</code>（系列内，72 宽三视图） · 右：我方 <code>/assets</code>（全站库，三 tab）</span><span>概念不同的两个产品能力</span></figcaption>
+  </figure>
+  <div class="note">结论：不是缺页。竞品把"剧集资产"放在项目上下文，我方拆成"全站库 + 项目内资产视图"，更适合多项目复用角色。建议补竞品的 <b>筛选 / 网格-列表切换 / 三卡空态</b>。</div>
+
+  <!-- 06 -->
+  <h2 id="p06">06 · 资产清单校验</h2>
+  <figure>
+    <img src="evidence/ui-compare/06-asset-confirm.png" alt="资产清单校验：左竞品空态，右我方空态" />
+    <figcaption><span>左：竞品（空态禁用 CTA） · 右：我方（统计行 + 全选 + 批量定稿/删除）</span><span>我方更完备</span></figcaption>
+  </figure>
+  <div class="note">对齐且我方更强。唯一文案差异：竞品两步「下一步，自动生成提示词 → 批量生成资产」，我方合并成「下一步，批量生成资产图」——建议注明"将自动生成提示词"。</div>
+
+  <!-- 07 -->
+  <h2 id="p07">07 · 剪辑台（时间线导出）</h2>
+  <figure>
+    <img src="evidence/ui-compare/07-timeline-editor.png" alt="剪辑台：左竞品，右我方" />
+    <figcaption><span>左：竞品 298 剧集资产 + 884×497 播放器 + 1102×164 时间线 · 右：我方三区 + 闸门说明 + 切片发布</span><span>同构</span></figcaption>
+  </figure>
+  <div class="two">
+    <div><h3>竞品</h3><ul><li>左栏 <code>全部▾</code> + <code>已定稿</code> 复选</li><li><code>更新分镜</code> 显式同步 + tooltip 明说"不会自动更新"</li><li>导出面板 ❌ 从未取证（点了没反应）</li></ul></div>
+    <div><h3>我方</h3><ul><li>左栏写明"只列已定稿……共 2/4 个镜头"（白盒闸门）</li><li><code>更新分镜</code> + 700ms 自动保存 + 导出→下载 mp4 闭环</li><li>另有 <code>切片发布</code> / <code>片段资产</code></li><li>但左栏写"点击加入"、单击实际不生效（P0-4）</li></ul></div>
+  </div>
+
+  <!-- 08 -->
+  <h2 id="p08">08 · 项目内「时间线导出」视图（我方独有）</h2>
+  <figure>
+    <img src="evidence/ui-compare/08-timeline-inproject.png" alt="项目内时间线视图" />
+    <figcaption><span>同一能力两个入口：项目页时间线 vs 独立剪辑台</span><span>两套闸门口径不一致</span></figcaption>
+  </figure>
+  <div class="warnbox">IA 债：项目页按"有 video_task_id"算已出片，剪辑台按 <code>status===5</code>。建议项目页该视图改为"预览 + 去剪辑台"入口，删除项目内合成按钮。</div>
+
+  <!-- 09 -->
+  <h2 id="p09">09 · 3D 导演台</h2>
+  <figure>
+    <img src="evidence/ui-compare/09-3d-director.png" alt="3D导演台：左竞品，右我方" />
+    <figcaption><span>左：竞品三段式（359/704/359） · 右：我方同构 + 定位截图/切换视角</span><span>我方补了「定位截图→首帧」闭环</span></figcaption>
+  </figure>
+  <div class="note">结构对齐；参数项一致（角色标签/网格吸附/缩放/平移/旋转/地面透明度）。我方多 <code>定位截图</code>（存当前视角作首帧参考）+ <code>切换视角</code>，建议保留并写进产品说明。</div>
+
+  <!-- 引导 -->
+  <h2 id="guide">附 · 竞品首访 coach-mark（引导范式）</h2>
+  <figure>
+    <img src="evidence/ui-compare/ref-coachmark-2026-10-25.png" alt="竞品首访 coach-mark：锚在 AI拆分镜 上的第 1/3 步" />
+    <figcaption><span>竞品 2026-10-25 首访引导（第 1/3 步，锚点 <code>AI拆分镜</code>）</span><span>页面整体压暗，紫色气泡 + 跳过 / 下一步</span></figcaption>
+  </figure>
+  <div class="note">竞品的教学发生在<b>动作旁边</b>；我方是首页引导条 + 各页空态文案。建议补 coach-mark（锚 AI拆分镜 / 项目资产 / 更新分镜 三点），把首页引导条改为"首访一次后收起"。同一张图还露出一处一次性运营公告条（我方缺公告位）。</div>
+
+  <!-- 改进清单 -->
+  <h2 id="fix">改进清单（节选，完整版见 Markdown §7）</h2>
+  <table>
+    <thead><tr><th>优先级</th><th>问题</th><th>改法</th><th>验收</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag p0">P0</span></td><td><b>批量投递不带 <code>mode</code></b>：选「文生视频」后批量按默认参考模式跑，30 镜全 400105，需逐镜重投 +60 步</td><td>批量请求体补 <code>mode</code>，与单镜同源；批量前预检未定稿/无参考镜头</td><td>选文生视频批量 3 镜全成功 + e2e 断言</td></tr>
+      <tr><td><span class="tag p0">P0</span></td><td><b>两套"已出片"口径</b>：项目页看在途，剪辑台不认，用户白等一次导出</td><td>统一 <code>status===5 &amp;&amp; video_task_id</code>；项目页区分"已出片/在途"</td><td>在途镜头不进剪辑台，项目页显示"在途"</td></tr>
+      <tr><td><span class="tag p0">P0</span></td><td><b><code>匹配资产</code> disabled</b>：逐镜 2 步绑定，30 镜 ~90 次点击</td><td>先做前端 v0.5（提示词/主体匹配预勾选），后端接组合任务</td><td>一镜从"点不动"变"已预选 2 个资产"</td></tr>
+      <tr><td><span class="tag p0">P0</span></td><td><b>剪辑台"点击加入"不生效</b>：文案与行为矛盾</td><td>单击即入轨，或三处文案改为"拖入/回车"</td><td>首用单击入轨成功</td></tr>
+      <tr><td><span class="tag p1">P1</span></td><td><b>空间债</b>：侧栏 240 + 双顶栏</td><td>工作台/剪辑台：侧栏折叠 64（hover 展开）+ 顶栏合并</td><td>可用宽 ≥1380 / 高 ≥720（对比截图复测）</td></tr>
+      <tr><td><span class="tag p1">P1</span></td><td>两套时间线 / 列表 48 截断 / <code>已导出</code> 名不符实 / 5 个 disabled 占位 / 抽屉搜索未绑定</td><td>合并入口、加分页、接真导出记录、改"即将开放"chip、绑定搜索</td><td>逐项可点可查</td></tr>
+      <tr><td><span class="tag p2">P2</span></td><td>提示词库、coach-mark、状态徽标统一、面板材质 token、可访问性、窄屏</td><td>见 Markdown §7 表 14–20</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="foot">
+    证据索引：<a href="evidence/ui-compare/">evidence/ui-compare/</a>（9 张并排图）· <a href="evidence/ui-compare/ours-2026-10-29/">ours-2026-10-29/</a>（我方现抓 12 张 + capture-report.json）· <a href="evidence/reelflow/">evidence/reelflow/</a>（竞品一手证据 11 张 + measure.json）<br/>
+    复跑：<code>cd _acceptance; node ui-compare-capture.cjs; node ui-compare-capture2.cjs; python _ui_compare_montage.py</code><br/>
+    外部参照（即梦 / 可灵 / Vidu / 海螺 / 剪映）见 <a href="_ui-audit/landscape.md">landscape.md</a>（证据等级 A–D，弱证据已降级标注）。
+  </div>
+</div>
+</body>
+</html>

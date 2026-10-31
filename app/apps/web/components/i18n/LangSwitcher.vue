@@ -39,7 +39,15 @@ function onChange(event: Event): void {
 
 <template>
   <label class="lang-switcher" :class="`lang-switcher--${props.tone}`" :aria-label="t('lang.switch')">
-    <span class="lang-switcher__icon" aria-hidden="true">🌐</span>
+    <!-- 线性地球图标（GL11/D1）：深色界面里 🌐 是整条顶栏唯一的彩色噪点，
+         改成与壳层其它图标同参数的 stroke=currentColor 线性图标（16px / 1.6）。 -->
+    <span class="lang-switcher__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M3.5 12h17" />
+        <path d="M12 3.5c2.4 2.4 3.6 5.3 3.6 8.5S14.4 18.1 12 20.5c-2.4-2.4-3.6-5.3-3.6-8.5S9.6 5.9 12 3.5Z" />
+      </svg>
+    </span>
     <select class="lang-switcher__select" :value="locale" @change="onChange">
       <option v-for="item in languages" :key="item.code" :value="item.code">
         {{ item.nativeName }}
@@ -56,24 +64,31 @@ function onChange(event: Event): void {
   flex: 0 0 auto;
 }
 .lang-switcher__icon {
-  font-size: 13px;
-  opacity: 0.75;
+  display: inline-flex;
+  color: var(--text-3);
 }
+.lang-switcher__icon svg {
+  width: 15px;
+  height: 15px;
+}
+/* GL4/GL11：与顶栏其余控件同一档（40 高 / 圆角 10 / 底 #0A0A0E / 描边 #2C2C30 / 13px）。
+   旧值 30 高 + r8 + var(--bg-raised) #1f1f2a，比顶栏胶囊明显偏紫亮且矮 10px。 */
 .lang-switcher__select {
-  height: 30px;
-  padding: 0 26px 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border-2);
-  background: var(--bg-raised);
+  height: 40px;
+  padding: 0 26px 0 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid #2c2c30;
+  background: #0a0a0e;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  /* chevron 垂直居中：40 高时基线在 18–19px（旧值 13px 是按 30 高调的） */
   background-position:
-    calc(100% - 13px) 13px,
-    calc(100% - 9px) 13px;
+    calc(100% - 13px) 19px,
+    calc(100% - 9px) 19px;
   background-size: 4px 4px, 4px 4px;
   background-repeat: no-repeat;
 }
@@ -85,6 +100,9 @@ function onChange(event: Event): void {
   outline-offset: 1px;
 }
 /* 浅色变体：登录页的局部浅色色板（login.vue 的 --lm-* 不外泄，这里用等价中性色） */
+.lang-switcher--light .lang-switcher__icon {
+  color: #767676;
+}
 .lang-switcher--light .lang-switcher__select {
   background: #ffffff;
   border-color: #e5e5e5;

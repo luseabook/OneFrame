@@ -7,12 +7,11 @@ import {
   modelPrices,
   models,
   projectAssets,
+  releaseFrozen,
   scriptProjects,
-  settleCredits,
   storyboards,
   taskEvents,
   tasks,
-  unfreezeCredits,
 } from "@app/db";
 import type { Tx } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
@@ -758,10 +757,13 @@ export class AdDramaService {
       const produced = await params.produce();
       await db.transaction(async (tx) => {
         await params.persist(tx, produced);
-        await settleCredits(tx, {
+        // ⚠️ 本模块有自己的 TASK_STATUS 常量，按 TaskStatus 符号名 grep 会**整段漏掉**这两处。
+        // 成功 → settle（不是 unfreeze：赠送额度的 delta=0，换成解冻等于白拿）；
+        // 额度按 credit_flows 的 outstanding 算，并归零 tasks.credits_frozen。
+        await releaseFrozen(tx, {
           spaceId: BigInt(params.auth.spaceId),
-          cost: priced.credits,
           taskId,
+          disposition: "settle",
           memo: `ad-drama ${params.action} settled`,
         });
         await tx
@@ -791,10 +793,10 @@ export class AdDramaService {
     } catch (error) {
       // 补偿：解冻 + 任务失败（不让冻结悬空）
       await db.transaction(async (tx) => {
-        await unfreezeCredits(tx, {
+        await releaseFrozen(tx, {
           spaceId: BigInt(params.auth.spaceId),
-          cost: priced.credits,
           taskId,
+          disposition: "unfreeze",
           memo: `ad-drama ${params.action} failed refund`,
         });
         await tx

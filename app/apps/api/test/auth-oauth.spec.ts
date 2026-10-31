@@ -391,6 +391,62 @@ describe("auth oauth (SSO) + 双 token e2e", () => {
     expect(afterLogout.code).toBe(401101);
   });
 
+  /**
+   * P1-8 守卫：`/auth/renew` 的 **Cookie 降级通道**（没有 master、只有 refresh cookie 的老客户端）
+   * 此前只验签、不查撤销状态 —— 等于一枚被窃的 refresh cookie 可以在 14 天有效期内无限续 access，
+   * 登出/改密/踢下线都拦不住，**这是不可撤销的长期凭据**。
+   *
+   * 判据用同一个 Cookie 走三步：续成功 → 登出 → 再续必须 401101。
+   */
+  it("renew 的 Cookie 降级通道：登出后同一枚 refresh 不能再续 access（P1-8）", async () => {
+    const tail = String(Date.now()).slice(-8);
+    const phone = `1${tail}57`;
+    const sms = await inject("POST", "/auth/sms-code", { phone });
+    const smsCode = (sms.data as { debug_code?: string } | undefined)?.debug_code;
+    const loginRes = await app.inject({
+      method: "POST",
+      url: "/v1/auth/login",
+      payload: JSON.stringify({ phone, code: smsCode, age_confirmed: true }),
+      headers: { "content-type": "application/json" },
+    });
+    const loginData = (JSON.parse(loginRes.body) as { data?: { access_token?: string } }).data;
+    const rawCookies = loginRes.headers["set-cookie"];
+    const cookieHeader = (Array.isArray(rawCookies) ? rawCookies : [rawCookies])
+      .filter(Boolean)
+      .map((c) => String(c).split(";")[0])
+      .join("; ");
+    expect(cookieHeader).toContain("refresh_token=");
+
+    const renewWithCookie = () =>
+      app.inject({
+        method: "POST",
+        url: "/v1/auth/renew",
+        payload: JSON.stringify({}),
+        headers: { cookie: cookieHeader, "content-type": "application/json" },
+      });
+
+    // ① 正常态：只有 Cookie 也能续（这条不能因为加固而挂掉）
+    const ok = await renewWithCookie();
+    const okBody = JSON.parse(ok.body) as { code: number; data?: { access_token?: string } };
+    expect(okBody.code).toBe(0);
+    expect(String(okBody.data?.access_token ?? "").length).toBeGreaterThan(20);
+
+    // ② 登出：revokeRefresh + revokeMaster
+    const logout = await app.inject({
+      method: "POST",
+      url: "/v1/auth/logout",
+      headers: { cookie: cookieHeader, authorization: `Bearer ${String(loginData?.access_token ?? "")}` },
+    });
+    expect(logout.statusCode).toBeLessThan(400);
+
+    // ③ 撤销之后同一枚 Cookie 必须失效（修复前这里会返回 0 —— 就是 P1-8 本尊）
+    const after = await renewWithCookie();
+    const afterBody = JSON.parse(after.body) as { code: number; data?: unknown };
+    expect(afterBody.code).toBe(401101);
+    // 错误响应里不得带出任何 token（信封在失败时 data=null）
+    expect((afterBody.data as { access_token?: string } | null)?.access_token).toBeUndefined();
+  });
+
   it("登录响应同时下发双 token（字段齐全，且 refresh 仍只走 Cookie 不下发 body 明文）", async () => {
     const user = await loginNewUser("23");
     expect(user.body.access_token).toBeTruthy();

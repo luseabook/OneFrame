@@ -11,15 +11,23 @@ import {
  * - production 缺显式密钥 / 仍用仓库默认值 / 未显式 COOKIE_SECURE / 支付凭据不全 → fail fast；
  * - test / development 完全不受影响；
  * - 错误信息聚合且**只含变量名**，绝不打印密钥值。
+ *
+ * PR-05（2026-10-29）后基线新增三项显式配置：`ADMIN_JWT_SECRET`（admin 与用户拆密钥）、
+ * `STORAGE_SIGN_SECRET`（仓库默认值是 dev-only-*）、以及 `PAYMENT_LIVE`（必须显式声明）。
+ * 同时密钥值改为 3 类字符：守卫新增的强度下限会拒绝 2 类字符的"长但可猜"值。
  */
 const secureProd = (overrides: Record<string, string | undefined> = {}) => ({
   NODE_ENV: "production",
-  JWT_SECRET: "prod-only-jwt-secret-0123456789abcdef",
-  PHONE_HMAC_PEPPER: "prod-only-phone-pepper-0123456789",
-  PHONE_ENC_KEY: "prod-only-phone-enc-key-0123456789",
+  JWT_SECRET: "Prod-Jwt-Secret-0123456789AbCdEf",
+  ADMIN_JWT_SECRET: "Prod-Admin-Jwt-Secret-0123456789AbCdEf",
+  PHONE_HMAC_PEPPER: "Prod-Phone-Pepper-0123456789AbC",
+  PHONE_ENC_KEY: "Prod-Phone-Enc-Key-0123456789AbC",
+  STORAGE_SIGN_SECRET: "Prod-Storage-Sign-0123456789AbC",
   ADMIN_USERNAME: "ops-admin",
-  ADMIN_PASSWORD: "prod-admin-password-123456",
+  ADMIN_PASSWORD: "Prod-Admin-Password-123456",
   COOKIE_SECURE: "true",
+  METRICS_TOKEN: "Prod-Metrics-Token-0123456789",
+  PAYMENT_LIVE: "false",
   ...overrides,
 });
 
@@ -41,7 +49,7 @@ describe("production env guard (api)", () => {
   it("aggregates every missing secret/default/COOKIE_SECURE problem in production", () => {
     const problems = collectProductionProblems({ NODE_ENV: "production" });
     const joined = problems.join("\n");
-    for (const key of ["JWT_SECRET", "PHONE_HMAC_PEPPER", "PHONE_ENC_KEY", "ADMIN_USERNAME", "ADMIN_PASSWORD", "COOKIE_SECURE"]) {
+    for (const key of ["JWT_SECRET", "PHONE_HMAC_PEPPER", "PHONE_ENC_KEY", "ADMIN_USERNAME", "ADMIN_PASSWORD", "COOKIE_SECURE", "METRICS_TOKEN"]) {
       expect(joined).toContain(key);
     }
     expect(problems.length).toBeGreaterThanOrEqual(6);

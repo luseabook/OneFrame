@@ -1,8 +1,9 @@
-import { Controller, Get, Res } from "@nestjs/common";
+import { Controller, Get, Headers, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
 import { Public } from "../common/public.decorator";
 import { db } from "../db/database";
+import { metricsAuthorized } from "./metrics-auth";
 
 /**
  * Prometheus 文本格式指标（deployment.md §4）。
@@ -14,12 +15,27 @@ import { db } from "../db/database";
  *
  * 刻意不引入 prom-client：单端点手写文本格式，避免为一个指标接口增加运行时依赖。
  * 注意：必须用 @Res() 直接 send，绕过 EnvelopeInterceptor（否则文本被包成 JSON 信封）。
+ *
+ * 鉴权：`@Public` 只表示"不走用户登录守卫"，**不是公开可读**——处理器自己校验
+ * `Authorization: Bearer <METRICS_TOKEN>`，未配置令牌时 401（见 metrics-auth.ts）。
  */
 @Public()
 @Controller("metrics")
 export class MetricsController {
   @Get()
-  async metrics(@Res() res: FastifyReply): Promise<void> {
+  async metrics(
+    @Headers("authorization") authorization: string | undefined,
+    @Res() res: FastifyReply,
+  ): Promise<void> {
+    if (!metricsAuthorized(authorization)) {
+      res
+        .status(401)
+        .header("content-type", "text/plain; charset=utf-8")
+        .header("www-authenticate", "Bearer")
+        .send("metrics: unauthorized\n");
+      return;
+    }
+
     const lines: string[] = [];
 
     // ── 任务队列深度（按状态）──

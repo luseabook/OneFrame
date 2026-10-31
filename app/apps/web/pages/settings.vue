@@ -55,7 +55,6 @@ async function deleteAccount(): Promise<void> {
   <main class="page">
     <div class="page-head">
       <h1>{{ t("settings.title") }}</h1>
-      <LangSwitcher />
     </div>
 
     <section class="card">
@@ -109,7 +108,8 @@ async function deleteAccount(): Promise<void> {
 }
 h1 {
   margin: 0 0 8px;
-  font-size: 24px;
+  /* GL16：有 h1 的页面统一 26px/700 */
+  font-size: 26px;
   font-weight: 700;
   color: var(--text-1);
 }

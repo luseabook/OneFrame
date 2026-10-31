@@ -52,10 +52,12 @@ const id = useId();
   margin-left: 2px;
 }
 .input {
-  height: 34px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-md);
+  /* GL8：竞品输入框 32 高 / 底 #121216 / 1px #2E303A / 圆角 10
+     （旧值 34 高 + --bg-surface #191a21，输入框比容器还亮 → 层级反了） */
+  height: var(--control-h-sm);
+  background: var(--control-bg);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-control);
   color: var(--text-1);
   padding: 0 var(--space-3);
   font-size: var(--text-base);
@@ -70,9 +72,9 @@ const id = useId();
 .input:hover:not(:disabled) {
   border-color: var(--border-3);
 }
+/* GL8：竞品 focus 只有 1px 品牌描边，**无外发光**（旧值多一层 3px #7e70ff2e 紫晕） */
 .input:focus {
   border-color: var(--brand-500);
-  box-shadow: 0 0 0 3px #7e70ff2e;
 }
 .input:disabled {
   background: var(--bg-sunken);

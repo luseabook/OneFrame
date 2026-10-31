@@ -28,10 +28,18 @@ const router = useRouter();
 const list = ref<WorkDto[]>([]);
 const total = ref(0);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref("");
 const tab = ref<"projects" | "exported">("projects");
 
 const PAGE_SIZE = 48;
+/** 当前已请求到第几页（「加载更多」时递增，切 tab 回 1） */
+const page = ref(1);
+/** 最近一页实际返回条数：小于 PAGE_SIZE 说明已到底，不再显示「加载更多」 */
+const lastCount = ref(0);
+const hasMore = computed(() => lastCount.value >= PAGE_SIZE && list.value.length < total.value);
+/** 请求序号：快速切 tab 时丢弃过期响应（见 load()） */
+let loadSeq = 0;
 
 // ── 封面配色（按剧目类型给不同色相，保证卡片可区分；与 /projects 一致）──
 const COVER: Record<number, string> = {
@@ -45,21 +53,72 @@ const dramaKeys: Record<number, string> = { 1: "domestic", 2: "overseas", 3: "an
 const dramaLabel = (type: number): string =>
   dramaKeys[type] ? t(`home.dramaType.${dramaKeys[type]}`) : t("reelflow.dramaFallback");
 
-async function load(): Promise<void> {
-  loading.value = true;
+/**
+ * 拉取一页作品。
+ * - reset=true：回到第 1 页重拉（首次进页 / 切 tab）；
+ * - reset=false：沿用递增后的 page 追加下一页（「加载更多」，不整页替换）。
+ */
+async function load(reset = true): Promise<void> {
+  // 请求序号：快速切 tab 时旧响应可能后到，用它丢弃过期响应，避免把第 2 页追加到刚重置的第 1 页上
+  const seq = ++loadSeq;
+  const appending = !reset;
+  if (reset) {
+    page.value = 1;
+    list.value = [];
+    loadingMore.value = false; // 重置会把在途的「加载更多」作废
+  }
+  if (appending) loadingMore.value = true;
+  else loading.value = true;
   error.value = "";
   try {
-    const q = new URLSearchParams({ page: "1", page_size: String(PAGE_SIZE) });
+    const q = new URLSearchParams({ page: String(page.value), page_size: String(PAGE_SIZE) });
     const data = await api.get<{ list: WorkDto[]; total: number }>(`/works?${q.toString()}`);
-    list.value = data.list ?? [];
+    if (seq !== loadSeq) return;
+    const incoming = data.list ?? [];
+    lastCount.value = incoming.length;
     total.value = data.total ?? 0;
+    if (appending) {
+      // 分页期间可能有新作品插到前面，按 id 去重，避免下一页重复上一页的卡
+      const seen = new Set(list.value.map((item) => item.id));
+      list.value = [...list.value, ...incoming.filter((item) => !seen.has(item.id))];
+    } else {
+      list.value = incoming;
+    }
   } catch (e) {
+    if (seq !== loadSeq) return;
     error.value = e instanceof Error ? e.message : t("reelflow.loadFailed");
-    list.value = [];
-    total.value = 0;
+    if (appending) {
+      // 追加失败回退游标，让「加载更多」重试的是同一页
+      page.value = Math.max(1, page.value - 1);
+    } else {
+      list.value = [];
+      total.value = 0;
+      lastCount.value = 0;
+    }
   } finally {
-    loading.value = false;
+    // 过期请求不碰 loading 标记：标记归最新那次请求管
+    if (seq === loadSeq) {
+      if (appending) loadingMore.value = false;
+      else loading.value = false;
+    }
   }
+}
+
+/** 追加下一页（正在加载或已无更多时按钮本就隐藏/禁用，这里再兜一层） */
+function loadMore(): void {
+  if (loading.value || loadingMore.value || !hasMore.value) return;
+  page.value += 1;
+  void load(false);
+}
+
+/**
+ * 切 tab：两个 tab 共用同一份 /works 数据，但分页游标属于列表视图本身，
+ * 重置回第 1 页——否则「加载更多」会接着上一个 tab 的页码追加，出现重复或漏页。
+ */
+function switchTab(next: "projects" | "exported"): void {
+  if (tab.value === next) return;
+  tab.value = next;
+  void load();
 }
 
 // ── 按日分组（今天 / 昨天 / 更早）──────────────────────────
@@ -95,7 +154,7 @@ const groups = computed<Group[]>(() => {
     .map((label) => ({ label, items: buckets.get(label) ?? [] }));
 });
 
-/** 「已导出」tab：只留已经剪过并且成片过的（有时间线时长 > 0），按长度倒序 */
+/** 「已剪辑」tab：只留剪过且成片过的（时间线时长 > 0），按长度倒序 */
 const exported = computed(() =>
   [...list.value]
     .filter((w) => (w.timeline_duration_s ?? 0) > 0)
@@ -128,8 +187,8 @@ function fmtDuration(seconds: number | undefined): string {
 
 async function createProject(): Promise<void> {
   // 竞品「创建项目」直接进空编辑器；我们复用已有的建项弹窗（在 /projects），
-  // 建完跳到剪辑台——这样不用在剪辑台里再实现一份建项表单。
-  await router.push("/projects?create=1");
+  // 带 redirect=reelflow 让建项成功后回到剪辑台——否则会落在 /projects/:id，回不来。
+  await router.push("/projects?create=1&redirect=reelflow");
 }
 
 function openEditor(item: WorkDto): void {
@@ -151,13 +210,13 @@ onMounted(() => {
       <NuxtLink to="/projects" class="rl-link">{{ t("reelflow.allProjects") }}</NuxtLink>
     </header>
 
-    <!-- tab 行：项目 (N) / 已导出（竞品左上角，白字 + 2px 紫下划线） -->
+    <!-- tab 行：项目 (N) / 已剪辑（竞品左上角，白字 + 2px 紫下划线） -->
     <nav class="rl-tabs">
-      <button type="button" class="rl-tab" :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
+      <button type="button" class="rl-tab" :class="{ active: tab === 'projects' }" @click="switchTab('projects')">
         {{ t("reelflow.tabProjects", { count: total }) }}
       </button>
-      <button type="button" class="rl-tab" :class="{ active: tab === 'exported' }" @click="tab = 'exported'">
-        {{ t("reelflow.tabExported") }}
+      <button type="button" class="rl-tab" :class="{ active: tab === 'exported' }" @click="switchTab('exported')">
+        {{ t("reelflow.tabEdited") }}
       </button>
     </nav>
 
@@ -229,9 +288,10 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- 已导出 tab -->
+      <!-- 已剪辑 tab（切 tab 会重拉第 1 页，加载中同样走骨架，避免闪一下假空态） -->
       <template v-else>
-        <div v-if="exported.length" class="rl-grid">
+        <Skeleton v-if="loading" :rows="4" />
+        <div v-else-if="exported.length" class="rl-grid">
           <article
             v-for="item in exported"
             :key="item.id"
@@ -269,6 +329,13 @@ onMounted(() => {
           <p class="rl-empty__hint">{{ t("reelflow.exportedEmptyHint") }}</p>
         </div>
       </template>
+
+      <!-- 加载更多：本页满 48 条且未达 total 时才出现，追加而非整页替换 -->
+      <div v-if="!loading && hasMore" class="rl-more">
+        <button type="button" class="rl-more__btn" :disabled="loadingMore" @click="loadMore">
+          {{ loadingMore ? t("common.loading") : t("common.loadMore") }}
+        </button>
+      </div>
     </div>
 
     <!-- 底部居中悬浮胶囊「创建项目」（竞品约 236×68 全圆） -->
@@ -359,7 +426,7 @@ onMounted(() => {
   bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 
 .rl-err {
@@ -548,6 +615,34 @@ onMounted(() => {
   margin: 0;
   color: var(--text-4);
   font-size: 12px;
+}
+
+/* 加载更多（居中胶囊，与底部「创建项目」区分开：更矮、无投影） */
+.rl-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+.rl-more__btn {
+  height: 38px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-tint);
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.rl-more__btn:hover:not(:disabled) {
+  border-color: var(--border-3);
+  color: var(--text-1);
+}
+.rl-more__btn:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* 悬浮胶囊 */

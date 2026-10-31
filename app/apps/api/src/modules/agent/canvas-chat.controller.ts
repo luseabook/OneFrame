@@ -15,6 +15,7 @@ import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
+import { AllowStreamToken } from "../../common/allow-stream-token.decorator";
 import { SkipEnvelope } from "../../common/http/skip-envelope.decorator";
 import { parseOrThrow } from "../../common/zod";
 import { AgentChatService } from "./agent-chat.service";
@@ -187,6 +188,7 @@ export class CanvasChatController {
    * 该响应不是 JSON 信封，必须 `@SkipEnvelope()`。
    */
   @Get("chat/sessions/:session_id/stream")
+  @AllowStreamToken()
   @SkipEnvelope()
   async streamSession(
     @Req() req: AuthedRequest,

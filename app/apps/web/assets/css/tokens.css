@@ -15,6 +15,17 @@
   --brand-300: #b8afff;
   --brand-400: #b07aff;
   --brand-500: #9b46ff; /* 参照产品按钮主色（一手 CSS 实测 #9B46FF） */
+  /* 竞品实测：hover 变亮 #A05AFF、pressed #A564FF（--brand-02hover / --brand-03pressed）。
+     我方旧值 #8a3ae6 是"悬停变暗"，方向与竞品相反，故单列出两档令牌。 */
+  /* ── Tab 下划线（竞品工作流页实测）──
+     #E3AFFF 来自 3 张工作流截图独立取样：01-project-list.png y=60 x27..84 rgb(226,175,255)、
+     03-episode-workspace.png y=119 x945..1051 rgb(227,174,255)、05-project-assets-panel.png
+     y171..174 rgb(231,172,255)。页面级 tab = 白字 + 该色线；面板级 tab = 该色字 + 该色线。
+     旧值 #ffffff 来自 pricing-full.png 那条 y=91 的白线——复核发现该线上方无任何文字，
+     并非 tab 下划线，证据不成立，故不再使用白色。 */
+  --tab-line: #e3afff;
+  --brand-hover: #a05aff;
+  --brand-pressed: #a564ff;
   --brand-600: #8a3ae6;
   --brand-700: #732fc2;
   --brand-800: #5c259b;
@@ -38,6 +49,17 @@
   --brand-40: rgba(155, 70, 255, 0.4);
   --radius-panel: 20px;
   --control-h: 40px;
+
+  /* ── 控件规格（竞品实测，01 文档 §2.6 / §3.3 / §3.5）────────────────
+     高度只有三档 32 / 40 / 48；圆角 10px（白按钮 y514→y523 左缘 x383→374）。
+     输入框是比容器**更暗**的一层（#121216 < #191A22），旧值用 --bg-surface
+     会让输入框比容器亮，层级是反的。 */
+  --control-h-sm: 32px;
+  --control-h-md: 40px;
+  --control-h-lg: 48px;
+  --radius-control: 10px;
+  --control-bg: #121216; /* 输入框底 */
+  --control-line: #2e303a; /* 输入框描边 */
 
   /* ── 语义色（竞品 dark-* 调色板）── */
   --success: #5fd08a;
@@ -66,6 +88,18 @@
   --bg-hover: #ffffff0d; /* 悬停 = 白 5% */
   --bg-active: #ffffff1a; /* 按下 = 白 10% */
   --bg-inverse: #f5f5f7;
+
+  /* ── 壳层三层表面（竞品逐像素实测）────────────────────────────────
+     chrome  #0B0B10 → 顶栏底 = 页面色（task.png y0–63 全同色）
+     sidebar #101015 → 240px 侧栏（task.png (100,300)）
+     panel   #191A22 → 内容承载面板（task.png x240–1589 / y64–977，圆角 12）
+     三者必须**不同色**，否则整站看起来是"一整块黑"（01 文档 GL1）。 */
+  --bg-chrome: #0b0b10;
+  --bg-sidebar: #101015;
+  --bg-content: #0b0b10;
+  --bg-panel: #191a22;
+  --sidebar-line: #25262f; /* 侧栏右分隔（task.png (239,300)） */
+  --gold-text: #e1cea6; /* 会员/积分香槟金（像素 task.png 顶栏金色胶囊） */
 
   /* ── 文本（参照产品 #f5f8ff 五阶）── */
   --text-1: #f5f8ff; /* 标题 */

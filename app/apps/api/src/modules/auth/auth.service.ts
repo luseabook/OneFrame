@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import {
   creditAccounts,
   creditIn,
@@ -8,6 +8,7 @@ import {
   inviteCodes,
   inviteRedemptions,
   projectAssets,
+  releaseFrozen,
   scriptProjects,
   spaceMembers,
   spaces,
@@ -342,8 +343,17 @@ export class AuthService {
       return { access_token: access.accessToken, expires_in: access.expiresIn };
     }
     if (refreshCookie) {
-      // 降级通道：老客户端只有 Cookie 时也能续（不消费、不轮换 refresh）
+      // 降级通道：老客户端只有 Cookie 时也能续（不消费、不轮换 refresh）。
+      //
+      // P1-8：这条通道**必须**同样校验撤销状态。此前只 `verifyRefresh` 就发 access，
+      // 等于「登出/改密后，被窃的 refresh cookie 仍可在 14 天有效期内无限续 access」——
+      // 不可撤销的长期凭据。校验用 `assertRefreshActive`（只读不消费：续期不能互相作废）。
       const payload = this.tokens.verifyRefresh(refreshCookie);
+      await this.tokens.assertRefreshActive(payload.sub, payload.jti);
+      const [user] = await db.select().from(users).where(eq(users.id, BigInt(payload.sub)));
+      if (!user || user.status !== 1 || user.deletedAt) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, "account disabled");
+      }
       const access = this.tokens.issueAccess(payload.sub, payload.sid);
       return { access_token: access.accessToken, expires_in: access.expiresIn };
     }
@@ -366,6 +376,23 @@ export class AuthService {
         .update(users)
         .set({ status: 2, nickname: "已注销用户", avatarUri: null, deletedAt, updatedAt: deletedAt })
         .where(eq(users.id, BigInt(userId)));
+      // 任务记录脱敏前先释放冻结（PR-06）。
+      //
+      // 顺序不能反：先按流水 unfreeze、再置 status=5，流水与账户才同向变动。
+      // 只加一句 `creditsFrozen: 0` 会把「这笔钱还悬着」这个事实抹掉，流水与字段永久对不上，
+      // 而 auditLedger 的不平判据（`a.frozen <> Σ f.frozen_delta`）两边仍相等 → 全库对账永远查不出来。
+      const holding = await tx
+        .select({ id: tasks.id, spaceId: tasks.spaceId })
+        .from(tasks)
+        .where(and(eq(tasks.userId, BigInt(userId)), gt(tasks.creditsFrozen, 0)));
+      for (const t of holding) {
+        await releaseFrozen(tx, {
+          spaceId: t.spaceId,
+          taskId: t.id,
+          disposition: "unfreeze",
+          memo: "account deleted unfreeze",
+        });
+      }
       // 任务记录脱敏：清空输入与结果，保留计数用于对账
       await tx
         .update(tasks)

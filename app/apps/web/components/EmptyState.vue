@@ -21,26 +21,29 @@ defineProps<{ title?: string; description?: string; icon?: string }>();
   text-align: center;
 }
 .icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-full);
-  background: var(--bg-sunken);
+  /* GL17：竞品的空态是「插画（≈80×64，**无圆底板**）+ 一行灰字」（task.png y300–400）。
+     旧值是 48×48 实心圆底 + 500 字重标题 + 描述 + 按钮，三层比竞品重。 */
+  width: auto;
+  height: auto;
+  background: transparent;
   color: var(--text-4);
   display: grid;
   place-items: center;
-  font-size: 22px;
+  font-size: 40px;
+  line-height: 1;
+  opacity: 0.7;
   margin-bottom: var(--space-4);
 }
 .title {
   margin: 0;
-  color: var(--text-2);
-  font-size: var(--text-base);
-  font-weight: 500;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 400;
 }
 .desc {
   margin: var(--space-2) 0 0;
   color: var(--text-4);
-  font-size: var(--text-sm);
+  font-size: 12px;
   max-width: 360px;
 }
 .action {

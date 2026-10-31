@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { newId } from "@app/shared";
 import type { Tx } from "./client";
-import { creditAccounts, creditFlows } from "./schema";
+import { creditAccounts, creditFlows, tasks } from "./schema";
 
 // 记账口径（docs/02-architecture/database.md §4）：
 //   delta = 可用余额变动；frozen_delta = 冻结额变动
@@ -129,6 +129,81 @@ export async function unfreezeCredits(
     memo: input.memo,
   });
   return { balanceAfter, frozenAfter };
+}
+
+/**
+ * 某任务**尚未释放**的冻结额度（口径唯一来源：流水，不是 `tasks.credits_frozen`）。
+ *
+ * `frozen_delta` 的符号约定：freeze 为 +cost，settle / unfreeze 为 −cost，
+ * 所以 `Σ frozen_delta where ref_task_id = taskId` 恰好等于「还悬着多少」。
+ */
+export async function taskOutstandingFrozen(tx: Tx, taskId: bigint): Promise<number> {
+  const [row] = await tx
+    .select({ amount: sql<number>`coalesce(sum(${creditFlows.frozenDelta}), 0)::int` })
+    .from(creditFlows)
+    .where(eq(creditFlows.refTaskId, taskId));
+  return Number(row?.amount ?? 0);
+}
+
+export type FrozenReleaseDisposition = "settle" | "unfreeze";
+
+/**
+ * 任务终态的**唯一**冻结收尾入口（PR-03）。
+ *
+ * 为什么必须是一个函数：原实现有 8 处「解冻/结算」写入点，每处各自读 `tasks.creditsFrozen`
+ * 决定退多少，而 `creditsFrozen` 从插入后再没被写回过 0 —— 于是「是否已释放」这个语义
+ * 从未被表达，`creditsFrozen > 0` 恒真。取消过的任务会被 worker 的 `fail()` 再退一次，
+ * 凭空造积分；注销账号则让冻结永久悬空且对账查不出来。
+ *
+ * 三条硬约束（改动前请先读完）：
+ * 1. **额度按流水算，不按 `tasks.creditsFrozen` 算**。按字段算会让「已经 settle 过的任务」
+ *    再退一次；极端情况下等于每次成功生成都全额退款。
+ * 2. **成功后是 settle 不是 unfreeze**。赠送额度的流水是 `delta=0, frozen_delta=−N`，
+ *    换成 unfreeze 会返回 `+N` 可用余额 —— 等于白拿。
+ * 3. **幂等**：同一任务重复调用只生效一次（`outstanding <= 0` 时只归零字段、不写流水）。
+ *    调用方因此可以无条件调用，不需要自己判断 `creditsFrozen > 0`。
+ *
+ * 收尾同时把 `tasks.credits_frozen` 置 0：字段的语义从此是「当前还冻结着多少」，
+ * 而不是「当初冻结了多少」（后者由 `credit_flows` 与 `tasks.credits_settled` 表达）。
+ * `credits_settled` 不在这里改 —— 它是「这笔实际结算了多少」的唯一记录。
+ */
+export async function releaseFrozen(
+  tx: Tx,
+  input: {
+    spaceId: bigint;
+    taskId: bigint;
+    disposition: FrozenReleaseDisposition;
+    memo?: string;
+  },
+): Promise<{ released: number; disposition: FrozenReleaseDisposition }> {
+  const outstanding = await taskOutstandingFrozen(tx, input.taskId);
+
+  if (outstanding > 0) {
+    if (input.disposition === "settle") {
+      await settleCredits(tx, {
+        spaceId: input.spaceId,
+        cost: outstanding,
+        taskId: input.taskId,
+        memo: input.memo,
+      });
+    } else {
+      await unfreezeCredits(tx, {
+        spaceId: input.spaceId,
+        cost: outstanding,
+        taskId: input.taskId,
+        memo: input.memo,
+      });
+    }
+  }
+
+  // 无论是否真的退了钱，字段都要归零：outstanding<=0 表示"没有悬着的钱"，
+  // 此时字段若还留着旧值，就会让 4 处 `creditsFrozen > 0` 判据继续恒真。
+  await tx
+    .update(tasks)
+    .set({ creditsFrozen: 0, updatedAt: new Date() })
+    .where(eq(tasks.id, input.taskId));
+
+  return { released: outstanding > 0 ? outstanding : 0, disposition: input.disposition };
 }
 
 export async function creditIn(

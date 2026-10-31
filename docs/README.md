@@ -126,6 +126,184 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.64 · 上线前 P1 收尾 6 条 + 运营后台整批落库 · 2026-11-01）
+
+v6.63 结尾列的「P1 剩余 12 条」里，本批清掉 6 条（只剩 `prod compose` 的 TLS）；
+另外把已写好但没提交的运营后台一整批（9 个面板 + 角色 / 审计 / 配置中心）落库。
+
+| # | 缺陷 | 改法 | 守卫 |
+|---|---|---|---|
+| P1-12 | `/v1/metrics` 是 `@Public`，nginx 又全量反代 → 任务量 / 失败率 / **资金指标**对外可读 | 改 Bearer：`METRICS_TOKEN`（≥16 位）进生产必填；比较用 `timingSafeEqual`，长度不等直接 false（不抛异常、不泄露长度） | `metrics-auth.spec.ts` 5 例：完全匹配才放行 / **未配置令牌时一律拒绝**（不能因为缺配置而敞开）/ 拒缺失·空·非 Bearer / 错误令牌不抛异常 / 不把前后缀当匹配 |
+| P1-5/6 | 团队「分配」锁 `team → personal`、「回收」锁 `personal → team`，并发即 `40P01` 死锁；且 `creditsQuota` 是读-改-写，并发丢更新 | 新增 `lockCreditAccountPair(tx, a, b)`：**按 spaceId 升序**锁两个账户，分配 / 回收共用；配额改由 SQL 表达式 `creditsQuota + n` 原子完成 | ⚠️ **无并发用例**：`team.spec.ts` 只覆盖守恒 / 上限 / 越权 / 批量 / CSV。锁序与自增靠代码形状 + PG 语义，**未压测** |
+| P1-3 | 升级「报价按天折抵、履约追加整周期」：折抵按剩余天数算价，但新周期从 `max(now, 旧 endAt)` 起 → 白送旧周期剩余天数 | `isUpgrade = paidAmountCents < listPriceCents`；升级的新周期一律从 `now` 起算（非升级续费仍是 `max(now, endAt)`） | `billing-subscription.spec.ts:178`「升级换档：折抵后新周期从今天起算，不叠加旧周期剩余天数」 |
+| P1-9 | `?stream_token=` 一旦带上就**对所有受保护路由生效**，等价于把 SSE 短令牌变成万能 Bearer；而 query 里的 token 会进 nginx 访问日志 | 新增 `@AllowStreamToken()`，只在 4 个 SSE 处理器上开放；其余路由的 query token 一律忽略 | `agent.spec.ts:302` 先证明同一枚短令牌能开 SSE，再拿它打 `/me?stream_token=` **必须 401** |
+| P1-10 | refresh 轮换「先读再删」有并发竞态：两请求同时带同一枚 token 都可能成功 | 改成 Lua `delIfCurrent`：**比对当前值后再删**，原子完成；守卫值不匹配时一个键都不删（不误删新会话） | `token-refresh-rotation.spec.ts` 4 例：同一枚只能消费一次 / 并发恰好一个成功 / 已被新会话覆盖的旧 token 不能消费 / 守卫值不匹配时零删除 |
+| P1-11 | `COOKIE_SECURE` 有默认值 → 生产「忘记设置」会静默降级成非 Secure Cookie | 与 `METRICS_TOKEN` 一起进 `env.ts` 生产必填清单，缺失即启动失败并给出明确文案 | `env-production-guard.spec.ts` 16 例（含逐 key 缺失矩阵与 `COOKIE_SECURE` 文案断言） |
+
+**运营后台整批（9 个面板）**：角色 `super/ops/viewer` + `token_version` 即时踢下线；`admin_audit_logs` 由全局拦截器统一记录
+（只记 `/v1/ops/` 的写操作、**成功才记**、键名打码、URL 不带 query、8KB 截断、fire-and-forget 不阻塞业务）；
+配置中心 `(key, module)` 唯一键 + `module@lang` 语言回退；等待名单 / 邀请码 / 用户封禁与注销恢复 / AI 标识审计 + CSV /
+漏斗 / 模型档位 `modes` 热改 / 首页配置版本化 / 画布 SSRF 守卫 / 登录限流。
+
+**验证**：`pnpm -r test` **12/12 任务全绿，1,654 用例通过**（api 1,240 / cli 128 / shared 26 / storage 6(+1 skipped) / model-adapters 164 / db 27 / worker 63），4m7s，exit 0；typecheck / lint 0 error。运营后台的两个 DB e2e（`admin-community.spec.ts`、`admin-ai-label.spec.ts`）在真实 PG + Redis 下随全量套件跑通（v6.60 当时因本机无 PG/Redis 未跑）。同时把口径更新为：端点 780→**800**、controller 54→**63**、迁移 47→**49**、表 113→**115**、页面 65 不变。
+
+**仍未做**：`prod compose` 的 TLS（仍只有 `listen 80`）；9 个后台面板**无浏览器 E2E**；团队锁序与配额自增**无并发用例**；审计写库失败只记日志、不重试。
+
+---
+
+## 变更登记（v6.63 · P1 第二批两条：任务删除判据改流水口径 / 轮询上限默认值 · 2026-10-30）
+
+| # | 缺陷 | 改法 | 守卫 |
+|---|---|---|---|
+| P1-1 | `DELETE /tasks/{id}` 用 `tasks.credits_frozen > 0` 判「还带着冻结」→ 该字段在 PR-03 前从不归零、**恒真**，等于「任何计价 > 0 的任务永久删不掉」；反过来历史脏行（字段非 0、流水已结清）会被误拒 | `tasks.service.remove()` 改为事务内锁任务行 + `taskOutstandingFrozen(tx, id)`（= `Σ frozen_delta`）；拒绝时返回 `400101 + credits_frozen=outstanding` | `task-delete.spec.ts` 两条：①**造真实 freeze 流水**才判拒（旧夹具只写字段，是"线上不存在的状态"）；②字段残留但流水已结清 → **允许删除**（新增用例，专防回退）。`remove()` 与 `releaseFrozen()` 从此共用同一把尺子 |
+| P1-16 | `POLL_MAX_MS` 默认 **120s**，而真实视频生成 2–10 分钟 → 按默认配置上线「绝大多数视频任务超时判失败」（不扣费但口碑重创 + 污染失败率告警） | `executor.ts` 导出 `DEFAULT_MAX_POLL_MS = 15min`，`main.ts` 与 `executor` 内部 deadline 都用它（此前两处各写一个 `120_000`） | `executor.spec.ts` 新增 2 例：常量 ≥10min；`main.ts` 必须引用常量且**不许再内联 `120_000`**（源码级守卫，防"改了常量但入口还写死"） |
+
+**验证**：`apps/api` 全量 **104 文件 / 1227 用例**、`apps/worker` **63/63**，均 exit 0；typecheck/lint 0 error。
+
+**仍未做（P1 剩余 12 条，按风险排序）**：`/v1/metrics` 公开（`@Public` + nginx 全量反代）→ 任务量/失败率/资金指标对外可读；团队分配/回收锁序相反（`40P01` 死锁）；升级「报价按天折抵、履约追加整周期」（权益泄漏）；`stream_token` 当万能 Bearer 且进 nginx 访问日志；`COOKIE_SECURE` 默认值架空"必须显式设置"的守卫；`refresh` 轮换的并发竞态；`prod compose` 的 TLS（仍只有 `listen 80`）。
+
+---
+
+## 变更登记（v6.62 · P1 首批三条：分享页 routeRules / renew 撤销校验 / 网关安全头 · 2026-10-30）
+
+上线前全检报告把 P1 十七条排到「上线后第一周」，但其中三条是**改一行就能清掉、且清不掉会白屏或不可撤销**的，
+这批先把它们做掉；其余十四条不动（README 与报告口径保持一致，不假装整批完成）。
+
+| # | 缺陷 | 改法 | 守卫 |
+|---|---|---|---|
+| P1-14 | `/share/[token]` 声明 `ssr:false` 但 `nuxt.config` 缺 `routeRules`（与第 105 批 `/team/**` 同类）：**匿名直开的分享链接首帧不一致 → 整页空白** | `nuxt.config.ts` 补 `/share`、`/share/**` | 新增 `apps/api/test/web-route-rules.spec.ts`（4 例）：`pages/` 下**每个顶层路由**都必须在 routeRules 里声明 `ssr:false`，且根路由 `/` 必须**不**被切成 SPA。这是第一次把「新增页面必须同步配置」变成红/绿判据 |
+| P1-8 | `/auth/renew` 的 **Cookie 降级通道**只验签不查撤销：登出/改密/踢下线之后，被窃的 refresh cookie 仍可在 14 天内无限续 access（**不可撤销的长期凭据**） | `token.service.ts` 新增 `assertRefreshActive()`（只读不消费，避免续期互相作废）；`renew()` 的 cookie 分支补撤销校验 + 账号停用校验 | `auth-oauth.spec.ts` 新增 1 例三步判据：Cookie 续成功 → 登出 → 再续 `401101`。**已反向验证**：注释掉该校验，该例立刻红（`expected 0 to be 401101`） |
+| P1-10 / 11（部分） | 网关无任何安全响应头；`client_max_body_size 12m` 与 API `bodyLimit 48MB` 不一致（大图 base64 被网关先 413，应用日志里查不到） | `deploy/nginx.conf`：加 `X-Content-Type-Options` / `X-Frame-Options: SAMEORIGIN` / `Referrer-Policy` / `Permissions-Policy` / `COOP: same-origin-allow-popups`（OAuth 弹窗必须）/ `CORP: same-site`；body 上限对齐 48m | 无自动化（需真起网关）；HSTS 与 CSP **保持注释状态**并写明前置条件（HSTS 要等 TLS；CSP 要先接 nonce），不拿"看起来有"充数 |
+
+**验证**：`apps/api` 全量套件在真实 PG+Redis 下 **104 文件 / 1226 用例全绿**；`web build` 通过（routeRules 语法生效）。
+
+**仍未做（这批的边界）**：P1 余下 14 条（`POLL_MAX_MS=120s`、`/v1/metrics` 公开、`/tasks/:id` 删不掉、团队锁序死锁、升级权益泄漏、`stream_token` 万能 Bearer、`COOKIE_SECURE` 默认值架空守卫…）；nginx 仍只有 `listen 80`，TLS 由外层终止；CSP/HSTS 未启用。
+
+---
+
+## 变更登记（v6.61 · 上线前全检 P0 六条落地 · 2026-10-30）
+
+### 一、这批补的是「能不能上线」，不是「像不像竞品」
+
+`deliverables/gstack/pre-launch-check-oneframe-2026-10-29.md` 判 **No-Go（P0×6 / P1×17 / P2×18）**。
+台账口径的 98.4% 与这份结论**不矛盾也不相抵**：前者量的是「竞品有的我们有没有」，
+后者量的是「照样例部署会不会出事」。这批只做 P0 六条。
+
+| # | 缺陷 | 落点 | 关闭判据 |
+|---|---|---|---|
+| PR-01 | 生产编排起不来（`PHONE_*` 未透传、无 `env_file`、默认值可过守卫） | `app/docker-compose.prod.yml`、`app/.env.production.example` | **未关闭**：代码已改，但本机无 Docker，`docker compose up` 仍待真跑一次 |
+| PR-02 | 支付 fail-open（`PAYMENT_LIVE` 不在守卫、mock 端点无鉴权、`amountCents` 可省略） | `billing.controller.ts`（生产**硬拒** mock）、`billing.service.ts`（归属校验 + mock 金额必填 + `toBigId`）、`env.ts`（`PAYMENT_LIVE` 进必填） | ✅ 单测 + 真库直调 |
+| PR-03 | 记账恒真判据（`credits_frozen` 从不归零 + `fail()` 漏 `CANCELED` → 取消后二次退款） | 新增 `@app/db releaseFrozen()` 唯一收尾入口，替换 7 处写入点（executor×2 / tasks.cancel / generations 入队失败 / ad-drama×2 / auth 注销），看门狗按流水归零 | ✅ `ledger-release.spec.ts` 4 例 + 全量套件 |
+| PR-04 | canvas 批量下载 SSRF | 新增 `canvas-download.guard.ts`（协议/凭据/host 白名单/内网黑名单/解析后校验/超时/体积/重定向逐跳复检/可信 origin 豁免），并复用到 `tasks` 的两处同类裸 `fetch` | ✅ `canvas-download-ssrf.spec.ts` 91 例 |
+| PR-05 | 占位密钥盲区 + admin 与用户共用 `JWT_SECRET` | `env.ts`（占位符黑名单 + 强度下限 + `ADMIN_JWT_SECRET`）、`admin-auth.service.ts`（签发/校验改用独立密钥） | ✅ 单测 19 例 |
+| PR-06 | 注销搁浅冻结，且 `auditLedger` 结构上查不出 | `auth.service.ts deleteAccount`：**先按流水 unfreeze 再置 status=5** | ✅ 双向不变式用例 |
+
+### 二、顺手修掉的两个「让测试永远红」的既有缺陷（都不在 6 条 P0 里，但挡着 CI）
+
+1. `common/admin-audit.interceptor.ts`：只靠构造参数类型注入 `AdminAuditService`。vitest 用 esbuild 转译**不产出
+   `design:paramtypes`**，Nest 于是零参构造 → `this.audit` undefined → 每次运营写操作后 `setImmediate` 抛
+   `Cannot read properties of undefined (reading 'record')`。**它不让任何断言变红，只把 `pnpm test` 退出码拖成 1**
+   （全量套件曾累计 101 条 uncaught error）。改显式 `@Inject(AdminAuditService)`。
+2. `admin-ai-label.service.ts` 列表 `orderBy(desc(finished_at))`：PostgreSQL 的 `DESC` 默认 **NULLS FIRST**，
+   历史脏数据（status=3 但 `finished_at` 为空）把最近完成的任务挤出首屏；5000 行扫描上限一满，新行永远查不到。
+   改 `desc nulls last`。
+
+### 三、验证（本机真跑，DB 已起）
+
+本机此前无 PG/Redis，这批首次把 `start-local-stack.ps1` 起起来并把迁移打到 0048、seed 46 模型：
+
+| 命令 | 结果 |
+|---|---|
+| `pnpm --filter @app/api test`（真实 PG + Redis，`--no-file-parallelism`） | **103 文件 / 1221 用例全绿，exit 0**（此前从未跑过：77 个连库 e2e 一律跳过） |
+| `pnpm --filter @app/worker test` | 61/61（含 watchdog、maintenance 账本一致） |
+| `typecheck`（api/worker/db）+ `lint`（0 error，2 条既有 warning） + `build`（api/worker/db） | 全绿 |
+
+### 四、仍未做（这批的诚实边界）
+
+- **PR-01 的关闭证据**（`docker compose up` 真跑 + 生产 `NODE_ENV=production` 下 mock 端点活体 403）本机无 Docker，未做；
+- **P1 17 条一条未动**（`/share` 缺 routeRule、`POLL_MAX_MS=120s`、nginx 仅 80 无安全头、`/auth/renew` 无撤销校验、
+  `/v1/metrics` 公开、`/tasks/:id` 删不掉、团队锁序死锁…），按报告行动 7/8 排在上线后第一周；
+- **DNS 与 fetch 之间的 TOCTOU** 仍在（先校验后请求），要彻底钉死需自建 dispatcher 固定 IP；
+- `notify/mock` 的 `space_id` 是「传了就强校验」而非必填（生产已一律 403，敞口只剩开发机）；
+- 真实供应商出片抽验（AI 标识 CODE-H1）、EXT-01~20 外部资质、D1–D9 演练仍全部 ⏳。
+
+---
+
+## 变更登记（v6.60 · 运营后台第二批：等待名单 / 邀请码 / 用户管理 / AI 标识审计 / 广场面板 · 2026-10-30）
+
+### 一、这批补的是审查报告里"仍未做"的最后几项
+
+| 缺口 | 落点 |
+|---|---|
+| 等待名单只有用户提交、后台不可见 | `GET /ops/admin/waitlist`（invited 过滤、只回 `phone_hash_prefix`）+ `POST /:id/invite` 幂等标记；「等待名单」页签 |
+| 无运营发码入口（`invite_codes.created_by` 一直空） | `GET/POST/PATCH /ops/admin/invite-codes`（批量 1..50、8 位无歧义码、耗尽不可启用）+「邀请码」页签 |
+| 无用户管理/封禁/注销恢复 | `GET /ops/admin/users`（昵称/ID/手机号哈希、status/deleted 过滤、`phone_masked`）、`PATCH users/:id`、`POST users/:id/restore` +「用户管理」页签 |
+| AI 标识审计导出（compliance B3 待办） | `GET /ops/admin/ai-labels` 与 `.csv`（数据源 `tasks.results[].meta.ai_label`，`only_missing` 抽验"成功但没打标"）+「AI 标识审计」页签 |
+| 剧本广场面板缺看板/详情/重提 | `AdminMarketPanel` 接 `GET /ops/market/dashboard/scripts`、`scripts/list?status`、`scripts/:id`、`POST scripts/:id/submit-review`；看板 chip 即状态筛选 |
+| 配置列表无服务端分页 / 审计无导出 | `GET /ops/admin/configs?page&page_size&module&q`；`GET /ops/admin/audit-logs.csv`（同过滤、≤5000 行） |
+
+### 二、口径（写进 api-spec §11）
+
+- `users` 只回打码手机号；注销恢复不还原被匿名化的昵称/头像（可传新昵称）。
+- `waitlist` 只有 HMAC，平台发不了短信；`invite` 只是"线下已邀请"的标记。
+- `invite-codes.status=3`（耗尽）是派生值（`status=1 且 used_count>=max_uses`），列表过滤按同一口径翻译。
+- `ai-labels` 不建第二套埋点表、不做回填；`has_ai_label` 与 `enabled` 分开看；单次扫描 ≤5000 行。
+
+### 三、验证
+
+- `@app/api` typecheck/lint/build 通过；`@app/web` typecheck/build 通过；`i18n-check` 5 语言一致（本批新增 220 key）。
+- 纯函数单测 36/36：漏斗 13 + 审计脱敏 9 + 邀请码/手机号打码/AI 标识解析 14。
+- **当时未跑 DB e2e**（本机无 PG/Redis）：`admin-community.spec.ts`、`admin-ai-label.spec.ts` 需 CI 执行 —— v6.64 已在真实 PG+Redis 的全量套件里补跑并通过。
+
+### 四、仍未做
+
+- 剧本广场未接 `source-original-script` / `save-draft` / `tag_ids` 归类；`keyword` 只搜标题。
+- AI 标识列表 total 在 5000 行上限处是被截断的上限（未回 `truncated` 标记）。
+- 等待名单无法直接发短信/发码（数据模型只存 HMAC，需产品决定是否补联系方式字段）。
+
+---
+
+
+## 变更登记（v6.59 · 运营后台补齐：计价/任务筛选/模型档位/漏斗/审计/管理员/配置中心/广场面板 · 2026-10-29）
+
+### 一、为什么做
+
+2026-10-29 对 `/admin` 做了一次功能缺失审查（[报告](../deliverables/software-company/admin-console-gap-review-2026-10-29.md)），确认后台"API 多、可操作界面少"：
+
+- 计价只有 API、后台无价目界面；任务看板不能筛选、看不到失败原因；
+- 模型只能上下架，排序/参数枚举不可维护；
+- 漏斗只有计数与转化率，缺耗时/退出率/完集口径，且与埋点口径不一致；
+- 大量管理 API 没有后台入口（`/ops/market/*` 23 条、`/ops/agent-skills` 2 条、`/ops/admin/exports`）；
+- 无操作审计日志、无管理员账号/权限管理、无配置中心、无退款对账导出；
+- 工具模型改价/上下架在进程重启后被代码目录覆盖。
+
+### 二、这批落了什么
+
+| 层 | 内容 |
+|---|---|
+| 后台页面 | 新增「价格管理」「剧本广场」「Skill 推荐位」「操作日志」「管理员」「配置中心」「导出审计」7 个页签/面板；模型页签加排序与 `modes` JSON 热更；任务页签加状态/模型筛选、分页、失败原因列、筛选后 CSV；漏斗展示流失率/平均耗时；订单加状态筛选、分页与退款单 CSV；举报/分享/创作者审核分页；运营位支持编辑；概览渲染任务状态分布 |
+| API | `GET /ops/admin/models` 回 `modes/types`；`PATCH models/:id` 支持 `modes`（1..20 键、≤32KB、档位校验）；价目列表加 `active` 筛选与 `model_name/active/updated_at`；`GET tasks` 加 `model_id/mode` 与 model/adapter/error 字段；`task-metrics`、`failed-tasks.csv` 共用 `model_id/from/to` 筛选；漏斗改为 6 段项目维度（建项→大纲→角色→分镜→批量→完集）+ `dropoff_from_previous/avg_hours_*`；新增管理员账号 CRUD（super-only）、操作审计 `audit-logs`、配置中心 `configs`/`config/:key`、`orders.csv` |
+| 数据 | 迁移 `0047_fair_sphinx`：`admin_audit_logs`、`app_configs`、`admin_users.status/token_version/last_login_at/password_updated_at`，并把存量首个管理员提升为 `super`；迁移 `0048_amusing_mandarin`：配置唯一键改 `(key,module)`，让多语言覆盖可并存 |
+| 鉴权 | 角色 `super/ops/viewer`；`AdminGuard` 每请求读库校验 `status/token_version`，改密/停用后旧 JWT 立即失效；viewer 只读；`admin_users` 管理仅 super |
+| 一致性修复 | `ensureToolCatalog` 不再覆盖运营改过的 `visible/sort/credits/strike/active`，只补缺失行；`CATALOG_SYNC_TOOLS=true` 才强制同步（测试/应急） |
+
+### 三、验证与边界
+
+- `@app/api` typecheck/lint/build 通过；`@app/web` typecheck 通过；`i18n-check` 5 语言包一致（新增 356 key）。
+- 纯函数单测：漏斗合并/算术 13 例、审计脱敏 9 例通过。
+- **未在本机跑 DB e2e**（本机无 PG/Redis）：`admin.spec.ts`、`admin-core-funnel.spec.ts`、`admin-ops-*.spec.ts` 需 CI/本地栈执行；`db:migrate` 也未执行。
+- 相关文档：api-spec §10.5/§11 已同步、database §8 已同步；契约与施工边界见 [admin-console-completion-contract-2026-10-29](../deliverables/software-company/admin-console-completion-contract-2026-10-29.md)。
+
+### 四、仍未做（下一批）
+
+- 等待名单查看/发放邀请码、用户封禁/注销恢复（运营人工介入点）；AI 标识审计导出；
+- 剧本广场面板未接 `submit-review`/作品详情/看板徽标；配置列表无服务端分页；审计日志无 CSV 导出。
+
+> 本批已补：admin 登录限流（同用户名+IP 5 分钟 10 次失败 → 429）；运营位/首页板块从「概览」
+> 拆成独立页签（原先是藏在 dashboard 里，运营找不到）。
+
+---
+
 
 ## 变更登记（v6.58 · 第 104 批：收尾 —— 把「剩下 3.33 卡在谁手上」写成具名清单 · 2026-10-29）
 

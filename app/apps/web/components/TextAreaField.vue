@@ -39,9 +39,10 @@ const id = useId();
 }
 .area {
   width: 100%;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-md);
+  /* GL8：文本域沿用输入框规格（底 #121216 / 1px #2E303A / 圆角 10），高度由 rows 决定 */
+  background: var(--control-bg);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-control);
   color: var(--text-1);
   padding: var(--space-3);
   font-size: var(--text-base);
@@ -60,7 +61,6 @@ const id = useId();
 }
 .area:focus {
   border-color: var(--brand-500);
-  box-shadow: 0 0 0 3px #7e70ff2e;
 }
 .invalid .area {
   border-color: var(--danger);

@@ -379,9 +379,12 @@ onUnmounted(() => {
 <style scoped>
 .page {
   position: relative;
-  max-width: 1200px;
+  /* HM1：竞品首页内容带宽 1328（loggedin.png x280–1607，视口 1664 / 侧栏 240 / 左右内距 48）→
+     内距 48 与 max-width 1480 是它的等比落地。旧值 max-width:1200 + padding 72 只得到 1056，
+     比竞品窄 272px，导致案例墙掉到 3 列。 */
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 40px 72px 80px;
+  padding: 40px 48px 80px;
 }
 /* 参照产品：左上紫色光晕 + 底部渐隐 */
 .page::before {
@@ -402,7 +405,8 @@ onUnmounted(() => {
 .hero-title {
   margin: 24px 0 36px;
   text-align: center;
-  font-size: 28px;
+  /* GL16：有 h1 的页面统一 26px/700（竞品墨迹高 21px ≈ 26px/700，loggedin.png y94–114） */
+  font-size: 26px;
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -439,15 +443,17 @@ onUnmounted(() => {
 .ab-btn {
   padding: 10px 22px;
   border-radius: 999px;
-  border: 1px solid #7769ff66;
-  background: linear-gradient(120deg, #5d4ff0, #8a7dff);
+  /* HM2：竞品所有实心 CTA 都是单一 #9B46FF（--brand-01normal，pricing-full.png 实测 64.4% 面积），
+     旧值 linear-gradient(120deg,#5d4ff0,#8a7dff) 是体系外的第二支紫渐变。 */
+  border: 1px solid transparent;
+  background: var(--brand-500);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
 .ab-btn:hover {
-  filter: brightness(1.08);
+  background: var(--brand-hover);
 }
 .hero-cards.single {
   grid-template-columns: minmax(0, 640px);
@@ -458,7 +464,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 640px) minmax(0, 480px);
   justify-content: center;
-  gap: 24px;
+  /* HM1：竞品双卡间距 12（loggedin.png 卡1 640 + 隙 12 + 卡2 480 = 1132 居中） */
+  gap: 12px;
 }
 .flow-card,
 .canvas-card {
@@ -468,7 +475,8 @@ onUnmounted(() => {
   gap: 18px;
   min-height: 160px;
   padding: 40px 48px;
-  border-radius: 32px;
+  /* HM3：竞品圆角阶梯上限 24，常用 12/16；旧值 32px 超出体系，显"圆过头" */
+  border-radius: 16px;
   overflow: hidden;
 }
 .flow-card {
@@ -731,8 +739,12 @@ onUnmounted(() => {
 }
 .case-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 322px);
-  gap: 13px;
+  /* HM1：竞品案例墙 4 列（loggedin.png 卡 x280–602 / 615–937 / 950–1272 / 1285–1607，列距 12–13）。
+     旧值 auto-fill 322px 在 1056 容器里只放得下 3 列 → 密度差 33%。
+     改成显式 4 等分而不是固定 322px：1600 视口下内宽是 1264，固定 322 仍只放 3 列；
+     竞品自己也是"4 等分"，故按列数对齐、宽度自适应。 */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 .case-card {
   position: relative;
@@ -799,11 +811,15 @@ onUnmounted(() => {
   padding: 0 18px;
   border-radius: 999px;
   border: 0;
-  background: linear-gradient(90deg, #7e70ff, #a45fff);
+  /* HM2：同 .ab-btn —— 竞品实心 CTA 只有一支 #9B46FF */
+  background: var(--brand-500);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+.recent-create:hover {
+  background: var(--brand-hover);
 }
 .recent-skeleton {
   height: 170px;

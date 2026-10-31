@@ -13,7 +13,11 @@ import type {
 } from "~/types/api";
 import { statusLabel } from "~/types/api";
 
-definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
+// 沉浸式工作台（对齐竞品 /series-manage/episode/:id）：无全站侧栏、单一 64px 顶栏。
+// 之前用 layout:"app" 会多出 240px 侧栏 + 64px 全局顶栏，工作台可用区从 1424×741
+// 缩到 1152×661（右生成台少 180px）；blank 壳把这两块空间还给三列，账户入口改由
+// 页面顶栏的 <AccountPills /> 承载（见 docs/03-frontend/competitor-ui-comparison.md §3.3/§4.1）。
+definePageMeta({ ssr: false, requiresAuth: true, layout: "blank" });
 
 interface BatchItem {
   shot_id: string;
@@ -76,7 +80,6 @@ const exporting = ref(false);
 const portraitCount = ref(1);
 const candidates = ref<{ charId: string; task_id: string; list: Array<{ index: number; url: string }> } | null>(null);
 const matrix = ref<MatrixDto | null>(null);
-const materials = ref<Array<{ id: string; name: string; portrait_url: string | null }>>([]);
 const budgetTouched = ref(false);
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /**
@@ -133,16 +136,6 @@ async function loadEpisode(): Promise<void> {
   );
   episode.value = data.episode;
   shots.value = data.storyboards;
-}
-
-async function loadMaterials(): Promise<void> {
-  try {
-    materials.value = await api.get<Array<{ id: string; name: string; portrait_url: string | null }>>(
-      `/projects/${projectId.value}/shot-materials`,
-    );
-  } catch {
-    materials.value = [];
-  }
 }
 
 async function loadMatrix(): Promise<void> {
@@ -369,6 +362,32 @@ async function generateStoryboards(): Promise<void> {
   });
 }
 
+/**
+ * 重生成二次确认（对齐竞品"先 check 再 create"的护栏思路）。
+ * 大纲/AI拆分镜都是「整体覆盖」：已有内容时先弹确认，空态直接执行，避免多一次无意义点击。
+ */
+const regenConfirm = ref<null | "outline" | "shots">(null);
+function maybeGenerateOutline(): void {
+  if (episodes.value.length) {
+    regenConfirm.value = "outline";
+    return;
+  }
+  void generateOutline();
+}
+function maybeGenerateStoryboards(): void {
+  if (shots.value.length) {
+    regenConfirm.value = "shots";
+    return;
+  }
+  void generateStoryboards();
+}
+async function confirmRegenerate(): Promise<void> {
+  const kind = regenConfirm.value;
+  regenConfirm.value = null;
+  if (kind === "outline") await generateOutline();
+  else if (kind === "shots") await generateStoryboards();
+}
+
 async function saveShot(shot: StoryboardDto): Promise<void> {
   await run(t("projectDetail.shotSaved"), async () => {
     await api.patch(
@@ -486,7 +505,6 @@ onMounted(async () => {
     await loadProject();
     await loadModels();
     await loadMatrix();
-    await loadMaterials();
     await loadProjectAssets();
     await loadVideoModels();
   });
@@ -624,16 +642,11 @@ function shotThumb(shot: StoryboardDto): string | null {
   const first = characters.value.find((c) => c.id === shot.character_ids[0]);
   return first?.portrait_url ?? null;
 }
-/** 中列素材：优先展示该镜绑定角色的定妆图，否则回退到项目分镜素材 */
-const stageMaterials = computed(() => {
-  if (stageTab.value === "video") return [];
-  const byId = new Map(characters.value.map((c) => [c.id, c]));
-  const bound = (selectedShot.value?.character_ids ?? [])
-    .map((id) => byId.get(id))
-    .filter((c): c is CharacterDto => Boolean(c));
-  if (bound.length) return bound.map((c) => ({ id: c.id, name: c.name, portrait_url: c.portrait_url }));
-  return materials.value;
-});
+/** 中列「全部」是否要连带渲染出片行：视频 tab 永远渲染（含空态），
+ *  全部 tab 只在真有出片结果时追加，避免多出一块空 «视频» 区。 */
+const showsVideoRows = computed(
+  () => stageTab.value === "video" || (stageTab.value === "all" && submittedShots.value.length > 0),
+);
 const submittedShots = computed(() => batchItems.value);
 function batchReason(item: BatchItem): string {
   if (item.code === 400105) return t("projectDetail.batchReasons.notFinalized");
@@ -1658,6 +1671,7 @@ function kindLabel(kind: string): string {
         <span class="ep-meta">{{ t("projectDetail.ui.epMeta", { ratio: project?.ratio ?? "9:16", episodes: episodes.length, characters: characters.length }) }}</span>
         <Button variant="ghost" size="sm" @click="directorOpen = true">{{ t("projectDetail.ui.director3d") }}</Button>
         <Button size="sm" :disabled="!!busy || !selectedShot" @click="saveSelectedShot">{{ t("projectDetail.ui.save") }}</Button>
+        <AccountPills />
       </div>
     </header>
 
@@ -1678,7 +1692,7 @@ function kindLabel(kind: string): string {
           <p class="sub">{{ t("projectDetail.ui.scriptSub") }}</p>
         </div>
         <div class="panel__actions">
-          <Button :disabled="!!busy" @click="generateOutline">
+          <Button :disabled="!!busy" @click="maybeGenerateOutline">
             {{ episodes.length ? t("projectDetail.ui.regen") : t("projectDetail.ui.genOutline") }}
           </Button>
           <Button variant="ghost" :disabled="!!busy || episodes.length === 0" @click="saveOutline">{{ t("projectDetail.ui.confirmOutline") }}</Button>
@@ -1710,7 +1724,7 @@ function kindLabel(kind: string): string {
         :title="t('projectDetail.ui.emptyScriptTitle')"
         :description="t('projectDetail.ui.emptyScriptDesc')"
       >
-        <Button :disabled="!!busy" @click="generateOutline">{{ t("projectDetail.ui.genOutline") }}</Button>
+        <Button :disabled="!!busy" @click="maybeGenerateOutline">{{ t("projectDetail.ui.genOutline") }}</Button>
       </EmptyState>
     </section>
 
@@ -1802,8 +1816,11 @@ function kindLabel(kind: string): string {
         <div class="cta-hero">
           <div class="cta-hero__text">
             <h3>{{ t("projectDetail.ui.aiExtractTitle") }} <span class="free">{{ t("projectDetail.ui.freeFirst") }}</span></h3>
-            <p>{{ t("projectDetail.ui.aiExtractChars") }}</p>
-            <button class="btn-white" type="button" disabled :title="t('projectDetail.ui.aiExtractBtnDisabled')">✦ {{ t("projectDetail.ui.aiExtractTitle") }}</button>
+            <p>{{ t("projectDetail.ui.aiExtractDescClean") }}</p>
+            <button class="btn-white" type="button" disabled :title="t('projectDetail.ui.soonExtractHint')">
+              ✦ {{ t("projectDetail.ui.aiExtractTitle") }}
+              <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+            </button>
           </div>
         </div>
         <div class="cta-two">
@@ -1871,7 +1888,7 @@ function kindLabel(kind: string): string {
     <div v-else-if="tab === 'storyboards'" class="work">
       <!-- 左：分镜条 -->
       <aside class="rail">
-        <button class="rail-ai" type="button" :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">
+        <button class="rail-ai" type="button" :disabled="!!busy || !selectedEpisodeId" @click="maybeGenerateStoryboards">
           <span>{{ t("projectDetail.ui.aiSplit") }}</span><i>{{ t("projectDetail.ui.freeFirst") }}</i>
         </button>
         <p class="rail-group">{{ t("projectDetail.ui.railGroupShots", { n: shots.length }) }}</p>
@@ -1892,7 +1909,10 @@ function kindLabel(kind: string): string {
             <span class="shot-chip__state">{{ s.video_task_id ? t("projectDetail.ui.shotSubmitted") : s.status === 5 ? t("projectDetail.ui.shotFinalized") : t("projectDetail.ui.shotNotFinalized") }}</span>
           </button>
         </div>
-        <button class="rail-add" type="button" disabled :title="t('projectDetail.ui.addShotDisabled')">{{ t("projectDetail.ui.addShot") }}</button>
+        <button class="rail-add" type="button" disabled :title="t('projectDetail.ui.soonAddShotHint')">
+          {{ t("projectDetail.ui.addShot") }}
+          <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+        </button>
         <p v-if="!shots.length" class="rail-empty">{{ t("projectDetail.ui.railEmpty") }}</p>
       </aside>
 
@@ -1960,7 +1980,7 @@ function kindLabel(kind: string): string {
           :title="t('projectDetail.ui.emptyShotTitle')"
           :description="t('projectDetail.ui.emptyShotDesc')"
         >
-          <Button :disabled="!!busy || !selectedEpisodeId" @click="generateStoryboards">{{ t("projectDetail.ui.genStoryboards") }}</Button>
+          <Button :disabled="!!busy || !selectedEpisodeId" @click="maybeGenerateStoryboards">{{ t("projectDetail.ui.genStoryboards") }}</Button>
         </EmptyState>
       </section>
 
@@ -2037,14 +2057,21 @@ function kindLabel(kind: string): string {
 
           <div class="gen-cards">
             <button type="button" class="gen-card" @click="openDrawer"><span>+</span>{{ t("projectDetail.ui.projectAssets") }}</button>
-            <button type="button" class="gen-card" disabled :title="t('projectDetail.ui.moreSourcesDisabled')"><span>+</span>{{ t("projectDetail.ui.moreSources") }}</button>
+            <button type="button" class="gen-card" disabled :title="t('projectDetail.ui.soonMoreSourcesHint')">
+              <span>+</span>{{ t("projectDetail.ui.moreSources") }}
+              <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+            </button>
           </div>
 
           <div class="gen-row gen-row--between">
             <span class="gen-label">{{ t("projectDetail.ui.promptLabel") }}</span>
             <span class="gen-row__ops">
-              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.matchAssetsDisabled')">{{ t("projectDetail.ui.matchAssets") }}</button>
-              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.zoomEditDisabled')">{{ t("projectDetail.ui.zoomEdit") }}</button>
+              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.soonMatchHint')">
+                {{ t("projectDetail.ui.matchAssets") }} <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+              </button>
+              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.soonZoomHint')">
+                {{ t("projectDetail.ui.zoomEdit") }} <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+              </button>
             </span>
           </div>
           <textarea
@@ -2482,6 +2509,22 @@ function kindLabel(kind: string): string {
       <p v-if="!candidates?.list.length" class="muted">{{ t("projectDetail.ui.noCandidates2") }}</p>
     </Modal>
 
+    <!-- ── 重生成二次确认（大纲 / AI拆分镜 都是整体覆盖）── -->
+    <Modal
+      :open="!!regenConfirm"
+      :title="regenConfirm === 'outline' ? t('projectDetail.ui.genOutline') : t('projectDetail.ui.aiSplit')"
+      width="460px"
+      @close="regenConfirm = null"
+    >
+      <p class="confirm-text">
+        {{ regenConfirm === "outline" ? t("projectDetail.ui.regenOutlineConfirm") : t("projectDetail.ui.regenShotsConfirm") }}
+      </p>
+      <template #footer>
+        <Button variant="ghost" @click="regenConfirm = null">{{ t("common.cancel") }}</Button>
+        <Button :disabled="!!busy" @click="confirmRegenerate">{{ t("common.confirm") }}</Button>
+      </template>
+    </Modal>
+
     <!-- ── 3D 导演台（场景快照存服务端；打开即载入本项目最近场景）── -->
     <Director3D
       :open="directorOpen"
@@ -2498,9 +2541,10 @@ function kindLabel(kind: string): string {
 .episode {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px 16px;
-  height: calc(100vh - var(--header-h));
+  gap: 8px;
+  padding: 0 8px 8px;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -2512,6 +2556,7 @@ function kindLabel(kind: string): string {
   justify-content: space-between;
   gap: 12px;
   flex-shrink: 0;
+  min-height: 56px;
 }
 .ep-head__left,
 .ep-head__right {
@@ -2781,9 +2826,10 @@ function kindLabel(kind: string): string {
   cursor: pointer;
 }
 .av-tab.on {
-  color: var(--text-1);
+  /* 竞品 05-project-assets-panel.png y171..174 rgb(231,172,255)：紫字 + 浅紫下划线 */
+  color: var(--tab-line);
   font-weight: 700;
-  border-bottom-color: var(--brand-500);
+  border-bottom-color: var(--tab-line);
 }
 .av-head__right {
   display: flex;
@@ -2887,6 +2933,35 @@ function kindLabel(kind: string): string {
   font-size: 11px;
   font-weight: 700;
 }
+/* 「即将开放」chip：对齐竞品把状态直接印在控件上（而不是只写在 title 里，
+   触屏/键盘用户读不到 hover 提示）。用于本页 5 个暂未接通的入口。 */
+.soon-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid #9b46ff40;
+  background: #9b46ff26;
+  color: #cf9fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.rail-add .soon-chip,
+.gen-card .soon-chip {
+  display: block;
+  margin: 4px auto 0;
+  width: fit-content;
+}
+.confirm-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
 .cta-hero p {
   margin: 0 0 14px;
   font-size: 13px;
@@ -2940,13 +3015,13 @@ function kindLabel(kind: string): string {
   padding: 32px 0;
 }
 
-/* ═══════════ 分镜工作台：三列 ═══════════ */
+/* ═══════════ 分镜工作台：三列（对齐竞品 160 / 自适应 / 640 + 8px 缝隙）═══════════ */
 .work {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 176px minmax(320px, 1fr) 460px;
-  gap: 12px;
+  grid-template-columns: 160px minmax(320px, 1fr) 640px;
+  gap: 8px;
 }
 
 /* 左：分镜条 */
@@ -3188,7 +3263,8 @@ function kindLabel(kind: string): string {
 .gen-tabs {
   display: flex;
   gap: 20px;
-  border-bottom: 1px solid var(--panel-line);
+  /* 竞品 03-episode-workspace.png 实测：面板头两 tab 之间**没有通栏底线**，
+     只有激活项自身 2px 下划线（y=119 x945..1051）。旧值有多余的 1px 通栏线。 */
 }
 .gen-tab {
   position: relative;
@@ -3200,7 +3276,8 @@ function kindLabel(kind: string): string {
   cursor: pointer;
 }
 .gen-tab.on {
-  color: var(--text-1);
+  /* 竞品实测：激活文字/图标与下划线是**同一个浅紫**（文本核 rgb(225,176,255)），不是白字 */
+  color: var(--tab-line);
   font-weight: 700;
 }
 .gen-tab.on::after {
@@ -3211,7 +3288,7 @@ function kindLabel(kind: string): string {
   bottom: -1px;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 .mode-tabs {
   display: flex;
@@ -3233,9 +3310,9 @@ function kindLabel(kind: string): string {
   cursor: pointer;
 }
 .mode-tab.on {
-  color: var(--text-1);
+  color: var(--tab-line);
   font-weight: 700;
-  border-bottom-color: var(--brand-500);
+  border-bottom-color: var(--tab-line);
 }
 .mode-tab.off {
   color: var(--text-5);
@@ -3676,9 +3753,9 @@ function kindLabel(kind: string): string {
 }
 
 /* ═══════════ 响应式 ═══════════ */
-@media (max-width: 1360px) {
+@media (max-width: 1400px) {
   .work {
-    grid-template-columns: 164px minmax(280px, 1fr) 420px;
+    grid-template-columns: 160px minmax(280px, 1fr) 560px;
   }
 }
 @media (max-width: 1180px) {
@@ -4231,7 +4308,6 @@ function kindLabel(kind: string): string {
 .cf-crumb {
   padding: 6px 2px;
   border: 0;
-  border-bottom: 2px solid transparent;
   background: none;
   color: var(--text-3);
   font-size: 15px;
@@ -4239,8 +4315,9 @@ function kindLabel(kind: string): string {
   cursor: pointer;
 }
 .cf-crumb.on {
+  /* 竞品 ev4-confirm-head-2x.png 实测：面包屑当前段**没有下划线**，只靠白色+字重区分；
+     分隔符是紫色➤（.cf-arrow）。旧值加了一条 2px 紫底线，属于把面包屑当 tab 处理。 */
   color: var(--text-1);
-  border-bottom-color: var(--brand-500);
 }
 .cf-arrow {
   color: var(--brand-500);

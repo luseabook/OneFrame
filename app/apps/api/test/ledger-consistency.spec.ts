@@ -282,4 +282,96 @@ describe("台账内部一致性（第 103 批守卫）", () => {
     const uniq = new Set(triples.map((m) => `${m[1]}/${m[2]}/${m[3]}`));
     expect([...uniq].length, `三分类合计在多处不一致：${[...uniq].join(" vs ")}`).toBe(1);
   });
+
+  /**
+   * 第 105 批新增：§3.4 的**分布表与解读**也必须能由模块行重算。
+   *
+   * 第 103 批守卫只钉了三组总分；§3.4 下面这两块（区间分布 + 中位数/满分）
+   * 在同一轮 202.58→202.67 的漂移里同样过期过（旧表少了 #17 满分、#6 从 97 回落等），
+   * 却没有守卫。分布是「读一眼就懂」的那部分，越容易被手改成过期数字。
+   */
+  it("§3.4 分布表与「中位数 / 满分」解读必须能由模块行重算出来", () => {
+    const pcts = rows.map((r) => Math.round(r.pct * 1000) / 10).sort((a, b) => a - b);
+    const median = Math.round(((pcts[13]! + pcts[14]!) / 2) * 100) / 100;
+    const full = pcts.filter((p) => p === 100).length;
+    const min = pcts[0]!;
+
+    const buckets: Array<[string, (p: number) => boolean]> = [
+      ["100%", (p) => p >= 100],
+      ["99–99.9%", (p) => p >= 99 && p < 100],
+      ["97–98%", (p) => p >= 97 && p < 99],
+      ["95–96%", (p) => p >= 95 && p < 97],
+      ["92%", (p) => p >= 92 && p < 95],
+    ];
+
+    const dist = new Map<string, number>();
+    for (const line of md.split("\n")) {
+      if (!line.startsWith("| ")) continue;
+      const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      if (cells.length < 3) continue;
+      const label = cells[0]!.replace(/\*/g, "");
+      if (buckets.some(([b]) => b === label)) dist.set(label, Number(cells[1]!.replace(/\*/g, "")));
+    }
+
+    for (const [label, inBucket] of buckets) {
+      const computed = pcts.filter(inBucket).length;
+      expect(dist.has(label), `§3.4 分布表缺 ${label} 行`).toBe(true);
+      expect(dist.get(label), `${label} 区间的模块数`).toBe(computed);
+    }
+    expect(buckets.reduce((s, [, f]) => s + pcts.filter(f).length, 0)).toBe(rows.length);
+
+    expect(md, "§3.4 解读里的最小值/中位数/满分必须与模块行一致").toContain(
+      `**${rows.length} 个模块全部 ≥${min}%，中位数 ${median}%，${full} 个满分**`,
+    );
+  });
+
+  /**
+   * 第 105 批新增：§5.3「外部依赖清单」的逐行权重相加必须等于合计行。
+   *
+   * 本批漂移最典型的一处：合并行 #5 仍写 1.00，但它的子项里
+   * #17 `replace` 0.08（第 98 批核清已实现）和 #23 计费补差价 0.01（第 97 批已做）
+   * 早已从模块行清零 —— 子项相加只有 0.91，合计行也就跟着多算 0.09。
+   */
+  it("§5.3 外部依赖清单：逐行权重相加 == 合计行 == 全站剩余", () => {
+    const lines = md.split("\n");
+    const start = lines.findIndex(
+      (l) => l.startsWith("| # |") && l.includes("缺口") && l.includes("卡在哪"),
+    );
+    expect(start, "找不到 §5.3 表头").toBeGreaterThan(-1);
+
+    let sum = 0;
+    let stated: number | null = null;
+    let checked = 0;
+    for (let i = start + 2; i < lines.length; i += 1) {
+      const line = lines[i]!;
+      if (!line.startsWith("|")) break;
+      const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      if (cells.length < 3) continue;
+      const w = currentNumber(cells[2]!);
+      if (cells[1]!.includes("合计")) {
+        stated = w;
+        continue;
+      }
+      if (w === null) continue;
+      sum += w;
+      checked += 1;
+    }
+
+    const remain = Math.round(sumRemain * 100) / 100;
+    expect(checked, "§5.3 至少要核到几行").toBeGreaterThan(3);
+    expect(
+      Math.abs(sum - remain),
+      `§5.3 逐行权重合计 ${Math.round(sum * 100) / 100} 应≈全站剩余 ${remain}`,
+    ).toBeLessThanOrEqual(0.011);
+    expect(stated, "§5.3 合计行缺失").not.toBeNull();
+    expect(Math.abs(stated! - remain), `§5.3 合计行 ${stated} 应≈${remain}`).toBeLessThanOrEqual(0.011);
+  });
+
+  it("§5.5 的「未满 100%」行数与表 A 标题必须等于实际未满行数", () => {
+    const unfinished = rows.filter((r) => r.pct < 1).length;
+    expect(md, "§5.5 正文的未满行数").toContain(`**${unfinished} 个未满 100% 的行**`);
+    expect(md, "§5.5 表 A 标题的未满模块数").toContain(
+      `**表 A：${unfinished} 个未满 100% 的模块逐条核账**`,
+    );
+  });
 });

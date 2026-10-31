@@ -3,6 +3,7 @@ import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
+import { AllowStreamToken } from "../../common/allow-stream-token.decorator";
 import { SkipEnvelope } from "../../common/http/skip-envelope.decorator";
 import { parseOrThrow } from "../../common/zod";
 import { AgentChatService } from "./agent-chat.service";
@@ -164,6 +165,7 @@ export class AgentConversationsController {
    * （客户端已用 messages 拉过全量）；带游标则增量重放，游标过期 → 746004。
    */
   @Get("sessions/:session_id/stream")
+  @AllowStreamToken()
   @SkipEnvelope()
   async streamSession(
     @Req() req: AuthedRequest,

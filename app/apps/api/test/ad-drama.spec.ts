@@ -332,7 +332,11 @@ describe("ad-drama e2e", () => {
     expect(task!.capability).toBe("text");
     expect(task!.mode).toBe("script_optimization");
     expect(task!.status).toBe(3);
-    expect(task!.creditsFrozen).toBe(2);
+    // 收尾后字段必须归零（PR-03）。这一行**曾经断言是 2** —— 那是在描述缺陷：
+    // `tasks.credits_frozen` 从插入后再没被写回过 0，导致「是否已释放」的语义从未表达，
+    // `creditsFrozen > 0` 在 4 处判据里恒真（任务删不掉、取消后被二次解冻）。
+    // 现在额度以 credit_flows 为准，字段只表达「当前还冻结着多少」。
+    expect(task!.creditsFrozen).toBe(0);
     expect(task!.creditsSettled).toBe(2);
 
     // 流水必须是 freeze + settle 两条（对账口径：冻结→结算，不是直接扣）

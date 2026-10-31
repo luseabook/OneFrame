@@ -1,9 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LocalStorage } from "@app/storage";
-import { transferResult, type ExecutorDeps, type TaskRow } from "./executor";
+import { DEFAULT_MAX_POLL_MS, transferResult, type ExecutorDeps, type TaskRow } from "./executor";
 
 let dir = "";
 let storage: LocalStorage;
@@ -58,5 +59,25 @@ describe("worker result transfer", () => {
     expect(text.text).toBe("hello");
     const stored = await transferResult(deps, task, 0, { uri: "u/22/tasks/11/r0.mp4" }, "video/mp4");
     expect(stored.uri).toBe("u/22/tasks/11/r0.mp4");
+  });
+});
+
+/**
+ * P1-16 守卫：轮询上限默认值必须覆盖真实视频生成时长。
+ *
+ * 120s 的旧默认值意味着「按默认配置上线，绝大多数视频任务会在超时后判失败」——
+ * 不扣费但用户体验是「点了没反应然后失败」，还会污染失败率告警。
+ * 这里同时钉两件事：常量本身的下限，以及**启动入口必须用这个常量**（防止又内联一个 120_000）。
+ */
+describe("轮询上限默认值（P1-16）", () => {
+  it("DEFAULT_MAX_POLL_MS 至少 10 分钟", () => {
+    expect(DEFAULT_MAX_POLL_MS).toBeGreaterThanOrEqual(10 * 60_000);
+  });
+
+  it("worker 启动入口引用该常量，不再内联固定值", () => {
+    const main = readFileSync(join(__dirname, "main.ts"), "utf8");
+    expect(main).toMatch(/POLL_MAX_MS\s*\?\?\s*DEFAULT_MAX_POLL_MS/);
+    // 旧写法（内联 120_000 / 2 分钟）不许回来
+    expect(main).not.toMatch(/POLL_MAX_MS\s*\?\?\s*120_?000/);
   });
 });

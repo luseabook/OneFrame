@@ -27,6 +27,7 @@ let token = "";
 let spaceId = "";
 let vipSkuId = "";
 const vipSku = `spec-vip-month-${tag}`;
+const vipYearSku = `spec-vip-year-${tag}`;
 const creditsSku = `spec-credits-${tag}`;
 
 async function inject(
@@ -77,6 +78,16 @@ beforeAll(async () => {
   });
   await db.insert(skus).values({
     id: BigInt(base + 2),
+    kind: "vip",
+    sku: vipYearSku,
+    label: "规格测试会员 · 年",
+    priceCents: 39900,
+    credits: 6000,
+    period: "year",
+    active: true,
+  });
+  await db.insert(skus).values({
+    id: BigInt(base + 3),
     kind: "credits",
     sku: creditsSku,
     label: "规格测试积分包",
@@ -98,6 +109,7 @@ afterAll(async () => {
   await db.delete(orders).where(eq(orders.spaceId, BigInt(spaceId)));
   await db.delete(skuPromotions).where(eq(skuPromotions.sku, vipSku));
   await db.delete(skus).where(and(eq(skus.sku, vipSku), eq(skus.id, BigInt(vipSkuId))));
+  await db.delete(skus).where(eq(skus.sku, vipYearSku));
   await db.delete(skus).where(eq(skus.sku, creditsSku));
   await app.close();
   await pool.end();
@@ -161,6 +173,32 @@ describe("订阅制", () => {
       .from(subscriptions)
       .where(and(eq(subscriptions.spaceId, BigInt(spaceId)), eq(subscriptions.status, 1)));
     expect(activeRows).toHaveLength(1);
+  });
+
+  it("升级换档：折抵后新周期从今天起算，不叠加旧周期剩余天数", async () => {
+    const before = await inject("GET", "/billing/subscription");
+    const beforeEnd = new Date(before.body.data.end_at as string).getTime();
+    expect(beforeEnd).toBeGreaterThan(Date.now());
+
+    const quote = await inject("GET", `/billing/upgrade-quote?sku=${vipYearSku}`);
+    expect(quote.body.code).toBe(0);
+    expect(quote.body.data.is_upgrade).toBe(true);
+    expect(quote.body.data.credit_cents).toBeGreaterThan(0);
+    const payable = quote.body.data.payable_cents as number;
+    expect(payable).toBeLessThan(39900);
+
+    const created = await inject("POST", "/billing/subscribe", { sku: vipYearSku, channel: "mock" });
+    expect(created.body.code).toBe(0);
+    expect(created.body.data.amount_cents).toBe(payable);
+    await inject("POST", `/billing/orders/${created.body.data.order_id}/mock-pay`, {});
+
+    const after = await inject("GET", "/billing/subscription");
+    expect(after.body.data.sku).toBe(vipYearSku);
+    const afterEnd = new Date(after.body.data.end_at as string).getTime();
+    // 折抵已买断旧周期剩余价值 → 新到期日 ≈ 今天 + 365 天。
+    // 若仍按续期顺延，会额外多出旧周期剩余的约 59 天（> 旧到期日 + 365 天）。
+    expect(afterEnd - Date.now()).toBeLessThanOrEqual(365 * 86_400_000 + 60_000);
+    expect(afterEnd - Date.now()).toBeGreaterThan(364 * 86_400_000);
   });
 
   it("取消订阅只关自动续费，到期前权益仍在", async () => {

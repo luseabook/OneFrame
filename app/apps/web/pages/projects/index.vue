@@ -14,9 +14,23 @@ const route = useRoute();
 const list = ref<ProjectDto[]>([]);
 const total = ref(0);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref("");
 const showCreate = ref(false);
 const tab = ref<"projects" | "exports">("projects");
+
+const PAGE_SIZE = 50;
+/** 当前已请求到第几页（「加载更多」时递增） */
+const page = ref(1);
+/** 最近一页实际返回条数：小于 PAGE_SIZE 说明已到底，不再显示「加载更多」 */
+const lastCount = ref(0);
+const hasMore = computed(() => lastCount.value >= PAGE_SIZE && list.value.length < total.value);
+/**
+ * 从剪辑台「创建项目」进来会带 `redirect=reelflow`（见 reelflow/list.vue）。
+ * onMounted 末尾会用 `router.replace("/projects")` 抹掉 query，所以要在那之前存下来，
+ * 建项成功后据此跳回剪辑台。
+ */
+const redirectTo = ref("");
 
 /** 剧目类型展示名（1 国内仿真人剧 / 2 海外仿真人剧 / 3 2D3D 动漫） */
 function dramaLabel(type: number): string {
@@ -38,17 +52,50 @@ const DRAMA_COVER: Record<number, string> = {
   3: "linear-gradient(135deg, #2f1a44, #15101f)",
 };
 
-async function load(): Promise<void> {
-  loading.value = true;
+/**
+ * 拉取一页项目。
+ * - reset=true：回到第 1 页重拉（首次进页）；
+ * - reset=false：沿用递增后的 page 追加下一页（「加载更多」，不整页替换）。
+ */
+async function load(reset = true): Promise<void> {
+  const appending = !reset;
+  if (reset) {
+    page.value = 1;
+    list.value = [];
+  }
+  if (appending) loadingMore.value = true;
+  else loading.value = true;
+  error.value = "";
   try {
-    const data = await api.get<{ list: ProjectDto[]; total: number }>("/projects?page=1&page_size=50");
-    list.value = data.list;
-    total.value = data.total;
+    const q = new URLSearchParams({ page: String(page.value), page_size: String(PAGE_SIZE) });
+    const data = await api.get<{ list: ProjectDto[]; total: number }>(`/projects?${q.toString()}`);
+    const incoming = data.list ?? [];
+    lastCount.value = incoming.length;
+    total.value = data.total ?? 0;
+    if (appending) {
+      // 分页期间可能有新项目插到最前（按创建时间倒序），按 id 去重避免重复卡
+      const seen = new Set(list.value.map((item) => item.id));
+      list.value = [...list.value, ...incoming.filter((item) => !seen.has(item.id))];
+    } else {
+      list.value = incoming;
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("errors.load");
+    if (appending) {
+      // 追加失败回退游标，让「加载更多」重试的是同一页
+      page.value = Math.max(1, page.value - 1);
+    }
   } finally {
-    loading.value = false;
+    if (appending) loadingMore.value = false;
+    else loading.value = false;
   }
+}
+
+/** 追加下一页（正在加载或已无更多时按钮本就隐藏/禁用，这里再兜一层） */
+function loadMore(): void {
+  if (loading.value || loadingMore.value || !hasMore.value) return;
+  page.value += 1;
+  void load(false);
 }
 
 function openCreate(): void {
@@ -57,10 +104,17 @@ function openCreate(): void {
 
 function onCreated(project: ProjectDto): void {
   showCreate.value = false;
+  // 从剪辑台进来建的项目：建完直接进剪辑台（空时间线）；否则落到项目工作台
+  if (redirectTo.value === "reelflow") {
+    void router.push(`/reelflow/edit/${project.id}`);
+    return;
+  }
   void router.push(`/projects/${project.id}`);
 }
 
 onMounted(async () => {
+  // 必须在下面 router.replace 抹掉 query 之前取，否则 redirect=reelflow 会丢
+  redirectTo.value = String(route.query.redirect ?? "");
   await load();
   // 侧栏「剧本创作」/首页入口：/projects?create=1 直接打开新建项目弹窗
   if (String(route.query.create ?? "") === "1") {
@@ -115,6 +169,13 @@ onMounted(async () => {
         <p class="empty-text">{{ t("projects.emptyCreate") }}</p>
         <p v-if="total === 0" class="empty-hint">{{ t("projects.emptyHint") }}</p>
       </div>
+
+      <!-- 加载更多：本页满 50 条且未达 total 时才出现，追加而非整页替换 -->
+      <div v-if="!loading && hasMore" class="more">
+        <button type="button" class="more-btn" :disabled="loadingMore" @click="loadMore">
+          {{ loadingMore ? t("common.loading") : t("common.loadMore") }}
+        </button>
+      </div>
     </template>
 
     <div v-else class="empty exports">
@@ -166,25 +227,26 @@ onMounted(async () => {
   padding: 10px 2px 12px;
   border: 0;
   background: transparent;
-  color: var(--text-3);
-  font-size: 15px;
-  font-weight: 600;
+  color: #9d9d9f;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .tab.active {
-  color: var(--text-1);
+  color: #ffffff;
 }
 
+/* GL9：下划线白 2px、宽=文字宽（旧值紫 var(--brand-500)） */
 .tab.active::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 
 .err {
@@ -338,6 +400,35 @@ onMounted(async () => {
   margin: 0;
   color: var(--text-4);
   font-size: 12px;
+}
+
+/* 加载更多（居中胶囊，与底部「创建项目」区分开：更矮、无投影） */
+.more {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0 4px;
+}
+
+.more-btn {
+  height: 38px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-tint);
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.more-btn:hover:not(:disabled) {
+  border-color: var(--border-3);
+  color: var(--text-1);
+}
+
+.more-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .fab-wrap {

@@ -285,7 +285,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .shell {
   display: flex;
   min-height: 100vh;
-  background: var(--bg-app);
+  /* GL1：壳层 = chrome #0B0B10（页面色）。侧栏 #101015 / 内容面板 #191A22 各自分开，
+     三层必须不同色，否则整站塌成"一整块黑"（竞品 task.png 三点取样）。 */
+  background: var(--bg-chrome);
   color: var(--text-1);
 }
 
@@ -293,8 +295,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: var(--bg-app);
-  border-right: 1px solid var(--border-1);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--sidebar-line);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -313,8 +315,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   min-height: 64px;
 }
 .logo-mark {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
@@ -353,7 +355,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 
 .nav {
   flex: 1;
-  padding: 8px 12px;
+  /* 竞品侧栏选中块左沿距侧栏 14px（loggedin.png x14–222），故 nav 左右内距 14 */
+  padding: 8px 14px;
   overflow-y: auto;
 }
 .item {
@@ -361,11 +364,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   align-items: center;
   gap: 10px;
   height: 40px;
-  padding: 0 10px;
-  border-radius: var(--radius-lg);
+  padding: 0 8px;
+  border-radius: var(--radius-control);
   color: var(--text-2);
   font-size: 14px;
-  margin-bottom: 2px;
+  /* GL14/GL15：项高 40 + 隙 8 = 节距 48（竞品图标中心 y99/147/195/243/291 等距 48） */
+  font-weight: 500;
+  margin-bottom: 8px;
   transition:
     background var(--duration-fast) var(--ease-out),
     color var(--duration-fast) var(--ease-out);
@@ -385,10 +390,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .item.disabled:hover .ico {
   color: var(--text-3);
 }
+/* GL14：竞品选中态是「白 6% → 0% 的水平渐隐 + 白字」，**不加重字重**
+   （loggedin.png：x14 #1D1E25 → x148 #19191F → x176 #15151A → x210 #111115 → x222 收净）。
+   旧值 #ffffff1a→#ffffff08 起点过亮、终点没收到 0，且 600 字重属风格越位。 */
 .item.active {
-  background: linear-gradient(90deg, #ffffff1a, #ffffff08);
-  color: var(--text-1);
-  font-weight: 600;
+  background: linear-gradient(90deg, #ffffff0f, #ffffff00);
+  color: #ffffff;
 }
 .ico {
   width: 20px;
@@ -411,13 +418,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 }
 .group-label {
   margin: 0 0 6px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--text-4);
   font-size: 12px;
 }
 
 .foot {
-  padding: 8px 12px 14px;
+  padding: 8px 14px 14px;
+}
+/* 底部工具区节距 40（竞品 task.png y427/467/507/547），不跟随导航的 48 */
+.foot .item {
+  margin-bottom: 0;
 }
 .tag-beta {
   margin-left: auto;
@@ -463,39 +474,48 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   position: sticky;
   top: 0;
   z-index: var(--z-header);
-  background: #000000cc;
-  backdrop-filter: blur(8px);
+  /* GL3：竞品顶栏底 = 页面色 #0B0B10，**不加半透明也不加 blur**
+     （旧值 #000000cc + blur 实测渲染成 #020203，比竞品暗 9 个灰阶）。 */
+  background: var(--bg-chrome);
 }
 .crumb {
   font-size: 13px;
   color: var(--text-3);
+  /* 顶栏右侧控件簇是定宽的一整排（GL4：全部 40 高），左侧 crumb 必须可压缩，
+     否则窄视口下控件会被 flex 挤到换行（1000px 实测「会员订阅」被压成竖排） */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px; /* GL4：竞品控件间距 7–8px */
+  flex-shrink: 0;
 }
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 40px; /* GL4：竞品图标按钮 42×40（task.png x1146–1187 / y11–52） */
   display: grid;
   place-items: center;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border-2);
+  border: 1px solid #2c2c30;
   color: var(--text-2);
-  background: transparent;
+  background: #0a0a0e;
 }
 .mini-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
-  padding: 0 12px;
+  height: 40px; /* GL4：顶栏所有胶囊 40 高（旧值 34） */
+  padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid var(--border-1);
-  background: var(--bg-surface);
+  /* GL5：竞品胶囊底 #0A0A0E + 描边白 14–16%；旧值 #191a21 底"发灰" */
+  border: 1px solid #2c2c30;
+  background: #0a0a0e;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 .mini-pill svg {
@@ -518,12 +538,16 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 36px;
+  height: 40px;
   padding: 0 14px;
   border-radius: var(--radius-full);
-  background: #292115;
-  border: 1px solid #f5c45133;
-  color: #f5c451;
+  white-space: nowrap;
+  flex-shrink: 0;
+  /* GL5/GL19：竞品是**低饱和香槟金** #E1CEA6 的文字 + 深金底 + 金描边；
+     旧值 #f5c451 是高饱和柠檬金，气质差一档。 */
+  background: #1d1a12;
+  border: 1px solid #e1cea633;
+  color: var(--gold-text);
   font-size: 13px;
 }
 .recharge svg {
@@ -536,31 +560,33 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .recharge .sep {
   width: 1px;
   height: 12px;
-  background: #f5c45140;
+  background: #e1cea640;
 }
 .recharge span {
   font-size: 12px;
-  color: #f5c451cc;
+  color: #e1cea6cc;
 }
 .recharge:hover {
-  background: #33291a;
+  background: #241f14;
 }
 .credits {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  height: 40px;
   padding: 0 14px;
   border-radius: var(--radius-full);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-1);
+  background: #0a0a0e;
+  border: 1px solid #2c2c30;
   color: var(--text-1);
   font-size: 14px;
 }
 .credits .spark {
   width: 15px;
   height: 15px;
-  color: var(--brand-400);
+  color: var(--brand-500); /* GL5/T7：竞品积分星形图标是品牌紫 #9B46FF */
 }
 .credits:hover {
   border-color: var(--border-3);
@@ -573,20 +599,20 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   position: relative;
 }
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px; /* GL4：竞品头像 32×32（task.png x1540–1571 / y16–47） */
   border-radius: var(--radius-full);
   border: none;
   background: linear-gradient(135deg, var(--brand-500), var(--accent-500));
   color: #fff;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 .menu {
   position: absolute;
   right: 0;
-  top: 44px;
+  top: 40px;
   min-width: 160px;
   background: var(--bg-raised);
   border: 1px solid var(--border-2);
@@ -621,7 +647,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .login-btn {
   display: inline-flex;
   align-items: center;
-  height: 36px;
+  height: 40px; /* GL4：未登录「立即登录」胶囊 40 高（旧值 36） */
   padding: 0 20px;
   border-radius: var(--radius-full);
   background: var(--brand-500);
@@ -631,12 +657,22 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   transition: filter var(--duration-fast) var(--ease-out);
 }
 .login-btn:hover {
-  filter: brightness(1.1);
+  background: var(--brand-hover);
 }
 
 .content {
   flex: 1;
   min-width: 0;
+  /* GL1：无面板页的内容底 = 页面色（只有 /tasks 单独加面板，见 pages/tasks.vue） */
+  background: var(--bg-content);
+}
+
+/* GL4 的配套：控件统一 40 高后整排比原来宽约 10px，因此把"隐藏顶部说明胶囊"的断点
+   从 900 提到 1100（与 layouts/tool.vue 一致），否则 1000px 视口会出现横向滚动。 */
+@media (max-width: 1100px) {
+  .mini-pill {
+    display: none;
+  }
 }
 
 @media (max-width: 900px) {

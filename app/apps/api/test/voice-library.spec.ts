@@ -7,7 +7,7 @@ import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 import { db, pool } from "../src/db/database";
-import { tasks } from "@app/db";
+import { releaseFrozen, tasks } from "@app/db";
 
 /**
  * 第 93 批：音色库（#6 工具箱补的支撑面）。
@@ -94,18 +94,34 @@ async function createClone(prompt: string): Promise<string> {
   return res.data.task_id as string;
 }
 
-/** 把任务推到终态（列表/删除用例需要；worker 在测试里不跑） */
+/**
+ * 把任务推到终态（列表/删除用例需要；worker 在测试里不跑）。
+ *
+ * ⚠️ 必须走**真实的收尾入口** `releaseFrozen`，不能只把 `creditsFrozen` 写成 0：
+ * 那样 credit_flows 里仍留着一条未释放的 freeze（金额悬着），只是把"字段"伪装成已结清。
+ * 这曾经是这条用例的写法 —— 它让 `DELETE /tasks/{id}` 的流水判据（P1-1）在真实数据上
+ * 立刻变成"删不掉"，正好暴露了"夹具编码生产不出现的状态"这类问题的危害。
+ */
 async function finishTask(taskId: string, status = 3): Promise<void> {
-  await db
-    .update(tasks)
-    .set({
-      status,
-      creditsFrozen: 0,
-      results: status === 3 ? [{ uri: `u/voice/${taskId}/r0.mp3` }] : [],
-      finishedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(tasks.id, BigInt(taskId)));
+  const [row] = await db.select().from(tasks).where(eq(tasks.id, BigInt(taskId)));
+  if (!row) throw new Error(`task ${taskId} not found`);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(tasks)
+      .set({
+        status,
+        results: status === 3 ? [{ uri: `u/voice/${taskId}/r0.mp3` }] : [],
+        finishedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, BigInt(taskId)));
+    await releaseFrozen(tx, {
+      spaceId: row.spaceId,
+      taskId: BigInt(taskId),
+      disposition: status === 3 ? "settle" : "unfreeze",
+      memo: "spec finish voice clone task",
+    });
+  });
 }
 
 beforeAll(async () => {

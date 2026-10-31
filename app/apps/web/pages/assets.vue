@@ -262,7 +262,8 @@ onMounted(async () => {
   min-width: 0;
 }
 .head h1 {
-  font-size: var(--text-2xl);
+  /* GL16：有 h1 的页面统一 26px/700（竞品「资产」单字宽 26，assets.png y92–121） */
+  font-size: 26px;
   font-weight: 700;
   color: var(--text-1);
 }
@@ -282,7 +283,6 @@ onMounted(async () => {
 .tabs {
   display: flex;
   gap: var(--space-5);
-  border-bottom: 1px solid var(--border-1);
   margin-bottom: var(--space-4);
 }
 .tab {
@@ -299,17 +299,17 @@ onMounted(async () => {
   color: var(--text-1);
 }
 .tab.on {
-  color: var(--text-1);
-  font-weight: 600;
+  color: #ffffff;
 }
+/* GL9：白 2px 下划线，宽=文字宽，容器不再有全宽底线 */
 .tab.on::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   height: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
   border-radius: var(--radius-full);
 }
 

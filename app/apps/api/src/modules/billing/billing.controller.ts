@@ -43,6 +43,29 @@ const ALIPAY_FAILURE_BODY = "failure";
 const CHANNELS = ["mock", "wechat", "alipay"] as const;
 const PAYMENT_MODES: PaymentMode[] = ["native", "h5", "jsapi", "page", "precreate"];
 
+/**
+ * mock 渠道端点的准入判定（PR-02）。**纯函数**，本机无库也能测（test/payment-guard.spec.ts）。
+ *
+ * 修的是什么：原来只在 `PAYMENT_LIVE=true` 时才 403 —— 等于**拿业务开关当安全开关**。
+ * `PAYMENT_LIVE` 缺省是 false（compose 也没传），于是按样例部署的生产实例
+ * = 匿名 `POST /billing/notify/mock` 可入账 = mock 支付敞口。
+ * 现在安全边界只认 `NODE_ENV`：生产一律硬拒，与 PAYMENT_LIVE 取值无关。
+ *
+ * `PAYMENT_LIVE=true` 仍然禁用 mock 是**叠加的联调约束**（真收款环境不该还能点"模拟支付"），
+ * 它只能更严、不能代替上面那条安全判定。
+ */
+export function mockEndpointBlockReason(
+  nodeEnv: string | undefined,
+  paymentLive: boolean,
+  action: string,
+): string | null {
+  if ((nodeEnv ?? "development") === "production") {
+    return `${action} disabled in production (mock channel is never available on production)`;
+  }
+  if (paymentLive) return `${action} disabled when PAYMENT_LIVE=true`;
+  return null;
+}
+
 type NotifyRequest = FastifyRequest & { rawBody?: Buffer };
 
 @Controller()
@@ -369,18 +392,20 @@ export class BillingController {
 
   /**
    * mock 渠道回调（仅联调）：模拟渠道侧异步通知，验证幂等入账与金额校验链路。
-   * PAYMENT_LIVE=true 时禁用（真实 HTTP 403），生产环境只接受真实渠道回调。
+   *
+   * 生产一律 403（`NODE_ENV==="production"` 硬拒，PR-02：不再拿 PAYMENT_LIVE 当安全开关）。
+   * 载荷里 `amount_cents` 必填——mock 没有渠道签名，省略金额就等于跳过金额校验。
+   * 可选 `space_id`：传了就按空间归属校验（非生产联调时可用来验证归属拒绝分支）。
    */
   @Public()
   @Post("billing/notify/mock")
   async notifyMock(@Body() body: unknown) {
-    if (env.PAYMENT_LIVE) {
-      throw new HttpException("mock notify disabled when PAYMENT_LIVE=true", HttpStatus.FORBIDDEN);
-    }
+    this.assertMockEndpointEnabled("mock notify");
     const payload = (body ?? {}) as {
       order_id?: string;
       channel_order_id?: string;
       amount_cents?: number;
+      space_id?: string;
     };
     if (!payload.channel_order_id) {
       throw new AppError(ErrorCode.INVALID_PARAM, "channel_order_id is required", {
@@ -392,26 +417,39 @@ export class BillingController {
       channel: "mock",
       channelOrderId: payload.channel_order_id,
       amountCents: payload.amount_cents,
+      spaceId: payload.space_id,
     });
   }
 
   /**
    * mock 渠道"我已完成支付"（仅联调）。
-   * PAYMENT_LIVE=true 时禁用（真实 HTTP 403），防止生产环境被绕过真实支付。
+   *
+   * 生产一律 403（同上）。归属校验：订单必须属于**当前登录 space**（先按 space 取单，
+   * 取不到即 NOT_FOUND，不泄露订单是否存在）；金额从库里这一行取，
+   * 不信任客户端传值——因此这里既能满足 mock 渠道"金额必填"的口径，
+   * 也不会把"由谁决定金额"交给调用方。
    */
   @Post("billing/orders/:id/mock-pay")
   async mockPay(@Req() req: AuthedRequest, @Param("id") id: string) {
-    if (env.PAYMENT_LIVE) {
-      throw new HttpException("mock pay disabled when PAYMENT_LIVE=true", HttpStatus.FORBIDDEN);
-    }
+    this.assertMockEndpointEnabled("mock pay");
+    const spaceId = req.auth?.spaceId ?? "";
+    const order = await this.billing.getOrder(spaceId, id);
     return this.billing.markPaid({
       orderId: id,
       channel: "mock",
       channelOrderId: `mock-${id}-${Date.now()}`,
+      amountCents: order.amount_cents,
+      spaceId,
     });
   }
 
   // ── 内部工具 ────────────────────────────────────────────────────────────
+
+  /** mock 渠道端点准入（PR-02）：生产硬拒，非生产按 PAYMENT_LIVE 联调开关 */
+  private assertMockEndpointEnabled(action: string): void {
+    const reason = mockEndpointBlockReason(env.NODE_ENV, env.PAYMENT_LIVE, action);
+    if (reason) throw new HttpException(reason, HttpStatus.FORBIDDEN);
+  }
 
   /** 渠道回调也要带上 request_id（日志/排障链路），@Res 直写路径显式补 */
   private attachRequestId(res: FastifyReply, req: FastifyRequest): void {

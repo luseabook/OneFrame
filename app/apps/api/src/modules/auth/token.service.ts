@@ -129,10 +129,27 @@ export class TokenService {
   }
 
   async consumeRefresh(userId: string, jti: string): Promise<boolean> {
-    const expected = await this.redis.get(`refresh:user:${userId}`);
-    if (expected !== jti) return false;
-    await this.redis.del(`refresh:jti:${jti}`, `refresh:user:${userId}`);
-    return true;
+    // 原子「比对并删除」：并发的两次 /auth/refresh 只能有一次成功（见 RedisService.delIfCurrent）。
+    // 分开的 GET + DEL 会让两个调用都读到同一 jti 并各自签发新会话 —— 重放检测形同虚设。
+    return this.redis.delIfCurrent(`refresh:user:${userId}`, jti, `refresh:jti:${jti}`);
+  }
+
+  /**
+   * 只校验、不消费（P1-8）。
+   *
+   * `/auth/renew` 是「拿 refresh Cookie 换一枚新 access」的降级通道，**不轮换** refresh，
+   * 所以不能用 `consumeRefresh`（那会让并发的续期请求互相把对方作废）。
+   * 但也不能不校验 —— 否则登出/改密/被踢下线之后，一枚被窃的 refresh cookie
+   * 还能在 14 天有效期内无限续 access，这条通道等于「不可撤销的永久凭据」。
+   *
+   * 判据取与 `consumeRefresh` 完全相同的两个键：`refresh:user:<uid>` 必须是当前 jti，
+   * 且 `refresh:jti:<jti>` 仍在（登出会删这两把，改密/踢下线走 `revokeRefresh`）。
+   */
+  async assertRefreshActive(userId: string, jti: string): Promise<void> {
+    const current = await this.redis.get(`refresh:user:${userId}`);
+    if (current !== jti) throw new AppError(ErrorCode.UNAUTHORIZED, "refresh token revoked");
+    const alive = await this.redis.get(`refresh:jti:${jti}`);
+    if (!alive) throw new AppError(ErrorCode.UNAUTHORIZED, "refresh token revoked");
   }
 
   async revokeRefresh(userId: string): Promise<void> {

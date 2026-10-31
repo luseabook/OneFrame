@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   freezeCredits,
+  releaseFrozen,
   taskEvents,
+  taskOutstandingFrozen,
   taskShares,
   tasks,
-  unfreezeCredits,
 } from "@app/db";
 import {
   AppError,
@@ -23,10 +24,31 @@ import { db } from "../../db/database";
 import { toBigId } from "../../common/bigid";
 import { QueueService } from "../../queue/queue.service";
 import { StorageService } from "../../storage/storage.service";
+import { env } from "../../config/env";
 import { CreditsService } from "../credits/credits.service";
 import { ModelsService } from "../models/models.service";
+import {
+  fetchGuarded,
+  resolveDownloadLimits,
+  resolveUriPolicy,
+  safeUriForLog,
+  type CanvasDownloadPolicy,
+  type DownloadLimits,
+} from "../canvas/canvas-download.guard";
 
 type TaskRow = typeof tasks.$inferSelect;
+
+/**
+ * 任务产物 URI 的拉取策略（PR-04 同源收口）。
+ *
+ * `batchDownload` 与匿名 `publicShareDownload` 都会把 `tasks.results[].uri` 交给服务端
+ * 去读，而这个字段和 canvas 的 `params.result_uri` 一样是"用户可达的任意 URI"：
+ * 原来两处都是裸 `fetch(uri)` + `arrayBuffer()`（无白名单/无超时/无上限，产物还能
+ * 从 zip 里回读）。这里复用 `canvas/canvas-download.guard` 的同一套判定与限额，
+ * **不复制第二套逻辑**（两份判定必然漂移，漂移的那一份就是下一个洞）。
+ */
+const URI_POLICY: CanvasDownloadPolicy = resolveUriPolicy(env);
+const DOWNLOAD_LIMITS: DownloadLimits = resolveDownloadLimits(env);
 
 /**
  * 分享页「打包下载」的同步打包上限（产物文件数）。
@@ -59,6 +81,8 @@ export interface TaskDto {
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger("tasks.download");
+
   constructor(
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(ModelsService) private readonly models: ModelsService,
@@ -218,14 +242,15 @@ export class TasksService {
       if (row.status !== TaskStatus.PENDING && row.status !== TaskStatus.RUNNING) {
         throw new AppError(ErrorCode.CANCEL_NOT_ALLOWED, "task already finished");
       }
-      if (row.creditsFrozen > 0) {
-        await unfreezeCredits(tx, {
-          spaceId: row.spaceId,
-          cost: row.creditsFrozen,
-          taskId: row.id,
-          memo: "cancel task",
-        });
-      }
+      // 取消 = unfreeze（PR-03）：不再用 `creditsFrozen > 0` 判据（那字段曾经只增不减、
+      // 恒真），改由 ledger 的流水口径算额度，并顺带把字段归零。
+      // 归零之后 worker 的 fail() 再进来时 outstanding 已为 0 —— 只标状态、不再退钱。
+      await releaseFrozen(tx, {
+        spaceId: row.spaceId,
+        taskId: row.id,
+        disposition: "unfreeze",
+        memo: "cancel task",
+      });
       const [updated] = await tx
         .update(tasks)
         .set({ status: TaskStatus.CANCELED, finishedAt: new Date(), updatedAt: new Date() })
@@ -251,6 +276,10 @@ export class TasksService {
    * 1. **只允许终态**（3 成功 / 4 失败 / 5 取消 / 7 驳回）：1 排队、2 运行、6 审核中还在飞 —— 删记录
    *    不会停止上游生成，用户以为删掉了、后台还在跑还会回写结果。想删就先用 `task cancel`。
    * 2. **不允许带着冻结积分**：终态理论上已结算或已解冻，但历史脏数据可能存在；带冻结就删会让那笔钱永远悬着。
+   *    ⚠️ 判据必须取**流水口径**（`Σ frozen_delta where ref_task_id`），不能取 `tasks.credits_frozen`：
+   *    那个字段在 PR-03 之前从未被写回过 0，于是 `creditsFrozen > 0` 恒真 ——
+   *    「任何计价 > 0 的任务永久删不掉」。反过来，历史脏行可能字段非 0 而流水早已结清，
+   *    按字段判会继续误拒。两条都只有按流水判才是对的。
    * 3. **软删而不是物理删**：`canvas_nodes.task_id`、`assets.source_task_id` 有外键，
    *    `credit_flows.ref_task_id` 是对账依据 —— 物理删要么被外键拒绝，要么把「这张图是哪次生成出来的」
    *    这条链剪断。软删只影响**读**（列表 / 详情 / 下载 / 公开分享都不再返回它）。
@@ -266,14 +295,26 @@ export class TasksService {
         field: "id",
       });
     }
-    if (row.creditsFrozen > 0) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "task still holds frozen credits", { field: "id" });
+    // 与释放共用同一把尺子（ledger.ts 的 taskOutstandingFrozen），并在事务里复查一遍：
+    // 判定与软删之间若有人刚好解冻/再冻结，按事务外读到的值删就会删错。
+    const [updated, outstanding] = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(tasks).where(eq(tasks.id, row.id)).for("update");
+      if (!locked) return [null, 0] as const;
+      const pending = await taskOutstandingFrozen(tx, row.id);
+      if (pending > 0) return [null, pending] as const;
+      const rows = await tx
+        .update(tasks)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(tasks.id, row.id))
+        .returning();
+      return [rows[0] ?? null, 0] as const;
+    });
+    if (outstanding > 0) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "task still holds frozen credits", {
+        field: "id",
+        credits_frozen: outstanding,
+      });
     }
-    const [updated] = await db
-      .update(tasks)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(tasks.id, row.id))
-      .returning();
     return { deleted: true, task_id: String(row.id), status: (updated ?? row).status };
   }
 
@@ -343,6 +384,53 @@ export class TasksService {
     return this.toDto(row);
   }
 
+  /**
+   * 读取一条任务产物（PR-04 同源收口）。
+   *
+   * http(s) 一律走共用守卫：协议白名单 → host 白名单（未配置=仅存储 host）
+   * → IP/DNS 内网黑名单（存储自身 origin 例外）→ 10s 超时 → 流式大小上限
+   * → 3xx 逐跳复检。
+   * `mock://` 这类假协议返回 null（沿用既有语义：不是真实文件，跳过）；
+   * 无协议的相对 key 是自有存储对象，走 `storage.read`（不经过网络）。
+   *
+   * 返回值语义与收口前一致（null = 这条结果没有可打包内容），**不把拒绝抛给上层**：
+   * 批量下载的合同是"单个结果失败不阻断整包"，一条坏 uri 不能把整包打成 400101。
+   * 拒绝原因进结构化日志（见 `logResultSkip`），不留静默吞掉的路径。
+   */
+  private async readResultUri(uri: string): Promise<Buffer | null> {
+    if (/^https?:\/\//i.test(uri)) return fetchGuarded(uri, URI_POLICY, DOWNLOAD_LIMITS);
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
+    return this.storage.read(uri);
+  }
+
+  /**
+   * 跳过单个产物的结构化日志：`task_id` / `reason` / `host` / `status`。
+   * 只写去掉 query 的 URI —— 签名参数（`X-Amz-Signature`/`sig`）不能进日志。
+   */
+  private logResultSkip(taskId: bigint, uri: string, error: unknown): void {
+    const base = { msg: "tasks.download.skip", task_id: String(taskId), uri: safeUriForLog(uri) };
+    if (error instanceof AppError) {
+      const details = (error.details ?? {}) as { reason?: unknown; host?: unknown; status?: unknown };
+      this.logger.warn(
+        JSON.stringify({
+          ...base,
+          code: error.code,
+          reason: typeof details.reason === "string" ? details.reason : "unknown",
+          host: typeof details.host === "string" ? details.host : null,
+          ...(typeof details.status === "number" ? { status: details.status } : {}),
+        }),
+      );
+      return;
+    }
+    this.logger.warn(
+      JSON.stringify({
+        ...base,
+        reason: "read_failed",
+        error: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+  }
+
   async batchDownload(spaceId: string, taskIds: string[]) {
     if (taskIds.length === 0 || taskIds.length > 50) {
       throw new AppError(ErrorCode.INVALID_PARAM, "task_ids must be 1..50", { field: "task_ids" });
@@ -378,19 +466,17 @@ export class TasksService {
         const uri = results[i]?.uri;
         if (!uri) continue;
         try {
-          const data = /^https?:\/\//.test(uri)
-            ? Buffer.from(await (await fetch(uri)).arrayBuffer())
-            : /^[a-z][a-z0-9+.-]*:\/\//i.test(uri)
-              ? null
-              : await this.storage.read(uri);
+          const data = await this.readResultUri(uri);
           if (!data) continue;
           const ext = uri.split(".").pop()?.toLowerCase() || "bin";
           const name = `task-${row.id}-${i + 1}.${ext}`;
           zip.file(name, data);
           files.push(name);
           count += 1;
-        } catch {
-          // 单个结果失败不阻断整包
+        } catch (error) {
+          // 单个结果失败不阻断整包（沿用既有语义）；但被守卫拒绝必须留痕，
+          // 否则"有人在拿批量下载探测内网"这件事永远不可见。
+          this.logResultSkip(row.id, uri, error);
         }
       }
       manifest.push({ task_id: String(row.id), files });
@@ -767,18 +853,15 @@ export class TasksService {
       const uri = results[i]?.uri;
       if (!uri) continue;
       try {
-        const data = /^https?:\/\//.test(uri)
-          ? Buffer.from(await (await fetch(uri)).arrayBuffer())
-          : /^[a-z][a-z0-9+.-]*:\/\//i.test(uri)
-            ? null
-            : await this.storage.read(uri);
+        const data = await this.readResultUri(uri);
         if (!data) continue;
         const ext = uri.split(".").pop()?.toLowerCase() || "bin";
         const name = `result-${i + 1}.${ext}`;
         zip.file(name, data);
         files.push(name);
-      } catch {
-        // 单个产物失败不阻断整包
+      } catch (error) {
+        // 单个产物失败不阻断整包（沿用既有语义），拒绝原因进结构化日志
+        this.logResultSkip(row.id, uri, error);
       }
     }
     if (files.length === 0) throw new AppError(ErrorCode.NOT_FOUND, "no downloadable results");

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { eq } from "drizzle-orm";
-import { taskEvents, tasks, freezeCredits, unfreezeCredits } from "@app/db";
+import { taskEvents, tasks, freezeCredits, releaseFrozen } from "@app/db";
 import { AppError, ErrorCode, generationRequestSchema, newId, type GenerationRequest } from "@app/shared";
 import { db } from "../../db/database";
 import { QueueService } from "../../queue/queue.service";
@@ -146,11 +146,13 @@ export class GenerationsService {
         // 入队失败：补偿性回滚（任务 FAILED + 解冻 + 事件），避免冻结悬空
         await db.transaction(async (tx) => {
           const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for("update");
-          if (task && task.status === 1 && task.creditsFrozen > 0) {
-            await unfreezeCredits(tx, {
+          if (task && task.status === 1) {
+            // 入队失败 = unfreeze（PR-03）：额度按流水 outstanding 算，幂等；
+            // 不再用 `creditsFrozen > 0` 当判据（该字段在修复前只增不减、恒真）。
+            await releaseFrozen(tx, {
               spaceId: task.spaceId,
-              cost: task.creditsFrozen,
               taskId,
+              disposition: "unfreeze",
               memo: "enqueue failed refund",
             });
             await tx

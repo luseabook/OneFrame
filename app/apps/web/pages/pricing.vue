@@ -357,7 +357,6 @@ onUnmounted(stopPoll);
       <div v-if="balance !== null" class="balance-chip">
         {{ t("pricing.balance") }} <b>{{ balance }}</b> {{ t("pricing.balanceUnit") }}
       </div>
-      <LangSwitcher />
     </header>
 
     <p v-if="error" class="err">{{ error }}</p>
@@ -484,23 +483,24 @@ onUnmounted(stopPoll);
   padding: 10px 2px 12px;
   border: 0;
   background: transparent;
-  color: var(--text-3);
-  font-size: 15px;
-  font-weight: 600;
+  color: #9d9d9f;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
 }
 .price-tab.on {
-  color: var(--text-1);
+  color: #ffffff;
 }
+/* GL9：下划线白 2px、宽=文字宽（竞品 pricing-full.png 下划线 y90–91 / x239–303 为 #FFFFFF） */
 .price-tab.on::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   height: 2px;
   border-radius: 2px;
-  background: var(--brand-500);
+  background: var(--tab-line);
 }
 .cycle-toggle {
   display: inline-flex;
@@ -733,7 +733,7 @@ onUnmounted(stopPoll);
   right: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--text-1);
+  background: var(--tab-line);
 }
 .mode-note {
   margin: 0 0 10px;

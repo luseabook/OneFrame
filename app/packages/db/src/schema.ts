@@ -132,10 +132,102 @@ export const adminUsers = pgTable("admin_users", {
   id: pk(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  /** super（管管理员+全量）/ ops（运营写）/ viewer（只读） */
   role: text("role").notNull().default("ops"),
+  /**
+   * 1 启用 / 2 停用。
+   *
+   * 为什么用状态位而不是物理删除：审计日志（`admin_audit_logs.admin_id`）与各类
+   * `*_admin_id` 外键都指向本表，删行会让"谁操作的"变成悬空引用；停用既保住追溯链，
+   * 又能让 `AdminGuard` 在下一个请求就把该账号踢下线。
+   */
+  status: smallint("status").notNull().default(1),
+  /**
+   * 令牌版本：JWT 里带 `ver`，guard 每次按库里的 `token_version` 比对。
+   *
+   * 为什么需要它：JWT 是无状态的，改密/停用/降权之后**已签发的 token 仍然有效**，
+   * 直到过期为止（默认 2 小时）。把"必须立即失效"的事件变成 `token_version++`，
+   * 旧 token 的 `ver` 就对不上，等于全端强制重登，无需引入 Redis 黑名单。
+   */
+  tokenVersion: integer("token_version").notNull().default(1),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  /** 改密时间：运营安全审计需要"密码多久没换"这一列 */
+  passwordUpdatedAt: timestamp("password_updated_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * 管理端操作审计（契约 §3.4）。
+ *
+ * 为什么单独建表而不是复用请求日志：请求日志刻意**不记录请求体**（合规要求手机号/token
+ * 禁入日志），而审计要回答的是"谁在什么时候改了什么值"——必须留脱敏后的入参快照。
+ * 两者保留期与访问权限也不同（审计要能给客户/监管看），混在一起必然两难。
+ *
+ * 写入方是 `AdminAuditInterceptor`（全局，异步、失败吞掉）：审计失败绝不能阻断业务，
+ * 否则"日志库抖动导致后台不可用"。
+ */
+export const adminAuditLogs = pgTable(
+  "admin_audit_logs",
+  {
+    id: pk(),
+    adminId: bigint("admin_id", { mode: "bigint" }).references(() => adminUsers.id),
+    /** 冗余用户名：管理员改名/停用后仍要能一眼看出是谁，不做 join 也能出报表 */
+    adminUsername: text("admin_username").notNull().default(""),
+    method: text("method").notNull(),
+    path: text("path").notNull(),
+    /** 路由模板（如 `PATCH /ops/admin/model-prices/:id`），用于按"动作"聚合而非按 id 聚合 */
+    action: text("action").notNull().default(""),
+    statusCode: integer("status_code").notNull().default(200),
+    ok: boolean("ok").notNull().default(true),
+    ip: text("ip"),
+    requestId: text("request_id"),
+    /** 脱敏后的入参（≤8KB）；不存响应体，避免把用户内容整段复制进审计库 */
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("idx_admin_audit_logs_created").on(t.createdAt.desc()),
+    index("idx_admin_audit_logs_admin_created").on(t.adminId, t.createdAt.desc()),
+    index("idx_admin_audit_logs_action_created").on(t.action, t.createdAt.desc()),
+  ],
+);
+
+/**
+ * 运营配置中心（契约 §3.5）。
+ *
+ * 为什么是通用 KV 而不是给每个开关建列：开关类需求（首页文案、灰度比例、功能闸门）
+ * 变化频率远高于发版节奏，每次加一个开关都要求一次迁移，运营就被绑在发版上。
+ * `module` 做命名空间隔离（同一 key 在不同模块可各自取值），`value` 收任意 JSON，
+ * 加"带语言的文案"也不用改表结构（`lang` 作为 module 约定后缀由调用方拼）。
+ */
+export const appConfigs = pgTable(
+  "app_configs",
+  {
+    id: pk(),
+    key: text("key").notNull(),
+    module: text("module").notNull().default(""),
+    value: jsonb("value")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    description: text("description"),
+    /** 最后修改人：配置事故要能定位到人 */
+    updatedBy: bigint("updated_by", { mode: "bigint" }).references(() => adminUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    /**
+     * 唯一性放在 `(key, module)` 而不是单 `key`。
+     *
+     * 为什么：多语言/多作用域的 `module` 约定是 `home` / `home@en`，
+     * 同一个 key 必须能同时存在"默认值"与"某语言覆盖"。单列唯一会让
+     * `GET /ops/config/home?lang=en` 的"先带语言、再回落"永远落在同一行上，
+     * 语言覆盖根本存不进来（api 侧 resolve() 的两级查找会变成死代码）。
+     */
+    uniqueIndex("uq_app_configs_key_module").on(t.key, t.module),
+  ],
+);
 
 export const inviteCodes = pgTable(
   "invite_codes",

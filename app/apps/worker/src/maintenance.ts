@@ -139,6 +139,9 @@ export async function reviveStuckTasks(
 
         // 3) 没有未释放冻结 → 只标失败：不写流水、不改账户（避免凭空造积分/双释放）
         if (outstanding <= 0) {
+          // 流水里没有悬着的钱 → 字段投影也必须是 0（PR-03：该字段此前只增不减，
+          // 导致「带冻结不能删任务」等 4 处判据恒真）。这里不动账户、不写流水。
+          await tx.update(tasks).set({ creditsFrozen: 0 }).where(eq(tasks.id, t.id));
           log.warn(
             {
               task_id: String(t.id),
@@ -184,6 +187,9 @@ export async function reviveStuckTasks(
             balanceAfter,
             memo: `watchdog unfreeze (ledger outstanding ${outstanding})`,
           });
+          // 只在实际写了流水之后归零：没写流水的分支（账户缺失/账户值未变）若也归零，
+          // 会让「字段 == Σ frozen_delta」这条不变式反而被打破。
+          await tx.update(tasks).set({ creditsFrozen: 0 }).where(eq(tasks.id, t.id));
         }
         log.warn(
           {

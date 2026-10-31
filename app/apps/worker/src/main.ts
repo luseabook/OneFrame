@@ -17,7 +17,7 @@ import {
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
 import { QUEUES, redisConnection, type QueueName } from "./queues";
-import { runGenerationTask, type ExecutorDeps } from "./executor";
+import { DEFAULT_MAX_POLL_MS, runGenerationTask, type ExecutorDeps } from "./executor";
 import { runExport } from "./export";
 import { runTimelineExport } from "./timeline-export";
 import { runPublishTranscodeJob, resolvePublicationSourceKey, type PublishTranscodeJobData } from "./publish-transcode";
@@ -134,7 +134,7 @@ const deps: ExecutorDeps = {
   aiLabel,
   log: (obj, msg) => log.info(obj, msg),
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 1000),
-  maxPollMs: Number(process.env.POLL_MAX_MS ?? 120_000),
+  maxPollMs: Number(process.env.POLL_MAX_MS ?? DEFAULT_MAX_POLL_MS),
   // P10：real 模式下出站素材 URI 的签名有效期（默认 6h，覆盖供应商长任务）
   outboundUriTtlSeconds: Number(process.env.ADAPTER_URI_TTL_SECONDS ?? 21_600),
 };

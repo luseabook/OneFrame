@@ -3,6 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { and, eq } from "drizzle-orm";
 import { spaceMembers, spaces, users } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
+import { ALLOW_STREAM_TOKEN_KEY } from "./allow-stream-token.decorator";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import { verifyStreamToken } from "./stream-token";
 import type { AuthedRequest } from "./auth.types";
@@ -39,11 +40,19 @@ export class AuthGuard implements CanActivate {
        * SSE 通道：浏览器 `EventSource` 不能设置请求头，只能把凭据放查询参数。
        * 这里接受短时效 `stream_token`（ADR-012），其 audience 与 access token
        * 不同，两套令牌互不可用（见 common/stream-token.ts）。
+       *
+       * P1-9：只对显式标注 `@AllowStreamToken()` 的处理器开放。原来所有受保护路由
+       * 都接受查询参数令牌，等于把"短时效、无 jti、无法吊销"的凭据变成通用后门。
        */
+      const allowStreamToken = this.reflector.getAllAndOverride<boolean>(ALLOW_STREAM_TOKEN_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!allowStreamToken) throw new AppError(ErrorCode.UNAUTHORIZED, "missing bearer token");
       const query = request.query as Record<string, unknown> | undefined;
       const raw = query?.stream_token;
       const provided = typeof raw === "string" ? raw : Array.isArray(raw) ? String(raw[0]) : undefined;
-      // 两个凭据都没带时保持历史文案：普通请求缺头不该被误报成"SSE 令牌问题"
+      // 标注了但没带参数：保持同一文案，避免把"缺头"误报成"SSE 令牌问题"
       if (!provided) throw new AppError(ErrorCode.UNAUTHORIZED, "missing bearer token");
       const streamPayload = verifyStreamToken(provided);
       userId = streamPayload.sub;

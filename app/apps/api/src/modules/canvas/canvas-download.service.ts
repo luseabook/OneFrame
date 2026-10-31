@@ -1,16 +1,34 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasDownloadLists, canvasNodes } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { toBigId } from "../../common/bigid";
+import { env } from "../../config/env";
 import { StorageService } from "../../storage/storage.service";
 import { TasksService } from "../tasks/tasks.service";
+import {
+  fetchGuarded,
+  resolveDownloadLimits,
+  resolveUriPolicy,
+  safeUriForLog,
+  type CanvasDownloadPolicy,
+  type DownloadLimits,
+} from "./canvas-download.guard";
 
 /** 打包上限：与 `tasks/batch-download` 对齐（≤50 项），避免一次请求拖垮进程 */
 const MAX_NODES = 50;
 /** 下载链接有效期：24h（契约 §3.5 `…/download/url` 明确写 24h） */
 const URL_TTL_S = 86_400;
+
+/**
+ * 用户可控 URI 的拉取策略（PR-04 SSRF 收口，见 `canvas-download.guard.ts`）。
+ *
+ * 启动时从 env 解析一次：`env` 本身是启动即校验的常量，运行期改环境变量本来就不生效。
+ * allowlist 未配置 = 只允许存储自身 host；内网/保留地址永远拒绝（白名单也放不进来）。
+ */
+const URI_POLICY: CanvasDownloadPolicy = resolveUriPolicy(env);
+const DOWNLOAD_LIMITS: DownloadLimits = resolveDownloadLimits(env);
 
 export interface DownloadListDto {
   download_list_id: string;
@@ -24,6 +42,8 @@ export interface DownloadListDto {
 
 @Injectable()
 export class CanvasDownloadService {
+  private readonly logger = new Logger("canvas.download");
+
   constructor(
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(TasksService) private readonly tasks: TasksService,
@@ -110,8 +130,10 @@ export class CanvasDownloadService {
           zip.file(filename, data);
           files.push(filename);
           fileCount += 1;
-        } catch {
-          // 单个文件读不到不阻断整包：manifest 里会缺这一条，用户至少能拿到别的
+        } catch (error) {
+          // 单个文件读不到不阻断整包：manifest 里会缺这一条，用户至少能拿到别的。
+          // 但**被守卫拒绝必须留痕**：静默吞掉会让"有人在探测内网"这件事永远不可见。
+          this.logSkip(node.id, uri, error);
         }
       }
       manifest.push({
@@ -242,15 +264,44 @@ export class CanvasDownloadService {
     return out;
   }
 
+  /**
+   * 拉取一条产物 URI（PR-04）。
+   *
+   * http(s) 一律走 `fetchGuarded`：协议白名单 → host 白名单（未配置=仅存储 host）
+   * → IP/DNS 内网黑名单 → 10s 超时 → 流式大小上限 → 3xx 逐跳复检。
+   * 其它带协议的形态（`mock://` 等）不是真实文件，返回 null 由调用方跳过；
+   * 无协议的相对 key 才是自有存储对象，走 `storage.read`（不经过网络）。
+   */
   private async readUri(uri: string): Promise<Buffer | null> {
     if (/^https?:\/\//i.test(uri)) {
-      const res = await fetch(uri);
-      if (!res.ok) return null;
-      return Buffer.from(await res.arrayBuffer());
+      return fetchGuarded(uri, URI_POLICY, DOWNLOAD_LIMITS);
     }
     // 其他协议（mock:// 等）不是真实文件，跳过而不是塞一个空文件进去
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
     return this.storage.read(uri);
+  }
+
+  /**
+   * 跳过产物的日志：只记 node_id / 原因 / host，**不打印 URI 的 query**（签名参数不进日志）。
+   * 业务错误（守卫拒绝）用 warn 且带 `reason`，便于按原因聚合并发现探测行为。
+   */
+  private logSkip(nodeId: bigint, uri: string, error: unknown): void {
+    const target = safeUriForLog(uri);
+    if (error instanceof AppError) {
+      const details = (error.details ?? {}) as { reason?: unknown; host?: unknown; status?: unknown };
+      this.logger.warn(
+        `canvas-download skip node=${String(nodeId)} uri=${target} code=${error.code}` +
+          ` reason=${typeof details.reason === "string" ? details.reason : "-"}` +
+          ` host=${typeof details.host === "string" ? details.host : "-"}` +
+          (typeof details.status === "number" ? ` status=${details.status}` : ""),
+      );
+      return;
+    }
+    this.logger.warn(
+      `canvas-download skip node=${String(nodeId)} uri=${target} reason=read_failed error=${
+        error instanceof Error ? error.name : "unknown"
+      }`,
+    );
   }
 
   private toDto(row: typeof canvasDownloadLists.$inferSelect): DownloadListDto {

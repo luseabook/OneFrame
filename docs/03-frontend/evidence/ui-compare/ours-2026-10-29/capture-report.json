@@ -1,0 +1,28 @@
+{
+  "pid": "108322059313152000",
+  "eid": "108322059355095040",
+  "hasShots": true,
+  "shotCount": 0,
+  "title": "ReelFlow 验收 21:53:11",
+  "shots": [
+    "01-home",
+    "02-reelflow-list",
+    "03-project-storyboards",
+    "04-shot-selected",
+    "05-assets-drawer",
+    "07-director3d",
+    "08-outline",
+    "09-characters",
+    "10-batch",
+    "11-timeline-tab",
+    "12-asset-confirm",
+    "13-reelflow-editor",
+    "14-assets-library",
+    "15-tasks"
+  ],
+  "notes": [
+    "为取证生成 4 个分镜（mock，项目 108322059313152000）",
+    "点不到「匹配资产」"
+  ],
+  "pageErrors": []
+}
