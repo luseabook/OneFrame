@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import cookie from "@fastify/cookie";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
 import { AppModule } from "../src/app.module";
@@ -23,6 +23,12 @@ import {
   promoSlots,
 } from "@app/db";
 import { newId } from "@app/shared";
+import {
+  MARKET_AGREEMENT_KIND,
+  MARKET_LICENSE_SCOPE,
+  defaultLicenseScopeForKind,
+  isMarketLicenseScope,
+} from "../src/modules/market/market.constants";
 
 /**
  * 剧本集市（market）契约测试 —— 对照竞品 `df/novel_market` 29 端点（routes.txt:601-629）
@@ -369,13 +375,24 @@ describe("market e2e", () => {
     const bought = await inject("POST", `/market/scripts/${work.id}/buy`, undefined, buyer.token, buyer.spaceId);
     expect(bought.code).toBe(0);
     const data = bought.data as {
-      agreement: { id: string; price_credits: number; status: number; revenue_credits: number; commission_credits: number };
+      agreement: {
+        id: string;
+        price_credits: number;
+        status: number;
+        revenue_credits: number;
+        commission_credits: number;
+        license_scope: number;
+        license_scope_name: string;
+      };
       idempotent: boolean;
       balance_after: number;
     };
     expect(data.idempotent).toBe(false);
     expect(data.agreement.price_credits).toBe(1000);
     expect(data.agreement.status).toBe(2); // 已生效
+    // 成交行必须自己记住许可范围（协议正文会随模板改版，已成交事实不能跟着变）
+    expect(data.agreement.license_scope).toBe(1);
+    expect(data.agreement.license_scope_name).toContain("可改编");
     // 抽成 2000bps = 20%：1000 → 抽 200 / 作者得 800（常量改了这一条会立刻红）
     expect(data.agreement.commission_credits).toBe(200);
     expect(data.agreement.revenue_credits).toBe(800);
@@ -506,8 +523,12 @@ describe("market e2e", () => {
 
     const preorder = await inject("POST", `/market/scripts/${work.id}/preorder`, undefined, buyer.token, buyer.spaceId);
     expect(preorder.code).toBe(0);
-    const data = preorder.data as { agreement: { kind: number; price_credits: number; revenue_credits: number }; balance_after: number };
+    const data = preorder.data as {
+      agreement: { kind: number; price_credits: number; revenue_credits: number; license_scope: number };
+      balance_after: number;
+    };
     expect(data.agreement.kind).toBe(2); // 预售
+    expect(data.agreement.license_scope).toBe(1); // 预售定金与买断同为"可改编"
     expect(data.agreement.price_credits).toBe(200);
     expect(data.agreement.revenue_credits).toBe(160); // 200 - 40(20%)
     expect(data.balance_after).toBe(start - 200);
@@ -524,10 +545,22 @@ describe("market e2e", () => {
 
     const cancelled = await inject("POST", `/market/scripts/${work.id}/cancelorder`, undefined, buyer.token, buyer.spaceId);
     expect(cancelled.code).toBe(0);
-    const data = cancelled.data as { refund_credits: number; refund: { kind: number }; agreement: { status: number } };
+    const data = cancelled.data as {
+      refund_credits: number;
+      refund: { kind: number; license_scope: number };
+      agreement: { status: number; license_scope: number };
+    };
     expect(data.refund_credits).toBe(200);
     expect(data.agreement.status).toBe(3); // 原协议 → 已退款
     expect(data.refund.kind).toBe(4); // 反向记录
+    // 退款只冲账，不改变当年约定的权利：反向记录与原协议行同 scope
+    expect(data.agreement.license_scope).toBe(1);
+    expect(data.refund.license_scope).toBe(1);
+    const [refundScope] = await db
+      .select({ scope: marketAgreements.licenseScope })
+      .from(marketAgreements)
+      .where(and(eq(marketAgreements.workId, BigInt(work.id)), eq(marketAgreements.kind, 4)));
+    expect(refundScope?.scope).toBe(1); // 落库值，不只是 DTO
     // 定金全额退回：余额回到充值后的起点
     expect(await balanceOf(buyer.spaceId)).toBe(start);
 
@@ -947,10 +980,21 @@ describe("market e2e", () => {
       visitor.spaceId,
     );
     expect(purchase.code).toBe(0);
-    const body = (purchase.data as { body: string; kind: number }).body;
+    const purchaseData = purchase.data as {
+      body: string;
+      kind: number;
+      license_scope: number;
+      license_scope_name: string;
+    };
+    const body = purchaseData.body;
     expect(body).toContain("500 积分");
     expect(body).toContain("20%"); // 抽成比例写进条文，避免"页面说 20%、实际扣 30%"
     expect(body).toContain("作者实收 400 积分");
+    // 买断 = 可改编、禁止原样再发布（§5.4 第 3 条），且条文与字段必须同口径
+    expect(purchaseData.license_scope).toBe(1);
+    expect(purchaseData.license_scope_name).toContain("可改编");
+    expect(body).toContain("允许改编");
+    expect(body).toContain("不得原样再发布");
 
     const preorder = await inject(
       "GET",
@@ -960,7 +1004,24 @@ describe("market e2e", () => {
       visitor.spaceId,
     );
     expect(preorder.code).toBe(0);
-    expect((preorder.data as { body: string }).body).toContain("100 积分");
+    const preorderData = preorder.data as { body: string; license_scope: number };
+    expect(preorderData.body).toContain("100 积分");
+    expect(preorderData.license_scope).toBe(1); // 预售与买断同口径
+
+    // 分成授权（kind=3，尚未开放交易）是占位口径：仅使用、不授予改编
+    const license = await inject(
+      "GET",
+      `/market/scripts/${work.id}/agreement?kind=3`,
+      undefined,
+      visitor.token,
+      visitor.spaceId,
+    );
+    expect(license.code).toBe(0);
+    const licenseData = license.data as { body: string; license_scope: number; license_scope_name: string };
+    expect(licenseData.license_scope).toBe(2);
+    expect(licenseData.license_scope_name).toBe("仅使用（不授予改编）");
+    expect(licenseData.body).toContain("不得改编");
+    expect(licenseData.body).not.toContain("允许改编");
 
     const file = await app.inject({
       method: "GET",
@@ -970,6 +1031,82 @@ describe("market e2e", () => {
     expect(file.statusCode).toBe(200);
     expect(file.headers["content-type"]).toContain("text/plain");
     expect(file.body).toContain("作品购买协议");
+  });
+
+  /**
+   * §5.4 第 3 条（#12 买断后二次改编许可）：许可范围落在**协议行**上，不是只写在正文模板里。
+   *
+   * 为什么单列一例：
+   * - 纯函数是"新 kind 漏映射 → 协议正文印出 undefined"的最后一道防线，必须钉死；
+   * - `parse` 的许可必须读**行上的值**：协议正文会随模板改版，已成交事实不能跟着变；
+   * - 作者本人没有购买协议行 → 回报 null（不猜一个 scope），而不是继承某种默认。
+   */
+  it("许可范围：kind→scope 映射与白名单 + parse 读行上许可（买家 1 / 作者 null / 未购买 403）", async () => {
+    // 纯函数：买断/预售 = 可改编，分成授权占位 = 仅使用；没有映射的 kind 必须 null（不许猜）
+    expect(defaultLicenseScopeForKind(MARKET_AGREEMENT_KIND.PURCHASE)).toBe(MARKET_LICENSE_SCOPE.ADAPT);
+    expect(defaultLicenseScopeForKind(MARKET_AGREEMENT_KIND.PREORDER)).toBe(MARKET_LICENSE_SCOPE.ADAPT);
+    expect(defaultLicenseScopeForKind(MARKET_AGREEMENT_KIND.LICENSE)).toBe(MARKET_LICENSE_SCOPE.USE_ONLY);
+    expect(defaultLicenseScopeForKind(MARKET_AGREEMENT_KIND.REFUND)).toBeNull();
+    expect(defaultLicenseScopeForKind(99)).toBeNull();
+    expect(isMarketLicenseScope(MARKET_LICENSE_SCOPE.ADAPT)).toBe(true);
+    expect(isMarketLicenseScope(MARKET_LICENSE_SCOPE.USE_ONLY)).toBe(true);
+    expect(isMarketLicenseScope(0)).toBe(false);
+    expect(isMarketLicenseScope(MARKET_AGREEMENT_KIND.LICENSE)).toBe(false); // 3 是 kind，不是 scope
+    expect(isMarketLicenseScope(null)).toBe(false);
+    expect(isMarketLicenseScope(undefined)).toBe(false);
+
+    const owner = await loginNewUser("59");
+    const buyer = await loginNewUser("60");
+    const novelId = await seedNovel(owner.spaceId);
+    const work = await publishWork(owner, { novel_id: novelId, title: "许可范围作品", price_credits: 300 });
+    await topUp(buyer.spaceId, 500);
+    const bought = await inject("POST", `/market/scripts/${work.id}/buy`, undefined, buyer.token, buyer.spaceId);
+    expect(bought.code).toBe(0);
+
+    // 买家：读到的就是成交行上的 scope（1 可改编），且仍是只读解析（写库通道未开放）
+    const parsed = await inject("POST", `/market/scripts/${work.id}/parse`, undefined, buyer.token, buyer.spaceId);
+    expect(parsed.code).toBe(0);
+    const parsedData = parsed.data as {
+      work_id: string;
+      license_scope: number | null;
+      license_scope_name: string | null;
+      structure: { writable: boolean; note: string; counts: { chapters: number } };
+    };
+    expect(parsedData.work_id).toBe(work.id);
+    expect(parsedData.license_scope).toBe(1);
+    expect(parsedData.license_scope_name).toBe("可改编（禁止原样再发布）");
+    expect(parsedData.structure.writable).toBe(false);
+    expect(parsedData.structure.counts.chapters).toBe(2);
+    expect(parsedData.structure.note).toContain("允许改编");
+    expect(parsedData.structure.note).toContain("写库通道尚未开放");
+
+    // 预览与成交同口径：kind=1 的协议预览 scope 必须等于成交行 scope（两处口径漂移会立刻红）
+    const preview = await inject(
+      "GET",
+      `/market/scripts/${work.id}/agreement?kind=1`,
+      undefined,
+      buyer.token,
+      buyer.spaceId,
+    );
+    expect(preview.code).toBe(0);
+    expect((preview.data as { license_scope: number }).license_scope).toBe(parsedData.license_scope);
+
+    // 作者本人：没有购买协议行 → null（不猜 scope），note 明确"作者本人"
+    const authorParsed = await inject("POST", `/market/scripts/${work.id}/parse`, undefined, owner.token, owner.spaceId);
+    expect(authorParsed.code).toBe(0);
+    const authorData = authorParsed.data as {
+      license_scope: number | null;
+      license_scope_name: string | null;
+      structure: { note: string };
+    };
+    expect(authorData.license_scope).toBeNull();
+    expect(authorData.license_scope_name).toBeNull();
+    expect(authorData.structure.note).toContain("作者本人");
+
+    // 未购买者：403（许可不该绕过购买门槛被读到）
+    const stranger = await loginNewUser("61");
+    const denied = await inject("POST", `/market/scripts/${work.id}/parse`, undefined, stranger.token, stranger.spaceId);
+    expect(denied.code).toBe(403101);
   });
 
   /**

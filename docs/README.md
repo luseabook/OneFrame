@@ -126,6 +126,28 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.65 · TLS 终止 + 后台 10 面板浏览器 E2E + 团队并发用例 + #12 许可范围 · 2026-11-01）
+
+v6.64 结尾列的「仍未做」4 条里，本批清掉 3 条（`prod compose` 的 TLS、后台面板浏览器 E2E、团队并发用例）；
+只剩「审计写库失败只记日志、不重试」。顺带把 #12「买断后二次改编许可」从口径落成实现（迁移 0049）。
+
+| # | 缺陷 | 改法 | 守卫 |
+|---|---|---|---|
+| P1-13 | `prod compose` 的 nginx 只有 `listen 80` —— 生产要么明文，要么指望外部 LB 而容器内无 ssl；配合上一批的 `COOKIE_SECURE=true`，没有 HTTPS 就连登录 Cookie 都发不出去 | `nginx.conf` → `nginx.conf.template`（官方镜像 entrypoint 用 envsubst 渲染），compose 内**终止 TLS**：`listen 443 ssl` 是唯一业务入口，80 只留 ACME HTTP-01 与 `return 308 https://${TLS_SERVER_NAME}$request_uri`（**不用 `$host`**：拿 Host 头拼跳转目标 = 开放重定向）；`TLS_SERVER_NAME` 用 `${...:?}` 强制必填；证书只读挂载、私钥不入库；HSTS 由注释改**启用**，CSP 仍注释（Nuxt hydration 要内联脚本、未接 nonce） | `deploy-tls.spec.ts` 18 例静态断言（443 / HSTS / 跳转目标不是 `$host` / CSP 仍注释 / 模板与证书挂载 / compose 必填 / 证书被 git 忽略 / `rollback.sh` 走 https）。⚠️ **本机无 Docker**，`docker compose config` / `up` 与真实握手**没跑过** |
+| P1-14 | 9（第 106 批拆完是 10）个后台面板只有接口 e2e，**没有一次在浏览器里真打开过** —— 数字输入崩溃、反代 404 这类缺陷 typecheck / lint / build 全绿看不见（本批真踩到两个，见下） | 10 面板真栈 E2E `_acceptance/e2e-admin-panels.cjs`（83 项）：真登录 + 未登录守卫 + 每面板「侧栏高亮 / 标题 / h2 / 首屏列表 `code=0` / 一次只读刷新 / 控制台 0 error」+ 两条可逆写流程（邀请码「生成→停用」、配置中心「新建→搜索→删除」） | 83/83，`RESULT panels=10 panelFailures=0 writeFailures=0`；报告 `_acceptance/_team/report-admin-panels.md`。明确不做：不可逆操作 / 多管理员权限矩阵 / 价格面板写 |
+| P1-15 | 上一批把团队锁序改成按 `spaceId` 升序、配额改 SQL 自增，但**没有并发用例**，等于「按代码形状相信」 | — | 新增 `team-credits-concurrency.spec.ts` 4 例（真 PG 并发事务）：分配 / 回收不再 `40P01`、`creditsQuota` 自增不丢更新、Σ 守恒、失败整笔回滚 |
+| #12 | 买断协议只记「购买 / 预售 / 授权」，**二次改编许可没有字段** —— 竞品把「仅使用 / 可改编」作为协议属性展示 | `market_agreements.license_scope`（迁移 0049，`smallint not null default 1`）：**1 可改编（禁止原样再发布）/ 2 仅使用**；`kind`→`scope` 默认映射（购买 / 预售→1、授权→2）、白名单校验（未知 `400101` + `details.field`）、**退款沿用原 scope**（不按当前模板重算）、作品页显示**协议行上**的 `license_scope_name`、5 语言文案 | `market.spec.ts` +1；`api-spec §16.6` 同步。只认领已实现的 0.10 |
+
+**E2E 先踩出的两个「全绿缺陷」（都在这批修掉）**：
+1. `<input type="number">` 上的裸 `v-model` 由 Vue 自动 looseToNumber → 运营一填数字，入参从 `""` 变成 number，而 `parseIntField(raw: string)` 调 `raw.trim()` → 抛 `trim is not a function` → **POST 根本发不出去**。`AdminInviteCodesPanel` / `AdminPricePanel` 两个解析器同形状。修法：签名改 `string | number` + `String(raw).trim()`；静态守卫 `admin-numeric-inputs.spec.ts` 7 例（含全目录扫描：裸绑定数字输入必须同时出现 `String(` 与 `Number.isInteger(`）。
+2. web→api 反代目标 `routeRules["/v1/**"].proxy` 是**构建期**常量（Nitro 烤进 `.output`），运行期设 `NUXT_API_PROXY` 无效 → 本地栈 web 产物烤着默认 `127.0.0.1:3000`（本机是另一个项目的端口），10 个面板**全部正常渲染、`/v1/**` 全 404**。修法：启动脚本 build web 前注入 `:3002` + 启动前 `Assert-WebBuiltFor` 校验产物 + 就绪判据改成「经反代 `/v1/healthz/live` 拿 200」；守卫 `web-api-proxy.spec.ts` 10 例（含 Dockerfile `ARG`/`ENV` 顺序与 compose `build.args`）。
+
+**验证**：`pnpm test` **12/12 任务全绿，1,694 用例通过**（api 1,280 / cli 128 / shared 26 / storage 6(+1 skipped) / model-adapters 164 / db 27 / worker 63），4m3s，exit 0；`build` 8/8（35s）、typecheck、lint 均 exit 0。api 的 +40 例 = `deploy-tls` 18 + `web-api-proxy` 10 + `admin-numeric-inputs` 7 + `team-credits-concurrency` 4 + `market` 1。口径：端点 **800** / controller **63** / 页面 **65** 不变（本批零新端点），迁移 49→**50**，表 115（只加列）。台账：#12 剧本广场 92%→**93.25%**（7.36→7.46）→ 全站 202.67→**202.77**（98.4% 不变）、生态 94.89→**94.99**、剩余 3.33→**3.23**、B 类 0.68→**0.58**；首发口径 130.68/133 = 98.3% 不变。
+
+**仍未做**：审计写库失败只记日志、不重试；TLS 未在 Docker / 部署机做真实握手（本机无 Docker，只有静态断言）；CSP 仍注释；后台 E2E 不覆盖不可逆操作与多角色权限矩阵、价格面板不写；并发用例是**单进程多事务**而非多实例压测；邀请码后端无删除端点，**每跑一次 E2E 在本机开发库留一条已停用记录**。
+
+---
+
 ## 变更登记（v6.64 · 上线前 P1 收尾 6 条 + 运营后台整批落库 · 2026-11-01）
 
 v6.63 结尾列的「P1 剩余 12 条」里，本批清掉 6 条（只剩 `prod compose` 的 TLS）；

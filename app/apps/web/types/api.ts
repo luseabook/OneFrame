@@ -1536,6 +1536,9 @@ export interface MarketAgreementTextDto {
   kind: number;
   kind_name: string;
   title: string;
+  /** 1 可改编（禁止原样再发布） / 2 仅使用（不授予改编）；由协议类型推导，见 §5.4 第 3 条 */
+  license_scope: number;
+  license_scope_name: string;
   body: string;
   signed: boolean;
   creator_view?: {
@@ -1556,6 +1559,9 @@ export interface MarketAgreementDto {
   /** 1 购买 / 2 预售 / 3 授权 / 4 退款反向记录 */
   kind: number;
   kind_name: string;
+  /** 1 可改编（禁止原样再发布） / 2 仅使用；退款反向记录沿用原协议行的 scope */
+  license_scope: number;
+  license_scope_name: string;
   price_credits: number;
   commission_credits: number;
   revenue_credits: number;
@@ -1685,6 +1691,9 @@ export interface MarketWithdrawalDto {
 export interface MarketParseResultDto {
   work_id: string;
   novel_id: string | null;
+  /** 作者本人无购买协议 → null；买家取协议行上的值（历史成交自证，不看当前文案） */
+  license_scope: number | null;
+  license_scope_name: string | null;
   structure: {
     kind: string;
     counts: MarketWorkCountsDto;

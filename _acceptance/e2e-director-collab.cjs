@@ -27,9 +27,26 @@ const path = require("node:path");
 
 const API = process.env.API || "http://127.0.0.1:3002/v1";
 const WEB = process.env.WEB || "http://127.0.0.1:3003";
-const CHROME =
-  process.env.CHROME ||
-  "C:/Users/Administrator/AppData/Local/ms-playwright/chromium-1243/chrome-win64/chrome.exe";
+// 别写死 chromium-<build>：playwright 升级后目录名会变，写死的那天脚本会"一条用例
+// 都没跑就以退出码 0 结束"（第 107 批实际踩过：chromium-1243 早就不在了）。
+function resolveChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  const root = "C:/Users/Administrator/AppData/Local/ms-playwright";
+  try {
+    const candidates = fs
+      .readdirSync(root)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .sort((a, b) => Number(b.slice("chromium-".length)) - Number(a.slice("chromium-".length)));
+    for (const dir of candidates) {
+      const exe = path.join(root, dir, "chrome-win64", "chrome.exe");
+      if (fs.existsSync(exe)) return exe;
+    }
+  } catch {
+    /* ms-playwright 目录不存在 */
+  }
+  return "C:/Program Files/Google/Chrome/Application/chrome.exe";
+}
+const CHROME = resolveChrome();
 const SHOT_DIR = path.join(__dirname, "director-collab-e2e");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

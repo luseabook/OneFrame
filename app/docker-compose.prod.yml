@@ -182,10 +182,34 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
+    # TLS 终止在这里（第 107 批）：80 只做 ACME 校验 + 308 跳转，业务走 443。
+    # 若改用外层 LB/CDN 终止 TLS，**不能**让它反代到本容器的 80 —— 80 会 308 回 https，
+    # 形成「LB→80→https→LB」循环；那种部署要把模板里的 80 跳转 server 去掉，或让 LB 直连 443。
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
+    environment:
+      # 模板变量：真实域名（例 app.example.com）。证书 CN/SAN 必须匹配这个值。
+      # 缺失即 compose 解析阶段报错，不会带着 `server_name ${TLS_SERVER_NAME}` 起容器。
+      TLS_SERVER_NAME: ${TLS_SERVER_NAME:?TLS_SERVER_NAME is required (e.g. app.example.com)}
     volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # nginx 官方镜像 entrypoint 会把 /etc/nginx/templates/*.template 用 envsubst 渲染到 conf.d
+      - ./deploy/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # 证书由宿主机放置/续期，容器**只读**挂载。私钥绝不进仓库、不进镜像（见 .gitignore）。
+      - ${TLS_CERT_DIR:-./deploy/certs}:/etc/nginx/certs:ro
+      # ACME HTTP-01 校验目录：certbot --webroot 写入宿主机同名目录。
+      - ${TLS_ACME_WEBROOT:-./deploy/acme-webroot}:/var/www/certbot:ro
+    healthcheck:
+      # wget 在 alpine 里自带；自签证书会校验失败，所以显式 --no-check-certificate（仅本机回环探活）
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --no-check-certificate -O /dev/null https://127.0.0.1/nginx-health || exit 1",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
     depends_on:
       - api
       - web

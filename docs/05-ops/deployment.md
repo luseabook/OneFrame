@@ -1,5 +1,7 @@
 # 部署与运维
 
+> v1.2 · 2026-11-01 · nginx 在 compose 内独立终止 TLS（第 107 批）
+> v1.2 变更：`listen 80` 只做 ACME + 308 跳转，业务入口改为 `listen 443 ssl`；HSTS 由注释改为启用；证书只读挂载、私钥不入库
 > v1.1 · 2026-10-24 · MVP 双机起步，全容器化
 > v1.1 变更：worker 内置 ffmpeg/中文字体与水印环境变量（RE-07）；补 exports-cleanup/shares-expire 定时任务（RE-11/08）；Sentry 境内口径
 
@@ -26,7 +28,8 @@
 ## 3. docker-compose（prod 骨架）
 
 > 实现参考：`app/docker-compose.prod.yml`（已落地并通过全栈冒烟：postgres/redis/minio/minio-init/migrate/api/worker/web/nginx；
-> 镜像见 `app/apps/{api,worker,web}/Dockerfile`；nginx 同源反代见 `app/deploy/nginx.conf`；env 模板见 `app/.env.production.example`）。
+> 镜像见 `app/apps/{api,worker,web}/Dockerfile`；nginx 同源反代见 `app/deploy/nginx.conf.template`
+> （第 107 批起是 **envsubst 模板**，由 nginx 官方镜像 entrypoint 渲染；TLS 也在这里终止）；env 模板见 `app/.env.production.example`）。
 >
 > **PR-01（2026-10-30）**：compose 的 api/worker 必须带 `env_file: [./.env]`，且下列键在 `environment` 里用
 > `${VAR:?message}` **强制必填**（`JWT_SECRET`、`ADMIN_JWT_SECRET`、`PHONE_HMAC_PEPPER`、`PHONE_ENC_KEY`、
@@ -47,7 +50,14 @@ services:
     image: ghcr.io/<org>/worker:${TAG}
     env_file: /etc/app/worker.env
     deploy: { replicas: 2 }
-  nginx: { ports: ["443:443"], volumes: [./nginx.conf] }
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80", "443:443"]        # 80 只做 ACME 校验 + 308 跳转，业务全走 443
+    environment: { TLS_SERVER_NAME: app.example.com }
+    volumes:
+      - ./deploy/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/certs:/etc/nginx/certs:ro   # fullchain.pem + privkey.pem，私钥不入库
+      - ./deploy/acme-webroot:/var/www/certbot:ro
 ```
 
 ## 4. 环境变量清单（模板：`apps/api/.env.example`、`apps/worker/.env.example`、`.env.production.example`；本节为摘要）
@@ -125,7 +135,7 @@ ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
 
 ## 5.9 网关安全响应头与体积上限（P1-10，2026-10-30）
 
-`app/deploy/nginx.conf` 的 `server` 块已启用下列头（`always`，错误响应也带）：
+`app/deploy/nginx.conf.template` 的 443 `server` 块已启用下列头（`always`，错误响应也带）：
 
 | 头 | 值 | 为什么不能更严 |
 |---|---|---|
@@ -135,11 +145,28 @@ ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
 | `Permissions-Policy` | `camera=(), geolocation=(), payment=(), usb=()` | **未限制 microphone**：语音输入走浏览器 MediaRecorder，限了会挂 |
 | `Cross-Origin-Opener-Policy` | `same-origin-allow-popups` | 微信/Apple OAuth 走弹窗回跳，`same-origin` 会切断 window.opener |
 | `Cross-Origin-Resource-Policy` | `same-site` | — |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | **第 107 批起启用**：TLS 已在本层终止，HSTS 才有意义。`includeSubDomains` 的前提是所有子域都走 HTTPS（§1 的 www/app/api/static 用通配符证书）；只覆盖本站时删掉该指令。一旦下发，浏览器会记住一年，改部署形态前先确认。 |
 
-**仍为注释、不要急着打开的两条**：
+**仍为注释、不要急着打开的一条**：
 
-- `Strict-Transport-Security`：当前只有 `listen 80`，TLS 由外层 LB/CDN 终止。HSTS 只在 HTTPS 生效，且一旦下发错就难以回退——**确认外层证书与 80→443 跳转后再开**。
-- `Content-Security-Policy`：Nuxt hydration 需要内联脚本，未接 nonce 前启用会白屏。模板已写在 `nginx.conf` 末尾（含 `nonce-<INJECT>` 占位）。
+- `Content-Security-Policy`：Nuxt hydration 需要内联脚本，未接 nonce 前启用会白屏。模板已写在 `nginx.conf.template` 末尾（含 `nonce-<INJECT>` 占位）。
+
+### 5.10 TLS 终止（第 107 批）
+
+- **拓扑**：`listen 443 ssl; http2 on;` 是唯一业务入口；`listen 80` 只保留两件事——`/.well-known/acme-challenge/`
+  （certbot `--webroot` 写到宿主机 `deploy/acme-webroot`，容器只读挂到 `/var/www/certbot`）和
+  `return 308 https://${TLS_SERVER_NAME}$request_uri`。
+- **跳转目标不用 `$host`**：拿 Host 头拼跳转目标等于开放重定向；这里写死模板变量 `${TLS_SERVER_NAME}`，
+  compose 用 `${TLS_SERVER_NAME:?}` 强制必填，缺了在解析阶段就报错，不会带着未渲染的模板起容器。
+- **证书**：宿主机 `deploy/certs/fullchain.pem`（站点证书 + 中间证书，缺中间证书部分安卓/旧客户端握手失败）
+  与 `privkey.pem`（`chmod 600`），容器**只读**挂到 `/etc/nginx/certs`。私钥不入库、不进镜像（`.gitignore` 已忽略
+  `app/deploy/certs/*`，只保留 `.gitkeep`）。
+- **首次冒烟**：`./deploy/gen-selfsigned-cert.sh "$TLS_SERVER_NAME"` 生成 30 天自签证书（拒绝覆盖已有证书），
+  浏览器会警告，只用于验证握手与跳转；生产换真证书。
+- **走外层 LB/CDN 终止 TLS 的部署**：**不能**让 LB 反代到本容器的 80（80 会 308 回 https，形成
+  `LB→80→https→LB` 循环）。要么删掉模板里的 80 跳转 server，要么让 LB 直连 443。
+- **未验证项**：本机没有 Docker，`docker compose config` / `up` 未在这台机器上跑过；模板与 compose 的一致性由
+  `apps/api/test/deploy-tls.spec.ts` 做静态断言，真实握手仍需在部署机执行一次并留存日志（PR-01 关闭条件）。
 
 **体积上限**：`client_max_body_size` 已从 `12m` 对齐到 **48m**（= API 的 `bodyLimit`）。两者不一致时，大图 base64 上传会被网关先 413，而应用侧日志里**什么都看不到**（请求没到 api），是最难排查的一类"功能时好时坏"。
 
@@ -297,7 +324,7 @@ readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSecond
 | 编号 | 演练 | 操作步骤 | 通过判据 |
 |---|---|---|---|
 | D1 | 备份可恢复性 | `pwsh -File deploy/verify-backup.ps1`（拉最新备份 → 临时库恢复 → 比对表数与关键数据 → 删临时库） | 全表恢复成功、关键表行数一致、临时库已清理 |
-| D2 | 回滚 | `./deploy/rollback.sh <上一tag>` | ≤2min 完成；`curl -f http://127.0.0.1:8080/v1/healthz/ready` 返回 200；核心接口冒烟通过 |
+| D2 | 回滚 | `./deploy/rollback.sh <上一tag>` | ≤2min 完成；`curl -fsk https://127.0.0.1/v1/healthz/ready` 返回 200（**必须走 443**：`curl -f` 把 80 的 308 当成功，用旧地址会假通过）；核心接口冒烟通过 |
 | D3 | 支付回调失败 | 临时清空 `WECHAT_PLATFORM_PUBLIC_KEY` 后重启 api，构造一条回调 | 回调被拒（验签不过不入账）；`oneframe_orders_paid_without_credit` 不增长；告警触发 |
 | D4 | 对账补账 | `PAYMENT_LIVE=false` 时用 `POST /v1/billing/notify/mock` 制造"已支付未入账" | 5min 内 `orders-reconcile` 补账，指标归零 |
 | D5 | 优雅停机 | 向 api 进程发 `SIGTERM` | readiness 立刻 503 → 在途请求完成 → 退出码 0；日志含 `draining` / `closed cleanly` |

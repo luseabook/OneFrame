@@ -2904,6 +2904,13 @@ export const marketAgreements = pgTable(
     orderId: bigint("order_id", { mode: "bigint" }).references(() => orders.id),
     /** 1 购买 / 2 预售 / 3 授权（分成） / 4 退款（反向记录） */
     kind: smallint("kind").notNull().default(1),
+    /**
+     * 许可范围（迁移 0049；§5.4 第 3 条拍板）：1 可改编（禁止原样再发布） / 2 仅使用（不授予改编）。
+     *
+     * 落在协议行上而不是只写在协议正文里：历史成交必须能回答"当时卖的是哪种许可"，
+     * 文案改了不能改写已签事实。退款反向记录沿用原协议的 scope。
+     */
+    licenseScope: smallint("license_scope").notNull().default(1),
     priceCredits: integer("price_credits").notNull().default(0),
     /** 1 待支付 / 2 已生效 / 3 已退款 */
     status: smallint("status").notNull().default(1),

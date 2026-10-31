@@ -10,7 +10,11 @@ set -euo pipefail
 
 TARGET="${1:?usage: rollback.sh <git-tag-or-commit>}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/v1/healthz/ready}"
+# 第 107 批：TLS 在 nginx 终止，业务入口是 443。**不能**用 80 —— curl -f 把 308 当成功，
+# 会让"其实还没就绪"的回滚假通过。自签证书冒烟时加 -k（CURL_OPTS），生产真证书可留空。
+HEALTH_URL="${HEALTH_URL:-https://127.0.0.1/v1/healthz/ready}"
+# 用 `${VAR-default}`（无冒号）：显式 CURL_OPTS= 才能关掉 -k、走真证书校验。
+CURL_OPTS="${CURL_OPTS--k}"
 
 echo "[rollback] target: $TARGET"
 CURRENT="$(git rev-parse --short HEAD)"
@@ -33,7 +37,7 @@ docker compose -f "$COMPOSE_FILE" up -d
 
 echo "[rollback] waiting for readiness (max 120s)"
 for i in $(seq 1 60); do
-  if curl -fsS "$HEALTH_URL" > /dev/null 2>&1; then
+  if curl $CURL_OPTS -fsS "$HEALTH_URL" > /dev/null 2>&1; then
     echo "[rollback] ready after ${i}x2s"
     break
   fi
@@ -45,8 +49,8 @@ for i in $(seq 1 60); do
 done
 
 echo "[rollback] verifying core endpoints"
-curl -fsS "${HEALTH_URL%/ready}" > /dev/null && echo "  healthz OK"
-curl -fsS "${HEALTH_URL%/v1/healthz/ready}/v1/billing/skus" > /dev/null && echo "  billing/skus OK"
+curl $CURL_OPTS -fsS "${HEALTH_URL%/ready}" > /dev/null && echo "  healthz OK"
+curl $CURL_OPTS -fsS "${HEALTH_URL%/v1/healthz/ready}/v1/billing/skus" > /dev/null && echo "  billing/skus OK"
 
 echo "[rollback] done at $(git rev-parse --short HEAD)"
 echo "[rollback] 提醒：回滚后确认 worker 也在运行（docker compose ps）"

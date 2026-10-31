@@ -175,9 +175,14 @@ function toRowVm(row: AdminPriceRow): PriceRowVm {
  * 解析数字输入：空串 → null（= 未设置），负数/小数/NaN → 抛本地错误。
  * 为什么不直接把字符串丢给后端：zod 会回一句英文 `Expected number, received string`，
  * 运营看不懂也不知道是哪一格；这里当场指出字段名。
+ *
+ * 入参可能是 **number**：`<input type="number">` 的 `v-model` 由 Vue 自动
+ * looseToNumber，填了数就不再是字符串。按 string 调 `.trim()` 会抛
+ * "…trim is not a function" —— 与 `AdminInviteCodesPanel` 同一类缺陷（第 107 批：
+ * 运营后台 E2E 在邀请码「生成」上先踩到，价格编辑/新建是同一条路径）。
  */
-function parseIntInput(raw: string, field: string): number | null {
-  const text = raw.trim();
+function parseIntInput(raw: string | number, field: string): number | null {
+  const text = String(raw).trim();
   if (text === "") return null;
   const value = Number(text);
   if (!Number.isInteger(value) || value < 0) {

@@ -24,6 +24,8 @@ import {
   MARKET_AGREEMENT_KIND,
   MARKET_AGREEMENT_STATUS,
   MARKET_COMMISSION_BPS,
+  MARKET_LICENSE_SCOPE,
+  MARKET_LICENSE_SCOPE_LABEL,
   MARKET_MIN_WITHDRAW_CREDITS,
   MARKET_REVIEW_ACTION,
   MARKET_REVIEW_ACTION_LABEL,
@@ -32,6 +34,8 @@ import {
   MARKET_WORK_STATUS,
   MARKET_WORK_STATUS_LABEL,
   commissionOf,
+  defaultLicenseScopeForKind,
+  isMarketLicenseScope,
   revenueOf,
 } from "./market.constants";
 import { MarketTaxonomyService, type MarketCategory, type MarketTag } from "./market-taxonomy.service";
@@ -438,6 +442,18 @@ export class MarketService {
     if (![1, 2, 3].includes(kind)) {
       throw new AppError(ErrorCode.INVALID_PARAM, "unsupported agreement kind", { field: "kind" });
     }
+    /**
+     * 许可范围由协议类型推导（§5.4 第 3 条）：买断/预售 → 可改编；分成授权 → 仅使用。
+     * 这里再校验一次映射结果：新增 `kind` 却忘了补映射时，必须 400101，
+     * 不能生成一份 "权利范围：undefined" 的协议正文（协议是要当证据用的）。
+     */
+    const licenseScope = defaultLicenseScopeForKind(kind);
+    if (!isMarketLicenseScope(licenseScope)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "unsupported license scope for agreement kind", {
+        field: "license_scope",
+        kind,
+      });
+    }
     const price =
       kind === MARKET_AGREEMENT_KIND.PREORDER ? (work.preorderPriceCredits ?? 0) : work.priceCredits;
     const titleMap: Record<number, string> = { 1: "作品购买协议", 2: "作品预售协议", 3: "作品授权协议" };
@@ -453,13 +469,24 @@ export class MarketService {
       kind === MARKET_AGREEMENT_KIND.PREORDER
         ? "3. 预售：定金支付后锁定价格，开售后可下载完整内容；开售前可取消并全额退回定金。"
         : "3. 交付：支付成功后即可在集市「我的购买」下载内容，作者后续更新对已购用户免费。",
-      "4. 权利范围：仅限购买方自身创作使用，不得转售、再分发或用于训练第三方模型。",
+      licenseScope === MARKET_LICENSE_SCOPE.ADAPT
+        ? "4. 权利范围：允许改编（可基于本作品二次创作用于自身作品），但不得原样再发布、转售、再分发或用于训练第三方模型。"
+        : "4. 权利范围：仅限购买方自身使用，不得改编、转售、再分发或用于训练第三方模型。",
       "5. 退款：预售定金在开售前可取消并全额退回；买断与分成授权一经交付不支持退款。",
       "6. 争议：由平台按《用户协议》与集市规则处理。",
       "",
       "（本协议由平台按成交信息自动生成，具有与线下签署文本同等效力。）",
     ].join("\n");
-    return { work_id: String(work.id), kind, kind_name: titleMap[kind], title: titleMap[kind], body, signed: false };
+    return {
+      work_id: String(work.id),
+      kind,
+      kind_name: titleMap[kind],
+      title: titleMap[kind],
+      license_scope: licenseScope,
+      license_scope_name: MARKET_LICENSE_SCOPE_LABEL[licenseScope],
+      body,
+      signed: false,
+    };
   }
 
   /**
@@ -519,6 +546,8 @@ export class MarketService {
           buyerUserId: BigInt(auth.userId),
           spaceId: BigInt(auth.spaceId),
           kind: MARKET_AGREEMENT_KIND.PURCHASE,
+          /** 买断 = 可改编、禁止原样再发布（`defaultLicenseScopeForKind` 同一口径，测试对齐两侧） */
+          licenseScope: MARKET_LICENSE_SCOPE.ADAPT,
           priceCredits: price,
           status: MARKET_AGREEMENT_STATUS.ACTIVE,
           signedAt: new Date(),
@@ -571,6 +600,8 @@ export class MarketService {
           buyerUserId: BigInt(auth.userId),
           spaceId: BigInt(auth.spaceId),
           kind: MARKET_AGREEMENT_KIND.PREORDER,
+          /** 预售定金与买断同口径：开售后按后补全款交付，许可范围随协议行落库 */
+          licenseScope: MARKET_LICENSE_SCOPE.ADAPT,
           priceCredits: price,
           status: MARKET_AGREEMENT_STATUS.ACTIVE,
           signedAt: new Date(),
@@ -619,6 +650,8 @@ export class MarketService {
           buyerUserId: buyer,
           spaceId: row.spaceId,
           kind: MARKET_AGREEMENT_KIND.REFUND,
+          /** 反向记录沿用**原协议**的许可范围：退款只冲账，不改变当年约定的权利 */
+          licenseScope: row.licenseScope,
           priceCredits: price,
           status: MARKET_AGREEMENT_STATUS.REFUNDED,
           signedAt: new Date(),
@@ -692,22 +725,36 @@ export class MarketService {
   /**
    * 作品解析（task 要求：解析已购本子 → novel 域，**只读结构**）。
    *
-   * 只读：不复制、不写库。真正"导入到我方 novel 域"需要产品先定许可范围
-   * （买断是否允许二次改编/再发布），未拍板前不做写库，登记为未完成项。
+   * 许可范围已拍板（§5.4 第 3 条：买断/预售 = 允许改编、禁止原样再发布），
+   * 但"导入到我方 novel 域"的**写库通道尚未开放**——许可回答的是"能不能改编"，
+   * 不是"我方系统替不替用户复制"。所以仍然只读、不落库，只是把**行上的许可**
+   * 如实回报给前端（协议改了文案不能改写已发生的许可）。
    */
   async parsePurchased(auth: AuthContext, workId: string) {
     const { work } = await this.loadVisibleWork(workId);
-    await this.assertEntitled(work, auth.userId);
+    const agreement = await this.assertEntitled(work, auth.userId);
+    const licenseScope = agreement?.licenseScope ?? null;
     const counts = await this.novelCounts(work.novelId);
     return {
       work_id: String(work.id),
       novel_id: work.novelId ? String(work.novelId) : null,
+      /** 作者本人没有购买协议行 → 不受购买许可约束，回报 null 而不是猜一个 scope */
+      license_scope: licenseScope,
+      license_scope_name:
+        licenseScope !== null && isMarketLicenseScope(licenseScope)
+          ? MARKET_LICENSE_SCOPE_LABEL[licenseScope]
+          : null,
       /** 只读结构：解析出的骨架供前端预览，不落库 */
       structure: {
         kind: work.kind === 2 ? "script" : work.kind === 3 ? "storyboard_pack" : "novel",
         counts,
         writable: false,
-        note: "只读解析：买断后的二次改编许可未拍板，本期不复制到我方 novel 域",
+        note:
+          agreement === null
+            ? "作者本人：不受购买许可约束；只读解析，不复制到我方 novel 域"
+            : licenseScope === MARKET_LICENSE_SCOPE.ADAPT
+              ? "只读解析：协议允许改编（禁止原样再发布），但导入到我方 novel 域的写库通道尚未开放，本期不复制"
+              : "只读解析：协议仅授予使用权（不得改编），且导入到我方 novel 域的写库通道尚未开放，本期不复制",
       },
     };
   }
@@ -1957,11 +2004,14 @@ export class MarketService {
   /**
    * 内容读取凭据：作者本人 or 存在**已生效**的购买/预售协议。
    * 没有凭据 → 403 `reason=not_purchased`（前端据此弹"去购买"，而不是报错）。
+   *
+   * 返回命中的协议行（作者本人为 `null`）：`parsePurchased` 要按行上的 `license_scope`
+   * 回报"这份内容允许怎么用"，读凭据与读许可必须来自**同一次查询**，不能各查一遍。
    */
-  private async assertEntitled(work: WorkRow, userId: string) {
-    if (work.ownerUserId === BigInt(userId)) return;
+  private async assertEntitled(work: WorkRow, userId: string): Promise<AgreementRow | null> {
+    if (work.ownerUserId === BigInt(userId)) return null;
     const [row] = await db
-      .select({ id: marketAgreements.id })
+      .select()
       .from(marketAgreements)
       .where(
         and(
@@ -1978,6 +2028,7 @@ export class MarketService {
         work_id: String(work.id),
       });
     }
+    return row;
   }
 
   private async findActiveAgreement(tx: Tx, workId: bigint, buyerUserId: bigint, kind: number) {
@@ -2266,6 +2317,9 @@ export class MarketService {
       space_id: String(row.spaceId),
       kind: row.kind,
       kind_name: this.agreementKindName(row.kind),
+      /** 许可范围读**行上的值**（历史成交自证）；未知值不抛错、原样带编号，避免读接口被脏数据打断 */
+      license_scope: row.licenseScope,
+      license_scope_name: MARKET_LICENSE_SCOPE_LABEL[row.licenseScope] ?? String(row.licenseScope),
       price_credits: row.priceCredits,
       commission_credits: commissionOf(row.priceCredits),
       revenue_credits: revenueOf(row.priceCredits),

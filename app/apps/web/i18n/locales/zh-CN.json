@@ -996,6 +996,7 @@
     "agreementKindPreorder": "预售",
     "agreementKindLicense": "授权",
     "agreementAutoNote": "{kind}（平台按成交信息自动生成）",
+    "agreementLicenseNote": "许可范围：{scope}。买断与预售允许基于本作品二次创作，但不得原样再发布或转售。",
     "agreementLoading": "正在加载协议…",
     "kindBuy": "购买协议",
     "kindPreorder": "预售协议",

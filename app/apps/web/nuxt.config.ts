@@ -1,3 +1,10 @@
+// ⚠️ **构建期**常量：Nitro 把 routeRules 的 proxy 目标编译进 `.output/server`，
+// 运行期再设 NUXT_API_PROXY 已经晚了 —— 产物里会沿用构建时的那一个。
+// 3000 是 api 的默认端口（apps/api/src/config/env.ts），所以这里是通用默认值；
+// 但本机 3000 被另一个项目占着，本地栈必须构建前注入 3002
+// （_acceptance/start-wanxing-stack.ps1），生产由 Dockerfile 的 ARG 注入 http://api:3000。
+// 踩过的坑：本地 .output 用默认值构建 → web:3003 的 /v1/** 全部代理到别人服务上，
+// 后台 10 个面板渲染正常、数据全 404，typecheck/lint 全绿。
 const apiProxyTarget = process.env.NUXT_API_PROXY ?? "http://127.0.0.1:3000";
 
 export default defineNuxtConfig({

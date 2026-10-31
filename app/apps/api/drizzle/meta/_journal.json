@@ -344,6 +344,13 @@
       "when": 1793239532436,
       "tag": "0048_amusing_mandarin",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793487806183,
+      "tag": "0049_glossy_paladin",
+      "breakpoints": true
     }
   ]
 }

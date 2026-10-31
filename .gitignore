@@ -77,7 +77,19 @@ _acceptance/*
 # 这条链路上压着成员加入、活动空间切换（X-Space-Id）、双向心跳、乐观锁冲突与覆盖，
 # 只能在两个隔离浏览器上下文里跑。脚本入库，结果写进 _acceptance/_team/report-director.md。
 !_acceptance/e2e-director-collab.cjs
+# 运营后台 10 个面板的浏览器冒烟：面板是"整体能 build、单页却白屏"的高发区
+# （v-if 漏挂 / endpoint 写错 / composable 未导入都过得了 typecheck）。
+# 脚本入库；结果与未覆盖范围写进 _acceptance/_team/report-admin-panels.md。
+!_acceptance/e2e-admin-panels.cjs
 
 # 本地依赖运行时数据（PG/Redis 数据目录，66MB+，绝不入库）
 .localstack/
+
+# TLS 私钥绝不入库：app/deploy/gen-selfsigned-cert.sh 生成的自签证书只用于冒烟，
+# 生产证书由部署机放置/续期（deploy/certs 只读挂进 nginx）。
+app/deploy/certs/*
+!app/deploy/certs/.gitkeep
+# ACME HTTP-01 校验目录（certbot 写入的一次性 token）
+app/deploy/acme-webroot/*
+!app/deploy/acme-webroot/.gitkeep
 

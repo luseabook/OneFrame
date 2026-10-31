@@ -1,0 +1,1 @@
+ALTER TABLE "market_agreements" ADD COLUMN "license_scope" smallint DEFAULT 1 NOT NULL;

@@ -103,9 +103,19 @@ function toIso(local: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-/** 整数字段校验：空 → null（走后端默认值）；越界/非整数 → 抛错，由调用方翻成文案 */
-function parseIntField(raw: string, min: number, max: number, rangeKey: string): number | null {
-  const trimmed = raw.trim();
+/**
+ * 整数字段校验：空 → null（走后端默认值）；越界/非整数 → 抛错，由调用方翻成文案。
+ *
+ * 入参可能是 **number** 而不是 string：`<input type="number">` 上的 `v-model` 由 Vue
+ * 自动做 looseToNumber（不需要 `.number` 修饰符），所以运营一填数字，
+ * `createForm.credits` 就从 `""` 变成 `0`/`500`。这里若还按 string 调 `.trim()`，
+ * 会抛 "…trim is not a function"，被上层 catch 成一条看不懂的红条，
+ * **请求根本发不出去**——第 107 批运营后台浏览器 E2E 实测：邀请码「生成」点击后
+ * api 侧一个 POST 都没有，而 typecheck / lint / build 全绿。
+ */
+function parseIntField(raw: string | number, min: number, max: number, rangeKey: string): number | null {
+  if (raw === "") return null;
+  const trimmed = String(raw).trim();
   if (!trimmed) return null;
   const value = Number(trimmed);
   if (!Number.isInteger(value) || value < min || value > max) {

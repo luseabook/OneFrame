@@ -996,6 +996,7 @@
     "agreementKindPreorder": "Pré-venda",
     "agreementKindLicense": "Licenciamento",
     "agreementAutoNote": "{kind} (gerado automaticamente pela plataforma a partir da transação)",
+    "agreementLicenseNote": "Escopo da licença: {scope}. A compra e a pré-venda permitem obras derivadas desta obra, mas não a republicação ou revenda como está.",
     "agreementLoading": "Carregando o contrato…",
     "kindBuy": "Contrato de compra",
     "kindPreorder": "Contrato de pré-venda",

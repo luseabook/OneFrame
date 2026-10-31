@@ -1,0 +1,1 @@
+# 占位：ACME HTTP-01 校验目录（certbot --webroot 写入，容器只读挂载）。

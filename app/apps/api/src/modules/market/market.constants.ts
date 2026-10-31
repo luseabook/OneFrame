@@ -97,6 +97,50 @@ export const MARKET_AGREEMENT_KIND = {
 } as const;
 
 /**
+ * 许可范围（`market_agreements.license_scope`，迁移 0049；§5.4 第 3 条拍板）。
+ *
+ * - `1 ADAPT`：**允许改编、禁止原样再发布**。买断价显著高于单次阅读价，
+ *   买家买到的是"二次创作权"，而"原样转卖"会直接抢原作者的作品市场，所以不授予。
+ * - `2 USE_ONLY`：仅可使用，不授予改编（分成授权的占位口径；kind=3 尚未开放交易）。
+ *
+ * 为什么值要落库而不是只写在协议正文：正文是模板生成的，文案会随版本改；
+ * 历史成交行必须能独立回答"当时卖的是哪种许可"，否则客诉时无法自证。
+ */
+export const MARKET_LICENSE_SCOPE = {
+  ADAPT: 1,
+  USE_ONLY: 2,
+} as const;
+
+export const MARKET_LICENSE_SCOPE_LABEL: Record<number, string> = {
+  1: "可改编（禁止原样再发布）",
+  2: "仅使用（不授予改编）",
+};
+
+/** 许可范围白名单校验：DTO 与入参都走这一处，未知值一律不算合法 scope */
+export function isMarketLicenseScope(value: number | null | undefined): value is number {
+  if (value === null || value === undefined) return false;
+  return Object.values(MARKET_LICENSE_SCOPE).some((scope) => scope === value);
+}
+
+/**
+ * 协议类型 → 默认许可范围（唯一的映射源，service 与测试共用）。
+ *
+ * 退款反向记录（kind=4）不单独生成许可，沿用原协议行的 scope；未知类型返回 null，
+ * 由调用方按 400101 拒绝（与 `kind` 白名单同一口径）。
+ */
+export function defaultLicenseScopeForKind(kind: number): number | null {
+  switch (kind) {
+    case MARKET_AGREEMENT_KIND.PURCHASE:
+    case MARKET_AGREEMENT_KIND.PREORDER:
+      return MARKET_LICENSE_SCOPE.ADAPT;
+    case MARKET_AGREEMENT_KIND.LICENSE:
+      return MARKET_LICENSE_SCOPE.USE_ONLY;
+    default:
+      return null;
+  }
+}
+
+/**
  * 审核留痕动作（`market_review_logs.action`，迁移 0030）。
  *
  * 每一条都与作品 status 的一次迁移严格对应，所以"提交/通过/驳回/下架"是**四类事实**，

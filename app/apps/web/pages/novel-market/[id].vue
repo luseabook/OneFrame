@@ -340,6 +340,10 @@ onMounted(load);
         </div>
         <p v-if="!agreement" class="md-state">{{ t("marketDetail.agreementLoading") }}</p>
         <pre v-else class="md-agreement">{{ agreement.body }}</pre>
+        <!-- 许可范围一句话说明（§5.4 第 3 条）：取自协议行，不取当前模板文案 -->
+        <p v-if="agreement" class="md-license-note">
+          {{ t("marketDetail.agreementLicenseNote", { scope: agreement.license_scope_name }) }}
+        </p>
       </section>
     </template>
   </div>
@@ -599,5 +603,11 @@ onMounted(load);
   background: var(--bg-sunken);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
+}
+.md-license-note {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-3);
 }
 </style>
