@@ -145,6 +145,23 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.76 · 迁移链 lockstep：`schema.ts` ↔ 最新快照 ↔ 日志 ↔ `.sql` · 2026-11-01）
+
+又换了一类审计：前 117 批读的都是**代码**，本批读**迁移产物**。`schema.spec.ts` 自己写着「断掉的迁移在 dev 库上不会报错（drizzle 只比对快照），只有新环境重建时才炸」，而仓库里没有任何用例测过它 —— drizzle-kit 的 `generate` 从不读 `.sql`，所以「快照与 `schema.ts` 一致」和「50 个迁移能在空库上建出 115 张表」是两件互不蕴含的事。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | `schema.spec.ts` 记的「只有新环境重建时才炸」从无任何用例覆盖；快照对齐 ≠ 迁移可重放 | 临时库 `wf_d118` 从零重放 50 个迁移：`__drizzle_migrations` = 50、表 115 / 115、列 1204（类型比对 1204、默认值比对 514）、索引 186、外键 256（定义不一致 0）、**差异合计 0**；另在副本上 `drizzle-kit generate` → `No schema changes` | 一次性实跑（本批） |
+| 2 | 手写「迁移没断」的结论会腐化，而 dev 库上永远看不出来 | 新增 `packages/db/src/migration-lockstep.spec.ts` **6 例**，只读文件不连库：日志 `idx` 连续 + 文件齐全 + `prevId` 链；表集合双向相等；1,204 列的类型/可空/主键/默认值；186 索引 + 6 唯一 + 2 复合主键；256 外键；2 CHECK | 本批守卫 6/6 |
+| 3 | 守卫极易假红：PG 标识符 63 字节截断、默认值三种写法、cwd 不确定 | 两侧统一过 `pgName()`（按 UTF-8 回退续字节）；默认值归一（字符串补引号 / SQL 原样 / 空数组按 `text[]` vs `jsonb` 分叉 —— 原型阶段唯一咬到的差异是 `models.tags` / `models.promotions`）；从 `process.cwd()` 向上 8 层定位 `_journal.json`；另加列/索引/外键数 `> 0` 防空转 | 用例内断言 |
+| 4 | 守卫要能变红，否则只是装饰 | 6 类定向破坏 → **一条一个映射**全部 `EXIT=1`（journal→①、表→②、列→③ 报 `users.id 可空：schema notNull=true 快照=false`、索引→④、外键→⑤、CHECK→⑥）；还原后 6/6、110ms | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（10.81s）、typecheck 12/12（7.976s）、lint 7/7（0 errors / 29 条既有 warning：web 27 + api 2）、`pnpm test` 12/12 **1,763 用例通过 + 1 跳过**（3m48.195s；db 33/2、api 1,295/112、worker 91/12、cli 128/17、shared 35/5、model-adapters 164/14、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更）。临时库 `wf_d118` 已 `DROP`。
+
+**仍未做**：守卫**不解析 `.sql`**，断言的是「日志/文件/快照/schema 四者对齐」，不是「SQL 文本与快照等价」—— 后者只在 `wf_d118` 上做过一次性实跑（差异 0），没有变成常驻断言（要 PG，与 CI 无 PG 冲突）；CHECK 只比名字不比表达式文本；索引不比 `where` / `opClass` / `WITH`，不覆盖序列/策略/视图；默认值归一仅覆盖仓库现用形态，非空 JS 数组会响亮地红而不是静默放过；不校验迁移执行顺序的安全性与回滚。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
 
 v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。
