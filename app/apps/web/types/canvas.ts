@@ -210,3 +210,65 @@ export interface PinGroupDto {
   slot: number;
   node_ids: string[];
 }
+
+// ── 画布分享（第 126 批）──────────────────────────────────
+// 契约来源：`apps/api/src/modules/canvas/canvas-share.service.ts`。
+// 公开侧读的是**创建链接时冻结的快照**，所以这里没有 task_id / version /
+// space_id 等内部字段；节点另带 `file_count`（该节点冻结时有多少个产物）。
+
+export interface CanvasShareCreateResult {
+  token: string;
+  /** 前端直接拿去拼分享地址；以 `/` 开头 */
+  share_path: string;
+  expires_at: string;
+  allow_clone: boolean;
+  node_count: number;
+  file_count: number;
+  /** 画布超出快照上限（500 节点 / 200 文件）时为 true */
+  truncated: boolean;
+}
+
+export interface CanvasShareRetryResult extends CanvasShareCreateResult {
+  ok: true;
+  refreshed_at: string;
+}
+
+export interface CanvasShareCloseResult {
+  ok: true;
+  /** 被撤销的有效链接条数；重复关闭为 0 */
+  closed: number;
+}
+
+/** 公开页节点：与 CanvasNodeDto 同形，但冻结快照不含 task_id / version */
+export type CanvasShareNodeDto = Omit<CanvasNodeDto, "task_id" | "version">;
+
+export interface CanvasShareNode extends CanvasShareNodeDto {
+  file_count: number;
+}
+
+export interface CanvasShareView {
+  share: { expires_at: string; allow_clone: boolean };
+  canvas: {
+    title: string;
+    version: number;
+    cover_url: string | null;
+    node_count: number;
+    file_count: number;
+    truncated: boolean;
+  };
+  nodes: CanvasShareNode[];
+  edges: CanvasEdgeDto[];
+  groups: CanvasGroupDto[];
+}
+
+export interface CanvasShareFileUrls {
+  files: Array<{ node_id: string; kind: "result" | "preview"; url: string }>;
+  /** URL 有效期（秒），当前 3600 */
+  expires_in: number;
+  truncated: boolean;
+}
+
+export interface CanvasShareThumbs {
+  thumbs: Array<{ node_id: string; url: string }>;
+  expires_in: number;
+}

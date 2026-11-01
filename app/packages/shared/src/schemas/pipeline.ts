@@ -246,6 +246,19 @@ export const shareCreateSchema = z.object({
 });
 export type ShareCreateRequest = z.infer<typeof shareCreateSchema>;
 
+/**
+ * 画布分享（第 126 批）。
+ *
+ * 与任务分享同一套过期口径（1..30 天，默认 7），另加 `allow_clone`：
+ * 公开页是否允许观众把这张画布克隆到自己的空间。克隆本身在第 127 批实现，
+ * 这里先落开关，避免届时再加迁移改表。
+ */
+export const canvasShareCreateSchema = z.object({
+  expires_in_days: z.number().int().min(1).max(30).default(7),
+  allow_clone: z.boolean().default(false),
+});
+export type CanvasShareCreateRequest = z.infer<typeof canvasShareCreateSchema>;
+
 export const projectPatchSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   genre: z.string().max(50).optional(),

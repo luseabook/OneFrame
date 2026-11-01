@@ -4037,5 +4037,29 @@
     "prev": "上一页",
     "next": "下一页",
     "pageInfo": "第 {page}/{pages} 页 · 共 {total} 条"
+  },
+  "canvasShare": {
+    "title": "画布分享",
+    "unavailable": "链接不可用",
+    "expired": "链接已失效或不存在",
+    "backHome": "返回首页",
+    "nodeCount": "{n} 个节点",
+    "fileCount": "{n} 个文件",
+    "expires": "链接有效期至 {at}",
+    "truncated": "画布较大，这里只展示前 {n} 个节点",
+    "empty": "这张画布还没有节点",
+    "snapshotNote": "你看到的是分享时冻结的快照，之后的修改不会出现在这里。",
+    "filesTitle": "产物文件",
+    "loadFiles": "加载文件",
+    "filesHint": "点「加载文件」获取可下载的产物地址。",
+    "filesTtl": "链接 {min} 分钟内有效，过期后刷新页面重新加载。",
+    "filesError": "加载文件失败",
+    "emptyFiles": "没有可下载的文件",
+    "kindResult": "产物",
+    "kindPreview": "预览",
+    "nodeScript": "剧本",
+    "nodeAsset": "资产",
+    "nodeDirector": "3D 导演台",
+    "nodeThreeDWorld": "3D 世界"
   }
 }

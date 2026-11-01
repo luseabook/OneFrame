@@ -4037,5 +4037,29 @@
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"
+  },
+  "canvasShare": {
+    "title": "Canvas share",
+    "unavailable": "Link unavailable",
+    "expired": "This link has expired or no longer exists",
+    "backHome": "Back to home",
+    "nodeCount": "{n} nodes",
+    "fileCount": "{n} files",
+    "expires": "Link valid until {at}",
+    "truncated": "This canvas is large; only the first {n} nodes are shown",
+    "empty": "This canvas has no nodes yet",
+    "snapshotNote": "You are viewing a snapshot frozen at share time; later edits will not appear here.",
+    "filesTitle": "Files",
+    "loadFiles": "Load files",
+    "filesHint": "Click “Load files” to get downloadable URLs for the generated files.",
+    "filesTtl": "Links are valid for {min} minutes; refresh the page to load them again after they expire.",
+    "filesError": "Failed to load files",
+    "emptyFiles": "No downloadable files",
+    "kindResult": "Result",
+    "kindPreview": "Preview",
+    "nodeScript": "Script",
+    "nodeAsset": "Asset",
+    "nodeDirector": "3D director stage",
+    "nodeThreeDWorld": "3D world"
   }
 }

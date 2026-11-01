@@ -4037,5 +4037,29 @@
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"
+  },
+  "canvasShare": {
+    "title": "キャンバス共有",
+    "unavailable": "リンクを利用できません",
+    "expired": "リンクの有効期限が切れているか、存在しません",
+    "backHome": "ホームへ戻る",
+    "nodeCount": "{n} ノード",
+    "fileCount": "{n} ファイル",
+    "expires": "リンクの有効期限：{at}",
+    "truncated": "キャンバスが大きいため、先頭 {n} ノードのみ表示しています",
+    "empty": "このキャンバスにはまだノードがありません",
+    "snapshotNote": "共有時に固定されたスナップショットを表示しています。その後の編集は反映されません。",
+    "filesTitle": "生成ファイル",
+    "loadFiles": "ファイルを読み込む",
+    "filesHint": "「ファイルを読み込む」を押すと、生成ファイルのダウンロード URL を取得できます。",
+    "filesTtl": "リンクは {min} 分間有効です。期限切れ後はページを再読み込みしてください。",
+    "filesError": "ファイルの読み込みに失敗しました",
+    "emptyFiles": "ダウンロードできるファイルがありません",
+    "kindResult": "生成物",
+    "kindPreview": "プレビュー",
+    "nodeScript": "脚本",
+    "nodeAsset": "素材",
+    "nodeDirector": "3D 監督台",
+    "nodeThreeDWorld": "3D ワールド"
   }
 }

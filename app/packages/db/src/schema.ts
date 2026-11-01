@@ -1170,6 +1170,43 @@ export const canvasGroups = pgTable(
   (t) => [index("idx_canvas_groups").on(t.canvasId, t.parentId, t.sort)],
 );
 
+/**
+ * 画布分享（第 126 批）—— 令牌只读链接。
+ *
+ * 与 `task_shares` 的差异：任务分享读的是**任务当前结果**，画布分享读的是
+ * **创建时冻结的快照**（`snapshot`）。原因：画布是可变文档，边编辑边分享会让
+ * 公开页在两次刷新之间变样；冻结后公开侧只读一份 JSONB，撤销/过期也只判本行。
+ *
+ * 快照里**不落** task_id / space_id / user_id / 积分字段：公开页只需节点、边、
+ * 分组与已签好的文件清单，任何内部 ID 都不该出现在无鉴权响应里。
+ */
+export const canvasShares = pgTable(
+  "canvas_shares",
+  {
+    id: pk(),
+    canvasId: bigint("canvas_id", { mode: "bigint" })
+      .notNull()
+      .references(() => canvases.id),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    token: text("token").notNull(),
+    /** 冻结快照：{canvas:{title,width,height},nodes:[],edges:[],groups:[],files:[]} */
+    snapshot: jsonb("snapshot").notNull(),
+    /** 是否允许观众一键克隆到自己的空间（克隆链路属第 127 批） */
+    allowClone: boolean("allow_clone").notNull().default(false),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** 关闭 = 写撤销时间；与过期同判，不另设 status 列避免两处真相 */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("idx_canvas_shares_canvas").on(t.canvasId, t.createdAt.desc()),
+    uniqueIndex("uq_canvas_shares_token").on(t.token),
+  ],
+);
+
 /** 整画布模板库（与节点组模板不同物，勿混用） */
 export const canvasTemplates = pgTable(
   "canvas_templates",

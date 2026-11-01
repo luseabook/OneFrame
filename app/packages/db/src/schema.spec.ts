@@ -380,3 +380,26 @@ describe("db schema contract (第 93 批：音色收藏 1 张)", () => {
   });
 });
 
+describe("db schema contract (第 126 批：画布分享 1 张)", () => {
+  it("canvas_shares 冻结快照、令牌唯一、关闭/过期可判", () => {
+    expect(cols(schema.canvasShares)).toEqual(
+      expect.arrayContaining([
+        "canvas_id",
+        "space_id",
+        "token",
+        "snapshot",
+        "allow_clone",
+        "expires_at",
+        "revoked_at",
+      ]),
+    );
+    const uq = indexes(schema.canvasShares).find((i) => i.name === "uq_canvas_shares_token");
+    expect(uq?.unique).toBe(true);
+    // 快照必须是 NOT NULL：分享时没冻结内容，公开页就没有可读的东西。
+    const snapshot = getTableConfig(schema.canvasShares).columns.find((c) => c.name === "snapshot");
+    expect(snapshot?.notNull).toBe(true);
+    // task_id 只允许出现在 snapshot 内部；表上出现就把内部任务身份摆进了公开面。
+    expect(cols(schema.canvasShares)).not.toContain("task_id");
+  });
+});
+

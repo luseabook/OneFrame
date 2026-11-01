@@ -6,6 +6,7 @@ import { CanvasMaterialController } from "./canvas-material.controller";
 import { CanvasGroupController } from "./canvas-group.controller";
 import { CanvasTableController } from "./canvas-table.controller";
 import { CanvasDownloadController } from "./canvas-download.controller";
+import { CanvasShareController, PublicCanvasShareController } from "./canvas-share.controller";
 import { CanvasService } from "./canvas.service";
 import { CanvasNodeTasksService } from "./canvas-node-tasks.service";
 import { CanvasTemplateService } from "./canvas-template.service";
@@ -14,6 +15,7 @@ import { CanvasGroupService } from "./canvas-group.service";
 import { CanvasTableService } from "./canvas-table.service";
 import { CanvasDownloadService } from "./canvas-download.service";
 import { CanvasDeriveService } from "./canvas-derive.service";
+import { CanvasShareService } from "./canvas-share.service";
 import { CreditsModule } from "../credits/credits.module";
 import { GenerationsModule } from "../generations/generations.module";
 import { ModelsModule } from "../models/models.module";
@@ -31,6 +33,8 @@ import { TasksModule } from "../tasks/tasks.module";
     CanvasGroupController,
     CanvasTableController,
     CanvasDownloadController,
+    CanvasShareController,
+    PublicCanvasShareController,
   ],
   providers: [
     CanvasService,
@@ -41,6 +45,7 @@ import { TasksModule } from "../tasks/tasks.module";
     CanvasTableService,
     CanvasDownloadService,
     CanvasDeriveService,
+    CanvasShareService,
   ],
   exports: [
     CanvasService,
@@ -51,6 +56,7 @@ import { TasksModule } from "../tasks/tasks.module";
     CanvasTableService,
     CanvasDownloadService,
     CanvasDeriveService,
+    CanvasShareService,
   ],
 })
 export class CanvasModule {}

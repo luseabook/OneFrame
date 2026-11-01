@@ -351,6 +351,13 @@
       "when": 1793487806183,
       "tag": "0049_glossy_paladin",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793535722786,
+      "tag": "0050_classy_grey_gargoyle",
+      "breakpoints": true
     }
   ]
 }

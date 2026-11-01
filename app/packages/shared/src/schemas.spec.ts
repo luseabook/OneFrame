@@ -3,6 +3,7 @@ import { ErrorCode } from "./errors";
 import { generationRequestSchema } from "./schemas/generation";
 import { characterSchema, createProjectSchema, generateVideosSchema, storyboardSchema } from "./schemas/project";
 import { loginRequestSchema, refreshRequestSchema } from "./schemas/auth";
+import { canvasShareCreateSchema } from "./schemas/pipeline";
 
 describe("generationRequestSchema", () => {
   it("applies defaults and accepts a minimal text2video request", () => {
@@ -106,6 +107,26 @@ describe("storyboardSchema duration_s", () => {
     for (const d of [0, 31]) {
       expect(storyboardSchema.safeParse({ ...base, duration_s: d }).success).toBe(false);
     }
+  });
+});
+
+describe("canvasShareCreateSchema", () => {
+  it("defaults to 7 days without clone when the body is empty", () => {
+    expect(canvasShareCreateSchema.parse({})).toEqual({ expires_in_days: 7, allow_clone: false });
+  });
+
+  it("bounds the link lifetime to 1..30 days", () => {
+    for (const days of [1, 7, 30]) {
+      expect(canvasShareCreateSchema.safeParse({ expires_in_days: days }).success).toBe(true);
+    }
+    for (const days of [0, 31, 1.5]) {
+      expect(canvasShareCreateSchema.safeParse({ expires_in_days: days }).success).toBe(false);
+    }
+  });
+
+  it("rejects a non-boolean clone switch", () => {
+    expect(canvasShareCreateSchema.safeParse({ allow_clone: "true" }).success).toBe(false);
+    expect(canvasShareCreateSchema.parse({ allow_clone: true }).allow_clone).toBe(true);
   });
 });
 

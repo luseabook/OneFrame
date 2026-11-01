@@ -4037,5 +4037,29 @@
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"
+  },
+  "canvasShare": {
+    "title": "Compartilhamento do canvas",
+    "unavailable": "Link indisponível",
+    "expired": "Este link expirou ou não existe mais",
+    "backHome": "Voltar ao início",
+    "nodeCount": "{n} nós",
+    "fileCount": "{n} arquivos",
+    "expires": "Link válido até {at}",
+    "truncated": "O canvas é grande; apenas os primeiros {n} nós são exibidos",
+    "empty": "Este canvas ainda não tem nós",
+    "snapshotNote": "Você está vendo um snapshot congelado no momento do compartilhamento; edições posteriores não aparecem aqui.",
+    "filesTitle": "Arquivos gerados",
+    "loadFiles": "Carregar arquivos",
+    "filesHint": "Clique em “Carregar arquivos” para obter URLs de download dos arquivos gerados.",
+    "filesTtl": "Os links valem por {min} minutos; recarregue a página para carregá-los novamente após expirarem.",
+    "filesError": "Falha ao carregar arquivos",
+    "emptyFiles": "Nenhum arquivo para download",
+    "kindResult": "Resultado",
+    "kindPreview": "Prévia",
+    "nodeScript": "Roteiro",
+    "nodeAsset": "Recurso",
+    "nodeDirector": "Mesa de direção 3D",
+    "nodeThreeDWorld": "Mundo 3D"
   }
 }
