@@ -1,5 +1,15 @@
 import { resolve } from "node:path";
 import { z } from "zod";
+import { STORAGE_DRIVER_SPEC, STORAGE_S3_FORCE_PATH_STYLE_SPEC } from "@app/shared";
+// 第 124 批：布尔 / 枚举变量走 @app/shared 的唯一接受表，schema 只做接线
+import {
+  CATALOG_SYNC_TOOLS_SPEC,
+  CAPTCHA_ENFORCE_SPEC,
+  MODERATION_ENABLED_SPEC,
+  OAUTH_MOCK_SPEC,
+  zEnvEnum,
+  zEnvFlag,
+} from "./env-values";
 
 /** 生产/开发默认的短信 IP 频控阈值（条/小时） */
 export const DEFAULT_SMS_IP_HOURLY_LIMIT = 20;
@@ -145,18 +155,19 @@ const envSchema = z.object({
   OAUTH_DOUYIN_SECRET: z.string().optional(),
   OAUTH_DOUYIN_REDIRECT_URI: z.string().optional(),
   /** 仅非生产生效：把 OAuth 回调短路成本地假用户（便于 E2E 覆盖"登录成功"分支） */
-  OAUTH_MOCK: z.enum(["0", "1"]).default("0"),
+  OAUTH_MOCK: zEnvFlag("OAUTH_MOCK", OAUTH_MOCK_SPEC),
   /** master token 有效期（秒）：长令牌只用于换 access，不得打业务端点 */
   MASTER_TTL_S: z.coerce.number().int().min(3600).default(2_592_000), // 30 天
 
   /**
-   * 行为验证码是否在**登录/发码**入口强制校验（默认 0=关）。
+   * 行为验证码是否在**登录/发码**入口强制校验（默认关）。
    *
    * 为什么默认关：验证码只有本地算术题模式（无第三方 Key），强制校验会把"机器人防护"
    * 变成"用户多答一道题"，而现有 13 套 e2e 与真机验收全都走无验证码路径。
-   * 运营决定开启时置 1（服务在**调用时**读 process.env，便于测试切态；此处仅登记）。
+   * 运营决定开启时置 true（第 124 批起接受表固定为 1/true/yes/on，服务在**调用时**
+   * 现场读环境变量，便于测试切态；此处只登记接受范围与默认值）。
    */
-  CAPTCHA_ENFORCE: z.enum(["0", "1"]).default("0"),
+  CAPTCHA_ENFORCE: zEnvFlag("CAPTCHA_ENFORCE", CAPTCHA_ENFORCE_SPEC),
 
   /**
    * 影视版离线通知 webhook（第 4 轮）：为空 = 只走广播面，不投递（响应 `delivery:"stored"`）。
@@ -196,20 +207,14 @@ const envSchema = z.object({
    * （此前每次进程启动都会被代码目录覆盖，等于"改了重启就回滚"）。
    * 只有需要"代码即真相"的测试/应急场景才打开；正常运营不要开。
    */
-  CATALOG_SYNC_TOOLS: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
+  CATALOG_SYNC_TOOLS: zEnvFlag("CATALOG_SYNC_TOOLS", CATALOG_SYNC_TOOLS_SPEC),
 
   // 内容安全（MVP 敏感词；供应商审核 P2）
-  MODERATION_ENABLED: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((v) => v === "true"),
+  MODERATION_ENABLED: zEnvFlag("MODERATION_ENABLED", MODERATION_ENABLED_SPEC),
   MODERATION_WORDS: z.string().optional(),
 
-  // 结果存储（ADR-005：生产替换为 OSS/S3 driver）
-  STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  // 结果存储（ADR-005：生产替换为 OSS/S3 driver）—— 与 worker 共用同一张取值表
+  STORAGE_DRIVER: zEnvEnum("STORAGE_DRIVER", STORAGE_DRIVER_SPEC),
   STORAGE_DIR: z.string().default(resolve(process.cwd(), "../../data/storage")),
   STORAGE_PUBLIC_BASE: z.string().default("http://127.0.0.1:3000/v1"),
   STORAGE_SIGN_SECRET: z.string().min(8).default("dev-only-storage-sign-secret"),
@@ -220,10 +225,7 @@ const envSchema = z.object({
   STORAGE_S3_PUBLIC_ENDPOINT: z.string().optional(),
   STORAGE_S3_ACCESS_KEY_ID: z.string().optional(),
   STORAGE_S3_SECRET_ACCESS_KEY: z.string().optional(),
-  STORAGE_S3_FORCE_PATH_STYLE: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
+  STORAGE_S3_FORCE_PATH_STYLE: zEnvFlag("STORAGE_S3_FORCE_PATH_STYLE", STORAGE_S3_FORCE_PATH_STYLE_SPEC),
 
   // ── 画布批量下载：用户可控产物 URI 的服务端拉取守卫（PR-04 SSRF 收口）──
   /**

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { AppError, ErrorCode } from "@app/shared";
+import { AppError, ErrorCode, readEnvFlag } from "@app/shared";
+import { OAUTH_MOCK_SPEC } from "../../config/env-values";
 import { RedisService } from "../../redis/redis.service";
 import { AppleIdTokenError, verifyAppleIdToken, type VerifiedAppleClaims } from "./apple-id-token";
 
@@ -295,15 +296,19 @@ export class OauthService {
   }
 
   /**
-   * mock 开关：**只在非生产**且显式 `OAUTH_MOCK=1` 时生效。
+   * mock 开关：**只在非生产**且显式打开时生效。
    *
    * 为什么需要：本仓库没有渠道测试账号，CI/测试机也不会去调微信。但"成功路径"必须被
    * 真实覆盖（否则等于只有失败路径有测试）。mock 只替换**渠道那一跳**（code→用户信息），
    * 之后的建号/绑定/发 token 全走真实链路，所以测出来的仍然是真语义。
-   * 生产环境下即使误设 OAUTH_MOCK=1 也不生效（`NODE_ENV === "production"` 短路）。
+   * 生产环境下即使误开也不生效（`NODE_ENV === "production"` 短路）。
+   *
+   * 第 124 批：开关判定改走唯一入口 `readEnvFlag`（1/true/yes/on，大小写与首尾空白不敏感），
+   * 旧写法 `=== "1"` 会把 `OAUTH_MOCK=true` 判成「关」——测试以为开了 mock，实际走了真渠道。
+   * 仍是**调用时**读：测试要在同一进程内切态。
    */
   private mockEnabled(): boolean {
-    return process.env.NODE_ENV !== "production" && process.env.OAUTH_MOCK === "1";
+    return process.env.NODE_ENV !== "production" && readEnvFlag("OAUTH_MOCK", OAUTH_MOCK_SPEC);
   }
 
   /** 渠道清单（登录页用来决定哪些按钮可点） */

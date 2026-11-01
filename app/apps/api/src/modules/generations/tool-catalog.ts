@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { modelPrices, models } from "@app/db";
 import { newId, type GenerationMode } from "@app/shared";
+import { env } from "../../config/env";
 import { db } from "../../db/database";
 import { POSTPROCESS_CODES } from "@app/model-adapters";
 
@@ -1202,10 +1203,12 @@ let ensuredInThisProcess = false;
 export async function ensureToolCatalog(): Promise<EnsureToolCatalogResult> {
   if (ensuredInThisProcess) return { models_inserted: 0, prices_inserted: 0 };
   /**
-   * 逃生开关。这里直接读 `process.env` 而不是走 `env.ts`：`env.ts` 由 api-ops 在本批
-   * 同步修改，先读原始环境变量可以让两边独立落地、互不阻塞（契约 §2.10 明确允许）。
+   * 逃生开关。第 124 批起改走 `env.ts` 的启动快照（与 schema 共用同一张接受表）：
+   * 旧写法 `=== "true"` 把 `CATALOG_SYNC_TOOLS=1/TRUE/yes` 判成「不覆盖」——
+   * 运维以为在重置价目，实际运营字段一个都没刷。快照口径与本函数"每进程只同步一次"
+   * 的语义一致，不存在"中途改环境变量期望即时生效"的用法。
    */
-  const syncOperationalFields = process.env.CATALOG_SYNC_TOOLS === "true";
+  const syncOperationalFields = env.CATALOG_SYNC_TOOLS;
   let modelsInserted = 0;
   let pricesInserted = 0;
   for (const [index, tool] of TOOL_MODES.entries()) {

@@ -4,8 +4,21 @@ import pino from "pino";
 import { createDb } from "@app/db";
 import { timelinePublications } from "@app/db";
 import { eq } from "drizzle-orm";
-import { probeFfmpeg, readEnvNumber } from "@app/shared";
+import {
+  probeFfmpeg,
+  readEnvEnum,
+  readEnvFlag,
+  readEnvNumber,
+  STORAGE_DRIVER_SPEC,
+  STORAGE_S3_FORCE_PATH_STYLE_SPEC,
+} from "@app/shared";
 import { assertWorkerEnv } from "./env-guard";
+import {
+  ADAPTER_MODE_SPEC,
+  AI_LABEL_ENABLED_SPEC,
+  ARK_IMAGE_RESPONSE_FORMAT_SPEC,
+  ARK_IMAGE_WATERMARK_SPEC,
+} from "./env-flags";
 import {
   auditLedger,
   expireShares,
@@ -38,7 +51,9 @@ assertWorkerEnv(process.env);
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://app:app@localhost:5432/app";
 const storageDir = process.env.STORAGE_DIR ?? resolve(process.cwd(), "../../data/storage");
-const storageDriver = (process.env.STORAGE_DRIVER as "local" | "s3" | undefined) ?? "local";
+// 布尔 / 枚举配置统一走 @app/shared 的唯一入口（第 124 批）：拼错不静默落到另一侧，
+// 坏值启动即抛（`STORAGE_DRIVER=S3` 不再被裸转换当成未知驱动）。
+const storageDriver = readEnvEnum("STORAGE_DRIVER", STORAGE_DRIVER_SPEC);
 const storage = createStorage({
   driver: storageDriver,
   rootDir: storageDir,
@@ -51,7 +66,7 @@ const storage = createStorage({
           region: process.env.STORAGE_S3_REGION ?? "cn-hangzhou",
           endpoint: process.env.STORAGE_S3_ENDPOINT,
           publicEndpoint: process.env.STORAGE_S3_PUBLIC_ENDPOINT,
-          forcePathStyle: process.env.STORAGE_S3_FORCE_PATH_STYLE === "true",
+          forcePathStyle: readEnvFlag("STORAGE_S3_FORCE_PATH_STYLE", STORAGE_S3_FORCE_PATH_STYLE_SPEC),
           accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID ?? "",
           secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY ?? "",
         },
@@ -80,7 +95,7 @@ function parseCodeList(raw: string | undefined): string[] {
 const arkModelMap = parseJsonRecord(process.env.ARK_MODEL_MAP);
 
 const adapterOptions: AdapterRuntimeOptions = {
-  mode: process.env.ADAPTER_MODE === "real" ? "real" : "mock",
+  mode: readEnvEnum("ADAPTER_MODE", ADAPTER_MODE_SPEC),
   ...(process.env.DEEPSEEK_API_KEY
     ? {
         deepseek: {
@@ -102,8 +117,8 @@ const adapterOptions: AdapterRuntimeOptions = {
           apiKey: process.env.ARK_API_KEY,
           baseUrl: process.env.ARK_IMAGE_BASE_URL ?? process.env.ARK_BASE_URL,
           modelMap: parseJsonRecord(process.env.ARK_IMAGE_MODEL_MAP) ?? arkModelMap,
-          responseFormat: process.env.ARK_IMAGE_RESPONSE_FORMAT === "b64_json" ? "b64_json" : "url",
-          watermark: process.env.ARK_IMAGE_WATERMARK !== "false",
+          responseFormat: readEnvEnum("ARK_IMAGE_RESPONSE_FORMAT", ARK_IMAGE_RESPONSE_FORMAT_SPEC),
+          watermark: readEnvFlag("ARK_IMAGE_WATERMARK", ARK_IMAGE_WATERMARK_SPEC),
           timeoutMs: readEnvNumber("ARK_IMAGE_TIMEOUT_MS", { default: 120_000, min: 1, integer: true }),
         },
       }
@@ -125,7 +140,7 @@ const adapterOptions: AdapterRuntimeOptions = {
 };
 
 const aiLabel = {
-  enabled: process.env.AI_LABEL_ENABLED !== "false",
+  enabled: readEnvFlag("AI_LABEL_ENABLED", AI_LABEL_ENABLED_SPEC),
   text: process.env.AI_LABEL_TEXT ?? "AI生成",
   fontPath: process.env.AI_LABEL_FONT_PATH,
   ffmpegPath: process.env.FFMPEG_PATH,

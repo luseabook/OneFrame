@@ -22,3 +22,5 @@ export * from "./project-category";
 export * from "./http-bounded";
 // 第 123 批：数值环境变量的唯一读取入口 —— 空白不再是 0、坏值不再是 NaN 穿过闸门
 export * from "./env-number";
+// 第 124 批：布尔 / 枚举环境变量的唯一读取入口 —— 拼错一个字母不再静默走到另一侧
+export * from "./env-flag";

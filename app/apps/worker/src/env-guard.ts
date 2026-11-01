@@ -8,6 +8,8 @@
  *
  * 纯函数实现，便于单测；错误信息只包含变量名与原因，不含任何密钥值。
  */
+import { parseEnvEnum } from "@app/shared";
+import { ADAPTER_MODE_SPEC } from "./env-flags";
 
 export interface WorkerEnvLike {
   NODE_ENV?: string;
@@ -21,16 +23,27 @@ function filled(value: string | undefined): boolean {
   return typeof value === "string" && value.trim() !== "";
 }
 
+/**
+ * 与适配器构造共用同一张 `ADAPTER_MODE` 表（第 124 批）：`ADAPTER_MODE=Real` 在这里和
+ * `main.ts` 必须得到同一个结论。未知取值把解析错误原文作为「当前」带进拒绝启动原因。
+ */
+function readAdapterMode(raw: string | undefined): { mode: "real" | "mock" | undefined; current: string } {
+  const trimmed = (raw ?? "").trim();
+  try {
+    return { mode: parseEnvEnum("ADAPTER_MODE", raw, ADAPTER_MODE_SPEC.values), current: trimmed === "" ? "未设置" : trimmed };
+  } catch (error) {
+    return { mode: undefined, current: (error as Error).message };
+  }
+}
+
 export function collectWorkerProductionProblems(env: WorkerEnvLike = process.env): string[] {
   const nodeEnv = (env.NODE_ENV ?? "development").trim();
   if (nodeEnv !== "production") return [];
 
   const problems: string[] = [];
-  const adapterMode = (env.ADAPTER_MODE ?? "").trim();
-  if (adapterMode !== "real") {
-    problems.push(
-      `ADAPTER_MODE 必须为 real（当前：${adapterMode === "" ? "未设置" : adapterMode}）；生产禁止 mock 生成`,
-    );
+  const adapterMode = readAdapterMode(env.ADAPTER_MODE);
+  if (adapterMode.mode !== "real") {
+    problems.push(`ADAPTER_MODE 必须为 real（当前：${adapterMode.current}）；生产禁止 mock 生成`);
   }
 
   const vendors: Array<[string, string | undefined]> = [

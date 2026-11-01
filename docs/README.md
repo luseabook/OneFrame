@@ -199,6 +199,26 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.82 · 布尔 / 枚举环境变量一个入口：写错一个字母不再静默走到另一侧 · 2026-11-01）
+
+仓库里布尔 / 枚举型环境变量一直是就地拿原始字符串比字面量（`=== "true"`、`!== "0"`、`=== "1"`、`as "local" | "s3"`），全树 **10** 个读者（worker `main.ts` 6 处、启动守卫 `env-guard.ts` 1 处、api `oauth.service.ts` / `auth.controller.ts` / `tool-catalog.ts` 各 1 处）。写法差一个字母不会报错、类型检查也过，行为却悄悄落到另一侧。本批的问法是：**同一类配置，是不是只有一个读取入口，接受表是不是只有一份**。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | 布尔 / 枚举配置没有统一入口，10 处各写各的字面量比较 | 先量（`_acceptance/d124/flag-probe.log`，`EXIT=0`）：15 种错误写法 **15 种全部静默错向**，对照组 15 种正确写法全部达成意图 | 探针矩阵先量后改 |
+| 2 | `AI_LABEL_ENABLED=0` / `=off` 被 `!== "false"` 判成 true | 想关的合规开关没关上 → 判定改走唯一入口 `readEnvFlag`（`1/true/yes/on` 与 `0/false/no/off` 两表，裁首尾空白、忽略大小写），新增 `packages/shared/src/env-flag.ts`（168 行） | 主程序 6 个站点改道的逐名断言 |
+| 3 | 同一变量两个读者给出相反结论：`ADAPTER_MODE=Real` 被 worker 主程序读成 mock、又被启动守卫判成「不是 real」 | 两份接受表合并成 `apps/worker/src/env-flags.ts`（27 行）里的**一张** `ADAPTER_MODE_SPEC`，主程序与启动守卫共用同一张表 | `readEnvCallNames(env-guard.ts)` 必须恰为 `["ADAPTER_MODE"]` |
+| 4 | `STORAGE_DRIVER=S3` 被裸转换 `as "local" \| "s3"` 当成未知驱动 | 报错文案却是「s3 storage requires s3 config」，排查方向整个跑偏 → `readEnvEnum` 归一小写并在启动时抛 `invalid STORAGE_DRIVER: "S3" (must be one of: local, s3)`；`STORAGE_*` 两张表只在 shared 定义一次，api 与 worker 都 import | 两张 spec 不许在 api / worker 里各自重定义 |
+| 5 | `OAUTH_MOCK=true` / `CAPTCHA_ENFORCE=true` 被 `=== "1"` 判成关 | 联调拿不到 mock，行为验证码入口在没有任何提示下直接放行 → 两个测试开关保留「调用时现场读」（测试要在同一进程切开关），但判定改走 `readEnvFlag`；启动快照另接 4 个 flag + 2 个 enum（`apps/api/src/config/env-values.ts` 78 行的 `zEnvFlag` / `zEnvEnum`，`env.ts:158/170/210/213/217/228`），坏值在启动时即被 schema 拦住 | 已知 10 个站点逐名改道断言 + `tool-catalog.ts` 不得再出现裸比较 |
+| 6 | 空白与坏值的语义必须统一 | 空白 = 没配置 → 返回该键的合法默认值；坏值 → `RangeError`，文案带变量名、原值与合法范围；默认值本身也在构造时自检。两个 `.env.example` 的注释写明可接受拼写（不区分大小写，首尾空白忽略，`1/true/yes/on` 与 `0/false/no/off`） | 20 例 shared 单测（空白 / 大小写 / 坏值 / 默认值自检） |
+| 7 | 守卫要能变红，否则只是装饰 | 撤 `tool-catalog.ts:1211` 回 `process.env.CATALOG_SYNC_TOOLS === "true"` → `env-flag-guard` `EXIT=1` 并点名该文件（附 `.not.toContain` 红）；还原后 7/7、`EXIT=0`。静态 AST 只认四种决策形状（四则比较 / `switch` 判别式 / 字面量类型断言 / 自造 `.includes`、`.indexOf` 接受表），真树 0 处 | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（3 cached）、typecheck 12/12（7 cached）、lint 7/7（4 cached；0 errors / 29 条既有 warning：web 27 + api 2，本批无新增）、`pnpm test` 12/12 **1,962 用例通过 + 1 跳过**（api 1,385/118、worker 104/14、shared 82/8、db 82/4、cli 128/17、model-adapters 164/14、storage 17+1/3；7 个包命中缓存）。比第 123 批 **+27** = shared 新增 20 例 + 守卫新增 7 例（worker 97→104、shared 62→82）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：空白按「没配置」返回默认值，所以「留空表示关」无法表达 —— 要关必须显式写 `0` / `false` / `no` / `off`；只覆盖布尔与枚举，自由文本配置（URL、地区、模型名）不在此列。静态守卫只认四种决策形状：`if (process.env.X)` 的真值判断（多为密钥「配没配」的存在性判断）、先解构 `const { X } = process.env` 再比较、`=== null` / `=== undefined` 都不看；`NODE_ENV` 豁免（2 处直接比较均为安全边界）。api 的六个 schema 键是**启动快照**，运行期热改不生效；`OAUTH_MOCK` / `CAPTCHA_ENFORCE` 故意保留现场读，因此这两个键即改即生效，与其它键语义不同 —— 已在两处注释里写明。守卫是 AST 静态扫描，看不到运行期被别的代码写进 `process.env` 的情况（当前仓库没有）。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.81 · 数值环境变量一个入口：空白不再是 0、坏值不再是 NaN 穿过闸门 · 2026-11-01）
 
 仓库里数值型环境变量一直是就地解析 `Number(process.env.<键> ?? 默认值)`，全树 15 处（worker 12、api 2、shared 1）。它有两个不抛错的静默口子：`Number("") === 0`（「留空」被当成 0），`Number("30s")` 是 `NaN`（而 `NaN <= 0` 为 false）。两者都是合法的 number，类型检查、lint、构建与总闸全绿也发现不了；只有运行时的行为能证明。本批的问法是：**同一类配置，是不是只有一个读取入口，坏值会不会当场失败**。

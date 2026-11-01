@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Req, Res , Inject} from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode } from "@app/shared";
+import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode, readEnvFlag } from "@app/shared";
 import { env } from "../../config/env";
+import { CAPTCHA_ENFORCE_SPEC } from "../../config/env-values";
 import { Public } from "../../common/public.decorator";
 import { clientIp } from "../../common/client-ip";
 import { parseOrThrow } from "../../common/zod";
@@ -76,14 +77,19 @@ export class AuthController {
   }
 
   /**
-   * 可选的行为验证码闸门（`CAPTCHA_ENFORCE=1` 时生效）。
+   * 可选的行为验证码闸门（`CAPTCHA_ENFORCE` 打开时生效，默认关）。
    *
    * 为什么放在 controller 而不是 service：它只拦"发码/登录"这两个入口，
    * 而 `AuthService` 本身还要被 OAuth/内部调用复用（那些路径不该被算术题挡住）。
-   * 读 `process.env` 而不是 `env` 常量：测试需要在同一进程里切"开/关"两态（与 OAuth 同口径）。
+   * 为什么现场读环境变量而不是 `env` 常量：测试需要在同一进程里切"开/关"两态（与 OAuth 同口径）。
+   *
+   * 第 124 批：判定改走唯一入口 `readEnvFlag`（1/true/yes/on；0/false/no/off），
+   * 旧写法 `String(...) !== "1"` 把 `CAPTCHA_ENFORCE=true` 判成「关」——强制校验没开，
+   * 入口在没有任何提示的情况下直接放行。坏值在启动时已被 schema 拦住，此处只可能在
+   * 运行期被改动后抛错（响亮失败，不静默放行）。
    */
   private async enforceCaptcha(input: { captcha_ticket?: string; captcha_answer?: unknown }): Promise<void> {
-    if (String(process.env.CAPTCHA_ENFORCE ?? "0") !== "1") return;
+    if (!readEnvFlag("CAPTCHA_ENFORCE", CAPTCHA_ENFORCE_SPEC)) return;
     if (!input.captcha_ticket) {
       throw new AppError(ErrorCode.INVALID_PARAM, "captcha required (captcha_required)", {
         field: "captcha_ticket",
