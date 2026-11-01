@@ -199,6 +199,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.79 · 数据库等待一律有上限：语句 / 锁 / 取连接 / 空闲事务四道闸 · 2026-11-01）
+
+前 120 批已经把仓库里几乎所有会挂住的等待都封了顶：停机等 25s（`main.ts:13`）、出站 `fetch` 的时间 + 字节双闸（第 119 批）、ffmpeg SIGTERM→SIGKILL（第 116 批）、入站列表项数（第 120 批）。**只有数据库这一处没有** —— pg 8.23.1 的 `statement_timeout` / `lock_timeout` / `idle_in_transaction_session_timeout` 默认都是 `false`（永远等），pg-pool 3.14.0 在没传 `connectionTimeoutMillis` 时把 `connect()` 直接压进 `_pendingQueue` 且**不挂定时器**（池满就无限等）。于是「10 个连接被慢查询占满 → 第 11 个请求永远不返回」这类卡死，在类型检查 / lint / 构建 / 总闸里**全是绿的**。本批的问法是：**运行时取连接与执行语句的每一段等待，是不是都有上限**。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | 四段等待全部无上限：取连接（池满）、语句执行、锁等待、事务开始后挂起 | 先量：`apps/*/src` + `packages/*/src` 下 **307** 个生产 `.ts`（跳过 `*.spec.ts` / `dist` / `node_modules`），`new Pool(`、`from "pg"`、`drizzle-orm/node-postgres` 各 **1** 处，都在 `packages/db/src/client.ts`；`createDb(` 的运行时调用点恰好 **2** 个（api `db/database.ts`、worker `main.ts`）。入口本就只有一个，缺的是入口里的上限与「以后不会多出第二个入口」 | 静态扫描先量后改 |
+| 2 | 上限不能只写在注释或某一条路径上 | `client.ts` 新增冻结的 `DB_LIMITS`：`poolMax 10` / `idleMs 30_000` / `acquireMs 10_000`（池被占满先暴露，与停机上限同量级）/ `statementMs 30_000`（单请求不比整个进程的停机窗口更久）/ `lockMs 10_000`（锁等待先于语句窗口失败）/ `idleTxMs 60_000`；`dbPoolOptions` 纯函数映射到 pg `PoolConfig`，`createDb` 只经它建池 | 单测整对象相等 39 例（含 6 个覆盖值各自只改一个键） |
+| 3 | `0` 在 pg 里不是「立即超时」，恰好是「永远等」——静默回落默认值会让一条闸无声消失 | `resolveDbLimits` 对 0 / 负数 / `NaN` / `Infinity` / 小数一律抛 `RangeError`（文案带 `0 = wait forever`），拼错的键名（如 `statementTimeout`）也抛 | 6 键 × 5 类坏值 = 30 例 + 1 例拼写 |
+| 4 | 参数写对 ≠ PostgreSQL 真的按它执行 | 新增 `apps/api/test/db-limits.spec.ts` **5 例真库**：api 共享池的 `pg_settings` 等于 `DB_LIMITS`（证明生产接线）、新建连接同样；`statementMs: 200` + `pg_sleep(1)` → SQLSTATE `57014`；`lockMs: 200` + 私有 advisory lock → `55P03`；`poolMax: 1 + acquireMs: 500` + 占住唯一连接 → pg-pool 的 `timeout exceeded when trying to connect` | 活体 e2e |
+| 5 | 谁再 `new Pool(...)` 就绕过全部四道闸，而类型检查 / lint / 总闸仍然全绿 | 新增 `packages/db/src/pool-sites.spec.ts` 10 例：按**逐文件分布相等**钉死三处唯一入口；`createDb(` 调用点减声明必须恰好是两个登记入口，且都从 `@app/db` 取；另 4 例扫描器自测（`new PoolBuilder` / `pg-pool` 不算、声明行不算调用点） | 门禁 |
+| 6 | 守卫要能变红，否则只是装饰 | 抽掉 `PoolConfig` 的四个闸 → 单测 `4 failed \| 45 passed (49)`，失败的四条正是整对象相等与 `pool.options` 断言；活体首跑 5/5 全红，根因是 stale `dist`（api 经 `@app/db` 的 `main` 解析到改前产物），build 后 4/5，acquire 又因 100ms 跑不过本机握手而红 —— 预热 + 500ms 后转绿；还原后 db **82/82**、活体 5/5 连跑四次 | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（11.668s，5 cached）、typecheck 12/12（8.386s，9 cached）、lint 7/7（5.257s，0 errors / 29 条既有 warning：web 27 + api 2，本批无新增）、`pnpm test` 12/12 **1,883 用例通过 + 1 跳过**（3m53.99s；api 1,356/117、db 82/4、shared 45/6、worker 91/12、cli 128/17、model-adapters 164/14、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：这些是**每连接**的服务端启动参数，只对池里新建的连接生效；迁移走 drizzle-kit、不经过 `createDb`，所以不受影响（也不该受影响）。超时后客户端拿到的是 pg 原始错误（语句 `57014`、锁 `55P03`、取连接是 pg-pool 的 `timeout exceeded when trying to connect`），`AllExceptionsFilter` 把它们归为 500 + `INTERNAL`，本批**不新增对外错误码**（那是契约变更）；不按请求动态调整，需要不同口径时用 `createDb` 的第二参数覆盖。`idle_in_transaction_session_timeout` 只断言服务端 `pg_settings` 的值，不断言它真的触发（要挂 60s）；也不断言任何耗时（CI 抖动会假红），「是否被打断」由 SQLSTATE 与「`pg_sleep` 本来会成功」共同证明。静态守卫是文本匹配而非 AST，只证明「入口唯一」、不证明数值正确（后者由整对象相等与 `pg_settings` 活体断言负责），也不覆盖 `scripts/` / `docs/`。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
 
 v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。
