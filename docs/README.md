@@ -126,6 +126,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.75 · 配置面三面对齐：声明 ↔ 读取 ↔ `.env.example` · 2026-11-01）
+
+换了一类此前没人用过的审计：不看代码内部，只看配置的三个面是否对齐 —— `envSchema` 的声明、生产代码的 `process.env` 读取、运维真正会复制的那份 `.env.example` 的可见性。起因是 `env.ts` 对 `OAUTH_*` / `CAPTCHA_ENFORCE` / `FILM_NOTIFY_*` 明写「此处登记只为可发现性」，而 `apps/api/.env.example` 里一个都没有；worker 的 10 个运维旋钮也只存在于代码默认值 ——「代码里有」不等于「运维能发现」，后者才是这份文件存在的理由。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | `env.ts` 自称「只为可发现性」登记的 `OAUTH_*` / `CAPTCHA_ENFORCE` / `FILM_NOTIFY_*`，在 `apps/api/.env.example` 里一个都找不到 | 补齐能力开关段：`OAUTH_*` 14 项（含 Apple 私钥 PEM 占位）、`CAPTCHA_ENFORCE` / `CAPTCHA_PROVIDER`、`MODERATION_ENABLED` / `MODERATION_WORDS`、`FILM_NOTIFY_WEBHOOK_URL` / `FILM_NOTIFY_SECRET`（附 `x-of-signature: sha256=<hex>` 校验说明）、`LLM_MODE` + `DEEPSEEK_*`、`AGENT_STT_*` | 本批守卫 ②③ |
+| 2 | `envSchema` 的 **88** 个键里有 **35** 个不在任何示例中（只看 api 自己的示例缺 **39**），运维按示例起服务会缺配置 | api 示例补齐鉴权/存储/可观测段（`ADMIN_JWT_SECRET`、`COOKIE_SECURE`、`METRICS_TOKEN`、`MASTER_TTL_S`、`STORAGE_S3_PUBLIC_ENDPOINT`、`SHUTDOWN_TIMEOUT_MS`、`APP_VERSION`、`FFMPEG_PATH` / `FFPROBE_PATH` 等），全部为占位值 | 本批守卫 ① |
+| 3 | worker 的 10 个运维旋钮（并发/轮询/看门狗/停机）只在代码里，运维不知道有、也不知道默认值 | `apps/worker/.env.example` 逐个写出并注明不配置时的默认值：`WORKER_CONCURRENCY=5`、`POLL_INTERVAL_MS=1000`、`POLL_MAX_MS=900000`、5 个看门狗/定时任务间隔、`SHUTDOWN_TIMEOUT_MS=25000` | 本批守卫 ② |
+| 4 | **22** 个生产读取无任何文档（api 11 / worker 12，并集 22，`SHUTDOWN_TIMEOUT_MS` 两边都读） | 逐条补进各自示例（`APP_VERSION`、`CATALOG_SYNC_TOOLS`、`MASTER_TTL_S`、`FFPROBE_PATH`、`STORAGE_S3_PUBLIC_ENDPOINT`、各轮询/看门狗间隔等）；`WORKER_ID` 在 schema 里声明但 api 不读，照实写 `pid % 1024` 而不是删 schema 条目 | 本批守卫 ② |
+| 5 | 手写清单会腐化；示例几乎全是 `# VAR=value`，只匹配裸赋值会得到 100+ 假阳性 | 新增 `apps/api/test/env-example-coverage.spec.ts` **5 例**：schema 全覆盖（带解析器自检 ≥50 键）、**按 app** 判读取而非并集、`packages/*` 覆盖、扫描器读注释行（正反双向自检）、豁免名单不腐化 | 本批守卫 5/5 |
+| 6 | 守卫本身要能变红，否则只是装饰 | 删掉 worker 示例里的 `# FFPROBE_PATH=ffprobe` 实测：`1 failed / 4 passed`，报 `FFPROBE_PATH（读于 \apps\worker\src\main.ts）`；加回后 5/5、76ms | 红→绿实测 |
+
+**验证**：api 示例 49 → **93** 个名字（覆盖全部 88 个 schema 键，缺口 0）、worker 42 → **54**；生产读取缺口 22 → **0**、schema 缺口 35 → **0**。门禁四段 `EXIT=0`：build 8/8（8.906s）、typecheck 12/12（8.757s）、lint 7/7（0 errors / 29 条既有 warning：web 27 + api 2）、`pnpm test` 12/12 **1,757 用例通过 + 1 跳过**（3m35.595s；api 1,295 / worker 91 / cli 128 / shared 35 / model-adapters 164 / db 27 / storage 17+1），台账守卫 11/11。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更）。
+
+**仍未做**：守卫只看**键是否出现**，不看说明写得对不对、默认值是否与代码一致；不覆盖 web 的 `import.meta.env.VITE_*`（构建期注入，与 node 进程 env 语义不同）；不校验动态 `process.env[key]`；示例里只放占位值，支付/短信/供应商 Key 仍走服务器 env 或 CI Secrets。分数不变：202.77/206 = 98.4%，剩余 3.23 全部是外部材料/资质/法务与产品决策，代码侧已无自记缺口。
+
+---
+
 ## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
 
 v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。
