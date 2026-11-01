@@ -15,6 +15,12 @@ import {
 } from "../src/outbound-uri";
 import { runGenerationTask, type ExecutorDeps } from "../src/executor";
 
+/**
+ * 本文件只验证出站 URI 签名，不关心标识；按 `ExecutorDeps` 的必填要求**显式关闭**，
+ * 而不是靠漏传字段绕过结算门（第 112 批：aiLabel 已从可选改为必填）。
+ */
+const LABELS_OFF = { enabled: false, text: "" } as const;
+
 const rawInput = () => ({
   prompt: "雨夜街头",
   reference_uris: ["u/1/assets/a.png"],
@@ -218,6 +224,7 @@ describe("executor outbound uri integration (P10)", () => {
       db,
       storage,
       adapterOptions: { mode: "real" },
+      aiLabel: LABELS_OFF,
       log: () => {},
       outboundUriTtlSeconds: 3600,
       resolveAdapter: () => fakeAdapter(captured),
@@ -259,6 +266,7 @@ describe("executor outbound uri integration (P10)", () => {
       db,
       storage,
       adapterOptions: { mode: "real" },
+      aiLabel: LABELS_OFF,
       log: (obj, msg) => logs.push({ obj, msg }),
       resolveAdapter: () => fakeAdapter(captured),
     };
@@ -274,5 +282,56 @@ describe("executor outbound uri integration (P10)", () => {
     expect(String(error?.message)).toContain("STORAGE_PUBLIC_BASE");
     expect(captured).toHaveLength(0); // 未调用供应商
     expect(logs.some((entry) => JSON.stringify(entry.obj).includes("STORAGE_DRIVER=s3"))).toBe(true);
+  });
+
+  /**
+   * 心跳（第 112 批）：长轮询必须刷新 `tasks.updatedAt`，否则看门狗的 10 分钟阈值
+   * 会在 `DEFAULT_MAX_POLL_MS`（15 分钟）到点之前把正常任务误杀。
+   * 这里把 updatedAt 拨到 1 小时前（等价于"已经轮询很久"），让假适配器在第二次 poll 时
+   * 反查数据库：如果心跳生效，此刻应看到 RUNNING + 新的 updatedAt。
+   */
+  it("长轮询期间刷新 updatedAt，看门狗不会把耗时任务判成卡死", async () => {
+    const taskId = await createVideoTask({ prompt: "heartbeat" });
+    const stale = new Date(Date.now() - 60 * 60_000);
+    await db.update(tasks).set({ updatedAt: stale }).where(eq(tasks.id, taskId));
+
+    let polls = 0;
+    let statusAtSecondPoll: number | undefined;
+    let updatedAtAtSecondPoll: Date | undefined;
+    const adapter: ModelAdapter = {
+      vendor: "fake",
+      submit: async () => ({ vendor_task_id: "vendor-heartbeat-1" }),
+      poll: async () => {
+        polls += 1;
+        if (polls === 1) {
+          // 让心跳间隔至少过去 1ms（heartbeatMs 在测试里压到 1ms）
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { status: "running" as const };
+        }
+        const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+        statusAtSecondPoll = row?.status;
+        updatedAtAtSecondPoll = row?.updatedAt;
+        return { status: "failed" as const, error: { code: "stop", message: "stop after heartbeat" } };
+      },
+      cancel: async () => {},
+    };
+
+    const storage = await makeStorage("https://cdn.test/v1");
+    await runGenerationTask(String(taskId), {
+      db,
+      storage,
+      adapterOptions: { mode: "mock" },
+      aiLabel: LABELS_OFF,
+      log: () => {},
+      resolveAdapter: () => adapter,
+      pollIntervalMs: 1,
+      heartbeatMs: 1,
+      maxPollMs: 60_000,
+      sleep: () => Promise.resolve(),
+    });
+
+    expect(polls).toBe(2);
+    expect(statusAtSecondPoll).toBe(2); // 轮询期间仍是 RUNNING
+    expect(updatedAtAtSecondPoll?.getTime()).toBeGreaterThan(stale.getTime());
   });
 });

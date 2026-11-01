@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { Worker, Queue } from "bullmq";
+import { Worker, Queue, type Job } from "bullmq";
 import pino from "pino";
 import { createDb } from "@app/db";
 import { timelinePublications } from "@app/db";
@@ -16,7 +16,7 @@ import {
 } from "./maintenance";
 import type { AdapterRuntimeOptions } from "@app/model-adapters";
 import { createStorage } from "@app/storage";
-import { QUEUES, redisConnection, type QueueName } from "./queues";
+import { HANDLED_QUEUES, QUEUES, RESERVED_QUEUES, redisConnection, type HandledQueueName } from "./queues";
 import { DEFAULT_MAX_POLL_MS, runGenerationTask, type ExecutorDeps } from "./executor";
 import { runExport } from "./export";
 import { runTimelineExport } from "./timeline-export";
@@ -305,51 +305,58 @@ schedule(
   true,
 );
 
-const workers: Worker[] = (Object.values(QUEUES) as QueueName[]).map((name) =>
-  new Worker(
-    name,
-    async (job) => {
-      if (name === QUEUES.GEN_SUBMIT) {
-        const taskId = (job.data as { taskId?: string }).taskId;
-        if (!taskId) throw new Error("missing taskId");
-        await runGenerationTask(taskId, deps);
-        return { ok: true, taskId };
-      }
-      if (name === QUEUES.EXPORT) {
-        const exportId = (job.data as { exportId?: string }).exportId;
-        if (!exportId) throw new Error("missing exportId");
-        await runExport(exportId, episodeExportDeps);
-        return { ok: true, exportId };
-      }
-      if (name === QUEUES.TIMELINE_EXPORT) {
-        const exportId = (job.data as { exportId?: string }).exportId;
-        if (!exportId) throw new Error("missing exportId");
-        await runTimelineExport(exportId, timelineExportDeps);
-        return { ok: true, exportId };
-      }
-      if (name === QUEUES.PUBLISH_TRANSCODE) {
-        const data = job.data as Partial<PublishTranscodeJobData>;
-        if (!data.publicationId || !data.spaceId || !data.sourceKey) {
-          throw new Error("missing publicationId/spaceId/sourceKey");
-        }
-        const outcome = await runPublishTranscodeJob(
-          { db, storage, log: (obj, msg) => log.info(obj, msg) },
-          {
-            publicationId: data.publicationId,
-            spaceId: data.spaceId,
-            sourceKey: data.sourceKey,
-          },
-        );
-        return { ok: true, ...outcome };
-      }
-      log.info({ queue: name, job_id: job.id }, "job received (no-op)");
-      return { ok: true };
-    },
-    {
-      connection: redisConnection,
-      concurrency: Number(process.env.WORKER_CONCURRENCY ?? 5),
-    },
-  ).on("error", (err) => log.error({ queue: name, err: err.message }, "worker error")),
+/**
+ * 每个**有处理器**的队列对应一个函数（第 112 批）。
+ *
+ * 为什么从「为所有名字建 Worker + if 链 + 兜底 no-op」改成显式表：
+ * 旧写法给 `gen.poll` / `result.transfer` / `notify` 也建了 Worker，而这 3 个名字没有任何
+ * 生产者；一旦有消息误入，兜底分支会 `return { ok: true }` —— BullMQ 视为处理成功并删除，
+ * 消息**静默丢失**（既不在 failed，也没有重试）。现在处理器表与 `HANDLED_QUEUES` 一一对应，
+ * 少一个键 typecheck 失败；预留队列不建 Worker，消息会积压可见。
+ */
+type JobHandler = (job: Job) => Promise<Record<string, unknown>>;
+
+const handlers: Record<HandledQueueName, JobHandler> = {
+  [QUEUES.GEN_SUBMIT]: async (job) => {
+    const taskId = (job.data as { taskId?: string }).taskId;
+    if (!taskId) throw new Error("missing taskId");
+    await runGenerationTask(taskId, deps);
+    return { ok: true, taskId };
+  },
+  [QUEUES.EXPORT]: async (job) => {
+    const exportId = (job.data as { exportId?: string }).exportId;
+    if (!exportId) throw new Error("missing exportId");
+    await runExport(exportId, episodeExportDeps);
+    return { ok: true, exportId };
+  },
+  [QUEUES.TIMELINE_EXPORT]: async (job) => {
+    const exportId = (job.data as { exportId?: string }).exportId;
+    if (!exportId) throw new Error("missing exportId");
+    await runTimelineExport(exportId, timelineExportDeps);
+    return { ok: true, exportId };
+  },
+  [QUEUES.PUBLISH_TRANSCODE]: async (job) => {
+    const data = job.data as Partial<PublishTranscodeJobData>;
+    if (!data.publicationId || !data.spaceId || !data.sourceKey) {
+      throw new Error("missing publicationId/spaceId/sourceKey");
+    }
+    const outcome = await runPublishTranscodeJob(
+      { db, storage, log: (obj, msg) => log.info(obj, msg) },
+      {
+        publicationId: data.publicationId,
+        spaceId: data.spaceId,
+        sourceKey: data.sourceKey,
+      },
+    );
+    return { ok: true, ...outcome };
+  },
+};
+
+const workers: Worker[] = HANDLED_QUEUES.map((name) =>
+  new Worker(name, handlers[name], {
+    connection: redisConnection,
+    concurrency: Number(process.env.WORKER_CONCURRENCY ?? 5),
+  }).on("error", (err) => log.error({ queue: name, err: err.message }, "worker error")),
 );
 
 const heartbeat = setInterval(() => log.info({ running: workers.length }, "worker heartbeat"), 30_000);
@@ -386,6 +393,13 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 log.info(
-  { queues: Object.values(QUEUES), pid: process.pid, adapterMode: adapterOptions.mode },
+  {
+    queues: HANDLED_QUEUES,
+    // 预留名同样打印：运维看到启动日志就知道这几个名字没有消费者，
+    // 不会把「队列里没动静」误判成 worker 掉线
+    reservedQueues: RESERVED_QUEUES,
+    pid: process.pid,
+    adapterMode: adapterOptions.mode,
+  },
   "[worker] started",
 );

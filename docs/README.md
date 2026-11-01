@@ -126,6 +126,23 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.70 · 队列孤儿消息审计：预留队列停建消费者 + 轮询心跳 + AI 标识结算硬门 · 2026-11-01）
+
+§5.6 C「定时任务/队列的孤儿消息」此前只是「审过、没改完」：`QUEUES` 目录里的 `gen.poll` / `result.transfer` / `notify` **没有任何生产者**，worker 却给 7 个名字全建了 Worker，误入的消息落进兜底分支 `log.info(..., "job received (no-op)"); return { ok: true };`，被 BullMQ 当作**成功完成**并删除 —— 不失败、不重试、无告警。同批审计还撞出两处更严重的：看门狗的 10 分钟阈值会杀掉正常跑 10–15 分钟的长轮询任务；`system-design.md` 写了、代码里根本没有的 AI 标识结算硬门。本批把这三处一起关掉，并把文档里从未实现的拓扑说法（延时 `gen.poll` 队列、指数退避重入队、`result.transfer` 消息、`notify` 队列、心跳表、transfer 队重试 ×3、健康探测/熔断）逐条改回现状。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | 3 个保留名没有生产者，worker 却为全部 7 个名字建 Worker；兜底 no-op 把误入消息静默完成并删除 | `queues.ts` 拆成 `HANDLED_QUEUES`（4 条实队列）与 `RESERVED_QUEUES`（3 个保留名）；worker 用 `Record<HandledQueueName, JobHandler>` 显式表，只为 handled 建 Worker；删除 no-op 兜底 | `test/queue-topology.spec.ts` 10 例：两侧目录一致、分区不交叠、API 只构造/入队 handled、worker 不给保留名建消费者、无 `Object.values(QUEUES)` 与 `(no-op)` |
+| 2 | 看门狗 10 分钟 vs 轮询上限 15 分钟：轮询循环从不刷新 `tasks.updated_at`，正常长任务被判卡死 + 解冻，供应商成功的结果又被终态守卫丢弃 | `DEFAULT_HEARTBEAT_MS = 30_000`，轮询期间以 `WHERE id = ? AND status = RUNNING` 刷新 `updated_at`；心跳失败只记 `task heartbeat failed`，不判任务失败 | `executor.spec.ts` +2 静态守卫（常量比看门狗阈值小一个数量级、RUNNING 守卫、日志关键字）+ `outbound-uri.spec.ts` +1 真库用例（`updatedAt` 拨到 1 小时前，第二次 poll 反查应看到新时间戳） |
+| 3 | 文档写「AI 标识是结算前硬门」，代码里没有：无标识产物照常结算 | `isResultLabeled` / `findUnlabeledResults` 在 `succeed()` 结算事务前判定；媒体产物隐式旁车与显式水印两条路径都失败 → `FAILED(ai_label_failed)` + 解冻、不结算；纯文本与 `AI_LABEL_ENABLED=false` 豁免，缺 `ai_label` 字段按未标识；`ExecutorDeps.aiLabel` 从可选改必填（踩到 `outbound-uri.spec.ts` 漏传） | `label.spec.ts` +5（判定口径逐条）+ `executor.spec.ts` +1 静态守卫（`succeed()` 必须调用 `findUnlabeledResults` 且失败走 `ai_label_failed`） |
+| 4 | 后台 `GET /ops/admin/queues` 只报 1 条队列（实队列 4 条），保留名混进来会误导告警口径 | `queues()` 改为 4 条实队列（`gen.submit` / `export.zip` / `timeline.export` / `publish.transcode`），每条 `getJobCounts("wait","active","failed","completed","delayed")`；保留名不进后台 | `admin.spec.ts` 断言返回键**恰为** 4 个；`queue-topology.spec.ts` 静态断言 admin 源码只出现 handled 名 |
+
+**验证**：worker 定向 `pnpm --filter @app/worker test` **82/82 通过**（11 文件，`EXIT=0`；本批 63→82，+19 例：`queue-topology.spec.ts` 10、`label.spec.ts` 5、`executor.spec.ts` 3、`outbound-uri.spec.ts` 1 真库）。全站门禁：`pnpm test` 12/12、**1,723 用例通过**（3m38s，api 段 205.8s；api 1,290 / worker 82 / cli 128 / shared 26 / model-adapters 164 / db 27 / storage 6，另 1 skipped）、build 8/8（9.4s）、typecheck 12/12（8.1s）、lint 7/7（12.0s，0 error / 29 条既有 warning：web 27 + api 2，本批无新增），四段 `EXIT=0`，台账守护 11/11；端点 **801** / controller **63** / 页面 **65** / 迁移 **50** / 表 **115** 全部不变（零端点、零迁移、零契约变更）；改动 15 个文件（14 改 + 1 新），`603 insertions(+) / 118 deletions(-)`（含两份变更登记）。**分数不变：202.77/206 = 98.4%，剩余 3.23，E 仍 **2.65**、I = 0（B 0.58）** —— 该条从未计入三分类，是又一条自记诚实边界的关闭，不是补分。
+
+**仍未做**：心跳**只在轮询期间** —— 供应商成功后到转存/烧水印/结算之间不再续期，超大媒体若在这一段超过 10 分钟仍会被看门狗判卡死（彻底解决要把心跳挪到整条流水线）；仍为 RUNNING 且已落 `vendorTaskId` 的重投会**重新 submit**、不会续接原轮询，可能产生供应商侧重复计费；预留队列只是不建消费者，没有 dead-letter / 自动重放工具，Redis 丢失仍需人工按任务状态重放；AI 标识**无自动重试**（失败即 FAILED，靠告警人工补）；供应商仍无健康探测/熔断；本批拓扑靠**静态源码守卫**，没有起 Redis 做真队列端到端验证。
+
+---
+
 ## 变更登记（v6.69 · 邀请码多会话并发删除与陈旧快照浏览器 E2E · 2026-11-01）
 
 v6.68 结尾「仍未做」的第 4 条：后台 E2E 仍是**单进程单浏览器**，不覆盖多管理员同时操作同一条码 —— 本批用**两个隔离浏览器上下文**（各自 `localStorage.admin_token`、不共享缓存与页面状态）在真栈上把它变成实测。验收脚本 `_acceptance/e2e-invite-race.cjs`，完整交付报告 `_acceptance/_team/report-invite-race.md`。

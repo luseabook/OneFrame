@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LocalStorage } from "@app/storage";
-import { DEFAULT_MAX_POLL_MS, transferResult, type ExecutorDeps, type TaskRow } from "./executor";
+import {
+  DEFAULT_HEARTBEAT_MS,
+  DEFAULT_MAX_POLL_MS,
+  transferResult,
+  type ExecutorDeps,
+  type TaskRow,
+} from "./executor";
+
+const executorSource = readFileSync(join(__dirname, "executor.ts"), "utf8");
 
 let dir = "";
 let storage: LocalStorage;
@@ -21,6 +29,8 @@ beforeAll(async () => {
     db: {} as ExecutorDeps["db"],
     storage,
     adapterOptions: { mode: "mock" },
+    // 本文件只测转存；标识显式关闭（aiLabel 必填，不允许靠漏传绕过结算门）
+    aiLabel: { enabled: false, text: "" },
   };
 });
 
@@ -79,5 +89,42 @@ describe("轮询上限默认值（P1-16）", () => {
     expect(main).toMatch(/POLL_MAX_MS\s*\?\?\s*DEFAULT_MAX_POLL_MS/);
     // 旧写法（内联 120_000 / 2 分钟）不许回来
     expect(main).not.toMatch(/POLL_MAX_MS\s*\?\?\s*120_?000/);
+  });
+});
+
+/**
+ * 合规硬门（第 112 批）：结算前必须过滤无标识产物。
+ *
+ * 纯函数口径在 `label.spec.ts` 里逐条覆盖；这里守的是**接线**——判定必须在 `succeed()`
+ * 结算事务之前调用，且失败走 `fail(..., ai_label_failed)`（置 FAILED + 解冻）。
+ * 只保留 `labelResults` 而不调用判定，等于门没装上，测试仍会全绿，所以需要这条静态守卫。
+ */
+describe("结算前的 AI 标识门（第 112 批）", () => {
+  it("succeed() 调用 findUnlabeledResults 并以 ai_label_failed 拒绝结算", () => {
+    expect(executorSource).toContain("findUnlabeledResults(labeled)");
+    expect(executorSource).toContain('kind: "ai_label_failed"');
+  });
+});
+
+/**
+ * 轮询心跳（第 112 批 §5.6 C 审计的连带修复）。
+ *
+ * 看门狗（`reviveStuckTasks`，默认 10 分钟）与轮询上限（`DEFAULT_MAX_POLL_MS`，15 分钟）
+ * 之间存在一个真实冲突：轮询循环此前从不刷新 `tasks.updatedAt`，所以正常跑 10–15 分钟的
+ * 视频会被看门狗判卡死 + 解冻，之后供应商成功的结果又被终态守卫丢弃。
+ * 这里钉住两件事：心跳间隔必须显著小于看门狗阈值；轮询循环里的心跳必须带 RUNNING 状态守卫
+ * （否则会把已被取消/看门狗处置的任务"续命"）。
+ */
+describe("轮询心跳（第 112 批）", () => {
+  it("DEFAULT_HEARTBEAT_MS 至少比看门狗阈值小一个数量级", () => {
+    expect(DEFAULT_HEARTBEAT_MS).toBeGreaterThan(0);
+    // 允许连续丢 19 次心跳才误杀；也防止有人把它调到接近 10 分钟
+    expect(DEFAULT_HEARTBEAT_MS * 20).toBeLessThanOrEqual(10 * 60_000);
+  });
+
+  it("轮询循环按 heartbeatMs 刷新 updatedAt，且只写 RUNNING 任务", () => {
+    expect(executorSource).toContain("deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS");
+    expect(executorSource).toContain("eq(tasks.status, TaskStatus.RUNNING)");
+    expect(executorSource).toContain("task heartbeat failed");
   });
 });

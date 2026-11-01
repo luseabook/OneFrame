@@ -91,6 +91,34 @@ export async function labelResults(
   return labeled;
 }
 
+/**
+ * 合规判定：这条结果是否带上了**可核验的标识**（第 112 批 §5.6 C 审计的连带修复）。
+ *
+ * 为什么需要这个判定：`labelResults` 在旁车写失败 + 水印失败时仍会返回结果，只把原因记进
+ * `ai_label.implicit_reason / explicit_reason`；随后 `succeed()` 会照常结算，产物在没有任何
+ * 标识的情况下对外 —— 与《生成合成内容标识办法》「未标识不得提供」冲突，也与
+ * `system-design.md` §4 承诺的合规硬门不符。现在结算前必须过这道门。
+ *
+ * 口径：
+ * - 没有 `uri` 的纯文本结果：标识随 API 响应的 `meta.ai_label` 返回，不算漏标；
+ * - `ai_label.enabled === false`：部署方显式关闭标识功能（`AI_LABEL_ENABLED=false`），不算漏标；
+ * - 其余：显式水印或隐式旁车**至少一个成功**才算标识成功；两者都失败 = 无标识产物。
+ */
+export function isResultLabeled(result: GenResult): boolean {
+  if (!result.uri) return true;
+  const label = result.meta?.ai_label as
+    | { enabled?: boolean; explicit?: boolean; implicit?: boolean }
+    | undefined;
+  if (!label) return false;
+  if (label.enabled === false) return true;
+  return label.explicit === true || label.implicit === true;
+}
+
+/** 结算门用：筛出无标识的媒体结果（空数组 = 全部合规） */
+export function findUnlabeledResults(results: GenResult[]): GenResult[] {
+  return results.filter((result) => !isResultLabeled(result));
+}
+
 export function escapeDrawtext(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
 }

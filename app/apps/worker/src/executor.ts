@@ -5,7 +5,7 @@ import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-
 import { resolveAdapter } from "@app/model-adapters";
 import type { StorageDriver } from "@app/storage";
 import { newId, TaskStatus, type GenerationRequest } from "@app/shared";
-import { labelResults, type AiLabelConfig } from "./label";
+import { findUnlabeledResults, labelResults, type AiLabelConfig } from "./label";
 import { resolveOutboundUris } from "./outbound-uri";
 import { mockPngBuffer } from "./mock-media";
 
@@ -16,9 +16,22 @@ export interface ExecutorDeps {
   storage: StorageDriver;
   adapterOptions: AdapterRuntimeOptions;
   log?: (obj: Record<string, unknown>, msg: string) => void;
-  aiLabel?: AiLabelConfig;
+  /**
+   * AI 标识配置。**必填**：合规硬门依赖它判定“这条产物有没有标识”，
+   * 若允许省略，漏传的调用方会绕过结算门（见 `succeed()` 的说明）。
+   * 不启用标识的调用方要显式传 `{ enabled: false }`，让产物带上
+   * `ai_label.enabled=false`，而不是让字段从结果里消失。
+   */
+  aiLabel: AiLabelConfig;
   pollIntervalMs?: number;
   maxPollMs?: number;
+  /**
+   * 轮询期间刷新 `tasks.updatedAt` 的间隔（毫秒），默认 `DEFAULT_HEARTBEAT_MS`。
+   *
+   * 看门狗按 `updatedAt` 超过 10 分钟判卡死并置失败+解冻；轮询上限是 15 分钟。
+   * 没有心跳时，一个正常跑 10–15 分钟的视频会在轮询中途被看门狗误杀。
+   */
+  heartbeatMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /** 出站素材 URI 签名有效期（秒）；默认 21600，由 ADAPTER_URI_TTL_SECONDS 覆盖 */
   outboundUriTtlSeconds?: number;
@@ -37,6 +50,19 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
  * 15 分钟覆盖 P99 并留余量；供应商更慢时可以调 `POLL_MAX_MS`。
  */
 export const DEFAULT_MAX_POLL_MS = 15 * 60_000;
+
+/**
+ * 轮询期间的任务心跳间隔（第 112 批）。
+ *
+ * 为什么需要：`reviveStuckTasks` 默认把 `updatedAt` 超过 **10 分钟** 的 PENDING/RUNNING
+ * 任务判为卡死（置 FAILED + 按流水解冻），而本执行器的默认轮询上限是 **15 分钟**。
+ * 在此之前，轮询循环从不写 `tasks.updatedAt` —— 一个正常需要 10–15 分钟的视频
+ * 会在供应商还在生成时被看门狗杀掉，随后供应商成功的结果又被终态守卫丢弃。
+ *
+ * 取 30s：远小于 10 分钟阈值（允许连续丢 19 次心跳才误杀），又不会给数据库
+ * 带来明显写压力（单任务每分钟 2 次 UPDATE）。纯心跳，不改 progress、不写事件。
+ */
+export const DEFAULT_HEARTBEAT_MS = 30_000;
 
 /**
  * 任务产物落库的 Content-Type / 扩展名。
@@ -122,15 +148,39 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
   for (let i = 0; i < results.length; i += 1) {
     transferred.push(await transferResult(deps, task, i, results[i]!, contentType));
   }
-  const labeled = deps.aiLabel
-    ? await labelResults(
-        deps.storage,
-        { id: String(task.id), capability: task.capability },
-        transferred,
-        deps.aiLabel,
-        deps.log,
-      )
-    : transferred;
+  const labeled = await labelResults(
+    deps.storage,
+    { id: String(task.id), capability: task.capability },
+    transferred,
+    deps.aiLabel,
+    deps.log,
+  );
+
+  // 合规硬门（第 112 批）：标识必须在**结算之前**成立。
+  //
+  // `labelResults` 对失败是「降级 + 记原因」而不是抛错：旁车写失败、ffmpeg 缺失/媒体过大
+  // 都会留下 `implicit=false` / `explicit=false`。以前这里直接往下结算，产物无任何标识就
+  // 对外了 —— 既违反《生成合成内容标识办法》，也和 §4 写的「禁止无标识产物对外」不符。
+  // 现在只要有一条媒体结果两条标识路径都失败，就置 FAILED 并解冻，让用户重投或运维修复
+  // （ffmpeg/字体/存储）后重跑，而不是扣费交付无标识内容。纯文本结果与
+  // `AI_LABEL_ENABLED=false` 不计入（见 `isResultLabeled` 的口径）。
+  const unlabeled = findUnlabeledResults(labeled);
+  if (unlabeled.length > 0) {
+    const labelMeta = (unlabeled[0]?.meta?.ai_label ?? {}) as {
+      implicit_reason?: string;
+      explicit_reason?: string;
+    };
+    const reason = labelMeta.implicit_reason ?? labelMeta.explicit_reason ?? "label missing";
+    deps.log?.(
+      { task_id: String(task.id), unlabeled: unlabeled.length, reason },
+      "ai label missing, refuse to settle",
+    );
+    await fail(deps, task, TaskStatus.FAILED, {
+      kind: "ai_label_failed",
+      message: `ai label not applied: ${String(reason).slice(0, 200)}`,
+    });
+    return;
+  }
 
   await deps.db.transaction(async (tx) => {
     const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for("update");
@@ -410,6 +460,8 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
 
     const interval = deps.pollIntervalMs ?? 1000;
     const deadline = Date.now() + (deps.maxPollMs ?? DEFAULT_MAX_POLL_MS);
+    const heartbeatMs = deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    let lastBeat = Date.now();
     for (;;) {
       const state = await adapter.poll(submitted.vendor_task_id);
       if (state.status === "succeeded") {
@@ -433,6 +485,27 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
       if (Date.now() > deadline) {
         await fail(deps, task, TaskStatus.FAILED, { kind: "vendor_timeout", message: "poll timeout" });
         return;
+      }
+      /**
+       * 心跳：供应商还在生成时刷新 `updatedAt`，让看门狗把「真的卡死」和
+       * 「只是跑得久」区分开。只写 RUNNING 的任务——任务已被用户取消或被看门狗
+       * 置失败后，心跳不该把终态"续命"（虽然这里只是 updatedAt，但无谓的写也没意义）。
+       * 心跳失败只记日志、不判任务失败：一次数据库抖动不该杀死正在生成的内容；
+       * 若数据库持续不可用，后续 succeed()/fail() 与看门狗仍会各自兜底。
+       */
+      if (Date.now() - lastBeat >= heartbeatMs) {
+        lastBeat = Date.now();
+        try {
+          await deps.db
+            .update(tasks)
+            .set({ updatedAt: new Date() })
+            .where(and(eq(tasks.id, id), eq(tasks.status, TaskStatus.RUNNING)));
+        } catch (error) {
+          deps.log?.(
+            { task_id: taskId, err: error instanceof Error ? error.message : String(error) },
+            "task heartbeat failed",
+          );
+        }
       }
       await sleep(interval);
     }

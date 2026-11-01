@@ -699,8 +699,8 @@ worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至�
 GET  /ops/config/{key}?module=&lang=      // 公告/横幅/定价页文案；lang 以 module 后缀隔离（home@en），未命中回落无语言 module
 
 # ── 概览 / 运营位 / 首页配置 / 导出审计 / 分享 / 举报 / 创作者审核 ──
-GET  /ops/admin/dashboard                 // 失败率/队列深度/adapter 延迟/任务状态分布
-GET  /ops/admin/queues                    // gen.submit · export.zip 的 wait/active/failed/completed/delayed
+GET  /ops/admin/dashboard                 // 用户/管理员/任务状态分布/导出数/有效分享/待处理举报 + 4 队列计数
+GET  /ops/admin/queues                    // gen.submit · export.zip · timeline.export · publish.transcode 的 wait/active/failed/completed/delayed
 GET  /ops/admin/promo-slots · POST · PUT /{id} · DELETE /{id}   // banner/pop_up/activity/creator 四类；列表回 active_now
 GET  /ops/admin/home-config · POST /ops/admin/home-config       // global 层首页板块；乐观锁 version
 GET  /ops/admin/exports?page=&page_size=  // 导出任务审计

@@ -18,13 +18,13 @@
               │  billing·assets·files·ops │
               └───┬──────────┬─────────┬──┘
                   │          │         │
-        ┌─────────▼──┐ ┌────▼────┐ ┌──▼───────────────┐
-        │ PostgreSQL │ │ Redis   │ │ BullMQ queues    │
-        │ (业务主库) │ │ 缓存/锁 │ │ gen.submit      │
-        └────────────┘ │ 会话    │ │ gen.poll        │
-                       └─────────┘ │ result.transfer │
-                                   │ notify          │
-                                   └───┬───────────────┘
+        ┌─────────▼──┐ ┌────▼────┐ ┌──▼──────────────────┐
+        │ PostgreSQL │ │ Redis   │ │ BullMQ queues       │
+        │ (业务主库) │ │ 缓存/锁 │ │ gen.submit          │
+        └────────────┘ │ 会话    │ │ export.zip          │
+                       └─────────┘ │ timeline.export     │
+                                   │ publish.transcode   │
+                                   └───┬─────────────────┘
                                        ▼
                           ┌────────────────────────┐
                           │ Worker (apps/worker)   │
@@ -36,6 +36,13 @@
                                   ▼
                           对象存储 OSS(私有桶) + CDN 预签名
 ```
+
+**队列口径（第 112 批审计）**：`apps/worker/src/queues.ts` 的 `QUEUES` 目录另有
+`gen.poll` / `result.transfer` / `notify` 三个**保留名**（`RESERVED_QUEUES`）——
+worker 只为 `HANDLED_QUEUES`（上列 4 条）注册消费者，API 也只构造这 4 条。
+生成流水线在 `runGenerationTask` 内联完成 submit → 固定间隔 poll → 转存 → 标识 → 结算，
+**不产生** poll/transfer 消息；任务状态经 `task_events` + SSE 推送，不需要 notify 队列。
+保留名只为兼容旧配置、避免误配，`queue-topology.spec.ts` 守卫「保留名不得被构造或入队」。
 
 ## 2. 模块职责与依赖规则
 
@@ -101,37 +108,49 @@ Web            API(generations)        Redis/PG          BullMQ
  │                      │ ④ 事务: tasks(INSERT PENDING)       │
  │                      │   + credit_accounts.frozen+=cost    │
  │                      │   + credit_flows(freeze)            │
- │                      │ ⑤ gen.submit.add(task_id) ───────►│
+ │                      │ ⑤ gen.submit.add({taskId}) ──────►│
  │◄─ 200 {task_id,...} ─│                                    │
 ```
 
-失败路径：④ 余额不足抛 745701（不落任务）；⑤ 入队失败回滚事务；幂等重放返回原任务。
+失败路径：④ 余额不足抛 745701（不落任务）；⑤ 入队失败**不回滚创建事务**——创建已提交，
+改为在同库执行**补偿事务**：锁定任务并确认仍是 PENDING，按 `credit_flows` 解冻
+（`releaseFrozen(..., disposition: "unfreeze")`），任务置 FAILED（
+`error.kind = queue_error`）并写 `task.failed` 事件，随后向客户端返回错误、删除幂等键；
+幂等重放（成败路径）返回原任务。入队消息用 `jobId = task-<id>`、`attempts = 1`：
+重试由任务状态与看门狗兜底，不让 BullMQ 把同一任务重复投递。
 
-### 3.2 Worker 执行（submit → poll → transfer）
+### 3.2 Worker 执行（submit → poll → transfer → label → settle）
 
 ```
-Worker                 Adapter(火山…)          OSS            PG/Redis
- │ gen.submit 领取 │                        │               │
- │ submit(req) ──────► vendor_task_id          │               │
- │ 状态→RUNNING(2) ──────────────────────────────────────────► │
- │ gen.poll 加入延时队列(5s起,指数退避≤30s,上限=模型超时) ───► │
- │   poll(vendor_task_id) ─► {SUCCEEDED, uris}│               │
- │   ├─ 未终态: 重新延时入队                    │               │
- │   └─ 终态:                                │               │
- │       a) 内容审核拦截 → REVIEW_REJECTED + 解冻               │
- │       b) 失败 → FAILED + 解冻 + error{vendor_code}          │
- │       c) 成功 → result.transfer                          │
- │            下载 uri ────────────────────────► 转存私有桶    │
- │            post-process(必须成功后才结算)：                 │
- │              视频：ffmpeg 烧录"AI生成"水印 + 写 mp4 元数据   │
- │                    (comment/©too：task_id/model/生成时间)   │
- │              图片：重编码(剥 EXIF)+写 XMP/PNG tEXt AI 标识   │
- │              probe 校验(可解码 + 标识可读)                  │
- │            results 写回 + 结算(frozen-=,balance-=,consume)  │
- │            notify(SSE推送/到期推送)                       │
+Worker                 Adapter(火山…)          OSS            PG
+ │ gen.submit 领取
+ │ 状态→RUNNING(2) ─────────────────────────────────────────► PG
+ │ submit(req) ──────► vendor_task_id
+ │   ├─ 有 sync_results → 直接进入「转存 → 标识 → 结算」
+ │   └─ 异步任务：vendor_task_id 落库，进入固定间隔轮询
+ │ poll(vendor_task_id) ─► pending / running
+ │   ├─ 未终态：sleep(POLL_INTERVAL_MS，默认 1s) 后继续
+ │   │   每 DEFAULT_HEARTBEAT_MS（30s）刷新 tasks.updated_at
+ │   ├─ 超过 POLL_MAX_MS（默认 15min）→ FAILED(vendor_timeout) + 解冻
+ │   ├─ review_rejected → REVIEW_REJECTED + 解冻
+ │   ├─ failed → FAILED + 解冻 + error{vendor_code}
+ │   └─ succeeded →
+ │        ① 逐条转存：下载 uri ─────────────► 私有存储
+ │           失败 → 保留供应商 URL + meta.transfer_failed（告警人工补转）
+ │        ② AI 标识（结算前硬门）：
+ │           隐式 = 写 `<uri>.ai.json` 旁车；显式 = ffmpeg 烧录水印
+ │           两条都失败 → FAILED(ai_label_failed) + 解冻，不结算
+ │        ③ 单事务：results 写回 + 结算（settle）
+ │           + 定妆图/分镜/画布节点回写 + task.succeeded 事件
+ │   （状态经 task_events + SSE 推送；不产生 notify 消息）
 ```
 
-**超时兜底**：poll 总时长 > 模型 P99×2 → 标记 FAILED(kind=vendor_timeout) 并解冻；vendor 查询接口 5xx 连续 5 次 → 告警并继续退避（不轻易判死，供应商偶发抖动）。
+**实现口径**（与上文队列拓扑一致）：轮询是 `runGenerationTask` 内的固定间隔循环，
+不是延时队列、不做指数退避、也不「重新入 poll 队」；成功后的转存在同一函数内联完成，
+不产生 `result.transfer` 消息。**超时兜底**：轮询总时长超过 `POLL_MAX_MS`
+（默认 `DEFAULT_MAX_POLL_MS` = 15 分钟）→ FAILED(kind=vendor_timeout) 并解冻；
+供应商 5xx/429/网络抖动由 adapter 内建重试处理（`maxRetries` 默认 2，指数退避），
+4xx 业务错误与审核码不重试。
 
 ### 3.3 结果下载（预签名）
 
@@ -141,14 +160,14 @@ Worker                 Adapter(火山…)          OSS            PG/Redis
 
 | 失败 | 检测 | 对策 |
 |---|---|---|
-| Worker 崩溃（任务卡 RUNNING） | 心跳表 + 看门狗扫描 RUNNING>10min | 重新入 poll 队；供应商侧幂等（vendor_task_id 去重） |
-| 供应商全面不可用 | adapter 健康探测(探针任务/错误率) | 熔断该模型：目录置灰 + 前端提示切换 |
+| Worker 崩溃（任务卡 PENDING/RUNNING） | 轮询期间每 30s 心跳（`DEFAULT_HEARTBEAT_MS`）刷新 `tasks.updated_at`；看门狗每 60s 扫 `updated_at` 超 10 分钟的 PENDING/RUNNING（单轮上限 200） | 置 FAILED(`watchdog_timeout`) 并按 `credit_flows.frozen_delta` 余额解冻；重投由入口终态守卫跳过。**已知边界**：仍为 RUNNING 且已落 `vendorTaskId` 的重投会重新 submit，不会续接原轮询 |
+| 供应商全面不可用 | 暂无自动健康探测/熔断（未实现，非现状） | 人工在模型目录置灰 + 前端提示切换；失败率靠指标与告警观察 |
 | 供应商 5xx / 429 / 网络抖动 | adapter 内建重试（指数退避） | 默认重试 2 次（`maxRetries`），4xx 业务错误不重试 |
-| OSS 转存失败 | transfer 队重试 3 次 | 降级：直接引用供应商 URL（24h 内）+ 告警人工补转 |
-| AI 标识后处理失败 | probe/水印断言 | 重试 3 次；仍失败→FAILED 且不结算 + 告警；禁止无标识产物对外（合规硬门） |
+| OSS 转存失败 | 逐条 `transferResult` 下载/写入异常 | 该条保留供应商 URL + `meta.transfer_failed = true`，记日志 `result transfer failed, degrade to origin uri`；**无 transfer 队列重试**，人工补转；对外下载仍走我方预签名，不透传供应商 URL（ADR-005） |
+| AI 标识后处理失败 | `labelResults` 写入 `meta.ai_label`（隐式旁车 / 显式水印），`findUnlabeledResults` 在结算事务前判定 | 无自动重试：媒体产物两条路径都失败 → FAILED(`ai_label_failed`) + 解冻、不结算 + 告警；纯文本与 `AI_LABEL_ENABLED=false` 不拦（合规硬门） |
 | 支付回调丢失 | 对账任务每 5min 查未终态订单 | 主动查单补账 |
 | 支付回调被伪造 | 渠道签名验签（默认拒绝） | 微信 RSA-SHA256 + 5min 时间戳容差；支付宝 RSA2；未配公钥一律 401101 |
-| Redis 队列丢失(灾备) | 队列镜像/持久化(AOF) | PG tasks 表是事实来源，可重放入队 |
+| Redis 队列丢失(灾备) | PG `tasks` 是事实来源 | 人工按任务状态重放 `gen.submit.add({taskId})`（仅 PENDING 任务会被执行，终态被入口守卫跳过）；当前无自动重放工具 |
 | 秒级重复提交 | 幂等键 | 5min 内同键返回原任务 |
 
 ### 4.1 供应商适配器契约（`packages/model-adapters`）

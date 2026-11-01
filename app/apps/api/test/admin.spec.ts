@@ -59,11 +59,19 @@ describe("ops admin", () => {
     await adminInject("PATCH", `/ops/admin/models/${first.id}`, { visible: first.visible });
   });
 
-  it("returns queue metrics", async () => {
+  it("returns queue metrics for every live queue", async () => {
     const res = await adminInject("GET", "/ops/admin/queues");
     expect(res.code).toBe(0);
-    expect(typeof res.data["gen.submit"].wait).toBe("number");
-    expect(typeof res.data["export.zip"].active).toBe("number");
+    // 第 112 批：4 条有生产者/处理器的活队列都必须可见；
+    // 预留名（gen.poll / result.transfer / notify）不出现——没有生产者，报出来只会误导。
+    for (const name of ["gen.submit", "export.zip", "timeline.export", "publish.transcode"]) {
+      expect(typeof res.data[name].wait).toBe("number");
+      expect(typeof res.data[name].active).toBe("number");
+      expect(typeof res.data[name].failed).toBe("number");
+    }
+    expect(Object.keys(res.data).sort()).toEqual(
+      ["export.zip", "gen.submit", "publish.transcode", "timeline.export"].sort(),
+    );
   });
 
   it("lists tasks/exports/shares for audit", async () => {

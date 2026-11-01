@@ -33,12 +33,30 @@ function pageArgs(page?: number, pageSize?: number) {
 export class AdminService {
   constructor(@Inject(QueueService) private readonly queue: QueueService) {}
 
+  /**
+   * 队列积压面板（第 112 批扩到 4 条活队列）。
+   *
+   * 口径：只报「有生产者、worker 有真实处理器」的队列。`gen.poll` / `result.transfer` /
+   * `notify` 是预留名（轮询与转存在 executor 内联，通知渠道未接），没有生产者，
+   * 把它们列出来只会让运维盯着一排恒为 0 的卡片，掩盖真正需要看的积压。
+   * `timeline.export` 与 `publish.transcode` 各自有看门狗重投，漏报等于让「卡住但没重投」
+   * 的状态在后台不可见——这正是本批补上的观测盲区。
+   */
   async queues() {
-    const [submit, exportJobsQueue] = await Promise.all([
-      this.queue.submitQueue.getJobCounts("wait", "active", "failed", "completed", "delayed"),
-      this.queue.exportQueue.getJobCounts("wait", "active", "failed", "completed", "delayed"),
+    const counts = (queue: QueueService["submitQueue"]) =>
+      queue.getJobCounts("wait", "active", "failed", "completed", "delayed");
+    const [submit, exportJobsQueue, timelineExport, publishTranscode] = await Promise.all([
+      counts(this.queue.submitQueue),
+      counts(this.queue.exportQueue),
+      counts(this.queue.timelineExportQueue),
+      counts(this.queue.publishTranscodeQueue),
     ]);
-    return { "gen.submit": submit, "export.zip": exportJobsQueue };
+    return {
+      "gen.submit": submit,
+      "export.zip": exportJobsQueue,
+      "timeline.export": timelineExport,
+      "publish.transcode": publishTranscode,
+    };
   }
 
   /**

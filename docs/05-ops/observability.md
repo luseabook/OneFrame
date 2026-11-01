@@ -78,13 +78,16 @@ RED 三件套/API 路由 + 队列 + 供应商：
 ```
 http_request_duration_seconds{route,method,status}   # P50/P95（由请求日志 duration_ms 聚合）
 http_request_total{route,method,status}
-queue_depth{queue} · queue_age_seconds{queue}         # gen.submit/poll/transfer
+queue_depth{queue} · queue_age_seconds{queue}         # 仅 4 条实队列：gen.submit/export.zip/timeline.export/publish.transcode
 task_status_total{from,to}                            # 状态机迁移计数
 vendor_request_duration{vendor,op} · vendor_error_total{vendor,code}
 credits_frozen / credits_settled / credits_unfrozen (counter)
 ```
 
 > 现状：`/v1/metrics` 已暴露任务状态分布、15min 失败率、待支付超时、**已支付未入账**、进程指标；
+> **不暴露队列指标**——队列 wait/active/failed/completed/delayed 目前看后台
+> `GET /ops/admin/queues`（4 条实队列）与 BullMQ 面板；`gen.poll` / `result.transfer` / `notify`
+> 是保留名（见 `system-design.md` §1），没有消费者，不应纳入队列深度/年龄告警。
 > 路由级 RED（`http_request_*`）当前由请求日志在采集端聚合，如需服务端直出另行接入（P2）。
 
 ## 3. 业务指标（竞品式供给看板，metrics.md §4 数据源）
@@ -94,9 +97,9 @@ credits_frozen / credits_settled / credits_unfrozen (counter)
 | 任务成功率(1h 窗) | SUCCEEDED/(S+FAILED) | <85% 告警, <70% 页面降级提示 |
 | 供应商 P95 延迟(提交→终态) | 按 vendor | > 模型 P99×1.5 告警 |
 | 单任务均成本 | 结算积分↔供应商成本 | 毛利率 <25% 告警(定价复核) |
-| 队列积压 | depth+age | age>5min 告警 |
+| 队列积压 | wait 深度 + 最老任务年龄（`/ops/admin/queues` / BullMQ 面板） | age>5min 告警（告警接入待做，当前面板巡检） |
 | 审核拦截率 | REVIEW_REJECTED/全部 | >5% 告警(内容安全复盘) |
-| AI 标识后处理失败率 | post-process 失败/成功转存 | >0.5% 告警；>0 即检查 ffmpeg/字体/磁盘 |
+| AI 标识后处理失败率 | FAILED(`ai_label_failed`) / 含媒体产物的任务 | >0.5% 告警；>0 即检查 ffmpeg/字体/磁盘 |
 | 已支付未入账 | `oneframe_orders_paid_without_credit` | >0 立即 P0（用户付了钱没到账） |
 
 ## 4. 告警路由
@@ -104,7 +107,8 @@ credits_frozen / credits_settled / credits_unfrozen (counter)
 | 级别 | 条件 | 通道 | 响应 |
 |---|---|---|---|
 | P0 | API 5xx>1% / DB 不可达 / 支付回调失败 / `paid_without_credit>0` | 电话+IM | 立即, 止血优先 |
-| P1 | 任务成功率<85% / 队列 age>5min / 余额对账不平 / 慢请求持续 5min | IM 群@值班 | 1h 内 || P2 | 毛利率漂移 / 探针失败 / 证书 14 天到期 / `aborted` 占比突增 | IM 群 | 当日 |
+| P1 | 任务成功率<85% / 队列 age>5min（待接入） / 余额对账不平 / 慢请求持续 5min | IM 群@值班 | 1h 内 |
+| P2 | 毛利率漂移 / 供应商错误率突增 / 证书 14 天到期 / `aborted` 占比突增 | IM 群 | 当日 |
 
 > 「余额对账不平」（`LEDGER MISMATCH`，指标口径 `balance != Σdelta` 或 `frozen != Σfrozen_delta`）
 > 先按 `deployment.md §7.5 账本对账与修复 SOP` 跑只读 `node _acceptance/ledger-repair.cjs --dry-run`，
