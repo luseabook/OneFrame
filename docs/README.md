@@ -126,6 +126,22 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.71 · 重投续接原 vendorTaskId + 整条流水线心跳与下载上限 · 2026-11-01）
+
+v6.70 结尾「仍未做」的前两条是同一处执行链的两个缺口：① BullMQ 把被中断的 job 重投回来时，只要任务还在 PENDING/RUNNING 就**重新 `adapter.submit`** —— 供应商侧多出一个任务（重复计费），原任务的结果永远没人取；② 心跳**只在轮询循环里**，供应商成功后到转存/烧水印/标识/结算之间不再续期，正常跑满 10–15 分钟的长任务后半段又回到看门狗裸奔状态。本批把执行判定改成三分支的返回值、心跳挪到整条流水线，并顺手补上一直缺失的下载上限 —— 否则被心跳续命的挂死转存会让任务永远 RUNNING。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | 重投一个仍为 RUNNING 且已落 `vendorTaskId` 的任务会重新 submit：供应商重复计费，原结果无人取；旧事务只挡 CANCELED 且**不把结论传回外层**，取消后照样 submit | 新导出 `claimTaskForRun`：行锁内给出 `skip`（CANCELED / SUCCEEDED / FAILED 全挡）/ `resume`（RUNNING 且有 vendorTaskId：写 `task.resumed` 后直接轮询，绝不 submit、不改写 vendorTaskId）/ `submit`（PENDING 或 RUNNING 无 vendor id：置 RUNNING、progress 10、写 `task.running`，带上 `previousStatus`），外层按返回值分派 | `test/executor-recovery.spec.ts` 7 例真库：三个终态 skip 且零事件、resume 只写 `task.resumed`、两种 submit 分支的 `previousStatus`、**端到端**重投（submit 一调就抛错、poll 收到原 id、终态 SUCCEEDED、没有第二条 `task.running`）、CANCELED 重投不复活 |
+| 2 | 心跳只在轮询循环里，转存/烧水印/标识/结算无续期；看门狗 10 分钟会杀掉这一段 | 抽成 `startTaskHeartbeat`，在 claim 判定**之后**启动、`finally` 里停掉；`DEFAULT_HEARTBEAT_MS = 30_000`（`deps.heartbeatMs` 可覆盖），`WHERE id = ? AND status = RUNNING` 只续 RUNNING，失败只记 `task heartbeat failed`，定时器 `unref()`；删除旧的 `lastBeat` 计数实现 | `executor.spec.ts` 静态守卫：心跳必须在 claim 之后、`lastBeat` 不许回来、RUNNING 条件与日志关键字；`executor-recovery.spec.ts` 真库用例把 `updatedAt` 拨回 1 小时、转存期间反查库仍是 RUNNING 且已续期 |
+| 3 | `transferResult` 的 `fetch` 完全无上限：转存挂住会被流水线心跳无限续命，任务永远 RUNNING | `DEFAULT_TRANSFER_TIMEOUT_MS = 5 * 60_000`（`deps.transferTimeoutMs` 可覆盖）+ `AbortSignal.timeout(timeoutMs)`；超时按 ADR-005 降级：不判失败，保留供应商原 URI 并标 `meta.transfer_failed = true`，交人工补转（原 URI 仍只在任务结果里，不直接透出给终端用户） | `executor.spec.ts` 断言常量低于看门狗阈值且 `AbortSignal.timeout` 真接到 fetch；`executor-recovery.spec.ts` 让 fetch 在 abort 时 reject，断言任务 SUCCEEDED、URI 不变、`transfer_failed` 为真 |
+
+**验证**：worker 定向 `pnpm --filter @app/worker test` **91/91 通过**（12 文件，`EXIT=0`；本批 82→91，+9 例：新增 `test/executor-recovery.spec.ts` 7 例真库，`src/executor.spec.ts` 9→11）。全站门禁：`pnpm test` 12/12、**1,732 用例通过**（api 段 205.82s / worker 段 11.28s；api 1,290 / worker 91 / cli 128 / shared 26 / model-adapters 164 / db 27 / storage 6，另 1 skipped）、build 8/8（1.865s，worker 缓存 miss 走 `tsc`）、typecheck 12/12（1.803s）、lint 7/7（1.803s，0 error / **29** 条既有 warning：web 27 + api 2，均 2026-10-29 第 95 批遗留，本批无新增），四段 `EXIT=0`，台账守护 11/11；端点 **801** / controller **63** / 页面 **65** / 迁移 **50** / 表 **115** 全部不变（零端点、零迁移、零契约变更；`task_events.type` 是自由文本，`task.resumed` 不改 schema）。**分数不变：202.77/206 = 98.4%，剩余 3.23，E 仍 **2.65**、I = 0（B 0.58）** —— 该条从未计入三分类，是本批关掉的两条自记诚实边界，不是补分。
+
+**仍未做**：心跳只证明**进程还活着**，不证明供应商/存储还在推进 —— 彻底挂死的存储驱动（或 ffmpeg 烧水印卡死）仍会被续命，本批只给**单次下载**加了上限，极端情况仍要人工介入；resume 只在同一 worker 进程重投时安全，若供应商侧任务已过期，`poll` 会按供应商错误码失败并解冻（不会静默卡住），但「已计费却拿不到结果」的用户补偿仍是人工；预留队列 `gen.poll` / `result.transfer` / `notify` 仍无 dead-letter / 自动重放工具，Redis 丢失仍需人工按任务状态重放；AI 标识**无自动重试**（失败即 FAILED，靠告警人工补）；供应商仍无健康探测/熔断；本批靠**真库用例 + 静态源码守卫**，没有起 Redis + 真 BullMQ 做端到端重投演练，也没有多副本/延迟/连接池耗尽的测量。
+
+---
+
 ## 变更登记（v6.70 · 队列孤儿消息审计：预留队列停建消费者 + 轮询心跳 + AI 标识结算硬门 · 2026-11-01）
 
 §5.6 C「定时任务/队列的孤儿消息」此前只是「审过、没改完」：`QUEUES` 目录里的 `gen.poll` / `result.transfer` / `notify` **没有任何生产者**，worker 却给 7 个名字全建了 Worker，误入的消息落进兜底分支 `log.info(..., "job received (no-op)"); return { ok: true };`，被 BullMQ 当作**成功完成**并删除 —— 不失败、不重试、无告警。同批审计还撞出两处更严重的：看门狗的 10 分钟阈值会杀掉正常跑 10–15 分钟的长轮询任务；`system-design.md` 写了、代码里根本没有的 AI 标识结算硬门。本批把这三处一起关掉，并把文档里从未实现的拓扑说法（延时 `gen.poll` 队列、指数退避重入队、`result.transfer` 消息、`notify` 队列、心跳表、transfer 队重试 ×3、健康探测/熔断）逐条改回现状。

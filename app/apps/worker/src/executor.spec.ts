@@ -7,6 +7,7 @@ import { LocalStorage } from "@app/storage";
 import {
   DEFAULT_HEARTBEAT_MS,
   DEFAULT_MAX_POLL_MS,
+  DEFAULT_TRANSFER_TIMEOUT_MS,
   transferResult,
   type ExecutorDeps,
   type TaskRow,
@@ -107,24 +108,50 @@ describe("结算前的 AI 标识门（第 112 批）", () => {
 });
 
 /**
- * 轮询心跳（第 112 批 §5.6 C 审计的连带修复）。
+ * 流水线心跳与执行判定（第 112 批起，第 113 批扩到整条链路）。
  *
  * 看门狗（`reviveStuckTasks`，默认 10 分钟）与轮询上限（`DEFAULT_MAX_POLL_MS`，15 分钟）
- * 之间存在一个真实冲突：轮询循环此前从不刷新 `tasks.updatedAt`，所以正常跑 10–15 分钟的
- * 视频会被看门狗判卡死 + 解冻，之后供应商成功的结果又被终态守卫丢弃。
- * 这里钉住两件事：心跳间隔必须显著小于看门狗阈值；轮询循环里的心跳必须带 RUNNING 状态守卫
- * （否则会把已被取消/看门狗处置的任务"续命"）。
+ * 之间存在一个真实冲突：执行期间不刷新 `tasks.updatedAt`，正常跑 10–15 分钟的视频会被
+ * 看门狗判卡死 + 解冻，之后供应商成功的结果又被终态守卫丢弃。
+ *
+ * 第 113 批把心跳从「只在轮询循环里」改成覆盖 submit → 轮询 → 转存 → 标识 → 结算整条链路
+ * （供应商成功后的转存/烧水印同样可能超过 10 分钟），并补上下载上限——否则一个挂死的
+ * 转存会被流水线心跳无限续命，任务永远 RUNNING。这里静态钉住接线，运行时行为在
+ * `test/executor-recovery.spec.ts` 里用真库覆盖。
  */
-describe("轮询心跳（第 112 批）", () => {
+describe("流水线心跳与执行判定（第 112/113 批）", () => {
   it("DEFAULT_HEARTBEAT_MS 至少比看门狗阈值小一个数量级", () => {
     expect(DEFAULT_HEARTBEAT_MS).toBeGreaterThan(0);
     // 允许连续丢 19 次心跳才误杀；也防止有人把它调到接近 10 分钟
     expect(DEFAULT_HEARTBEAT_MS * 20).toBeLessThanOrEqual(10 * 60_000);
   });
 
-  it("轮询循环按 heartbeatMs 刷新 updatedAt，且只写 RUNNING 任务", () => {
+  it("心跳由 claim 之后的统一定时器驱动，并在 finally 里停掉", () => {
     expect(executorSource).toContain("deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS");
+    expect(executorSource).toContain("startTaskHeartbeat(deps");
+    expect(executorSource).toContain("stopHeartbeat?.();");
+    // 只写 RUNNING：不能给已取消/已被看门狗处置的任务续命
     expect(executorSource).toContain("eq(tasks.status, TaskStatus.RUNNING)");
     expect(executorSource).toContain("task heartbeat failed");
+    // 旧的「轮询循环内计数」实现不许回来（那样转存/标识/结算又回到无心跳状态）
+    expect(executorSource).not.toContain("lastBeat");
+    // 心跳必须在 claim 判定之后才起：已终态的任务不该有心跳
+    expect(executorSource.indexOf("await claimTaskForRun(")).toBeLessThan(
+      executorSource.indexOf("startTaskHeartbeat(deps"),
+    );
+  });
+
+  it("执行判定三分支接线：skip 直接返回、resume 续接原 vendorTaskId", () => {
+    expect(executorSource).toContain("if (claim.action === \"skip\") return;");
+    expect(executorSource).toContain("claim.action === \"resume\"");
+    expect(executorSource).toContain("claim.vendorTaskId");
+  });
+
+  it("下载有独立上限，且低于看门狗阈值的一半以下", () => {
+    expect(DEFAULT_TRANSFER_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(DEFAULT_TRANSFER_TIMEOUT_MS).toBeLessThan(10 * 60_000);
+    // 上限必须真的接到 fetch 上，否则常量只是个摆设
+    expect(executorSource).toContain("AbortSignal.timeout(timeoutMs)");
+    expect(executorSource).toContain("deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS");
   });
 });

@@ -26,12 +26,16 @@ export interface ExecutorDeps {
   pollIntervalMs?: number;
   maxPollMs?: number;
   /**
-   * 轮询期间刷新 `tasks.updatedAt` 的间隔（毫秒），默认 `DEFAULT_HEARTBEAT_MS`。
+   * 刷新 `tasks.updatedAt` 的心跳间隔（毫秒），默认 `DEFAULT_HEARTBEAT_MS`。
    *
    * 看门狗按 `updatedAt` 超过 10 分钟判卡死并置失败+解冻；轮询上限是 15 分钟。
    * 没有心跳时，一个正常跑 10–15 分钟的视频会在轮询中途被看门狗误杀。
+   * 第 113 批起心跳覆盖整条流水线（submit → 轮询 → 转存 → 标识 → 结算），
+   * 不再只在轮询循环里计数。
    */
   heartbeatMs?: number;
+  /** 单个结果下载（ADR-005 转存）的超时（毫秒），默认 `DEFAULT_TRANSFER_TIMEOUT_MS` */
+  transferTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /** 出站素材 URI 签名有效期（秒）；默认 21600，由 ADAPTER_URI_TTL_SECONDS 覆盖 */
   outboundUriTtlSeconds?: number;
@@ -52,17 +56,29 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 export const DEFAULT_MAX_POLL_MS = 15 * 60_000;
 
 /**
- * 轮询期间的任务心跳间隔（第 112 批）。
+ * 任务心跳间隔（第 112 批引入，第 113 批扩到整条流水线）。
  *
  * 为什么需要：`reviveStuckTasks` 默认把 `updatedAt` 超过 **10 分钟** 的 PENDING/RUNNING
  * 任务判为卡死（置 FAILED + 按流水解冻），而本执行器的默认轮询上限是 **15 分钟**。
- * 在此之前，轮询循环从不写 `tasks.updatedAt` —— 一个正常需要 10–15 分钟的视频
- * 会在供应商还在生成时被看门狗杀掉，随后供应商成功的结果又被终态守卫丢弃。
+ * 第 112 批先补了轮询期间的心跳；但供应商成功后还有转存、标识、结算三段，
+ * 超大视频在转存段超过 10 分钟仍会被误杀，所以第 113 批把心跳挪到
+ * **从 RUNNING 落库到结算/失败事务返回**的整个执行期（见 `startTaskHeartbeat`）。
  *
  * 取 30s：远小于 10 分钟阈值（允许连续丢 19 次心跳才误杀），又不会给数据库
  * 带来明显写压力（单任务每分钟 2 次 UPDATE）。纯心跳，不改 progress、不写事件。
  */
 export const DEFAULT_HEARTBEAT_MS = 30_000;
+
+/**
+ * 单个结果转存下载的上限（第 113 批）。
+ *
+ * 心跳覆盖整条流水线之后，`fetch(result.uri)` 不设上限会带来新的风险：
+ * 供应商的下载地址挂住（TCP 半开、CDN 不回包）时，心跳会一直给任务续命，
+ * 看门狗再也判不了卡死 —— 一个真正挂死的任务变成永远 RUNNING。
+ * 5 分钟覆盖大视频的常见下载耗时，超时按 ADR-005 降级保留原 URI 并标记
+ * `transfer_failed`，交人工补转，而不是拖住整个任务。
+ */
+export const DEFAULT_TRANSFER_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * 任务产物落库的 Content-Type / 扩展名。
@@ -77,6 +93,96 @@ function contentTypeFor(task: TaskRow): string {
   if (task.capability === "text") return "text/plain; charset=utf-8";
   if (task.capability === "speech" || task.capability === "music") return "audio/mpeg";
   return "application/octet-stream";
+}
+
+/**
+ * 整条流水线的任务心跳（第 113 批）。
+ *
+ * 第 112 批只在**轮询循环**里按间隔刷新 `tasks.updatedAt`，但供应商成功后还有
+ * 转存（逐个下载结果）、水印/标识、结算：超大视频在转存段超过看门狗的 10 分钟阈值时，
+ * 任务仍会被判 `watchdog_timeout`，随后结算被终态守卫丢弃、已落盘的产物无人引用。
+ * 现在心跳从 RUNNING 落库起覆盖到结算/失败事务返回，轮询循环不再单独计数。
+ *
+ * 代价与边界：心跳只证明**进程还活着**，不证明供应商/存储还在推进。为此
+ * `transferResult` 的下载加了 `DEFAULT_TRANSFER_TIMEOUT_MS` 上限；S3 等驱动自带超时。
+ * 若某个存储驱动实现会无限挂起，任务会一直被心跳续命 —— 这是把「误杀正常长任务」
+ * 换成「极端情况下需要人工介入」的取舍，已记录在台账「仍未做」。
+ *
+ * 只写 RUNNING：任务被用户取消或被看门狗置失败后，心跳不该把终态"续命"。
+ * 心跳失败只记日志、不判任务失败：一次数据库抖动不该杀死正在生成的内容。
+ */
+function startTaskHeartbeat(
+  deps: ExecutorDeps,
+  id: bigint,
+  taskId: string,
+  intervalMs: number,
+): () => void {
+  const timer = setInterval(() => {
+    void deps.db
+      .update(tasks)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(tasks.id, id), eq(tasks.status, TaskStatus.RUNNING)))
+      .catch((error: unknown) => {
+        deps.log?.(
+          { task_id: taskId, err: error instanceof Error ? error.message : String(error) },
+          "task heartbeat failed",
+        );
+      });
+  }, intervalMs);
+  // 不阻止进程退出：worker 的 shutdown 会先关队列，残留的定时器不该拖住退出
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+/**
+ * 本次执行要怎么开始（第 113 批）。
+ *
+ * - `skip`：任务已终态 —— 可能在上面那次读与这里的事务之间被用户取消，
+ *   或被看门狗置失败。旧实现只挡 CANCELED 且**不把结论传回外层**，
+ *   于是"取消"之后照样会 submit（供应商侧白跑一次、可能计费）。
+ * - `resume`：仍是 RUNNING 且已落 `vendorTaskId` —— 上一次执行在轮询中途中断
+ *   （进程被杀 / 部署重启），BullMQ 把 job 重投回来。旧实现会**重新 submit**，
+ *   供应商侧出现两个任务（重复计费），旧任务结果则永远无人取。现在直接续接原任务。
+ * - `submit`：新任务，或 RUNNING 但还没拿到 vendor id（在 submit 前后崩溃，
+ *   无从续接）。后者仍可能重复提交，但窗口只有 submit 本身，且此前已记入台账。
+ */
+export type TaskRunClaim =
+  | { action: "skip" }
+  | { action: "resume"; vendorTaskId: string }
+  | { action: "submit"; previousStatus: number };
+
+const TERMINAL_STATUSES: number[] = [TaskStatus.CANCELED, TaskStatus.SUCCEEDED, TaskStatus.FAILED];
+
+export async function claimTaskForRun(
+  deps: ExecutorDeps,
+  taskId: bigint,
+  adapterCode: string,
+): Promise<TaskRunClaim> {
+  return deps.db.transaction(async (tx): Promise<TaskRunClaim> => {
+    const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for("update");
+    if (!fresh) return { action: "skip" };
+    if (TERMINAL_STATUSES.includes(fresh.status)) return { action: "skip" };
+    if (fresh.status === TaskStatus.RUNNING && fresh.vendorTaskId) {
+      await tx.insert(taskEvents).values({
+        id: newId(),
+        taskId,
+        type: "task.resumed",
+        payload: { vendor_task_id: fresh.vendorTaskId },
+      });
+      return { action: "resume", vendorTaskId: fresh.vendorTaskId };
+    }
+    await tx
+      .update(tasks)
+      .set({ status: TaskStatus.RUNNING, progress: 10, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId));
+    await tx.insert(taskEvents).values({
+      id: newId(),
+      taskId,
+      type: "task.running",
+      payload: { adapter: adapterCode },
+    });
+    return { action: "submit", previousStatus: fresh.status };
+  });
 }
 
 /** 产物扩展名必须跟 Content-Type 一致（见 contentTypeFor 的注释） */
@@ -111,7 +217,9 @@ export async function transferResult(
         data = Buffer.from(`mock result for task ${task.id} #${index}\n`);
       }
     } else if (/^https?:\/\//.test(result.uri)) {
-      const res = await fetch(result.uri);
+      // 下载必须有上限，否则整条流水线的心跳会把"挂死的转存"一直续命（见 DEFAULT_TRANSFER_TIMEOUT_MS）
+      const timeoutMs = deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS;
+      const res = await fetch(result.uri, { signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) throw new Error(`download result failed: ${res.status}`);
       data = Buffer.from(await res.arrayBuffer());
     } else {
@@ -391,79 +499,80 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
 
   const [task] = await deps.db.select().from(tasks).where(eq(tasks.id, id));
   if (!task) throw new Error(`task not found: ${taskId}`);
-  if (
-    task.status === TaskStatus.SUCCEEDED ||
-    task.status === TaskStatus.FAILED ||
-    task.status === TaskStatus.CANCELED
-  ) {
-    return;
-  }
+  // 快路径：终态直接返回。这里的读只是省一次事务；权威判定在 claimTaskForRun 里。
+  if (TERMINAL_STATUSES.includes(task.status)) return;
   const [model] = await deps.db.select().from(models).where(eq(models.id, task.modelId));
   if (!model) {
     await fail(deps, task, TaskStatus.FAILED, { kind: "model_missing", message: "model not found" });
     return;
   }
 
+  let stopHeartbeat: (() => void) | undefined;
   try {
-    await deps.db.transaction(async (tx) => {
-      const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, id)).for("update");
-      if (!fresh || fresh.status === TaskStatus.CANCELED) return;
-      await tx
-        .update(tasks)
-        .set({ status: TaskStatus.RUNNING, progress: 10, updatedAt: new Date() })
-        .where(eq(tasks.id, id));
-      await tx.insert(taskEvents).values({
-        id: newId(),
-        taskId: id,
-        type: "task.running",
-        payload: { adapter: model.adapterCode },
-      });
-    });
+    const claim = await claimTaskForRun(deps, id, model.adapterCode);
+    if (claim.action === "skip") return;
 
-    // P10：出站素材签名（real 模式 storage key → 公网签名 URL；mock 原样透传）。
-    // 只改出站 payload；tasks.input 落库仍是 raw key（本函数不写 DB）。
-    const outboundInput = await resolveOutboundUris(
-      (task.input ?? {}) as GenerationRequest["input"],
-      {
-        adapterMode: deps.adapterOptions.mode === "real" ? "real" : "mock",
-        sign: (key, ttlSeconds) => deps.storage.signDownload(key, ttlSeconds),
-        ttlSeconds: deps.outboundUriTtlSeconds,
-        logger: deps.log,
-      },
-    );
-    const request: GenerationRequest = {
-      mode: task.mode as GenerationRequest["mode"],
-      model: model.name,
-      scene: (task.scene as GenerationRequest["scene"]) ?? null,
-      input: outboundInput,
-      options: task.options as GenerationRequest["options"],
-    };
+    // 第 113 批：心跳覆盖整条流水线，直到结算/失败事务返回后才停（见 startTaskHeartbeat）
+    stopHeartbeat = startTaskHeartbeat(deps, id, taskId, deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+
     const adapter = (deps.resolveAdapter ?? resolveAdapter)(model.adapterCode, deps.adapterOptions);
-    const submitted = await adapter.submit({
-      task_id: String(task.id),
-      request,
-      model: { name: model.name, vendor: model.vendor, adapter_code: model.adapterCode },
-    });
+    let vendorTaskId: string;
+    if (claim.action === "resume") {
+      /**
+       * 重投续接：上一次执行在轮询中途被打断（进程被杀 / 部署重启），任务仍是
+       * RUNNING 且已落 vendorTaskId —— BullMQ 重投时**不能重新 submit**，
+       * 否则供应商侧会再走一遍生成（重复计费），原任务的结果则永远无人取。
+       * 直接接着轮询原来的供应商任务。
+       */
+      vendorTaskId = claim.vendorTaskId;
+      deps.log?.(
+        { task_id: taskId, vendor_task_id: vendorTaskId },
+        "task resumed; continue polling instead of resubmitting",
+      );
+    } else {
+      // P10：出站素材签名（real 模式 storage key → 公网签名 URL；mock 原样透传）。
+      // 只改出站 payload；tasks.input 落库仍是 raw key（本函数不写 DB）。
+      const outboundInput = await resolveOutboundUris(
+        (task.input ?? {}) as GenerationRequest["input"],
+        {
+          adapterMode: deps.adapterOptions.mode === "real" ? "real" : "mock",
+          sign: (key, ttlSeconds) => deps.storage.signDownload(key, ttlSeconds),
+          ttlSeconds: deps.outboundUriTtlSeconds,
+          logger: deps.log,
+        },
+      );
+      const request: GenerationRequest = {
+        mode: task.mode as GenerationRequest["mode"],
+        model: model.name,
+        scene: (task.scene as GenerationRequest["scene"]) ?? null,
+        input: outboundInput,
+        options: task.options as GenerationRequest["options"],
+      };
+      const submitted = await adapter.submit({
+        task_id: String(task.id),
+        request,
+        model: { name: model.name, vendor: model.vendor, adapter_code: model.adapterCode },
+      });
 
-    if (submitted.sync_results) {
-      await succeed(deps, task, submitted.sync_results);
-      return;
-    }
-    if (!submitted.vendor_task_id) {
-      throw new Error("adapter returned neither vendor_task_id nor sync_results");
-    }
+      if (submitted.sync_results) {
+        await succeed(deps, task, submitted.sync_results);
+        return;
+      }
+      if (!submitted.vendor_task_id) {
+        throw new Error("adapter returned neither vendor_task_id nor sync_results");
+      }
+      vendorTaskId = submitted.vendor_task_id;
 
-    await deps.db
-      .update(tasks)
-      .set({ vendorTaskId: submitted.vendor_task_id, updatedAt: new Date() })
-      .where(eq(tasks.id, id));
+      await deps.db
+        .update(tasks)
+        .set({ vendorTaskId, updatedAt: new Date() })
+        .where(eq(tasks.id, id));
+    }
 
     const interval = deps.pollIntervalMs ?? 1000;
     const deadline = Date.now() + (deps.maxPollMs ?? DEFAULT_MAX_POLL_MS);
-    const heartbeatMs = deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
-    let lastBeat = Date.now();
     for (;;) {
-      const state = await adapter.poll(submitted.vendor_task_id);
+      const state = await adapter.poll(vendorTaskId);
       if (state.status === "succeeded") {
         await succeed(deps, task, state.results ?? []);
         return;
@@ -486,27 +595,7 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
         await fail(deps, task, TaskStatus.FAILED, { kind: "vendor_timeout", message: "poll timeout" });
         return;
       }
-      /**
-       * 心跳：供应商还在生成时刷新 `updatedAt`，让看门狗把「真的卡死」和
-       * 「只是跑得久」区分开。只写 RUNNING 的任务——任务已被用户取消或被看门狗
-       * 置失败后，心跳不该把终态"续命"（虽然这里只是 updatedAt，但无谓的写也没意义）。
-       * 心跳失败只记日志、不判任务失败：一次数据库抖动不该杀死正在生成的内容；
-       * 若数据库持续不可用，后续 succeed()/fail() 与看门狗仍会各自兜底。
-       */
-      if (Date.now() - lastBeat >= heartbeatMs) {
-        lastBeat = Date.now();
-        try {
-          await deps.db
-            .update(tasks)
-            .set({ updatedAt: new Date() })
-            .where(and(eq(tasks.id, id), eq(tasks.status, TaskStatus.RUNNING)));
-        } catch (error) {
-          deps.log?.(
-            { task_id: taskId, err: error instanceof Error ? error.message : String(error) },
-            "task heartbeat failed",
-          );
-        }
-      }
+      // 心跳不再在这里计数：整条流水线共用 startTaskHeartbeat 起的那个定时器
       await sleep(interval);
     }
   } catch (error) {
@@ -518,5 +607,7 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
       kind: "executor_error",
       message: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    stopHeartbeat?.();
   }
 }
