@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { execFileBounded } from "./exec-bounded";
 
 /**
  * 媒体能力的**探测**（而不是配置开关）。
@@ -57,7 +54,10 @@ export async function probeFfmpeg(
   const checkedAt = new Date().toISOString();
   let value: MediaCapability;
   try {
-    const { stdout } = await run(bin, ["-version"], { timeout: 5_000, windowsHide: true });
+    const { stdout } = await execFileBounded(bin, ["-version"], {
+      timeoutMs: 5_000,
+      windowsHide: true,
+    });
     const version = parseFfmpegVersion(stdout ?? "");
     value = { available: true, path: bin, version, reason: null, checked_at: checkedAt };
   } catch (error) {

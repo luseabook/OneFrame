@@ -126,6 +126,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
+
+v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | `execFile` 的 `timeout` 到点只发一次默认 `killSignal`（SIGTERM）就返回，不保证退出；子进程忽略信号时 `close` 不来，Promise 照样能挂住 | 新增 `packages/shared/src/exec-bounded.ts` 的 `execFileBounded`：`timeoutMs` 到点先 `SIGTERM`，`killGraceMs`（默认 `DEFAULT_KILL_GRACE_MS = 2_000`，给被杀进程 flush 输出的收尾窗口）后仍未退出就 `SIGKILL`，**并在 SIGKILL 后立刻 reject、不等 `close`** —— 卡在不可中断内核调用里的进程会让 `close` 永不发生 | 永不退出的替身子进程 → `kills === ["SIGTERM","SIGKILL"]`、`escalated === true`、实测 < 2s 落定 |
+| 2 | 超时失败形态不统一会与真正的取消/崩溃混淆，原始错误也会丢 | 统一 `name = "TimeoutError"`、`killed = true`、`signal = "SIGTERM"`、`escalated` 区分是否已升级、原始错误挂 `cause`；到点之后才退出（自己退出或被信号杀）对外一律是超时，不把「被杀」当成功 | SIGTERM 后在宽限内退出 → 仍是 TimeoutError、`escalated === false`、`cause instanceof Error`、只 kill 一次 |
+| 3 | 参数写错会静默退化成「无上限」，等于把安全网关掉还没人知道 | `timeoutMs` / `killGraceMs` 为负数 / `NaN` / 非有限数时**构造即抛** `invalid timeoutMs: …` / `invalid killGraceMs: …`（与 `S3Config`、`operationTimeoutMs` 同一取舍）；`timeoutMs: 0` 是显式关闭 | 四组非法值构造即抛；默认宽限落在 500–5000ms（不是 0，也不是 10 分钟级） |
+| 4 | 换实现不能顺手改掉原有语义 | 成功 → `resolve({ stdout, stderr })`；非零退出 → 原样 `reject(error)`（**不**包装成 TimeoutError，`code` 可读）；`encoding` 默认 utf8；`kill` 自己抛错在定时器回调里兜住，不变成未捕获异常 | 真实 Node 子进程：成功返回 stdout/stderr；`process.exit(7)` 的 `code` 仍是 7 且 `name !== "TimeoutError"`；`kill` 抛错仍只报超时 |
+| 5 | 只改库不接线等于没改 | 4 个文件 / 7 处全量替换，**超时值原样保留**：`media-capability.ts` 5s 探测、`ffmpeg-trim.ts` `options.timeoutMs ?? 120_000`、`label.ts` 30s 水印、`timeline-export.ts` ffprobe 30s + `FFMPEG_TIMEOUT_MS`（10 分钟）3 处；可注入的 `BoundedExecImpl` 只给测试，生产一律真 `execFile` | 静态守卫：四个文件都含 `execFileBounded(` 且超时值逐条匹配（timeline 恰好 4 处调用 / 3 处 `FFMPEG_TIMEOUT_MS`），都不许出现 `promisify(execFile)` / `from "node:child_process"`；实现内部顺序必须是 SIGTERM → `timers.kill = setTimeout` → SIGKILL → `settle(reject)` |
+| 6 | **排障记录**：worker 定向测试首跑红在 `timeline-export.spec.ts`（expected 3 / received 4） | 根因不是逻辑：`@app/worker` 经 `node_modules/@app/shared` 解析到的是 `packages/shared/dist/index.js`，shared 没重新 build，报 `execFileBounded is not a function`；`pnpm --filter @app/shared build` 后 19/19 通过。全量门禁不受影响（`turbo.json` 的 `^build` 保证顺序），但**定向跑 worker 测试前先 build shared** | 定向 worker 3 文件 / 19 例 `EXIT=0` |
+
+**验证**：shared 定向 `pnpm --filter @app/shared test` **35/35 通过**（5 文件，`EXIT=0`；本批 26→35，+9 例，`exec-bounded.spec.ts` 9 例）。全站门禁：`pnpm test` 12/12、**1,752 用例通过**（3m48.826s；api 段 201.59s / worker 段 11.76s；api 1,290 / worker 91 / cli 128 / shared 35 / model-adapters 164 / db 27 / storage 17，另 1 skipped）、build 8/8（12.838s）、typecheck 12/12（8.881s）、lint 7/7（1.859s，0 error / **29** 条既有 warning：web 27 + api 2，本批无新增），四段 `EXIT=0`，台账守护 11/11；端点 **801** / controller **63** / 页面 **65** / 迁移 **50** / 表 **115** 全部不变（零端点、零迁移、零契约变更）。**分数不变：202.77/206 = 98.4%，剩余 3.23，E 仍 **2.65**、I = 0（B 0.58）** —— 该条从未计入三分类，是 v6.73 自记诚实边界的关闭，不是补分。
+
+**仍未做**：只杀**直接子进程**，不杀进程组 —— 我们始终 `execFile` 直调 ffmpeg/ffprobe（不经过 shell），但部署方若把 `FFMPEG_PATH` 指向包装脚本，脚本派生的孙进程不在此保证内；Windows 没有 POSIX 信号，`kill("SIGTERM")` 已等价 `TerminateProcess`，升级逻辑的价值主要在 Linux/macOS；超时路径**丢弃**已产出的部分 stdout/stderr；SIGKILL 后不等 `close`，不可中断状态下的进程可能残留为孤儿/僵尸；没有可配置的 kill 信号与进程组开关，也没有 env 开关（运维临时调整要发版）；测试用注入替身 + 真 Node 子进程，**没有**起真实「忽略 SIGTERM 的 ffmpeg 卡死」端到端演练，也没有对 SIGKILL 之后孤儿进程的回收做过测量。剩余 3.23 全部是外部材料/资质/法务与产品决策，代码侧已无自记缺口。
+
+---
+
 ## 变更登记（v6.73 · local 存储也设上限：fs 调用不再无限挂起 · 2026-11-01）
 
 v6.72 结尾「仍未做」的第 1 条是上一批自己留下的半边：S3 驱动已有建连/空闲/总时长三层上限，但 `LocalStorage` 仍直接 `await mkdir/writeFile/readFile/rename`。`STORAGE_DIR` 落在 NFS/网络盘、挂载点卡死时，转存永远不返回，而流水线心跳（第 113 批）会一直刷新 `updated_at`，看门狗永远不会处置 —— 任务永远 RUNNING。本批把 local 这半边关掉，并顺手更正上一批一条写错的记录。

@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { execFileBounded } from "./exec-bounded";
 import { probeFfmpeg } from "./media-capability";
-
-const run = promisify(execFile);
 
 /**
  * 按时间区间**真裁剪**一段视频（ffmpeg）。
@@ -54,7 +51,7 @@ export async function trimVideoBuffer(
   const output = join(dir, "out.mp4");
   try {
     await writeFile(input, buffer);
-    await run(
+    await execFileBounded(
       cap.path,
       [
         "-y",
@@ -76,7 +73,7 @@ export async function trimVideoBuffer(
         "+faststart",
         output,
       ],
-      { timeout: options.timeoutMs ?? 120_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      { timeoutMs: options.timeoutMs ?? 120_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
     );
     const trimmed = await readFile(output);
     if (trimmed.byteLength === 0) return { ok: false, reason: "ffmpeg produced empty output" };

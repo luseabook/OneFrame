@@ -1,15 +1,12 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { episodes, projectTimelines, scriptProjects, tasks, timelineExports } from "@app/db";
 import type { Db } from "@app/db";
+import { execFileBounded } from "@app/shared";
 import type { StorageDriver } from "@app/storage";
 import { escapeDrawtext, watermarkFilter } from "./label";
-
-const run = promisify(execFile);
 
 const FFMPEG_TIMEOUT_MS = 10 * 60_000;
 
@@ -68,10 +65,10 @@ async function readClipSource(deps: TimelineExportDeps, clip: TimelineClip): Pro
 
 async function hasVideoStream(ffprobe: string, file: string): Promise<boolean> {
   try {
-    const { stdout } = await run(
+    const { stdout } = await execFileBounded(
       ffprobe,
       ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", file],
-      { timeout: 30_000, windowsHide: true },
+      { timeoutMs: 30_000, windowsHide: true },
     );
     return stdout.includes("video");
   } catch {
@@ -118,7 +115,7 @@ async function normalizeSegment(
     output,
   ];
   try {
-    await run(ffmpeg, args, { timeout: FFMPEG_TIMEOUT_MS, windowsHide: true });
+    await execFileBounded(ffmpeg, args, { timeoutMs: FFMPEG_TIMEOUT_MS, windowsHide: true });
     return true;
   } catch (error) {
     log?.(
@@ -146,7 +143,7 @@ async function mockSegment(
     `drawtext=${font}text='${safeName}':x=(w-tw)/2:y=(h-th)/2:` +
     `fontsize=${fontSize}:fontcolor=white@0.9:box=1:boxcolor=black@0.35`;
   // 深色底（与产品深色主题一致），显式 30fps + yuv420p，时长 = clip.duration
-  await run(
+  await execFileBounded(
     ffmpeg,
     [
       "-y",
@@ -174,7 +171,7 @@ async function mockSegment(
       String(durationS),
       output,
     ],
-    { timeout: FFMPEG_TIMEOUT_MS, windowsHide: true },
+    { timeoutMs: FFMPEG_TIMEOUT_MS, windowsHide: true },
   );
 }
 
@@ -298,7 +295,7 @@ export async function runTimelineExport(exportId: string, deps: TimelineExportDe
       String(Math.max(1, durationS)),
       outputPath,
     );
-    await run(ffmpeg, args, { timeout: FFMPEG_TIMEOUT_MS, windowsHide: true });
+    await execFileBounded(ffmpeg, args, { timeoutMs: FFMPEG_TIMEOUT_MS, windowsHide: true });
     const buffer = await readFile(outputPath);
     if (buffer.byteLength === 0) throw new Error("ffmpeg produced empty file");
 

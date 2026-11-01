@@ -1,12 +1,9 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenResult } from "@app/model-adapters";
+import { execFileBounded } from "@app/shared";
 import type { StorageDriver } from "@app/storage";
-
-const run = promisify(execFile);
 
 export interface AiLabelConfig {
   enabled: boolean;
@@ -159,7 +156,10 @@ async function watermark(
       args.push("-frames:v", "1");
     }
     args.push(output);
-    await run(config.ffmpegPath ?? "ffmpeg", args, { timeout: 30_000, windowsHide: true });
+    await execFileBounded(config.ffmpegPath ?? "ffmpeg", args, {
+      timeoutMs: 30_000,
+      windowsHide: true,
+    });
     return await readFile(output);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
