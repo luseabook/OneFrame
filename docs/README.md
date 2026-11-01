@@ -199,6 +199,26 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.80 · 入站 HTTP 三道闸：收请求 / socket 静默 / handler 显式封顶 · 2026-11-01）
+
+第 119–121 批把出站下载、入站列表、数据库的等待都封了顶，但 HTTP 服务端自己那层一直没设：Fastify 5.12.7 的 `requestTimeout` / `connectionTimeout` / `handlerTimeout` 默认都是 `0`，`lib/server.js:339-341` 又把这几个 0 **原样写到** Node 的 server 上 —— Node 24 自带的 300s 收请求上限被一起抹掉。实测「请求体发一半、1.2s 后补完」照样 200，期间连接、解析器与已收字节一直占着，而类型检查 / lint / 构建 / 总闸全绿。本批的问法是：**服务端等一个请求、等一个连接、等一个 handler 的每一段，是不是都有上限**。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | 入站三处等待全是「永远等」：Fastify 默认三个 0，还把 0 写到 Node 的 server 上 | 先量（`_acceptance/d122` 裸 socket 探针）：`{requestTimeout: 0, connectionTimeout: 0}` 下请求体发一半、1.2s 后补完仍 200；`new FastifyAdapter(` 全仓 **1** 处、`createHttpAdapter(` 调用点 **1** 处 | 探针矩阵先量后改 |
+| 2 | `requestTimeout` 到底管哪一段？配错了会误杀长连接 | 实测：**不**掐 handler（400ms 下静默 900ms 仍 200）、**不**掐收全后的流式响应（13 chunk、1.6s 仍开）、只在扫描时给裸 `408 Request Timeout`；`connectionTimeout` 才回收「body 已收全、handler 不回」（400ms 下 409ms 裸 close、无响应），且「写」会重置它（每 100ms 写活过 1.6s、每 300ms 活过 2.6s）→ 15s 心跳的 4 个 SSE 不受影响 | 探针矩阵 |
+| 3 | handler 超时不能设，也没法按路由关 | `handlerTimeout > 0` 到点抛 `FST_ERR_HANDLER_TIMEOUT`，`route.js:636` 只收正整数（传 0 直接抛）；本仓库 4 个 SSE 端点（`pipeSession` / `pipeTask` / `stream.pipe`）的 handler 等客户端断开才 settle → 写死 0，resolver 拒绝其它值 | resolver 3 例 |
+| 4 | 三个数与既有适配器选项散在入口，改一个上限要改多处 | 新增 `apps/api/src/config/inbound-limits.ts`（147 行）作唯一口径：冻结 `{requestMs 120_000, idleMs 600_000, handlerMs 0}`、`BODY_LIMIT_BYTES 48MB`、`resolveInboundLimits` / `inboundServerOptions` / `createHttpAdapter()`（含 `trustProxy` / `genReqId` / `bodyLimit`）；`main.ts` 只调它（5 增 / 18 删）。`requestMs > 60s` 因为 Node 取 `headersTimeout = min(60_000, requestTimeout)`，而 Fastify 没有该选项；`idleMs` 必须宽于出站下载闸 300s | 静态 AST：全仓恰好一处 `new FastifyAdapter(`，且展开了 `...inboundServerOptions()` |
+| 5 | `0` 在 Node 里不是「立即超时」而是「不设上限」——静默回落会让一道闸无声消失 | resolver 对 0 / 负数 / `NaN` / `Infinity` / 小数抛 `RangeError`；`handlerMs` 只接受 0；`idleMs <= requestMs` 抛；拼错键（如 `requestTimeout`）抛 | 17 例纯函数 |
+| 6 | 参数写对 ≠ Node 真的按它执行 | `apps/api/test/inbound-limits.spec.ts` **29** 例：`getInstance()` 的 `server.requestTimeout 120_000` / `timeout 600_000` / `headersTimeout 60_000` / `keepAliveTimeout 72_000`、`initialConfig.handlerTimeout 0` / `bodyLimit 48MB`；**驱动生产 adapter 真起 HTTP** 的 5 例行为（静默 900ms → 200、400ms 静默闸 → 无 data + 对端 close、写重置、裸 Node 的 408 形状）；改前锚点「裸 `createServer()` 是 300_000，而 Fastify 传 0 后是 0」 | 活体 e2e |
+| 7 | 守卫要能变红，否则只是装饰 | 删 `...inboundServerOptions(overrides),` → **3 failed / 26 passed、EXIT=1**（接线 / 行为 / 静态守卫各一条）；还原 → **29/29、6.14s、EXIT=0** | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（8.889s，7 cached）、typecheck 12/12（7.646s，11 cached）、lint 7/7（4.825s，0 errors / 29 条既有 warning：web 27 + api 2，本批无新增）、`pnpm test` 12/12 **1,912 用例通过 + 1 跳过**（3m41.919s；api 1,385/118、db 82/4、shared 45/6、worker 91/12、cli 128/17、model-adapters 164/14、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：触发都在 socket 层（`requestTimeout` / `headersTimeout` 是裸 408，`connectionTimeout` 是裸 close），都不经过 `AllExceptionsFilter`，拿不到 `{code,msg,data}` 信封，也**不新增对外错误码**（那是契约变更）。`requestTimeout` 是「上限 + 最多一个扫描间隔」而非精确计时 —— 默认 `connectionsCheckingInterval` 30s，测试里调成 100ms 才在 427ms 看到 408，所以生产上真正兜底的是 `connectionTimeout`。这是**进程级常量**，不按请求 / 路由调整，需要不同口径时用 `createHttpAdapter(overrides)`。行为用例只断言 data / close / still-open 的有无，**不断言任何耗时**；「写重置」用「≥5 帧到达」证明，不证明 keep-alive 空转回收（实测它不回收，已写进模块注释）。静态守卫只认 `new FastifyAdapter(` / `new x.FastifyAdapter(` 两种写法，是 AST 但只证明入口唯一、不证明数值（数值由整对象相等 + `server.*` 断言负责），也不覆盖 `scripts/` / `docs/`。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.79 · 数据库等待一律有上限：语句 / 锁 / 取连接 / 空闲事务四道闸 · 2026-11-01）
 
 前 120 批已经把仓库里几乎所有会挂住的等待都封了顶：停机等 25s（`main.ts:13`）、出站 `fetch` 的时间 + 字节双闸（第 119 批）、ffmpeg SIGTERM→SIGKILL（第 116 批）、入站列表项数（第 120 批）。**只有数据库这一处没有** —— pg 8.23.1 的 `statement_timeout` / `lock_timeout` / `idle_in_transaction_session_timeout` 默认都是 `false`（永远等），pg-pool 3.14.0 在没传 `connectionTimeoutMillis` 时把 `connect()` 直接压进 `_pendingQueue` 且**不挂定时器**（池满就无限等）。于是「10 个连接被慢查询占满 → 第 11 个请求永远不返回」这类卡死，在类型检查 / lint / 构建 / 总闸里**全是绿的**。本批的问法是：**运行时取连接与执行语句的每一段等待，是不是都有上限**。

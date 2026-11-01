@@ -1,34 +1,21 @@
 import "reflect-metadata";
-import { randomUUID } from "node:crypto";
 import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
-import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
+import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/http/exception.filter";
 import { EnvelopeInterceptor } from "./common/http/envelope.interceptor";
 import { IdempotencyInterceptor } from "./common/http/idempotency.interceptor";
 import { env } from "./config/env";
+import { createHttpAdapter } from "./config/inbound-limits";
 
 /** 优雅停机等待上限：超过则强制退出，避免容器停不下来（deployment.md §5） */
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 25_000);
 
 async function bootstrap(): Promise<void> {
-  const adapter = new FastifyAdapter({
-    trustProxy: true,
-    genReqId: () => randomUUID(), // request_id：日志/排障/响应头回传（observability §1）
-    /**
-     * 请求体上限 48MB。
-     *
-     * 为什么必须显式抬：Fastify 默认 1MB，而本项目有若干"文件走 base64 JSON"的
-     * 上传路径（`POST /projects/parse-script`、`POST /canvas/.../table/import`、
-     * `POST /assets/upload`），解码上限（8MB 文档 / 32MB 视频）转成 base64 会再涨 1/3。
-     * 默认值下真实文件会先被 413 拒掉，接口文档里写的上限形同虚设（实测发现过一次）。
-     *
-     * 48MB = 32MB(视频) × 4/3 + 余量。**这是 MVP 的临时方案**：视频也走 base64 会把
-     * 单请求内存抬到几十 MB，真实生产应换 OSS 预签名直传（api-spec §9 已登记该偏离）。
-     */
-    bodyLimit: 48 * 1024 * 1024,
-  });
+  // 入站三道闸（收请求 120s / socket 静默 600s / handler 不设超时）与
+  // trustProxy / genReqId / bodyLimit 都在 createHttpAdapter 里，理由见该文件头注释。
+  const adapter = createHttpAdapter();
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     logger: ["log", "warn", "error"],
