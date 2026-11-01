@@ -165,7 +165,7 @@ export class AuthController {
   async readUserSettings(
     @Req() req: AuthedRequest,
     @Query("scope_type") scopeType?: string,
-    @Query("keys") keys?: string,
+    @Query("keys") keys?: string | string[],
   ) {
     const auth = req.auth;
     if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");

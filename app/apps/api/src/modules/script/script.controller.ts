@@ -32,6 +32,7 @@ import {
 } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import { MAX_TAG_ITEMS, parseListParam } from "../../common/list-param";
 import { AssetMatchService } from "./asset-match.service";
 import { FilmSynthesisService } from "./film-synthesis.service";
 import { ParseService } from "./parse.service";
@@ -293,11 +294,9 @@ export class ScriptController {
     // SHORT_FILM/DRAMA 两个可用大类（FILM 拒收），并集就是"不筛"，所以只在单值时才收窄。
     let kind = q.kind;
     let projectMode: number | undefined;
-    const categories = (q.project_categories ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .map((s) => Number(s));
+    const categories = (parseListParam(q.project_categories, "project_categories", MAX_TAG_ITEMS) ?? []).map((s) =>
+      Number(s),
+    );
     if (categories.length > 0) {
       for (const category of categories) {
         const mapped = workFilterOfCategory(category, undefined);

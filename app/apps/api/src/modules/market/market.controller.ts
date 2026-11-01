@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import { MAX_TAG_ITEMS, csvListQuery } from "../../common/list-param";
 import { MarketService } from "./market.service";
 
 /**
@@ -31,15 +32,11 @@ const pageQuery = z.object({
 
 const listScriptsQuery = pageQuery.extend({
   category_id: z.string().min(1).max(32).optional(),
-  /** 逗号分隔或重复 query 参数都接受（前端多选常用 `?tag_ids=a,b`） */
-  tag_ids: z
-    .union([z.string(), z.array(z.string())])
-    .optional()
-    .transform((v) => {
-      if (v === undefined) return undefined;
-      const arr = Array.isArray(v) ? v : v.split(",");
-      return arr.map((s) => s.trim()).filter((s) => s.length > 0);
-    }),
+  /**
+   * 逗号分隔或重复 query 参数都接受（前端多选常用 `?tag_ids=a,b`）。
+   * 第 120 批：项数上限与正文 / 后台 `tag_ids` 的 `.max(20)` 对齐。
+   */
+  tag_ids: csvListQuery("tag_ids", MAX_TAG_ITEMS),
   keyword: z.string().max(100).optional(),
   kind: z.coerce.number().int().min(1).max(3).optional(),
   owner_user_id: z.string().min(1).max(32).optional(),

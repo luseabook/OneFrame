@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Req } from "@n
 import { z } from "zod";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
-import { CanvasGroupService } from "./canvas-group.service";
+import { CanvasGroupService, MAX_PIN_SLOTS } from "./canvas-group.service";
 
 /**
  * 固定组（C10）+ 节点组模板（C11）端点
@@ -76,7 +76,7 @@ export class CanvasGroupController {
     @Body() body: unknown,
   ) {
     const c = this.ctx(req);
-    const input = parseOrThrow(z.object({ group_ids: z.array(z.string().min(1)).max(7) }), body);
+    const input = parseOrThrow(z.object({ group_ids: z.array(z.string().min(1)).max(MAX_PIN_SLOTS) }), body);
     return this.svc.setNodePinGroups(c.spaceId, canvasId, nodeId, input.group_ids);
   }
 

@@ -302,7 +302,7 @@ export class TeamController {
     @Query("status") status?: string,
     @Query("nick") nick?: string,
     @Query("remark") remark?: string,
-    @Query("role_ids") roleIds?: string,
+    @Query("role_ids") roleIds?: string | string[],
     @Query("has_group") hasGroup?: string,
     @Query("include_descendants") includeDescendants?: string,
   ) {
@@ -390,7 +390,7 @@ export class TeamController {
     @Query("status") status?: string,
     @Query("nick") nick?: string,
     @Query("remark") remark?: string,
-    @Query("role_ids") roleIds?: string,
+    @Query("role_ids") roleIds?: string | string[],
     @Query("has_group") hasGroup?: string,
     @Query("include_descendants") includeDescendants?: string,
   ) {

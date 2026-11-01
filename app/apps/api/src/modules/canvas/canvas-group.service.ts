@@ -20,7 +20,8 @@ import { toBigId } from "../../common/bigid";
  * - 与 `canvas_nodes.group_ids` 反向冗余，必须**同事务双写**，否则两边会不一致
  */
 
-const MAX_PIN_SLOTS = 7;
+/** 每画布固定组槽位数（第 120 批导出：`canvas_nodes.group_ids` 的入站上限必须与之一致） */
+export const MAX_PIN_SLOTS = 7;
 
 @Injectable()
 export class CanvasGroupService {

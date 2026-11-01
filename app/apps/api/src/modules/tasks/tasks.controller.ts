@@ -4,6 +4,7 @@ import type { FastifyReply } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import { parseOrThrow } from "../../common/zod";
+import { MAX_ID_ITEMS, parseListParam } from "../../common/list-param";
 import type { AuthedRequest } from "../../common/auth.types";
 import { TasksService } from "./tasks.service";
 
@@ -14,7 +15,7 @@ export class TasksController {
   @Get("tasks")
   async list(
     @Req() req: AuthedRequest,
-    @Query("ids") ids?: string,
+    @Query("ids") ids?: string | string[],
     @Query("page") page?: string,
     @Query("page_size") pageSize?: string,
     @Query("status") status?: string,
@@ -22,11 +23,11 @@ export class TasksController {
     @Res({ passthrough: true }) reply?: FastifyReply,
   ) {
     const spaceId = req.auth?.spaceId ?? "";
-    if (ids) {
-      const data = await this.tasks.getMany(
-        spaceId,
-        ids.split(",").map((id) => id.trim()).filter(Boolean),
-      );
+    // 第 120 批：`?ids=` 项数上限与列表 `page_size` 一致（一次批量取不应超过一页）；
+    // 空串 / 只有逗号 → 不过滤，落到普通列表（与改造前 `?ids=` 的行为一致）。
+    const wanted = parseListParam(ids, "ids", MAX_ID_ITEMS);
+    if (wanted && wanted.length > 0) {
+      const data = await this.tasks.getMany(spaceId, wanted);
       const etag = `"${createHash("sha1").update(JSON.stringify(data)).digest("hex")}"`;
       if (req.headers["if-none-match"] === etag) {
         reply?.code(304).send();

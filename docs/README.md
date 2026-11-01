@@ -180,6 +180,25 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.78 · 入站列表一律封顶：同一语义不能两个入口两个尺度 · 2026-11-01）
+
+前 119 批里已经有四批在给**出站**设上限（S3 三层超时、local fs 单次上限、ffmpeg SIGKILL、出站 `fetch` 时间 + 字节双闸），但**入站**这一侧从未被当作一个整体审计过。知识库正文的 `tags` 明明写着 `.max(20)`，同一个字段作为 query 过滤时却可以带几十万个逗号项；`main.ts:30` 的 `bodyLimit` 是 48 MiB，允许它原样进来，然后在同步 `split(",")` 与巨量 `IN` 查询里把事件循环卡住。本批问的是：**同一个语义的列表，在每一个入口是否同一个尺度** —— 一扫描就发现 11 个入口里多数没有，还顺带扫出两类会变成 500 的入参。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | 同一字段、两套尺度：正文 `tags` 有 `.max(20)`，query 版本无上限；`nodes[].group_ids`、`options.ranges` 同样在服务层才有上限 | 先量：生产代码 **95** 个 `z.array(...)` / **29** 文件（94 已带 `.max`，唯一例外是新建的 `csvListRaw`）；**11** 个入站列表入口 / 10 文件；**4** 个 `@Query string \| string[]` / 3 文件；`modules/**` 手写 `split(",")` **2** 处（启动期配置解析，登记豁免）。仓库已有正确尺度：tags 20、`page_size` 100、画布 7 pin 槽、切片 `SLICE_COUNT_MAX` 50 | AST 探针先量后改 |
+| 2 | 每种入口各写一遍上限必然漂移 | 新增 `apps/api/src/common/list-param.ts` 作**唯一口径**：`MAX_TAG_ITEMS = 20` / `MAX_ID_ITEMS = 100`、`splitCsvList`（去空白/去空项/不改入参/空串归一 `[]`）、`tooManyListItems(field, max)` 统一文案、手写路径 `parseListParam`（超限 `AppError(INVALID_PARAM, …, { field })`）、zod 路径 `csvListQuery`（`ctx.addIssue` + `z.NEVER`）；**13** 个生产文件接入（71 增 / 67 删），画布与切片的上限从服务层**前移**到 API 边界 | 单测 15 例，含两条路径文案**逐字一致**的反漂移用例 |
+| 3 | 另有两类入参不是「太慢」而是直接 500 | 重复 query 参数（`?ids=a&ids=b` 进来是数组，`ids.split(...)` → TypeError）与 `BigInt("abc")`（原生 SyntaxError 直接漏出）统一成 `400101`，非法 id 报 `invalid role_ids: abc` | e2e 断言 `status 200` + `code 400101`（错误信封统一 200，故断言 `code` 而非 status） |
+| 4 | 「以后每个入口都记得封顶」不能靠自觉 | 新增 `inbound-list-bounds.spec.ts` 16 例静态 AST：`z.array` 必须在**自己的链上**有 `.max(`（不认「每一项里再套单字段限长」）；内嵌 `z.array` 的 `z.union` 只允许在 `common/list-param.ts`；`csvListRaw` 必须配 `splitCsvList` + `tooManyListItems`；`modules/**` 不许再手写 `split(",")`；raw query 只允许 4 个登记站点。真树按**逐文件分布相等**断言（不是总数相等），新增未登记站点必红 | 门禁 |
+| 5 | 只抽几个端点证明不了运行时也拦 | 新增 `inbound-list-caps.spec.ts` 14 例，抽 **9** 个真实端点覆盖三种形状（query 逗号串 / 重复参数 / body 数组）与两条路径（`parseListParam` / `csvListQuery`），断言超限文案与边界值放行（tasks 100、knowledge 20、canvas 7 项走到服务层 400102、generations 50 段） | e2e |
+| 6 | 守卫要能变红，否则只是装饰 | 删掉 `generations.controller.ts:55` 的 `.max(SLICE_COUNT_MAX)` 一个改动 → **三条独立红信号**：分布断言、接线断言点名该文件、e2e 变成 `'model not found: cap-probe-model'`（证明没有边界上限时请求会一路走到服务层）。`2 failed \| 1 passed`、`3 failed \| 42 passed`、`EXIT=1`；还原后 45/45、`EXIT=0` | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（8.932s）、typecheck 12/12（7.453s）、lint 7/7（0 errors / 29 条既有 warning：web 27 + api 2，本批无新增）、`pnpm test` 12/12 **1,829 用例通过 + 1 跳过**（3m36.012s；api 1,351/116、shared 45/6、worker 91/12、cli 128/17、model-adapters 164/14、db 33/2、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：守卫只保证**链上有 `.max(`**，不校验数值是否合理（`.max(1)` 也通过），也不知道某个数组是不是真该封顶；不覆盖 **body 对象个数**（如 `nodes` 可以有几十万个元素）与深层嵌套数组，只封「列表字段的项数」；只认逗号切分，不覆盖自定义分隔符（当前仓库无）；e2e 只抽 9 个入口，其余靠静态守卫，两者互补。两处**对外可见的行为变化**已如实记下：`auth` 的越限文案从 `too many keys` 变为 `too many keys: at most 20`；`tasks ?ids=` 与 `?ids=,` 过去分别「不生效」与「空过滤」，现在统一为「不过滤」。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
 
 v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。

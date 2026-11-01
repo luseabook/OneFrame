@@ -17,6 +17,7 @@ import {
   waitlistEntries,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
+import { MAX_TAG_ITEMS, parseListParam } from "../../common/list-param";
 import { env } from "../../config/env";
 import { db } from "../../db/database";
 import { encryptPhone, hashPhone } from "./crypto";
@@ -507,7 +508,7 @@ export class AuthService {
   async readSettings(
     userId: string,
     scopeType?: string,
-    keys?: string,
+    keys?: string | string[],
   ): Promise<{ scope_type: string; settings: Record<string, unknown> }> {
     const scope = this.settingsScope(scopeType);
     const bag = await this.settingsBagOf(userId);
@@ -576,16 +577,10 @@ export class AuthService {
     return scope;
   }
 
-  /** `keys=a,b,c` 解析；空串/只逗号 → 不过滤（返回 null） */
-  private settingsKeys(raw?: string): string[] | null {
+  /** `keys=a,b,c` 解析；空串/只逗号 → 不过滤（返回 null）。上限 20 项（第 120 批与正文列表同一口径） */
+  private settingsKeys(raw?: string | string[]): string[] | null {
     if (raw === undefined) return null;
-    const keys = raw
-      .split(",")
-      .map((key) => key.trim())
-      .filter((key) => key.length > 0);
-    if (keys.length > 20) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "too many keys", { field: "keys" });
-    }
+    const keys = parseListParam(raw, "keys", MAX_TAG_ITEMS) ?? [];
     return keys.length > 0 ? keys : null;
   }
 

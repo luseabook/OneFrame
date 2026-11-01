@@ -3,6 +3,13 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import {
+  MAX_TAG_ITEMS,
+  csvListRaw,
+  csvListQuery,
+  splitCsvList,
+  tooManyListItems,
+} from "../../common/list-param";
 import { KnowledgeService } from "./knowledge.service";
 
 /**
@@ -55,15 +62,11 @@ const sceneQuery = z.object({ scene: z.coerce.number().int().optional() });
 /** 目录树只收 scene（竞品该端点 query 为 scene + parent_ukd_id，后者由树结构自身表达） */
 const dirQuery = sceneQuery;
 
-/** 标签既可 `?tags=a&tags=b` 也可 `?tags=a,b`（前端两种都常见） */
-const tagsQuery = z
-  .union([z.string(), z.array(z.string())])
-  .optional()
-  .transform((v) => {
-    if (v === undefined) return undefined;
-    const arr = Array.isArray(v) ? v : v.split(",");
-    return arr.map((s) => s.trim()).filter((s) => s.length > 0);
-  });
+/**
+ * 标签既可 `?tags=a&tags=b` 也可 `?tags=a,b`（前端两种都常见）。
+ * 第 120 批：项数上限与正文 `tags` 的 `.max(20)` 对齐 —— 同一语义不能两个入口两个尺度。
+ */
+const tagsQuery = csvListQuery("tags", MAX_TAG_ITEMS);
 
 /**
  * 第 75 批：竞品知识库列表请求里的 `sp_type` 是**数组**（`C-jRJshu.js` @10127：
@@ -72,12 +75,16 @@ const tagsQuery = z
  * 不校验取值集合（只校验整数范围）：竞品自己也在变（-1 是"通用"这一层语义也只在它前端出现），
  * 我方把它当透传维度 —— 硬编码枚举会把竞品新增的类型直接打成 400。
  */
-const spTypeQuery = z
-  .union([z.string(), z.array(z.string())])
+// 第 120 批：union 形状收进 `common/list-param.ts`（全局只有一处），项数上限照旧。
+const spTypeQuery = csvListRaw
   .optional()
   .transform((v, ctx) => {
     if (v === undefined) return undefined;
-    const parts = (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter((s) => s.length > 0);
+    const parts = splitCsvList(v);
+    if (parts.length > MAX_TAG_ITEMS) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: tooManyListItems("sp_type", MAX_TAG_ITEMS) });
+      return z.NEVER;
+    }
     const out: number[] = [];
     for (const part of parts) {
       if (!/^-?\d{1,5}$/.test(part)) {

@@ -17,6 +17,7 @@ import {
   userThirdKeys,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
+import { MAX_ID_ITEMS, parseListParam } from "../../common/list-param";
 import { db } from "../../db/database";
 import { toBigId } from "../../common/bigid";
 import { decryptPhone, decryptSecret, encryptSecret, hashPhone, hashSecret, maskSecret } from "../auth/crypto";
@@ -399,7 +400,7 @@ export class TeamService {
       status?: string;
       nick?: string;
       remark?: string;
-      role_ids?: string;
+      role_ids?: string | string[];
       has_group?: string;
       include_descendants?: string;
     } = {},
@@ -695,7 +696,7 @@ export class TeamService {
     extra: {
       nick?: string;
       remark?: string;
-      role_ids?: string;
+      role_ids?: string | string[];
       has_group?: string;
       include_descendants?: string;
     } = {},
@@ -719,11 +720,16 @@ export class TeamService {
     if (extra.nick) cond.push(ilike(spaceMembers.nickname, `%${extra.nick}%`));
     if (extra.remark) cond.push(ilike(spaceMembers.remark, `%${extra.remark}%`));
     if (extra.role_ids) {
-      const ids = extra.role_ids
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .map((s) => BigInt(s));
+      // 第 120 批：与列表分页同一上限；`BigInt("abc")` 抛的是原生 SyntaxError（→ 500），
+      // 非法 id 属于入参问题，这里统一转成 400101 + field，不再让 500 漏出去。
+      const items = parseListParam(extra.role_ids, "role_ids", MAX_ID_ITEMS) ?? [];
+      const ids = items.map((s) => {
+        try {
+          return BigInt(s);
+        } catch {
+          throw new AppError(ErrorCode.INVALID_PARAM, `invalid role_ids: ${s}`, { field: "role_ids" });
+        }
+      });
       if (ids.length > 0) cond.push(inArray(spaceMembers.roleId, ids));
     }
 

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Post, Req, Inject } from "@nestjs/common";
 import { z } from "zod";
 import { generationOptionsSchema, generationRequestSchema } from "@app/shared";
+import { SLICE_COUNT_MAX } from "@app/model-adapters";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { GenerationsService } from "./generations.service";
@@ -49,7 +50,9 @@ const toolOptionsSchema = generationOptionsSchema.extend({
   // 切片 / 帧率规整
   strategy: z.string().optional(),
   slice_duration: z.number().optional(),
-  ranges: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+  // 第 120 批：切片适配器本来就拒 >50 段（`SLICE_COUNT_MAX`），把同一个上限前移到 API 边界，
+  // 免得几十万段的数组先过 zod、再在适配器里才被拒（bodyLimit 48MiB 内可塞满）。
+  ranges: z.array(z.object({ start: z.number(), end: z.number() })).max(SLICE_COUNT_MAX).optional(),
   target_fps: z.number().optional(),
   target_duration: z.number().optional(),
   pad_mode: z.string().optional(),

@@ -4,6 +4,7 @@ import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
 import { CanvasService } from "./canvas.service";
+import { MAX_PIN_SLOTS } from "./canvas-group.service";
 
 /**
  * 画布（canvas）域端点 —— F1 契约 §14.4
@@ -110,7 +111,8 @@ const commitBody = z.object({
         params: z.unknown().optional(),
         task_id: z.string().nullable().optional(),
         status: z.number().int().min(1).max(3).optional(),
-        group_ids: z.array(z.string()).optional(),
+        // 第 120 批：与 `PUT nodes/:id/pin-groups` 同一语义，项数上限必须相同（每画布 7 槽）
+        group_ids: z.array(z.string()).max(MAX_PIN_SLOTS).optional(),
       }),
     )
     .max(1000),

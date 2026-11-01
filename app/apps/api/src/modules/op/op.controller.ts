@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@app/shared";
 import type { AuthedRequest } from "../../common/auth.types";
 import { parseOrThrow } from "../../common/zod";
+import { MAX_TAG_ITEMS, csvListQuery } from "../../common/list-param";
 import { OpRedeemService } from "./op.redeem.service";
 import { OpService, type TeamCtx } from "./op.service";
 import { OpSurveyService } from "./op.survey.service";
@@ -191,16 +192,8 @@ export class OpController {
   @Get("abtest/hit")
   async abtestHit(@Req() req: AuthedRequest, @Query() query: unknown) {
     const m = await this.ctx(req);
-    const q = parseOrThrow(
-      z.object({ experiment_keys: z.union([z.string(), z.array(z.string())]).optional() }),
-      query ?? {},
-    );
-    const keys = q.experiment_keys
-      ? Array.isArray(q.experiment_keys)
-        ? q.experiment_keys
-        : q.experiment_keys.split(",").map((s) => s.trim()).filter(Boolean)
-      : undefined;
-    return this.op.abtestHit(m, keys);
+    const q = parseOrThrow(z.object({ experiment_keys: csvListQuery("experiment_keys", MAX_TAG_ITEMS) }), query ?? {});
+    return this.op.abtestHit(m, q.experiment_keys);
   }
 
   @Get("abtest/experiments")
