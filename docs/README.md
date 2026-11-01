@@ -126,6 +126,24 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.72 · 存储驱动三层上限与响应体上限：S3 不再无限挂起 · 2026-11-01）
+
+v6.71 结尾「仍未做」的第 1 条：心跳只证明**进程还活着**，不证明供应商/存储还在推进 —— 彻底挂死的存储驱动仍会被续命。本批把「存储驱动」这半边关掉：`S3Storage` 的两个 `S3Client` 既没传 `requestHandler` 也没设 `maxAttempts`，走 smithy 默认的 `NodeHttpHandler`，`put`/`read` 可以挂到进程重启为止，而流水线心跳会一直给它刷 `updated_at`，看门狗永远不会处置。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | 两个 `S3Client` 无 `requestHandler`、无 `maxAttempts`：建连、空闲、总时长三个阶段都没有上限 | 新增 `DEFAULT_CONNECTION_TIMEOUT_MS = 10_000` / `DEFAULT_SOCKET_TIMEOUT_MS = 60_000` / `DEFAULT_REQUEST_TIMEOUT_MS = 15 * 60_000` / `DEFAULT_MAX_ATTEMPTS = 3`，`S3Config` 四项均可覆盖（0 = 显式关闭，与 smithy 语义一致）；负数 / NaN / `maxAttempts < 1` 在构造时直接抛 `invalid s3 …`，不静默退化成「无上限」 | `s3.spec.ts` 配置校验 1 例、默认值层次 1 例（建连 < 空闲 < 总时长，总时长 ≥ 10 分钟 —— 安全网不能变成「大文件必失败」） |
+| 2 | smithy 的 `requestTimeout` 默认只打 warning，到点请求继续挂着，等于没设；两个 client 共用一个 handler 会让 agent 池互相牵连 | 每个 client 各持一个 `NodeHttpHandler`，显式 `throwOnRequestTimeout: true`；`maxAttempts` 真正传进 client 基配置（AWS SDK 默认把 ETIMEDOUT 当可重试错误） | 静态守卫断言 `requestHandler: this.createHandler()` **恰好 2 处**、`maxAttempts: this.limits.maxAttempts`、`throwOnRequestTimeout: true` |
+| 3 | 只配 handler 不够：读 `@smithy/node-http-handler@4.12.1` 源码确认 `handle()` 在**响应头到达时**就 `resolve()` → `clearTimeouts()`，`requestTimeout` 与（3 秒延迟注册的）`socketTimeout` 一起失效，此后 `transformToByteArray()` 读响应体没有任何时限 | `readBodyWithin()`：同一个 `AbortSignal.timeout(requestTimeoutMs)` 继续守响应体，超时后显式 `body.destroy()` 销毁流避免悬空连接；竞速落败的 reading 补 no-op catch 防 unhandled rejection | 真服务器用例：先回 200 头 + `Content-Length: 1048576`、只写 16 字节再挂住 → `read` 在 400ms 上限内失败，且服务端 `res.on("close")` 2 秒内触发 |
+| 4 | 两个定时器（我们的 `AbortSignal` 与 handler 的 `requestTimeout`）谁先到都可能，直接透传只看到 `AbortError: Request aborted`，无法与真正的取消区分 | `bounded()` 按信号状态统一成 `s3 put/read timed out after N ms: <key>` 的 `TimeoutError`，原始错误挂 `cause` 不丢 | PUT 真服务器用例：收下请求永不回应，`maxAttempts: 1` + `socketTimeoutMs: 0`，断言 `/s3 put timed out after 400 ms/`、耗时 < 5s、**请求计数恰为 1**（证明重试上限真的生效） |
+| 5 | `@smithy/node-http-handler` 此前只是 `@aws-sdk/client-s3` 的传递依赖，直接 import 后不声明会在依赖提升变化时断 | `package.json` 显式声明 `@smithy/node-http-handler ^4.12.1` | `pnpm install`（`gates-114-install.log`）+ build/typecheck 全绿 |
+
+**验证**：storage 定向 `pnpm --filter @app/storage test` **11/11 通过、1 skipped**（3 文件，`EXIT=0`；本批 6→11，+5 例，`s3.spec.ts` 3→8）。全站门禁：`pnpm test` 12/12、**1,737 用例通过**（3m38s；api 段 203.25s / worker 段 11.11s；api 1,290 / worker 91 / cli 128 / shared 26 / model-adapters 164 / db 27 / storage 11，另 1 skipped）、build 8/8（9.027s）、typecheck 12/12（9.461s）、lint 7/7（1.636s，0 error / **29** 条既有 warning：web 27 + api 2，本批无新增），四段 `EXIT=0`，台账守护 11/11；端点 **801** / controller **63** / 页面 **65** / 迁移 **50** / 表 **115** 全部不变（零端点、零迁移、零契约变更）。**分数不变：202.77/206 = 98.4%，剩余 3.23，E 仍 **2.65**、I = 0（B 0.58）** —— 该条从未计入三分类，是 v6.71 自记诚实边界的关闭，不是补分。
+
+**仍未做**：`LocalStorage` 的 fs 读写同样没有上限（NFS/网络盘挂住仍会把转存挂死、仍会被心跳续命）；ffmpeg 烧水印卡死不在本批范围；超时只让当前任务失败/降级，存储端仍无健康探测或熔断；四项上限只能写在代码里（`S3Config`），没有 env 开关，运维临时放宽/收紧要发版（与第 113 批 `deps.heartbeatMs` / `deps.transferTimeoutMs` 同一取舍）；本批用真本地 HTTP 服务器钉住 PUT 与响应体两个阶段，没有对真实 S3/OSS/MinIO 做过慢链路、半开连接或连接池耗尽的测量。
+
+---
+
 ## 变更登记（v6.71 · 重投续接原 vendorTaskId + 整条流水线心跳与下载上限 · 2026-11-01）
 
 v6.70 结尾「仍未做」的前两条是同一处执行链的两个缺口：① BullMQ 把被中断的 job 重投回来时，只要任务还在 PENDING/RUNNING 就**重新 `adapter.submit`** —— 供应商侧多出一个任务（重复计费），原任务的结果永远没人取；② 心跳**只在轮询循环里**，供应商成功后到转存/烧水印/标识/结算之间不再续期，正常跑满 10–15 分钟的长任务后半段又回到看门狗裸奔状态。本批把执行判定改成三分支的返回值、心跳挪到整条流水线，并顺手补上一直缺失的下载上限 —— 否则被心跳续命的挂死转存会让任务永远 RUNNING。
