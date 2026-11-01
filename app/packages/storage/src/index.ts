@@ -12,6 +12,8 @@ export interface StorageOptions {
   rootDir?: string;
   publicBaseUrl?: string;
   signSecret?: string;
+  /** local driver 单次 fs 操作总上限（毫秒，0 = 不设上限，默认 DEFAULT_OPERATION_TIMEOUT_MS） */
+  operationTimeoutMs?: number;
   /** s3/OSS driver 使用 */
   s3?: S3Config;
 }
@@ -25,6 +27,9 @@ export function createStorage(options: StorageOptions): StorageDriver {
       rootDir: options.rootDir,
       publicBaseUrl: options.publicBaseUrl,
       signSecret: options.signSecret,
+      ...(options.operationTimeoutMs !== undefined
+        ? { operationTimeoutMs: options.operationTimeoutMs }
+        : {}),
     });
   }
   if (!options.s3) {

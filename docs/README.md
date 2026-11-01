@@ -126,6 +126,24 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.73 · local 存储也设上限：fs 调用不再无限挂起 · 2026-11-01）
+
+v6.72 结尾「仍未做」的第 1 条是上一批自己留下的半边：S3 驱动已有建连/空闲/总时长三层上限，但 `LocalStorage` 仍直接 `await mkdir/writeFile/readFile/rename`。`STORAGE_DIR` 落在 NFS/网络盘、挂载点卡死时，转存永远不返回，而流水线心跳（第 113 批）会一直刷新 `updated_at`，看门狗永远不会处置 —— 任务永远 RUNNING。本批把 local 这半边关掉，并顺手更正上一批一条写错的记录。
+
+| # | 审计发现 | 修复 | 守卫 |
+|---|---|---|---|
+| 1 | local 驱动的四次 fs 调用都没有上限：挂载点卡死时 `put`/`read` 可以挂到进程重启为止，心跳一直续命 | `DEFAULT_OPERATION_TIMEOUT_MS = 5 * 60_000`（与 worker 的转存上限同值 —— 安全网，不是「大文件必失败」的交付约束）；`LocalStorage` 新增 `operationTimeoutMs`（`0` = 显式关闭，与 S3 驱动一致），`StorageOptions` 透传；负数 / NaN 构造时直接抛 `invalid local operationTimeoutMs: …`，不静默退化成「无上限」 | `local.spec.ts` 构造校验 1 例、默认值层次 1 例（≥ 1 分钟且 ≤ 5 分钟） |
+| 2 | `readFile`/`writeFile` 支持 signal，但 `mkdir`/`rename` 在 Node 的 fs API 里**没有** signal 参数 —— 只给读写加 abort 会漏掉两步 | `withinDeadline()` 把每一步与同一个 deadline 竞速，任何一步挂住都只报一种失败：`name = "TimeoutError"`、消息 `local put/read timed out after N ms: <key>`；fs 层因 signal 抛的 `AbortError` 挂 `cause` 不丢；竞速落败的底层 Promise 补 no-op catch 防 unhandled rejection | 注入永不返回的 `readFile` → 100ms 内失败且错误形状正确、耗时 < 2s；注入永不返回的 `mkdir` → `put` 同样只报超时；静态守卫 `this.withinDeadline("put"` **恰好 3 处**、`signal ? { signal } : undefined` **恰好 2 处** |
+| 3 | 直接写目标 key 时，超时的写入可能已把半截数据落成正式 key，读者会读到坏文件 | `put` 改为先写同目录临时文件 `${target}.tmp-${randomUUID()}` 再 `rename`（POSIX 同目录原子；Windows `MoveFileEx` 覆盖已存在目标）—— 读者只看到完整的旧对象或完整的新对象 | 慢 `writeFile`（先真写临时文件、再拖 300ms）→ `put` 超时失败且目标 key **从未出现**（`access` 反查被拒） |
+| 4 | 真实坏盘/挂载点无法在测试里复现 | fs 能力做成可注入的 `LocalFs`（`Pick<typeof import("node:fs/promises"), …>`），生产一律 `node:fs/promises` | 「Promise 永不落定」视为挂死的等价形态，四个阶段各自可钉 |
+| 5 | **更正在先**：v6.72「ffmpeg 烧水印卡死不在本批范围」的措辞会被读成「ffmpeg 调用没有上限」 | 复核全部 `execFile` 调用点，**每个从各自功能提交起就带硬超时**：`label.ts:162` 30s、`timeline-export.ts:74`（ffprobe）30s 与 `:121`/`:177`/`:301`（`FFMPEG_TIMEOUT_MS`）10 分钟、`ffmpeg-trim.ts:79`（`timeoutMs ?? 120_000`）、`media-capability.ts:60` 5s。本批**不改 ffmpeg 代码**，只更正记录；真实残留是 `execFile` 的 timeout 只发一次 SIGTERM、**无 SIGKILL 升级** | 调用点逐条列出并复核 |
+
+**验证**：storage 定向 `pnpm --filter @app/storage test` **17/17 通过、1 skipped**（3 文件，`EXIT=0`；本批 11→17，+6 例，`local.spec.ts` 3→9）。全站门禁：`pnpm test` 12/12、**1,743 用例通过**（3m37.041s；api 段 201.53s；api 1,290 / worker 91 / cli 128 / shared 26 / model-adapters 164 / db 27 / storage 17，另 1 skipped）、build 8/8（8.694s）、typecheck 12/12（9.407s）、lint 7/7（1.65s，0 error / **29** 条既有 warning：web 27 + api 2，本批无新增），四段 `EXIT=0`，台账守护 11/11；端点 **801** / controller **63** / 页面 **65** / 迁移 **50** / 表 **115** 全部不变（零端点、零迁移、零契约变更）。**分数不变：202.77/206 = 98.4%，剩余 3.23，E 仍 **2.65**、I = 0（B 0.58）** —— 该条从未计入三分类，是 v6.72 自记诚实边界的关闭，不是补分。
+
+**仍未做**：上限只能让**调用方不再等待** —— 已进入 libuv 线程池的 syscall 无法收回，盘恢复前槽位可能仍被这次调用占着；`mkdir`/`rename` 只能竞速放手，底层调用仍会跑完；失败路径可能留下 `.tmp-<uuid>` 孤儿文件，清理是 fire-and-forget（坏盘上 `unlink` 同样会挂），没有孤儿清扫器；上限只能写在代码里，没有 env 开关（与 `S3Config` / `deps.heartbeatMs` 同一取舍）；测试用注入的「永不落定 Promise」模拟挂死，**没有**对真实 NFS / 挂载点卡死 / 线程池耗尽做过测量；存储端仍无健康探测或熔断；`execFile` 仍只有 SIGTERM、无 SIGKILL 升级。
+
+---
+
 ## 变更登记（v6.72 · 存储驱动三层上限与响应体上限：S3 不再无限挂起 · 2026-11-01）
 
 v6.71 结尾「仍未做」的第 1 条：心跳只证明**进程还活着**，不证明供应商/存储还在推进 —— 彻底挂死的存储驱动仍会被续命。本批把「存储驱动」这半边关掉：`S3Storage` 的两个 `S3Client` 既没传 `requestHandler` 也没设 `maxAttempts`，走 smithy 默认的 `NodeHttpHandler`，`put`/`read` 可以挂到进程重启为止，而流水线心跳会一直给它刷 `updated_at`，看门狗永远不会处置。
