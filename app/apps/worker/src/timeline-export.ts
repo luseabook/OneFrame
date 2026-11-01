@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { episodes, projectTimelines, scriptProjects, tasks, timelineExports } from "@app/db";
 import type { Db } from "@app/db";
-import { execFileBounded } from "@app/shared";
+import { downloadBounded, execFileBounded } from "@app/shared";
 import type { StorageDriver } from "@app/storage";
 import { escapeDrawtext, watermarkFilter } from "./label";
 
@@ -20,6 +20,10 @@ export interface TimelineExportDeps {
   adapterMode?: "mock" | "real";
   aiLabel?: { enabled: boolean; text: string; fontPath?: string };
   log?: (obj: Record<string, unknown>, msg: string) => void;
+  /** 远程 clip 下载的总时长上限（默认 5 分钟） */
+  downloadTimeoutMs?: number;
+  /** 远程 clip 下载的总字节上限（默认 256MiB） */
+  downloadMaxBytes?: number;
 }
 
 interface TimelineClip {
@@ -52,9 +56,12 @@ async function readClipSource(deps: TimelineExportDeps, clip: TimelineClip): Pro
     const uri = results[0]?.uri;
     if (!uri) return null;
     if (/^https?:\/\//.test(uri)) {
-      const res = await fetch(uri);
-      if (!res.ok) return null;
-      return Buffer.from(await res.arrayBuffer());
+      // 第 119 批：裸下载会让「连上不发完」的源挂死整条时间线导出；超限/超时一律当作该 clip
+      // 不可用（外层 catch 返回 null），由导出侧回退到色板，而不是无限等待。
+      return await downloadBounded(uri, {
+        timeoutMs: deps.downloadTimeoutMs,
+        maxBytes: deps.downloadMaxBytes,
+      });
     }
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null; // mock:// 等非存储 key
     return await deps.storage.read(uri);

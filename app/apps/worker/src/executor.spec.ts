@@ -150,8 +150,12 @@ describe("流水线心跳与执行判定（第 112/113 批）", () => {
   it("下载有独立上限，且低于看门狗阈值的一半以下", () => {
     expect(DEFAULT_TRANSFER_TIMEOUT_MS).toBeGreaterThan(0);
     expect(DEFAULT_TRANSFER_TIMEOUT_MS).toBeLessThan(10 * 60_000);
-    // 上限必须真的接到 fetch 上，否则常量只是个摆设
-    expect(executorSource).toContain("AbortSignal.timeout(timeoutMs)");
-    expect(executorSource).toContain("deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS");
+    // 第 119 批：转存改走 `downloadBounded`（总时长 + 总字节双上限），超时由共享实现用
+    // `AbortSignal.timeout(timeoutMs)` 接到 fetch 上；这里盯「上限真的传下去了」+
+    // 「executor 不再自己整块读 body」——字节上限只有一条实现，不能再长回来。
+    expect(executorSource).toContain("downloadBounded(result.uri");
+    expect(executorSource).toContain("timeoutMs: deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS");
+    expect(executorSource).toContain("maxBytes: deps.transferMaxBytes");
+    expect(executorSource).not.toContain("arrayBuffer(");
   });
 });

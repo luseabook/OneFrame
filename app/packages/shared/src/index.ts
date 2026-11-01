@@ -18,3 +18,5 @@ export * from "./publish-transcode";
 export * from "./knowledge-scene";
 // 第 63 批：「全部项目」竞品两级分类（project_category/project_subcategory）↔ 我方 kind/project_mode
 export * from "./project-category";
+// 第 119 批：出站下载总时长 + 总字节双上限 —— worker 导出读产物、CLI 下载产物共用一份实现
+export * from "./http-bounded";

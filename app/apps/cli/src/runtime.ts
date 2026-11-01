@@ -108,10 +108,70 @@ export interface RuntimeOverrides extends Partial<Runtime> {
   env?: NodeJS.ProcessEnv;
 }
 
+/**
+ * 第 119 批：`task download` 拉的是供应商签名 URL —— 原来裸 `fetch()` + `arrayBuffer()`，
+ * 既没有超时（CDN 连上不发完就永远挂着，Ctrl-C 之外没有出路）也没有字节上限（发 4GB 直接 OOM）。
+ *
+ * 为什么不复用 `@app/shared` 的 `downloadBounded`：CLI 是**零运行时依赖**包（见 http.ts 顶部
+ * 的说明：Node 20+ 自带 fetch），引入 workspace 依赖会把整棵共享包拖进分发产物；这里保持
+ * 同样的双上限语义，实现留在本文件内，并由静态守卫 `outbound-fetch-bounds.spec.ts` 盯住。
+ */
+const CLI_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+const CLI_DOWNLOAD_MAX_BYTES = 256 * 1024 * 1024;
+
+const isAbortLike = (error: unknown): boolean =>
+  error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+const cancelBodyQuietly = async (body: ReadableStream<Uint8Array> | null | undefined): Promise<void> => {
+  try {
+    await body?.cancel();
+  } catch {
+    // 取消失败不影响拒绝结论
+  }
+};
+
 const nodeFetchBinary = async (url: string): Promise<Buffer> => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(CLI_DOWNLOAD_TIMEOUT_MS), redirect: "follow" });
+  } catch (error) {
+    if (isAbortLike(error)) throw new Error(`download timed out after ${CLI_DOWNLOAD_TIMEOUT_MS} ms`);
+    throw error;
+  }
+  if (!res.ok) {
+    // 错误页不读（可能很大，也可能带厂商配额信息）
+    await cancelBodyQuietly(res.body);
+    throw new Error(`download failed: HTTP ${res.status}`);
+  }
+
+  const lengthHeader = res.headers.get("content-length");
+  const declared = lengthHeader === null ? null : Number(lengthHeader);
+  if (declared !== null && Number.isFinite(declared) && declared > CLI_DOWNLOAD_MAX_BYTES) {
+    await cancelBodyQuietly(res.body);
+    throw new Error(`download exceeds ${CLI_DOWNLOAD_MAX_BYTES} bytes (content-length ${declared})`);
+  }
+
+  if (!res.body) return Buffer.alloc(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > CLI_DOWNLOAD_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(`download exceeds ${CLI_DOWNLOAD_MAX_BYTES} bytes (read ${total} before cancel)`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (isAbortLike(error)) throw new Error(`download timed out after ${CLI_DOWNLOAD_TIMEOUT_MS} ms`);
+    throw error;
+  }
+  return Buffer.concat(chunks);
 };
 
 export function createRuntime(overrides: RuntimeOverrides = {}): Runtime {

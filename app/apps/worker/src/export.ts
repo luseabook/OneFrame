@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { episodes, exportJobs, storyboards, tasks } from "@app/db";
 import type { Db } from "@app/db";
 import type { StorageDriver } from "@app/storage";
-import { trimVideoBuffer, type TrimResult } from "@app/shared";
+import { downloadBounded, trimVideoBuffer, type TrimResult } from "@app/shared";
 
 /** 注入点（测试用）：默认走真 ffmpeg 的 `trimVideoBuffer` */
 export type TrimFn = (
@@ -21,6 +21,10 @@ export interface ExportDeps {
   ffmpegPath?: string;
   /** 测试注入点：默认 `trimVideoBuffer` */
   trim?: TrimFn;
+  /** 远程产物下载的总时长上限（默认 5 分钟；与 executor 的传输上限一致） */
+  downloadTimeoutMs?: number;
+  /** 远程产物下载的总字节上限（默认 256MiB；与 label 的上限一致） */
+  downloadMaxBytes?: number;
 }
 
 type TaskResult = { uri?: string };
@@ -96,14 +100,17 @@ export async function trimShotBuffer(
   };
 }
 
-async function readResult(storage: StorageDriver, uri: string): Promise<Buffer> {
+async function readResult(deps: ExportDeps, uri: string): Promise<Buffer> {
   if (/^https?:\/\//.test(uri)) {
-    const res = await fetch(uri);
-    if (!res.ok) throw new Error(`download failed: ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
+    // 第 119 批：原来裸 `fetch()` + `arrayBuffer()` —— 供应商 CDN 连上不发完就挂死整条导出，
+    // 发 4GB 就 OOM（导出侧必须整块进内存）。统一走双上限下载。
+    return downloadBounded(uri, {
+      timeoutMs: deps.downloadTimeoutMs,
+      maxBytes: deps.downloadMaxBytes,
+    });
   }
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) throw new Error(`unsupported result uri: ${uri.slice(0, 20)}`);
-  return storage.read(uri);
+  return deps.storage.read(uri);
 }
 
 // 整集导出：只打包已成功的镜头；无可用视频 → FAILED 400106（前端提示补齐）
@@ -155,7 +162,7 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
       if (!uri) continue;
       const fileName = `shot-${String(shot.shotNo).padStart(2, "0")}.mp4`;
       try {
-        const source = await readResult(deps.storage, uri);
+        const source = await readResult(deps, uri);
         const trimmed = await trimShotBuffer(source, shot.durationS, {
           ffmpegPath: deps.ffmpegPath,
           trim: deps.trim,

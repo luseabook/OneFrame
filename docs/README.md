@@ -162,6 +162,24 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.77 · 出站下载的双闸：时间 + 字节，且每一处 `fetch` 都有守卫 · 2026-11-01）
+
+前 118 批里有三批在修「上限」（S3 建连/空闲/总时长、local 存储单次 fs、ffmpeg SIGKILL），但都是**逐点**修的。本批换了个问法：**每一处**出站 `fetch()` 都有时间上限吗？一扫描就发现 3 处裸下载完全无上限、还有 1 处有超时但没有字节上限 —— 而类型检查、lint、构建、总闸全绿：这三处语法完全合法，测试也没覆盖远程分支。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | `fetch()` 天生没有超时，`arrayBuffer()` 天生没有大小上限 | 一次性扫描：生产代码 12 处裸 `fetch(`，3 处完全无上限（worker `export.ts` / `timeline-export.ts`、CLI `task download`），1 处只有时间无字节（worker `executor.ts` 转存），其余 8 处原本正确 | 先量后改（扫描脚本） |
+| 2 | 同一个语义散落三套实现还漏两处 | 新增 `packages/shared/src/http-bounded.ts`：`downloadBounded` 默认 5 分钟 / 256MiB；content-length 预检、chunked 边读边计数、超限那块即 cancel、非 2xx 不读错误页、任何提前退出都 cancel body；六种 `reason`，非正上限抛 `bad_options` | 单测 10 例 |
+| 3 | executor 只有 5 分钟、没有字节闸；CLI 又不能 import shared | executor / export / timeline-export 统一改走双闸并暴露可注入上限；CLI 因零运行时依赖保持内联同语义实现 | 静态守卫 |
+| 4 | 「以后每一处都记得」不能靠自觉 | 新增 `outbound-fetch-bounds.spec.ts` 11 例：注释/字符串感知扫描全树，9 处调用点逐文件登记，`arrayBuffer(` = 0，成员 `.fetch(` = 0 | 门禁 |
+| 5 | 守卫要能变红，否则只是装饰 | 删 CLI `signal:` → 红在 `runtime.ts:136`；新文件加裸 `fetch` → 双条红，改成有上限后仍红在「未登记」；注释里写 `fetch(` → 全绿 | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（13.503s，2 cached）、typecheck 12/12（1.79s）、lint 7/7（0 errors / 29 条既有 warning：web 27 + api 2）、`pnpm test` 12/12 **1,784 用例通过 + 1 跳过**（12.194s 并行墙钟；api 1,306/113、shared 45/6、worker 91/12、cli 128/17、model-adapters 164/14、db 33/2、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：JSON / 文本类供应商读取仍只有时间上限、没有字节上限（错误响应要整块 `JSON.parse`，设上限先要回答「一次错误响应多大算合法」，属供应商/产品决策）；守卫只保证「有超时机制」，不校验超时值是否合理，也不覆盖模板字面量 `${...}` 内的调用与手写 `node:http` 请求（当前仓库无此类代码）；CLI 是内联副本而非共享实现，两者一致由静态守卫保证。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.74 · ffmpeg 超时后真的会死：SIGTERM → 宽限 → SIGKILL · 2026-11-01）
 
 v6.73 结尾「仍未做」的最后一条：「`execFile` 仍只有 SIGTERM、无 SIGKILL 升级」。上一批审计已确认**每个** ffmpeg/ffprobe 调用从各自功能提交起就带硬超时，但「到点」和「真的死掉」是两件事 —— ffmpeg 解码损坏片源、等网络输入或卡在驱动里时可能不理 SIGTERM，于是「超时错误已经抛出、进程还在跑」，worker 重启也带不走它，最后一条代码侧缺口按此关闭。

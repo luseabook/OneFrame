@@ -4,7 +4,7 @@ import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
 import type { StorageDriver } from "@app/storage";
-import { newId, TaskStatus, type GenerationRequest } from "@app/shared";
+import { downloadBounded, newId, TaskStatus, type GenerationRequest } from "@app/shared";
 import { findUnlabeledResults, labelResults, type AiLabelConfig } from "./label";
 import { resolveOutboundUris } from "./outbound-uri";
 import { mockPngBuffer } from "./mock-media";
@@ -36,6 +36,11 @@ export interface ExecutorDeps {
   heartbeatMs?: number;
   /** 单个结果下载（ADR-005 转存）的超时（毫秒），默认 `DEFAULT_TRANSFER_TIMEOUT_MS` */
   transferTimeoutMs?: number;
+  /**
+   * 单个结果下载的字节上限（第 119 批）。超时只挡「挂了不结束」，挡不住「发 4GB」：
+   * 结果要整块进内存再落存储，无上限就是 OOM。默认与 label 的 256MiB 对齐。
+   */
+  transferMaxBytes?: number;
   sleep?: (ms: number) => Promise<void>;
   /** 出站素材 URI 签名有效期（秒）；默认 21600，由 ADAPTER_URI_TTL_SECONDS 覆盖 */
   outboundUriTtlSeconds?: number;
@@ -218,10 +223,11 @@ export async function transferResult(
       }
     } else if (/^https?:\/\//.test(result.uri)) {
       // 下载必须有上限，否则整条流水线的心跳会把"挂死的转存"一直续命（见 DEFAULT_TRANSFER_TIMEOUT_MS）
-      const timeoutMs = deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS;
-      const res = await fetch(result.uri, { signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) throw new Error(`download result failed: ${res.status}`);
-      data = Buffer.from(await res.arrayBuffer());
+      // 第 119 批补上字节上限：超时挡「挂住不结束」，挡不住「一下子发 4GB」的 OOM。
+      data = await downloadBounded(result.uri, {
+        timeoutMs: deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS,
+        maxBytes: deps.transferMaxBytes,
+      });
     } else {
       // 已经是存储 key（适配器/上游已转存）
       return result;
