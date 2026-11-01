@@ -3,12 +3,23 @@ import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq, inArray } from "drizzle-orm";
-import { adminUsers, identities, inviteCodes, inviteRedemptions, spaces, users, waitlistEntries } from "@app/db";
-import { newId } from "@app/shared";
+import {
+  adminUsers,
+  creditAccounts,
+  creditFlows,
+  identities,
+  inviteCodes,
+  inviteRedemptions,
+  spaces,
+  users,
+  waitlistEntries,
+} from "@app/db";
+import { AppError, ErrorCode, newId } from "@app/shared";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
 import { EnvelopeInterceptor } from "../src/common/http/envelope.interceptor";
-import { db } from "../src/db/database";
+import { db, pool } from "../src/db/database";
+import { OpService } from "../src/modules/op/op.service";
 import { encryptPhone, hashPhone } from "../src/modules/auth/crypto";
 
 /**
@@ -21,7 +32,9 @@ import { encryptPhone, hashPhone } from "../src/modules/auth/crypto";
  * 4. 已注销改状态 → 400101；restore 只对已注销生效，昵称传了才覆盖；
  * 5. 等待名单只回 `phone_hash_prefix`（平台没有明文），invite 幂等返回原时间；
  * 6. 邀请码批量生成 8 位无歧义码、`created_by` 是当前 admin、耗尽不可启用；
- * 7. 邀请码删除只对"从未核销"开放：未用可删、已用（含核销行存在但 used_count 仍是 0）拒绝、再删 400102。
+ * 7. 邀请码删除只对"从未核销"开放：未用可删、已用（含核销行存在但 used_count 仍是 0）拒绝、再删 400102；
+ * 8. 删除与核销并发：真核销持锁未提交时删除被条件删除挡下；核销提交后条件不再成立 → 400101，
+ *    码 / 核销行 / 积分不出现半状态（自由竞争下每张码也只有一个赢家）。
  *
  * 本机没有 PG 时这些用例会直接失败（与其余 admin e2e 同口径），
  * 所以契约 §5 规定验证只跑 typecheck/lint + 纯函数单测（`admin-invite-code.unit.spec.ts`）；
@@ -67,6 +80,36 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
       data: (body as { data?: any }).data,
       raw: res.body,
     };
+  };
+
+  /**
+   * 等一条"真的在等行锁"的 SQL 出现。并发用例靠它确认删除/核销到了预期的阻塞点，
+   * 而不是靠 sleep 猜时序（sleep 既慢又会在忙碌机器上假阴性）。
+   */
+  const waitForWaitingQuery = async (fragment: string, timeoutMs = 8000): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await pool.query<{ one: number }>(
+        `select 1 as one from pg_stat_activity
+          where datname = current_database()
+            and state = 'active'
+            and wait_event_type = 'Lock'
+            and query ilike $1
+          limit 1`,
+        [`%${fragment}%`],
+      );
+      if ((res.rowCount ?? 0) > 0) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
+  };
+
+  const countRedemptions = async (codeId: string): Promise<number> => {
+    const rows = await db
+      .select({ id: inviteRedemptions.id })
+      .from(inviteRedemptions)
+      .where(eq(inviteRedemptions.codeId, BigInt(codeId)));
+    return rows.length;
   };
 
   beforeAll(async () => {
@@ -121,6 +164,9 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
         await db.delete(inviteCodes).where(inArray(inviteCodes.id, ids));
       }
       await db.delete(waitlistEntries).where(eq(waitlistEntries.id, BigInt(waitlistId)));
+      // 并发核销用例会写入积分流水和账户；两者都外键到 spaces，必须先清
+      await db.delete(creditFlows).where(eq(creditFlows.spaceId, BigInt(userSpaceId)));
+      await db.delete(creditAccounts).where(eq(creditAccounts.spaceId, BigInt(userSpaceId)));
       for (const id of createdUserIds) {
         await db.delete(identities).where(eq(identities.userId, BigInt(id)));
         await db.delete(spaces).where(eq(spaces.ownerUserId, BigInt(id)));
@@ -402,5 +448,145 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
     expect((await inject("DELETE", `/ops/admin/invite-codes/${ghost.id}`)).code).toBe(400101);
     const [ghostKept] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(ghost.id)));
     expect(ghostKept).toBeDefined();
+  });
+
+  it("并发：核销持锁未提交时删除被条件删除挡下，提交后 400101 且码/核销/积分无半状态", async () => {
+    const op = app.get(OpService);
+    const ctx = { spaceId: userSpaceId, userId, role: 1, roleCode: null };
+    const fresh = (await inject("POST", "/ops/admin/invite-codes", { count: 1, credits: 50, max_uses: 1 })).data.codes[0];
+    createdInviteCodeIds.push(fresh.id);
+
+    // 真核销在事务里会先锁邀请码行、再经 creditIn → lockAccount 锁积分账户行。
+    // 这里先把账户行占住，核销就会停在"已改 used_count、尚未提交"的位置——
+    // 这正是删除最危险的窗口：只看快照会以为还能删。
+    await db
+      .insert(creditAccounts)
+      .values({ spaceId: BigInt(userSpaceId), balance: 0 })
+      .onConflictDoNothing({ target: creditAccounts.spaceId });
+    const [accountBefore] = await db
+      .select({ balance: creditAccounts.balance })
+      .from(creditAccounts)
+      .where(eq(creditAccounts.spaceId, BigInt(userSpaceId)));
+    const beforeBalance = accountBefore?.balance ?? 0;
+
+    let releaseAccount = () => {};
+    const holdAccount = new Promise<void>((resolve) => {
+      releaseAccount = resolve;
+    });
+    let markAccountLocked = () => {};
+    const accountLocked = new Promise<void>((resolve) => {
+      markAccountLocked = resolve;
+    });
+    const holder = db.transaction(async (tx) => {
+      await tx.select().from(creditAccounts).where(eq(creditAccounts.spaceId, BigInt(userSpaceId))).for("update");
+      markAccountLocked();
+      await holdAccount;
+    });
+    await accountLocked;
+
+    const verifyPromise = op.verifyInviteCode(ctx, fresh.code).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    let deletePromise: ReturnType<typeof inject> | null = null;
+    let creditBlocked = false;
+    let deleteBlocked = false;
+    try {
+      creditBlocked = await waitForWaitingQuery("credit_accounts");
+      if (creditBlocked) {
+        deletePromise = inject("DELETE", `/ops/admin/invite-codes/${fresh.id}`);
+        deleteBlocked = await waitForWaitingQuery('delete from "invite_codes"');
+      }
+    } finally {
+      releaseAccount();
+      await holder;
+    }
+    const verified = await verifyPromise;
+    const removed = deletePromise ? await deletePromise : null;
+
+    // 两个"真的在等锁"都被观测到，才说明这不是 sleep 撞出来的巧合
+    expect(creditBlocked).toBe(true);
+    expect(deleteBlocked).toBe(true);
+    // 核销赢了：积分到账、核销行落库
+    expect(verified).toEqual({
+      ok: true,
+      value: expect.objectContaining({
+        verified: true,
+        replayed: false,
+        credits: 50,
+        balance_after: beforeBalance + 50,
+      }),
+    });
+    // 删除醒来后条件已不成立（used_count 1 ≠ 0），只能回 400101，不能删掉刚核销的码
+    expect(removed?.code).toBe(400101);
+
+    const [kept] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(fresh.id)));
+    expect(kept).toBeDefined();
+    expect(kept.usedCount).toBe(1);
+    expect(kept.status).toBe(3);
+    expect(await countRedemptions(fresh.id)).toBe(1);
+    const [accountAfter] = await db
+      .select({ balance: creditAccounts.balance })
+      .from(creditAccounts)
+      .where(eq(creditAccounts.spaceId, BigInt(userSpaceId)));
+    expect(accountAfter.balance).toBe(beforeBalance + 50);
+    const flows = await db
+      .select({ id: creditFlows.id })
+      .from(creditFlows)
+      .where(eq(creditFlows.refCodeId, BigInt(fresh.id)));
+    expect(flows.length).toBe(1);
+  });
+
+  it("并发：自由竞争下每张码只有一个赢家——删除成功则核销不存在，核销成功则删除 400101", async () => {
+    const op = app.get(OpService);
+    const ctx = { spaceId: userSpaceId, userId, role: 1, roleCode: null };
+    // credits=0 让核销不必排积分账户锁，两边的相对时序交给数据库调度；
+    // 断言只要求"每张码恰好一个赢家"，不假设谁赢、也不假设赢家比例。
+    const codes: { id: string; code: string }[] = (
+      await inject("POST", "/ops/admin/invite-codes", { count: 6, credits: 0, max_uses: 1 })
+    ).data.codes;
+    for (const item of codes) createdInviteCodeIds.push(item.id);
+
+    const outcomes = await Promise.all(
+      codes.map(async (item) => {
+        const [deleted, verified] = await Promise.allSettled([
+          inject("DELETE", `/ops/admin/invite-codes/${item.id}`),
+          op.verifyInviteCode(ctx, item.code),
+        ]);
+        return { item, deleted, verified };
+      }),
+    );
+
+    let deleteWins = 0;
+    let verifyWins = 0;
+    for (const { item, deleted, verified } of outcomes) {
+      const deleteWon = deleted.status === "fulfilled" && deleted.value.code === 0;
+      const verifyWon = verified.status === "fulfilled";
+      expect(deleteWon !== verifyWon).toBe(true);
+
+      if (deleteWon) {
+        deleteWins += 1;
+        expect(verified.status).toBe("rejected");
+        if (verified.status === "rejected") {
+          expect(verified.reason).toBeInstanceOf(AppError);
+          expect((verified.reason as AppError).code).toBe(ErrorCode.INVALID_PARAM);
+        }
+        const [row] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(item.id)));
+        expect(row).toBeUndefined();
+        expect(await countRedemptions(item.id)).toBe(0);
+      } else {
+        verifyWins += 1;
+        expect(verified.status).toBe("fulfilled");
+        expect(deleted.status).toBe("fulfilled");
+        if (deleted.status === "fulfilled") expect(deleted.value.code).toBe(400101);
+        const [row] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(item.id)));
+        expect(row).toBeDefined();
+        expect(row.usedCount).toBe(1);
+        expect(row.status).toBe(3);
+        expect(await countRedemptions(item.id)).toBe(1);
+      }
+    }
+    // 不出现"两张码同一赢家"的错配：6 张码全部有且只有一个结局
+    expect(deleteWins + verifyWins).toBe(codes.length);
   });
 });
