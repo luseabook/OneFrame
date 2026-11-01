@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./errors";
+export * from "./vendor-http";
 export * from "./registry";
 export * from "./mock";
 export * from "./deepseek";

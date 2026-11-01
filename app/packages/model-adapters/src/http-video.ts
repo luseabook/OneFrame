@@ -1,3 +1,5 @@
+import { vendorProtocolError } from "./errors";
+import { VendorHttpClient } from "./vendor-http";
 import type { ModelAdapter, NormalizedGenRequest, GenResult, VendorTaskState } from "./types";
 
 export interface HttpVideoConfig {
@@ -9,6 +11,9 @@ export interface HttpVideoConfig {
   /** 我方模型名 → 供应商模型名；未命中则原样发送 */
   modelMap?: Record<string, string>;
   timeoutMs?: number;
+  /** 429/5xx/超时/网络的重试次数（默认 2；提交带 client_task_id，可安全重试） */
+  maxRetries?: number;
+  retryBaseMs?: number;
 }
 
 type Json = Record<string, unknown>;
@@ -66,17 +71,30 @@ function extractResults(payload: unknown): GenResult[] {
 
 // 通用 HTTP 视频供应商适配器：适配“提交→轮询→取结果 URL”的常见异步协议。
 // 真实供应商差异集中在 env 的 path/model 映射；Key 到位后仅改配置，不改任务/结算/转存链路。
+// 传输层（超时/重试/错误分类/响应封顶）统一走 VendorHttpClient。
 export class HttpVideoAdapter implements ModelAdapter {
   readonly vendor = "http-video";
+  private readonly http: VendorHttpClient;
   private readonly submitPath: string;
   private readonly pollPath: string;
 
   constructor(
     private readonly config: HttpVideoConfig,
-    private readonly fetchImpl: typeof fetch = fetch,
+    fetchImpl: typeof fetch = fetch,
   ) {
     this.submitPath = config.submitPath ?? "/v1/video/tasks";
     this.pollPath = config.pollPath ?? "/v1/video/tasks/{id}";
+    this.http = new VendorHttpClient({
+      vendor: this.vendor,
+      baseUrl: config.baseUrl,
+      timeoutMs: config.timeoutMs ?? 30_000,
+      apiKey: config.apiKey,
+      maxRetries: config.maxRetries ?? 2,
+      retryBaseMs: config.retryBaseMs ?? 400,
+      // 既有对外文案是 `http vendor <status>: …`，保前缀不动
+      messagePrefix: "http vendor ",
+      fetchImpl,
+    });
   }
 
   async submit(req: NormalizedGenRequest): Promise<{ vendor_task_id?: string; sync_results?: GenResult[] }> {
@@ -91,20 +109,26 @@ export class HttpVideoAdapter implements ModelAdapter {
       count: req.request.options.count,
       client_task_id: req.task_id,
     };
-    const data = await this.request("POST", this.submitPath, body);
+    const data = await this.http.request("POST", this.submitPath, body);
     const vendorTaskId =
       pickString(data, ["task_id", "id", "taskId"]) ??
       pickString(data.data, ["task_id", "id"]) ??
       pickString(data.task, ["id"]);
     const syncResults = extractResults(data);
     if (!vendorTaskId && syncResults.length > 0) return { sync_results: syncResults };
-    if (!vendorTaskId) throw new Error("http vendor response missing task id");
+    if (!vendorTaskId) {
+      throw vendorProtocolError("http vendor response missing task id", {
+        vendor: this.vendor,
+        operation: `POST ${this.submitPath}`,
+        status: 200,
+      });
+    }
     return { vendor_task_id: vendorTaskId };
   }
 
   async poll(vendorTaskId: string): Promise<VendorTaskState> {
     const path = this.pollPath.replace("{id}", encodeURIComponent(vendorTaskId));
-    const data = await this.request("GET", path);
+    const data = await this.http.request("GET", path);
     const inner = (data.data && typeof data.data === "object" ? data.data : data) as Json;
     const status = normalizeStatus(inner.status ?? data.status ?? inner.state ?? data.state);
     const results = extractResults(data);
@@ -124,29 +148,6 @@ export class HttpVideoAdapter implements ModelAdapter {
   async cancel(vendorTaskId: string): Promise<void> {
     if (!this.config.cancelPath) return;
     const path = this.config.cancelPath.replace("{id}", encodeURIComponent(vendorTaskId));
-    await this.request("POST", path, {});
-  }
-
-  private async request(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 30_000);
-    try {
-      const res = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, {
-        method,
-        headers: {
-          "content-type": "application/json",
-          ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`http vendor ${method} ${path} -> ${res.status}: ${text.slice(0, 200)}`);
-      }
-      return (await res.json()) as Json;
-    } finally {
-      clearTimeout(timer);
-    }
+    await this.http.request("POST", path, {});
   }
 }

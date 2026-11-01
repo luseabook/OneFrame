@@ -242,17 +242,138 @@ export function vendorProtocolError(
 }
 
 /**
- * 读取供应商 2xx JSON 响应：优先 res.json()，失败时退化到 text() 解析；
- * 两者都不可解析 → vendorProtocolError（不可重试）。
+ * 响应体字节上限（第 125 批）：供应商网关偶尔返回软链/占位超长响应，
+ * 不封顶会把整段读进内存再截断——这里读到上限就停手并取消响应流。
+ *   · 2xx 成功体 32 MiB：容得下 ARK_IMAGE_RESPONSE_FORMAT=b64_json 的调试图像；
+ *   · 非 2xx 错误体 8 KiB：只用于分类与 300 字文案，多读无益。
+ */
+export const VENDOR_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
+export const VENDOR_ERROR_BODY_MAX_BYTES = 8 * 1024;
+
+/** 只依赖最小读取接口：Node/undici 的 ReadableStreamDefaultReader 结构兼容 */
+interface BodyStreamReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(reason?: unknown): Promise<void>;
+  releaseLock(): void;
+}
+
+/** 取响应体读取器；测试替身那种没有 body 流的 Response 返回 undefined */
+function responseReader(res: Response): BodyStreamReader | undefined {
+  const body: unknown = res.body;
+  if (!body || typeof body !== "object") return undefined;
+  const getReader = (body as { getReader?: unknown }).getReader;
+  if (typeof getReader !== "function") return undefined;
+  return (getReader as () => BodyStreamReader).call(body);
+}
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function decodeChunks(chunks: Uint8Array[]): string {
+  if (chunks.length === 0) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  for (const chunk of chunks) text += decoder.decode(chunk, { stream: true });
+  return text + decoder.decode();
+}
+
+/** 逐块读到上限即停：超出部分不再拉取，响应流被取消 */
+async function readCappedStream(
+  reader: BodyStreamReader,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      const room = maxBytes - total;
+      if (value.byteLength > room) {
+        if (room > 0) chunks.push(value.subarray(0, room));
+        truncated = true;
+        break;
+      }
+      chunks.push(value);
+      total += value.byteLength;
+      if (total === maxBytes) {
+        // 刚好到顶：再读一块只为确认后面还有没有内容，没有就不算截断
+        truncated = !(await reader.read()).done;
+        break;
+      }
+    }
+  } finally {
+    if (truncated) {
+      try {
+        await reader.cancel();
+      } catch {
+        // 取消失败不影响已读结果
+      }
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // 流已释放
+    }
+  }
+  return { text: decodeChunks(chunks), truncated };
+}
+
+export interface ReadVendorJsonContext {
+  vendor: string;
+  operation: string;
+  /** 2xx 响应体字节上限，默认 VENDOR_RESPONSE_MAX_BYTES */
+  maxBytes?: number;
+  /** 覆盖「不是 JSON」的文案（DeepSeek 既有文案） */
+  invalidJsonMessage?: string;
+}
+
+function parseVendorJsonText(
+  text: string,
+  truncated: boolean,
+  status: number,
+  context: ReadVendorJsonContext,
+): Record<string, unknown> {
+  if (truncated) {
+    const maxBytes = context.maxBytes ?? VENDOR_RESPONSE_MAX_BYTES;
+    // 超限后重试只会再拉一遍同样的字节：显式失败，不进重试循环
+    throw vendorProtocolError(`${context.vendor} ${context.operation} response body exceeds ${maxBytes} bytes`, {
+      vendor: context.vendor,
+      operation: context.operation,
+      status,
+    });
+  }
+  if (!text.trim()) return {};
+  try {
+    return asJsonObject(JSON.parse(text));
+  } catch {
+    throw vendorProtocolError(
+      context.invalidJsonMessage ?? `${context.vendor} ${context.operation} invalid json response`,
+      { vendor: context.vendor, operation: context.operation, status },
+    );
+  }
+}
+
+/**
+ * 读取供应商 2xx JSON 响应：有响应流就按上限逐块读（到顶即取消），
+ * 只有测试替身那种没有 body 流的 Response 才退化到 json()/text()（json() 优先）。
+ * 超限 / 不可解析 → vendorProtocolError（均不可重试）。
  */
 export async function readVendorJson(
   res: Response,
-  context: { vendor: string; operation: string },
+  context: ReadVendorJsonContext,
 ): Promise<Record<string, unknown>> {
-  const asObject = (value: unknown): Record<string, unknown> =>
-    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const maxBytes = context.maxBytes ?? VENDOR_RESPONSE_MAX_BYTES;
+  const reader = responseReader(res);
+  if (reader) {
+    const { text, truncated } = await readCappedStream(reader, maxBytes);
+    return parseVendorJsonText(text, truncated, res.status, context);
+  }
   try {
-    return asObject(await res.json());
+    return asJsonObject(await res.json());
   } catch {
     // 部分网关/测试替身只实现 text()：退化为文本解析
   }
@@ -262,16 +383,32 @@ export async function readVendorJson(
   } catch {
     raw = "";
   }
-  if (!raw.trim()) return {};
-  try {
-    return asObject(JSON.parse(raw));
-  } catch {
-    throw vendorProtocolError(`${context.vendor} ${context.operation} invalid json response`, {
-      vendor: context.vendor,
-      operation: context.operation,
-      status: res.status,
-    });
+  const bytes = new TextEncoder().encode(raw).byteLength;
+  return parseVendorJsonText(raw, bytes > maxBytes, res.status, context);
+}
+
+/**
+ * 读取非 2xx 错误体：最多 maxBytes，读失败一律返回空串。
+ * 分类只看状态码与错误体开头，读失败不能反过来改变错误类型。
+ */
+export async function readVendorErrorBody(res: Response, context: { maxBytes?: number } = {}): Promise<string> {
+  const maxBytes = context.maxBytes ?? VENDOR_ERROR_BODY_MAX_BYTES;
+  const reader = responseReader(res);
+  if (reader) {
+    try {
+      const { text } = await readCappedStream(reader, maxBytes);
+      return text;
+    } catch {
+      return "";
+    }
   }
+  let raw = "";
+  try {
+    raw = await res.text();
+  } catch {
+    return "";
+  }
+  return raw.length > maxBytes ? raw.slice(0, maxBytes) : raw;
 }
 
 /** 提交前参数校验失败：不可重试 */

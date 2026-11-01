@@ -1,13 +1,10 @@
 import {
-  classifyVendorHttpError,
-  classifyVendorNetworkError,
-  isRetryableVendorError,
   looksLikeContentRejection,
-  readVendorJson,
   VendorError,
   vendorParamError,
   vendorProtocolError,
 } from "./errors";
+import { VendorHttpClient } from "./vendor-http";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 type Json = Record<string, unknown>;
@@ -176,6 +173,8 @@ export abstract class HttpPostprocessAdapter implements ModelAdapter {
   private readonly baseUrl: string;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
+  /** 传输层惰性构造：`vendor` 是子类字段，super() 期间尚未赋值 */
+  private httpClient?: VendorHttpClient;
   /** mock 任务形状（由 submit 时的请求决定，poll 时按 id 取回）*/
   private readonly mockJobs = new Map<string, { ext: string; count: number; durationS?: number }>();
   private readonly mockPolls = new Map<string, number>();
@@ -352,52 +351,25 @@ export abstract class HttpPostprocessAdapter implements ModelAdapter {
     return { status: "succeeded", results };
   }
 
-  /** 指数退避重试：只重试 VendorError.retryable（429/5xx/超时/网络） */
-  private async request(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      try {
-        return await this.requestOnce(method, path, body);
-      } catch (err) {
-        lastError = err;
-        if (!isRetryableVendorError(err) || attempt === this.maxRetries) break;
-        await new Promise((resolve) => setTimeout(resolve, this.retryBaseMs * 2 ** attempt));
-      }
-    }
-    throw lastError;
-  }
-
-  private async requestOnce(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 120_000);
-    const operation = `${method} ${path}`;
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method,
-        headers: {
-          "content-type": "application/json",
-          ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: controller.signal,
+  /**
+   * 传输层入口：重试（只重试 429/5xx/超时/网络）、超时、错误分类、响应封顶
+   * 统一由 VendorHttpClient 负责（第 125 批）。
+   *
+   * 惰性构造的原因同 submitPath：子类的 `vendor` 字段在 super() 返回之后才赋值，
+   * 构造函数里建客户端会拿到 undefined 的供应商标签。
+   */
+  private request(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
+    if (!this.httpClient) {
+      this.httpClient = new VendorHttpClient({
+        vendor: this.vendor,
+        baseUrl: this.baseUrl,
+        timeoutMs: this.config.timeoutMs ?? 120_000,
+        apiKey: this.config.apiKey,
+        maxRetries: this.maxRetries,
+        retryBaseMs: this.retryBaseMs,
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw classifyVendorHttpError(res.status, text, { vendor: this.vendor, operation });
-      }
-      return await readVendorJson(res, { vendor: this.vendor, operation });
-    } catch (err) {
-      if (err instanceof VendorError) throw err;
-      if (
-        err instanceof Error &&
-        (err.name === "AbortError" || err.name === "TimeoutError" || err.name === "TypeError")
-      ) {
-        throw classifyVendorNetworkError(err, { vendor: this.vendor, operation });
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
     }
+    return this.httpClient.request<Json>(method, path, body);
   }
 
   /** 校验辅助：文本类能力要求 prompt 非空 */

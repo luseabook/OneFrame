@@ -1,13 +1,5 @@
-import {
-  classifyVendorHttpError,
-  classifyVendorNetworkError,
-  isRetryableVendorError,
-  looksLikeContentRejection,
-  readVendorJson,
-  VendorError,
-  vendorParamError,
-  vendorProtocolError,
-} from "./errors";
+import { looksLikeContentRejection, vendorParamError, vendorProtocolError } from "./errors";
+import { classifyVendorPayloadError, VendorHttpClient } from "./vendor-http";
 import type { GenResult, ModelAdapter, NormalizedGenRequest, VendorTaskState } from "./types";
 
 type Json = Record<string, unknown>;
@@ -185,22 +177,26 @@ function pickErrorMessage(data: Json): string | undefined {
  */
 export class ArkImageAdapter implements ModelAdapter {
   readonly vendor = "volcengine-ark";
-  private readonly baseUrl: string;
-  private readonly maxRetries: number;
-  private readonly retryBaseMs: number;
+  private readonly http: VendorHttpClient;
 
   constructor(
     private readonly config: ArkImageConfig,
-    private readonly fetchImpl: typeof fetch = fetch,
+    fetchImpl: typeof fetch = fetch,
   ) {
-    this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.maxRetries = config.maxRetries ?? 2;
-    this.retryBaseMs = config.retryBaseMs ?? 400;
+    this.http = new VendorHttpClient({
+      vendor: VENDOR,
+      baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
+      timeoutMs: config.timeoutMs ?? 120_000,
+      apiKey: config.apiKey,
+      maxRetries: config.maxRetries ?? 2,
+      retryBaseMs: config.retryBaseMs ?? 400,
+      fetchImpl,
+    });
   }
 
   async submit(req: NormalizedGenRequest): Promise<{ vendor_task_id?: string; sync_results?: GenResult[] }> {
     const body = this.buildRequestBody(req);
-    const data = await this.request("POST", ARK_IMAGE_PATH, body);
+    const data = await this.http.request("POST", ARK_IMAGE_PATH, body);
 
     // 1) 同步出图（Seedream 常规路径）
     const results = parseImageResults(data);
@@ -208,10 +204,7 @@ export class ArkImageAdapter implements ModelAdapter {
 
     // 2) 200 但响应体带 error（如审核拒绝在同步接口直接返回）
     if (data.error) {
-      throw classifyVendorHttpError(200, JSON.stringify(data), {
-        vendor: VENDOR,
-        operation: `POST ${ARK_IMAGE_PATH}`,
-      });
+      throw classifyVendorPayloadError(data, { vendor: VENDOR, operation: `POST ${ARK_IMAGE_PATH}` });
     }
 
     // 3) 异步任务形态：返回 task id 后走 poll
@@ -227,7 +220,7 @@ export class ArkImageAdapter implements ModelAdapter {
 
   async poll(vendorTaskId: string): Promise<VendorTaskState> {
     const path = `${ARK_IMAGE_TASK_PATH}/${encodeURIComponent(vendorTaskId)}`;
-    const data = await this.request("GET", path);
+    const data = await this.http.request("GET", path);
     const rawStatus = String(data.status ?? "").toLowerCase();
 
     // 审核驳回必须单独识别（同视频）：否则落 running 造成无限轮询、积分永久冻结
@@ -272,7 +265,7 @@ export class ArkImageAdapter implements ModelAdapter {
   }
 
   async cancel(vendorTaskId: string): Promise<void> {
-    await this.request("POST", `${ARK_IMAGE_TASK_PATH}/${encodeURIComponent(vendorTaskId)}/cancel`, {}).catch(
+    await this.http.request("POST", `${ARK_IMAGE_TASK_PATH}/${encodeURIComponent(vendorTaskId)}/cancel`, {}).catch(
       () => undefined,
     );
   }
@@ -307,50 +300,5 @@ export class ArkImageAdapter implements ModelAdapter {
       body.sequential_image_generation_options = { max_images: count };
     }
     return body;
-  }
-
-  /** 指数退避重试：仅重试 VendorError.retryable（429/5xx/超时/网络） */
-  private async request(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      try {
-        return await this.requestOnce(method, path, body);
-      } catch (err) {
-        lastError = err;
-        if (!isRetryableVendorError(err) || attempt === this.maxRetries) break;
-        await new Promise((resolve) => setTimeout(resolve, this.retryBaseMs * 2 ** attempt));
-      }
-    }
-    throw lastError;
-  }
-
-  private async requestOnce(method: "GET" | "POST", path: string, body?: Json): Promise<Json> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 120_000);
-    const operation = `${method} ${path}`;
-    try {
-      const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.config.apiKey}`,
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw classifyVendorHttpError(res.status, text, { vendor: VENDOR, operation });
-      }
-      return await readVendorJson(res, { vendor: VENDOR, operation });
-    } catch (err) {
-      if (err instanceof VendorError) throw err;
-      if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError" || err.name === "TypeError")) {
-        throw classifyVendorNetworkError(err, { vendor: VENDOR, operation });
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
   }
 }

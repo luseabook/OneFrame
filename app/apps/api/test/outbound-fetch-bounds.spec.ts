@@ -55,7 +55,9 @@ const SCAN_ROOTS = [
  *     `@app/shared` 的 `downloadBounded`（三处裸 fetch 消失）；
  *   - CLI `runtime.ts` 的 `task download` 内联同一套双上限（CLI 保持零运行时依赖，
  *     不能 import shared），仍是裸 fetch + `AbortSignal.timeout`；
- *   - 其余 6 处 API 调用与 1 处 model-adapters 调用原本就有超时。
+ *   - 其余 6 处 API 调用原本就有超时；
+ *   - 第 125 批：model-adapters 的 deepseek / ark-image / ark-video / postprocess / http-video
+ *     五份手写传输收口到 `vendor-http.ts`，裸 fetch 从 5 处降到 1 处（且带 signal）。
  */
 const SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/agent/agent-stt.service.ts": 1,
@@ -64,7 +66,7 @@ const SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/canvas/canvas-download.guard.ts": 1,
   "apps/api/src/modules/film/film-notify.service.ts": 1,
   "apps/cli/src/runtime.ts": 2,
-  "packages/model-adapters/src/postprocess.ts": 1,
+  "packages/model-adapters/src/vendor-http.ts": 1,
 };
 
 interface FetchSite {
