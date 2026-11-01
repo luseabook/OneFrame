@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { eq, inArray } from "drizzle-orm";
-import { adminUsers, identities, inviteCodes, spaces, users, waitlistEntries } from "@app/db";
+import { adminUsers, identities, inviteCodes, inviteRedemptions, spaces, users, waitlistEntries } from "@app/db";
 import { newId } from "@app/shared";
 import { AppModule } from "../src/app.module";
 import { AllExceptionsFilter } from "../src/common/http/exception.filter";
@@ -20,7 +20,8 @@ import { encryptPhone, hashPhone } from "../src/modules/auth/crypto";
  * 3. `space_id` 取个人空间（`spaces.owner_user_id = users.id`）；
  * 4. 已注销改状态 → 400101；restore 只对已注销生效，昵称传了才覆盖；
  * 5. 等待名单只回 `phone_hash_prefix`（平台没有明文），invite 幂等返回原时间；
- * 6. 邀请码批量生成 8 位无歧义码、`created_by` 是当前 admin、耗尽不可启用。
+ * 6. 邀请码批量生成 8 位无歧义码、`created_by` 是当前 admin、耗尽不可启用；
+ * 7. 邀请码删除只对"从未核销"开放：未用可删、已用（含核销行存在但 used_count 仍是 0）拒绝、再删 400102。
  *
  * 本机没有 PG 时这些用例会直接失败（与其余 admin e2e 同口径），
  * 所以契约 §5 规定验证只跑 typecheck/lint + 纯函数单测（`admin-invite-code.unit.spec.ts`）；
@@ -44,7 +45,7 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
   const createdInviteCodeIds: string[] = [];
   const createdUserIds: string[] = [];
 
-  const inject = async (method: "GET" | "POST" | "PATCH", url: string, payload?: unknown) => {
+  const inject = async (method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: unknown) => {
     const headers: Record<string, string> = {};
     if (payload !== undefined) headers["content-type"] = "application/json";
     if (adminToken) headers.authorization = `Bearer ${adminToken}`;
@@ -113,9 +114,11 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
 
   afterAll(async () => {
     try {
-      // 外键顺序：邀请码 → 等待名单 → 身份 → 空间 → 用户
+      // 外键顺序：核销记录 → 邀请码 → 等待名单 → 身份 → 空间 → 用户
       if (createdInviteCodeIds.length > 0) {
-        await db.delete(inviteCodes).where(inArray(inviteCodes.id, createdInviteCodeIds.map((id) => BigInt(id))));
+        const ids = createdInviteCodeIds.map((id) => BigInt(id));
+        await db.delete(inviteRedemptions).where(inArray(inviteRedemptions.codeId, ids));
+        await db.delete(inviteCodes).where(inArray(inviteCodes.id, ids));
       }
       await db.delete(waitlistEntries).where(eq(waitlistEntries.id, BigInt(waitlistId)));
       for (const id of createdUserIds) {
@@ -365,5 +368,39 @@ describe("ops admin P2 (users/waitlist/invite-codes)", () => {
 
     expect((await inject("PATCH", "/ops/admin/invite-codes/999999999999", { status: 2 })).code).toBe(400102);
     expect((await inject("PATCH", `/ops/admin/invite-codes/${target.id}`, { status: 3 })).code).toBe(400101);
+  });
+
+  it("邀请码删除：未核销可删、已核销拒绝（快照与核销表都算数）、再删 400102", async () => {
+    // ── 未使用的码：删掉后行真的消失，列表里也查不到 ──
+    const fresh = (await inject("POST", "/ops/admin/invite-codes", { count: 1 })).data.codes[0];
+    createdInviteCodeIds.push(fresh.id);
+    const removed = await inject("DELETE", `/ops/admin/invite-codes/${fresh.id}`);
+    expect(removed.code).toBe(0);
+    expect(removed.data).toMatchObject({ id: fresh.id, code: fresh.code, deleted: true });
+    const [gone] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(fresh.id)));
+    expect(gone).toBeUndefined();
+    // 再删是"不存在"而不是"删除成功"：清理脚本重跑时不能假装删掉了什么
+    expect((await inject("DELETE", `/ops/admin/invite-codes/${fresh.id}`)).code).toBe(400102);
+    expect((await inject("DELETE", "/ops/admin/invite-codes/not-a-number")).code).toBe(400101);
+
+    // ── used_count>0：拒绝删除，行必须还在（已用码的唯一处置是停用） ──
+    const used = (await inject("POST", "/ops/admin/invite-codes", { count: 1 })).data.codes[0];
+    createdInviteCodeIds.push(used.id);
+    await db.update(inviteCodes).set({ usedCount: 1 }).where(eq(inviteCodes.id, BigInt(used.id)));
+    expect((await inject("DELETE", `/ops/admin/invite-codes/${used.id}`)).code).toBe(400101);
+    const [kept] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(used.id)));
+    expect(kept).toBeDefined();
+
+    // ── 核销表有行但 used_count 仍是 0（历史不一致）：同样拒绝，不能只信快照 ──
+    const ghost = (await inject("POST", "/ops/admin/invite-codes", { count: 1 })).data.codes[0];
+    createdInviteCodeIds.push(ghost.id);
+    await db.insert(inviteRedemptions).values({
+      id: newId(),
+      codeId: BigInt(ghost.id),
+      spaceId: BigInt(userSpaceId),
+    });
+    expect((await inject("DELETE", `/ops/admin/invite-codes/${ghost.id}`)).code).toBe(400101);
+    const [ghostKept] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, BigInt(ghost.id)));
+    expect(ghostKept).toBeDefined();
   });
 });

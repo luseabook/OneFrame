@@ -3993,6 +3993,12 @@
     "loadFailed": "Failed to load invite codes",
     "createFailed": "Failed to generate invite codes",
     "updateFailed": "Failed to update the invite code",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "deleteConfirm": "Delete invite code {code}? Only codes that were never redeemed can be deleted; this cannot be undone.",
+    "deleted": "Invite code {code} deleted",
+    "deleteFailed": "Failed to delete the invite code",
+    "deleteUsedHint": "This code has been redeemed and cannot be deleted; disable it instead",
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"

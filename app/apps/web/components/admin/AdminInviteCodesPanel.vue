@@ -10,6 +10,9 @@
  *
  * 为什么"已耗尽的码"禁用启用按钮：后端对 `used_count >= max_uses` 的码重新启用会 400101，
  * 前端先把按钮禁掉并给出原因，省掉一次注定失败的点击（契约 §2.3）。
+ *
+ * 为什么"已核销的码"禁用删除按钮：核销记录外键指向邀请码，删掉已用码会连带毁掉
+ * 返利/核销的来源，后端同样 400101。已用码的唯一处置是停用；删除只服务"发错/测试码"。
  */
 import { adminApi, adminErrorCode } from "~/composables/useAdminApi";
 
@@ -45,7 +48,7 @@ const pageSize = ref(20);
 const loading = ref(false);
 const error = ref("");
 const ok = ref("");
-/** 行内 busy：`<id>:status` */
+/** 行内 busy：`<id>:status` / `<id>:delete` */
 const busy = ref("");
 
 /** 输入中的筛选条件 */
@@ -82,14 +85,23 @@ function usageText(row: InviteCodeRow): string {
   return `${row.used_count}/${row.max_uses}`;
 }
 
-/** 已耗尽：不能再启用（后端同样拒绝），列表里也要把按钮禁掉 */
+/**
+ * 已耗尽：不能再启用（后端同样拒绝），列表里也要把按钮禁掉。
+ *
+ * `max_uses = 0` 是"不限次"（契约 §2.3、`OpService` 同口径），永远不算耗尽——
+ * 旧判断漏了这个分支，会把不限次码渲染成"耗尽"并禁掉启用按钮。
+ */
 function isExhausted(row: InviteCodeRow): boolean {
-  return row.status === 3 || row.used_count >= row.max_uses;
+  return row.status === 3 || (row.max_uses > 0 && row.used_count >= row.max_uses);
 }
 
 /** 行内按钮的 busy 判定收进函数：模板里少写反引号表达式，`vue-tsc` 与模板解析都更稳 */
 function isBusy(row: InviteCodeRow): boolean {
   return busy.value === `${row.id}:status`;
+}
+
+function isDeleting(row: InviteCodeRow): boolean {
+  return busy.value === `${row.id}:delete`;
 }
 
 /**
@@ -266,6 +278,30 @@ async function toggleStatus(row: InviteCodeRow): Promise<void> {
   }
 }
 
+/**
+ * 删除：只对"从未核销"的码开放（后端同日径，已核销会 400101）。
+ *
+ * 前端先按 `used_count > 0` 把按钮禁掉：已用码点下去注定失败，
+ * 而"为什么不能删"比一次报错更值得直接写在 title 里。
+ */
+async function removeCode(row: InviteCodeRow): Promise<void> {
+  if (row.used_count > 0) return;
+  if (!window.confirm(t("adminInvites.deleteConfirm", { code: row.code }))) return;
+  busy.value = `${row.id}:delete`;
+  error.value = "";
+  ok.value = "";
+  try {
+    await adminApi<unknown>(`/ops/admin/invite-codes/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+    // 删除会改变 total 与分页：重拉而不是本地 splice，避免最后一页变成空页
+    await load();
+    ok.value = t("adminInvites.deleted", { code: row.code });
+  } catch (err) {
+    await handleError(err, "adminInvites.deleteFailed");
+  } finally {
+    busy.value = "";
+  }
+}
+
 onMounted(() => {
   void load();
 });
@@ -396,11 +432,19 @@ onMounted(() => {
             <button class="mini" @click="copyText(row.code)">{{ t("adminInvites.copy") }}</button>
             <button
               class="mini"
-              :disabled="isBusy(row) || (row.status === 2 && isExhausted(row))"
+              :disabled="isBusy(row) || isDeleting(row) || (row.status === 2 && isExhausted(row))"
               :title="row.status === 2 && isExhausted(row) ? t('adminInvites.exhaustedHint') : ''"
               @click="toggleStatus(row)"
             >
               {{ row.status === 1 ? t("adminInvites.disable") : t("adminInvites.enable") }}
+            </button>
+            <button
+              class="mini danger"
+              :disabled="isBusy(row) || isDeleting(row) || row.used_count > 0"
+              :title="row.used_count > 0 ? t('adminInvites.deleteUsedHint') : ''"
+              @click="removeCode(row)"
+            >
+              {{ isDeleting(row) ? t("adminInvites.deleting") : t("adminInvites.delete") }}
             </button>
           </span>
         </div>
@@ -471,6 +515,9 @@ onMounted(() => {
 .mini:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.mini.danger {
+  color: #ff6b6b;
 }
 .banner {
   margin: 0;
@@ -560,13 +607,13 @@ onMounted(() => {
 }
 .table-inner {
   /* 8 列（含两个写操作按钮）在窄屏会挤：给最小宽度 + 横向滚动 */
-  min-width: 960px;
+  min-width: 1000px;
 }
 .row {
   display: grid;
   grid-template-columns:
     minmax(96px, 0.9fr) 72px 72px 72px minmax(130px, 1fr) minmax(96px, 0.8fr)
-    minmax(130px, 1fr) 150px;
+    minmax(130px, 1fr) 196px;
   gap: 8px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border-1);

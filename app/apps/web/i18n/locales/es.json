@@ -3993,6 +3993,12 @@
     "loadFailed": "Failed to load invite codes",
     "createFailed": "Failed to generate invite codes",
     "updateFailed": "Failed to update the invite code",
+    "delete": "Eliminar",
+    "deleting": "Eliminando…",
+    "deleteConfirm": "¿Eliminar el código de invitación {code}? Solo se pueden eliminar los códigos que nunca se canjearon; la acción no se puede deshacer.",
+    "deleted": "Código de invitación {code} eliminado",
+    "deleteFailed": "No se pudo eliminar el código de invitación",
+    "deleteUsedHint": "Este código ya fue canjeado y no se puede eliminar; desactívalo en su lugar",
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"

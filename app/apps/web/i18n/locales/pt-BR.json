@@ -3993,6 +3993,12 @@
     "loadFailed": "Failed to load invite codes",
     "createFailed": "Failed to generate invite codes",
     "updateFailed": "Failed to update the invite code",
+    "delete": "Excluir",
+    "deleting": "Excluindo…",
+    "deleteConfirm": "Excluir o código de convite {code}? Apenas códigos nunca resgatados podem ser excluídos; a ação não pode ser desfeita.",
+    "deleted": "Código de convite {code} excluído",
+    "deleteFailed": "Falha ao excluir o código de convite",
+    "deleteUsedHint": "Este código já foi resgatado e não pode ser excluído; desative-o",
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"

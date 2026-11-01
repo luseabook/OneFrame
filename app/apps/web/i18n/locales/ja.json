@@ -3993,6 +3993,12 @@
     "loadFailed": "Failed to load invite codes",
     "createFailed": "Failed to generate invite codes",
     "updateFailed": "Failed to update the invite code",
+    "delete": "削除",
+    "deleting": "削除中…",
+    "deleteConfirm": "招待コード {code} を削除しますか？削除できるのは未使用のコードのみで、元に戻せません。",
+    "deleted": "招待コード {code} を削除しました",
+    "deleteFailed": "招待コードの削除に失敗しました",
+    "deleteUsedHint": "このコードは使用済みのため削除できません。無効化してください",
     "prev": "Prev",
     "next": "Next",
     "pageInfo": "Page {page}/{pages} · {total} rows"

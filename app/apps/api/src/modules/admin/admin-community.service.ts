@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import { identities, inviteCodes, spaces, users, waitlistEntries } from "@app/db";
+import { identities, inviteCodes, inviteRedemptions, spaces, users, waitlistEntries } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { decryptPhone, hashPhone } from "../auth/crypto";
@@ -32,6 +32,17 @@ function parseId(id: string, field: string): bigint {
     throw new AppError(ErrorCode.INVALID_PARAM, `invalid ${field}`, { field });
   }
   return BigInt(id);
+}
+
+/** Postgres 外键冲突：删除邀请码时核销记录若已先行提交，按"已核销"拒绝而不是冒成 500 */
+const PG_FOREIGN_KEY_VIOLATION = "23503";
+
+/** 从驱动/drizzle 包装过的错误里取 SQLSTATE（与 audit 重试同一形状：code 或 cause.code） */
+function isForeignKeyViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  if ((err as { code?: unknown }).code === PG_FOREIGN_KEY_VIOLATION) return true;
+  const cause = (err as { cause?: unknown }).cause;
+  return !!cause && typeof cause === "object" && (cause as { code?: unknown }).code === PG_FOREIGN_KEY_VIOLATION;
 }
 
 /** 审计/归属里存的是 admin_users.id，可能为 null（历史数据/系统生成） */
@@ -521,5 +532,55 @@ export class AdminCommunityService {
       .returning();
     if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "invite code not found");
     return toInviteCodeDto(updated);
+  }
+
+  /**
+   * 删除邀请码（第 109 批，契约 §2.3）。
+   *
+   * 只允许删除**从未被核销**的码。`invite_redemptions.code_id` 是指向本表的外键：
+   * 删掉一个已核销的码，要么被 FK 拒绝（23503 冒成 500），要么必须连带删掉核销与积分流水，
+   * 后者会毁掉"谁用什么码拿了多少积分"的账实证据。已核销的码有唯一正确的处置——停用：
+   * 行保留、历史可追溯、用户侧立即失效（`OpService.verifyInviteCode` 拒绝 status≠1）。
+   *
+   * 判定同时看两个来源：`used_count`（核销时同事务自增）与核销表本身。
+   * 只看快照会漏掉历史不一致的数据（used_count 是 0 但核销行存在），
+   * 而那种码一旦删除就再也解释不了对应的积分来源。
+   *
+   * 删除用条件 `WHERE used_count = 0`：检查与删除之间若刚好有人在核销，
+   * 对方的 `SELECT … FOR UPDATE` 会先占行锁，本语句随后重新求值条件、删 0 行，
+   * 不会出现"检查时没用过、删掉的却是已用码"。零行删除按"已核销"拒绝。
+   */
+  async deleteInviteCode(id: string): Promise<{ id: string; code: string; deleted: true }> {
+    const codeId = parseId(id, "id");
+    const [row] = await db.select().from(inviteCodes).where(eq(inviteCodes.id, codeId)).limit(1);
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "invite code not found");
+
+    const redeemed = new AppError(
+      ErrorCode.INVALID_PARAM,
+      "invite code has been redeemed, disable it instead of deleting",
+      { field: "id" },
+    );
+    if (row.usedCount > 0) throw redeemed;
+    const [redemption] = await db
+      .select({ id: inviteRedemptions.id })
+      .from(inviteRedemptions)
+      .where(eq(inviteRedemptions.codeId, codeId))
+      .limit(1);
+    if (redemption) throw redeemed;
+
+    let deleted: { id: bigint; code: string }[];
+    try {
+      deleted = await db
+        .delete(inviteCodes)
+        .where(and(eq(inviteCodes.id, codeId), eq(inviteCodes.usedCount, 0)))
+        .returning({ id: inviteCodes.id, code: inviteCodes.code });
+    } catch (err) {
+      // 核销记录在"查核销表"与"删码"之间提交：FK 是最后一道闸，翻译成同一句业务错误
+      if (isForeignKeyViolation(err)) throw redeemed;
+      throw err;
+    }
+    const gone = deleted[0];
+    if (!gone) throw redeemed;
+    return { id: String(gone.id), code: gone.code, deleted: true };
   }
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../common/public.decorator";
@@ -151,6 +151,15 @@ export class AdminCommunityController {
   updateInviteCode(@Param("id") id: string, @Body() body: unknown) {
     const input = parseOrThrow(inviteCodeStatusPatchSchema, body ?? {});
     return this.community.updateInviteCodeStatus(id, input.status);
+  }
+
+  /**
+   * 删除邀请码（契约 §2.3）：只对"从未核销"的码开放，已核销返回 400101 并要求改用停用。
+   * DELETE 属写操作，Viewer 会被 `AdminGuard` 以 403101 拦下（同其它写端点）。
+   */
+  @Delete("invite-codes/:id")
+  deleteInviteCode(@Param("id") id: string) {
+    return this.community.deleteInviteCode(id);
   }
 }
 

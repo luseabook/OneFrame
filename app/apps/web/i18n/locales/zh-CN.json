@@ -3993,6 +3993,12 @@
     "loadFailed": "加载邀请码失败",
     "createFailed": "生成邀请码失败",
     "updateFailed": "更新邀请码失败",
+    "delete": "删除",
+    "deleting": "删除中…",
+    "deleteConfirm": "删除邀请码 {code}？只对从未核销的码开放，删除后不可恢复。",
+    "deleted": "邀请码 {code} 已删除",
+    "deleteFailed": "删除邀请码失败",
+    "deleteUsedHint": "该码已被核销，不能删除；请改用停用",
     "prev": "上一页",
     "next": "下一页",
     "pageInfo": "第 {page}/{pages} 页 · 共 {total} 条"

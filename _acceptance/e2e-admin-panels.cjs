@@ -13,7 +13,7 @@
  *   - 10 个面板逐个打开：断言侧栏高亮 + 顶部 `.page-title` + 面板 h2 文案，
  *     并断言首屏列表请求是真实发出且 `code === 0`（不是"页面打开了但数据没回来"）；
  *   - 每个面板点一次**只读**交互按钮（刷新 / 重置），断言第二次列表请求同样成功；
- *   - 两个**可逆**写操作：邀请码"生成 → 停用"、配置"新建 → 搜索 → 删除"，
+ *   - 两个**可逆**写操作：邀请码"生成 → 停用 → 删除"、配置"新建 → 搜索 → 删除"，
  *     用于证明表单绑定、window.confirm、写后端与列表刷新这条链路是通的；
  *   - 未登录直访 `/admin?tab=...` 必须被中间件弹回 `/admin/login`；
  *   - 收集 `console.error` / `pageerror`，任何一个未被白名单放行的错误都算失败。
@@ -21,7 +21,8 @@
  * 明确**不做**的事（见 `_acceptance/_team/report-admin-panels.md`）：
  *   - 不点封禁 / 退款 / 真实数据删除等不可逆操作；
  *   - 不验证多管理员角色权限矩阵（需要第二个账号，且属于权限测试而非面板冒烟）；
- *   - 邀请码只能停用、后端不提供删除，所以每次运行会在本机开发库里留下一条已停用的码。
+ *   - 邀请码只删**从未核销**的码（后端对已核销的码回 400101，需改用停用）；
+ *     E2E 建的码从未核销，所以跑完会把自己建的那条删掉，不再在开发库里留记录。
  *
  * 用法：先起栈（`_acceptance/start-wanxing-stack.ps1`），再
  *   node _acceptance/e2e-admin-panels.cjs
@@ -273,7 +274,7 @@ async function main() {
     }
   }
 
-  // ── 可逆写 1：邀请码 生成 → 停用 ──────────────────────────────────────────
+  // ── 可逆写 1：邀请码 生成 → 停用 → 删除 ───────────────────────────────────
   try {
     await page.goto(`${WEB}/admin?tab=invites`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".create-form .create-btn", { timeout: 20000 });
@@ -321,11 +322,29 @@ async function main() {
         check(`邀请码：行状态变为「${Z.adminInvites.statusDisabled}」`, offText.trim() === Z.adminInvites.statusDisabled, offText.trim());
         const banner = await page.locator("p.banner.ok").first().innerText().catch(() => "");
         check("邀请码：成功提示包含码值", banner.includes(code), banner.trim());
+
+        // 删除：只接受从未核销的码 —— 本流程刚建的码没被核销过，应删得掉。
+        // 全局 dialog 监听在页面加载时就已 accept（见文件顶部），`window.confirm` 不会卡住。
+        const del = row.locator("button", { hasText: Z.adminInvites.delete }).first();
+        const deleteWait = waitEnvelope(
+          page,
+          (r) =>
+            /\/v1\/ops\/admin\/invite-codes\/[^/]+$/.test(new URL(r.url()).pathname) &&
+            r.request().method() === "DELETE",
+        );
+        await del.click();
+        const removed = await deleteWait;
+        check("邀请码：删除未核销码 DELETE code=0", removed.body !== null && removed.body.code === 0, `code=${removed.body ? removed.body.code : "?"}`);
+        const rowGone = await row
+          .waitFor({ state: "detached", timeout: 20000 })
+          .then(() => true)
+          .catch(() => false);
+        check("邀请码：删除后行从列表消失", rowGone);
       }
     }
     await page.screenshot({ path: path.join(SHOT_DIR, "write-invites.png") }).catch(() => {});
   } catch (err) {
-    check("邀请码：生成 → 停用", false, String(err && err.message ? err.message : err));
+    check("邀请码：生成 → 停用 → 删除", false, String(err && err.message ? err.message : err));
     await page.screenshot({ path: path.join(SHOT_DIR, "write-invites.png") }).catch(() => {});
   }
 

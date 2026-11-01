@@ -747,6 +747,7 @@ POST /ops/admin/users/{id}/restore {nickname?}               // 注销恢复；�
 GET  /ops/admin/waitlist?invited=0|1&page=&page_size=        // 只回 phone_hash_prefix（平台无明文手机号）
 POST /ops/admin/waitlist/{id}/invite                         // 标记 invited_at（幂等）
 GET  /ops/admin/invite-codes?status=&page=&page_size= · POST /ops/admin/invite-codes {credits?,max_uses?,expires_at?,count?} · PATCH /ops/admin/invite-codes/{id} {status:1|2}
+DELETE /ops/admin/invite-codes/{id}                          // 只删从未核销的码；已核销 → 400101（改停用）
 GET  /ops/admin/ai-labels?from=&to=&only_missing=&page=&page_size= · GET /ops/admin/ai-labels.csv?from=&to=&only_missing=
 ```
 
@@ -784,6 +785,10 @@ GET  /ops/admin/ai-labels?from=&to=&only_missing=&page=&page_size= · GET /ops/a
 >   `invite` 只标记 `invited_at`，系统不会发短信（没有手机号）。
 > - `invite-codes` 的 `status=3`（耗尽）是**派生值**（`status=1 且 used_count>=max_uses`），
 >   库里不写 3；列表按 1/2/3 过滤时服务端翻译成同一口径条件，避免"筛 3 看不到用满的码"。
+> - `DELETE /invite-codes/{id}` 只接受**从未核销**的码（`used_count=0` **且** `invite_redemptions`
+>   无对应行 —— 两者都要查，快照与核销表可能因历史数据不一致）；否则 `400101`，提示改用停用。
+>   删除是条件删除（`WHERE id=? AND used_count=0`），与核销路径的 `SELECT … FOR UPDATE` 行锁配合
+>   避免"刚被核销就被删"；`invite_redemptions.code_id` 外键冲突（23503）同样翻译成 `400101`。
 > - `ai-labels` 数据源是 `tasks.results[].meta.ai_label`（worker 生成时写入，**不建第二套埋点表、
 >   不做回填**）：`has_ai_label` 与 `enabled` 是两个维度（`{enabled:false}` 也算有标签）；
 >   `only_missing=1` 用于抽验"成功但没打标"的产出；单次扫描 ≤5000 行，total 是该上限内的总数。
