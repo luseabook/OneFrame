@@ -4,7 +4,7 @@ import pino from "pino";
 import { createDb } from "@app/db";
 import { timelinePublications } from "@app/db";
 import { eq } from "drizzle-orm";
-import { probeFfmpeg } from "@app/shared";
+import { probeFfmpeg, readEnvNumber } from "@app/shared";
 import { assertWorkerEnv } from "./env-guard";
 import {
   auditLedger,
@@ -26,6 +26,11 @@ const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   redact: ["job.data.access_token", "*.access_token"], // observability §1：token 禁入日志
 });
+
+// 停机上限（第 123 批）：在**启动时**读一次并校验。旧写法在 shutdown() 里现读，
+// `SHUTDOWN_TIMEOUT_MS=30s` 会得到 NaN → 强制退出定时器 0ms 就开火（exit(1)），
+// 把还没 drain 完的进程直接杀掉；空白则得到 0，同样立即强杀。
+const SHUTDOWN_TIMEOUT_MS = readEnvNumber("SHUTDOWN_TIMEOUT_MS", { default: 25_000, min: 0, integer: true });
 
 // 生产启动守卫（fail fast）：NODE_ENV=production 时禁止 ADAPTER_MODE=mock，
 // 且必须至少配置一种真实供应商，否则直接拒绝启动（错误信息不含密钥值）。
@@ -99,7 +104,7 @@ const adapterOptions: AdapterRuntimeOptions = {
           modelMap: parseJsonRecord(process.env.ARK_IMAGE_MODEL_MAP) ?? arkModelMap,
           responseFormat: process.env.ARK_IMAGE_RESPONSE_FORMAT === "b64_json" ? "b64_json" : "url",
           watermark: process.env.ARK_IMAGE_WATERMARK !== "false",
-          timeoutMs: Number(process.env.ARK_IMAGE_TIMEOUT_MS ?? 120_000),
+          timeoutMs: readEnvNumber("ARK_IMAGE_TIMEOUT_MS", { default: 120_000, min: 1, integer: true }),
         },
       }
     : {}),
@@ -133,10 +138,10 @@ const deps: ExecutorDeps = {
   adapterOptions,
   aiLabel,
   log: (obj, msg) => log.info(obj, msg),
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 1000),
-  maxPollMs: Number(process.env.POLL_MAX_MS ?? DEFAULT_MAX_POLL_MS),
+  pollIntervalMs: readEnvNumber("POLL_INTERVAL_MS", { default: 1000, min: 1, integer: true }),
+  maxPollMs: readEnvNumber("POLL_MAX_MS", { default: DEFAULT_MAX_POLL_MS, min: 1, integer: true }),
   // P10：real 模式下出站素材 URI 的签名有效期（默认 6h，覆盖供应商长任务）
-  outboundUriTtlSeconds: Number(process.env.ADAPTER_URI_TTL_SECONDS ?? 21_600),
+  outboundUriTtlSeconds: readEnvNumber("ADAPTER_URI_TTL_SECONDS", { default: 21_600, min: 1, integer: true }),
 };
 
 // P7 成片合成：ffmpeg 路径可配（默认 PATH）；mock 模式下源视频为占位字节 → 回退色板
@@ -203,7 +208,7 @@ function schedule(name: string, intervalMs: number, fn: () => Promise<unknown>, 
 // 订单对账（5min）：已支付未入账 → 补账；待支付超时 → 关闭
 schedule(
   "orders-reconcile",
-  Number(process.env.ORDERS_RECONCILE_INTERVAL_MS ?? 5 * 60_000),
+  readEnvNumber("ORDERS_RECONCILE_INTERVAL_MS", { default: 5 * 60_000, min: 0, integer: true }),
   async () => {
     const n = await reconcileOrders(db, log);
     if (n > 0) log.warn({ reconciled: n }, "orders reconciled");
@@ -214,7 +219,7 @@ schedule(
 // 任务看门狗（1min）：卡死的任务置失败并解冻积分
 schedule(
   "tasks-watchdog",
-  Number(process.env.TASKS_WATCHDOG_INTERVAL_MS ?? 60_000),
+  readEnvNumber("TASKS_WATCHDOG_INTERVAL_MS", { default: 60_000, min: 0, integer: true }),
   async () => {
     const n = await reviveStuckTasks(db, log);
     if (n > 0) log.warn({ revived: n }, "stuck tasks revived");
@@ -233,7 +238,7 @@ const publishTranscodeQueue = new Queue(QUEUES.PUBLISH_TRANSCODE, { connection: 
 
 schedule(
   "publications-watchdog",
-  Number(process.env.PUBLICATIONS_WATCHDOG_INTERVAL_MS ?? 120_000),
+  readEnvNumber("PUBLICATIONS_WATCHDOG_INTERVAL_MS", { default: 120_000, min: 0, integer: true }),
   async () => {
     const n = await reviveStuckPublications(db, log, 15, undefined, {
       pendingInQueue: async () => {
@@ -284,12 +289,16 @@ schedule(
 );
 
 // 分享过期清理（1h）
-schedule("shares-expire", Number(process.env.SHARES_EXPIRE_INTERVAL_MS ?? 3_600_000), () => expireShares(db, log));
+schedule(
+  "shares-expire",
+  readEnvNumber("SHARES_EXPIRE_INTERVAL_MS", { default: 3_600_000, min: 0, integer: true }),
+  () => expireShares(db, log),
+);
 
 // 资金对账（每日）：balance == Σdelta 不平即告警
 schedule(
   "flows-audit",
-  Number(process.env.FLOWS_AUDIT_INTERVAL_MS ?? 86_400_000),
+  readEnvNumber("FLOWS_AUDIT_INTERVAL_MS", { default: 86_400_000, min: 0, integer: true }),
   async () => {
     const mismatch = await auditLedger(db, log);
     if (mismatch === 0) log.info("ledger audit ok");
@@ -300,7 +309,7 @@ schedule(
 // 数据保留清理（6h）：结果 90 天 / 回收站 7 天 / 注销 30 天
 schedule(
   "retention-purge",
-  Number(process.env.MAINTENANCE_INTERVAL_MS ?? 6 * 3_600_000),
+  readEnvNumber("MAINTENANCE_INTERVAL_MS", { default: 6 * 3_600_000, min: 0, integer: true }),
   () => purgeOldData(db, log),
   true,
 );
@@ -355,7 +364,7 @@ const handlers: Record<HandledQueueName, JobHandler> = {
 const workers: Worker[] = HANDLED_QUEUES.map((name) =>
   new Worker(name, handlers[name], {
     connection: redisConnection,
-    concurrency: Number(process.env.WORKER_CONCURRENCY ?? 5),
+    concurrency: readEnvNumber("WORKER_CONCURRENCY", { default: 5, min: 1, integer: true }),
   }).on("error", (err) => log.error({ queue: name, err: err.message }, "worker error")),
 );
 
@@ -367,11 +376,10 @@ async function shutdown(signal: string): Promise<void> {
 
   // 停机上限：BullMQ close() 会等当前 job 处理完；超时则强制退出，
   // 避免容器停不下来（未完成的 job 会被 BullMQ 重新投递，不会丢失）
-  const timeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 25_000);
   const force = setTimeout(() => {
-    log.error({ timeoutMs }, "shutdown timeout, forcing exit");
+    log.error({ timeoutMs: SHUTDOWN_TIMEOUT_MS }, "shutdown timeout, forcing exit");
     process.exit(1);
-  }, timeoutMs);
+  }, SHUTDOWN_TIMEOUT_MS);
   force.unref();
 
   try {

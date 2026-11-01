@@ -87,7 +87,8 @@ describe("轮询上限默认值（P1-16）", () => {
 
   it("worker 启动入口引用该常量，不再内联固定值", () => {
     const main = readFileSync(join(__dirname, "main.ts"), "utf8");
-    expect(main).toMatch(/POLL_MAX_MS\s*\?\?\s*DEFAULT_MAX_POLL_MS/);
+    // 第 123 批：读取入口换成 readEnvNumber，但默认值仍必须是这个常量
+    expect(main).toMatch(/readEnvNumber\("POLL_MAX_MS",\s*\{\s*default:\s*DEFAULT_MAX_POLL_MS/);
     // 旧写法（内联 120_000 / 2 分钟）不许回来
     expect(main).not.toMatch(/POLL_MAX_MS\s*\?\?\s*120_?000/);
   });

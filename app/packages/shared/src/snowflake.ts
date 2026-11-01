@@ -1,5 +1,7 @@
 // 雪花 ID：41bit 毫秒 + 10bit worker + 12bit 序列，epoch=2026-01-01 UTC
 // 所有表主键统一 bigint 雪花（docs/02-architecture/database.md），API 层字符串化防 JS 精度丢失
+import { readEnvNumber } from "./env-number";
+
 const EPOCH = 1767225600000n;
 const WORKER_BITS = 10n;
 const SEQ_BITS = 12n;
@@ -44,8 +46,9 @@ export const snowflake: Snowflake =
   globalForSnowflake.__appSnowflake ??
   (globalForSnowflake.__appSnowflake = new Snowflake(
     // 多进程（API 副本/worker/测试 worker）必须用不同 worker id，否则同毫秒会撞主键。
-    // 显式 WORKER_ID 优先；否则用 pid 取模，避免所有进程默认 1。
-    process.env.WORKER_ID ? BigInt(process.env.WORKER_ID) : BigInt(process.pid % 1024),
+    // 第 123 批：显式 WORKER_ID 走 `readEnvNumber`（空白 = 没配置 → pid 取模；`WORKER_ID=` 和
+    // `WORKER_ID=abc` 以前分别静默落成 pid / BigInt 抛错，现在边界与格式都在入口处说清楚）。
+    BigInt(readEnvNumber("WORKER_ID", { default: process.pid % 1024, min: 0, max: 1023, integer: true })),
   ));
 
 export const newId = (): bigint => snowflake.nextId();

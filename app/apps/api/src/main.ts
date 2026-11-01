@@ -6,11 +6,17 @@ import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/http/exception.filter";
 import { EnvelopeInterceptor } from "./common/http/envelope.interceptor";
 import { IdempotencyInterceptor } from "./common/http/idempotency.interceptor";
+import { readEnvNumber } from "@app/shared";
 import { env } from "./config/env";
 import { createHttpAdapter } from "./config/inbound-limits";
 
-/** 优雅停机等待上限：超过则强制退出，避免容器停不下来（deployment.md §5） */
-const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 25_000);
+/**
+ * 优雅停机等待上限：超过则强制退出，避免容器停不下来（deployment.md §5）。
+ *
+ * 第 123 批：走 `readEnvNumber` —— 空白是「没配置」（25s），不是 0；`30s` 这种写成
+ * 人类时间的坏值启动即抛，而不是等到停机那一刻才变成 NaN（强制退出 0ms 开火）。
+ */
+const SHUTDOWN_TIMEOUT_MS = readEnvNumber("SHUTDOWN_TIMEOUT_MS", { default: 25_000, min: 0, integer: true });
 
 async function bootstrap(): Promise<void> {
   // 入站三道闸（收请求 120s / socket 静默 600s / handler 不设超时）与

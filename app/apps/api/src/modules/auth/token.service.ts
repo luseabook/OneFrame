@@ -24,20 +24,6 @@ export interface IssuedMaster {
   jti: string;
 }
 
-/**
- * master token 有效期（天级）。
- *
- * 为什么不在 `config/env.ts` 里声明：那个文件是 Lead 独占（本批写权限只有 modules/auth、
- * modules/team）。这里在**调用时**读 `process.env.MASTER_TTL_S`（默认 30 天），
- * 好处是同一个进程内可切换（测试能造"过期/被轮换"的 master），代价是生产应改由
- * env.ts 启动即校验——已写进 `_acceptance/_team/report-account-team.md`「需要 Lead 做」。
- */
-const MASTER_TTL_DEFAULT_S = 30 * 86_400;
-function masterTtlSeconds(): number {
-  const raw = Number(process.env.MASTER_TTL_S ?? "");
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : MASTER_TTL_DEFAULT_S;
-}
-
 @Injectable()
 export class TokenService {
   constructor(@Inject(RedisService) private readonly redis: RedisService) {}
@@ -74,7 +60,7 @@ export class TokenService {
    */
   async issueMaster(userId: string, spaceId: string): Promise<IssuedMaster> {
     const jti = newJti();
-    const ttl = masterTtlSeconds();
+    const ttl = env.MASTER_TTL_S;
     await this.redis.set(`master:user:${userId}`, jti, ttl);
     return {
       masterToken: this.sign({ sub: userId, sid: spaceId, jti, typ: "master" }, ttl),

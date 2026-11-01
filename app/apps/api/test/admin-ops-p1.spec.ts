@@ -290,8 +290,14 @@ describe("ops admin P1 (accounts/audit/config/orders.csv)", () => {
     const patched = await inject("PATCH", `/ops/admin/admins/${targetId}`, { password: "audit-pass-456" });
     expect(patched.code).toBe(0);
 
-    const list = await waitForAudit((items) => items.some((item) => item.action.startsWith("PATCH ")));
-    const patchRow = list.find((item) => item.action.startsWith("PATCH ") && item.action.endsWith("/ops/admin/admins/:id"));
+    // 审计写库是 setImmediate 的 fire-and-forget（admin-audit.interceptor.ts：不得进入响应关键路径），
+    // 所以只能轮询等。**等的必须是断言那一行**：旧写法只等「任意一条 PATCH」，只要库里已有别的
+    // PATCH（并行跑的其他 spec / 上一轮遗留），第一次轮询就返回，随后 find 到的是还没写入的本行 →
+    // 全量门禁下随机红（第 123 批判出）。谓词与 find 用同一个函数，两者不可能再错位。
+    const isAdminPatch = (item: any) =>
+      item.action.startsWith("PATCH ") && item.action.endsWith("/ops/admin/admins/:id");
+    const list = await waitForAudit((items) => items.some(isAdminPatch));
+    const patchRow = list.find(isAdminPatch);
     expect(patchRow).toBeTruthy();
     expect(patchRow.admin_username).toBe("admin");
     expect(patchRow.method).toBe("PATCH");

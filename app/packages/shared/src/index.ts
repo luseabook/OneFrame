@@ -20,3 +20,5 @@ export * from "./knowledge-scene";
 export * from "./project-category";
 // 第 119 批：出站下载总时长 + 总字节双上限 —— worker 导出读产物、CLI 下载产物共用一份实现
 export * from "./http-bounded";
+// 第 123 批：数值环境变量的唯一读取入口 —— 空白不再是 0、坏值不再是 NaN 穿过闸门
+export * from "./env-number";

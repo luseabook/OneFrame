@@ -199,6 +199,26 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 
 ---
 
+## 变更登记（v6.81 · 数值环境变量一个入口：空白不再是 0、坏值不再是 NaN 穿过闸门 · 2026-11-01）
+
+仓库里数值型环境变量一直是就地解析 `Number(process.env.<键> ?? 默认值)`，全树 15 处（worker 12、api 2、shared 1）。它有两个不抛错的静默口子：`Number("") === 0`（「留空」被当成 0），`Number("30s")` 是 `NaN`（而 `NaN <= 0` 为 false）。两者都是合法的 number，类型检查、lint、构建与总闸全绿也发现不了；只有运行时的行为能证明。本批的问法是：**同一类配置，是不是只有一个读取入口，坏值会不会当场失败**。
+
+| # | 审计发现 | 修复 / 验证 | 守卫 |
+|---|---|---|---|
+| 1 | 数值配置没有统一入口，15 处各写各的 `Number(...)` | 先量（`_acceptance/d123` 四支探针 + 日志）：空白 → 0、坏值 → NaN，两条都不报错 | 探针矩阵先量后改 |
+| 2 | 空白 = 0：`POLL_INTERVAL_MS=` 变成 0ms 轮询 | 实测 60ms 内轮询 **5** 次（正常 1000ms 只 1 次）→ 空白改判为「没配置」，返回默认值 | 3 例（空串 / 纯空格 / `\t\n`） |
+| 3 | 坏值 = NaN 且 `NaN <= 0` 为 false，worker `schedule()` 的「停用」判据被绕过 | `setInterval(fn, NaN)` 被 Node 夹到 **1ms**（60ms 窗内 4 次，Node 告警 `Timeout duration was set to 1`）；`SHUTDOWN_TIMEOUT_MS=30s` → 强退定时器 0ms 开火、EXIT=1（还剩 300ms drain）；空白同样 EXIT=1，`=25000` → EXIT=0 | 探针日志 |
+| 4 | `0x10` / `Infinity` / `1_000` 语法合法、语义意外 | 只接受十进制（含科学计数法、首尾空白裁掉），其余一律 `RangeError`，文案带变量名、原始值与合法范围 | 9 例 `it.each` |
+| 5 | 同一个键两个入口：`MASTER_TTL_S` 既有 zod 校验，`token.service.ts` 又解析一遍 | 新增 `packages/shared/src/env-number.ts`（115 行，`readEnvNumber(name, spec, env)`）作唯一入口，**14** 处接入（worker 12 / api 1 / shared 1，默认值与超时值原样）；`token.service.ts` 删掉 `MASTER_TTL_DEFAULT_S` / `masterTtlSeconds()`、改用 `env.MASTER_TTL_S` —— 15 处 = 14 走新入口 + 1 合到既有 schema | 静态 AST：真实树直接数值解析 → `[]` |
+| 6 | 默认值写错也是静默 | `{ default: 1.5, integer: true }`、默认值越界 / 非有限都在构造时抛（与是否设置 env 无关）；`0` 在 `min: 0` 下仍是合法值，「停用」语义保留 | 3 例 |
+| 7 | 守卫要能变红，否则只是装饰 | 撤接线回到 15 处直接解析 → `numeric-env-guard` **EXIT=1** 并逐条点名 15 个站点；还原 EXIT=0。另修两处门禁红：注释里的 `process.env.X` 被 `.env.example` 扫描器误认（改文本、**不**加豁免 → 5/5）；审计用例的等待谓词只等「任意一条 PATCH」，与 `find` 共用 `isAdminPatch` 后全量转绿（单跑 13/13 印证是并发形状） | 红→绿实测 |
+
+**验证**：门禁四段 `EXIT=0` —— build 8/8（9.051s，6 cached）、typecheck 12/12（9.099s，7 cached）、lint 7/7（5.263s，0 errors / 29 条既有 warning：web 27 + api 2，本批无新增）、`pnpm test` 12/12 **1,935 用例通过 + 1 跳过**（3m59.312s；api 1,385/118、worker 97/13、shared 62/7、db 82/4、cli 128/17、model-adapters 164/14、storage 17+1/3）。端点 801 / controller 63 / 页面 65 / 迁移 50 / 表 115 全部不变（零端点、零迁移、零契约变更，故 `docs/02-architecture/` 未改）。
+
+**仍未做**：只覆盖**进程启动时读一次**的数值配置，运行期热改 env 的语义不变（本仓库没有）。`setInterval(fn, NaN)` 的 1ms 是 Node 内部夹取，Windows 定时器粒度约 15.6ms（本机 60ms 窗内 4 次、`setTimeout(fn, NaN)` 实测 15.8ms），Linux 上更快 —— 数量级结论不变。不校验数值的**业务含义**（轮询间隔是否小于总超时、`ADAPTER_URI_TTL_SECONDS` 与签名有效期是否一致），那属于调用方规格。静态守卫只认「在 `process.env` 上直接 `Number(...)` / `parseInt(...)`」，先存进变量再解析能躲过（当前仓库没有）；`.env.example` 覆盖仍是文本扫描（连注释一起扫），`scripts/` 与 `docs/` 不在扫描面。`WORKER_ID` 边界 0–1023 与雪花 10bit worker 一致，但多进程仍需部署方给不同值。分数不变：202.77/206 = 98.4%，剩余 3.23 仍是外部材料/资质/法务与产品决策。
+
+---
+
 ## 变更登记（v6.80 · 入站 HTTP 三道闸：收请求 / socket 静默 / handler 显式封顶 · 2026-11-01）
 
 第 119–121 批把出站下载、入站列表、数据库的等待都封了顶，但 HTTP 服务端自己那层一直没设：Fastify 5.12.7 的 `requestTimeout` / `connectionTimeout` / `handlerTimeout` 默认都是 `0`，`lib/server.js:339-341` 又把这几个 0 **原样写到** Node 的 server 上 —— Node 24 自带的 300s 收请求上限被一起抹掉。实测「请求体发一半、1.2s 后补完」照样 200，期间连接、解析器与已收字节一直占着，而类型检查 / lint / 构建 / 总闸全绿。本批的问法是：**服务端等一个请求、等一个连接、等一个 handler 的每一段，是不是都有上限**。
