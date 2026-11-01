@@ -81,6 +81,9 @@ _acceptance/*
 # （v-if 漏挂 / endpoint 写错 / composable 未导入都过得了 typecheck）。
 # 脚本入库；结果与未覆盖范围写进 _acceptance/_team/report-admin-panels.md。
 !_acceptance/e2e-admin-panels.cjs
+# 邀请码并发/陈旧快照验收：单进程单浏览器证明不了「两个管理员同时点同一条码」，
+# 也证明不了「核销后后台快照仍旧、点删除被正确拒绝」。脚本入库，结果写进批次报告。
+!_acceptance/e2e-invite-race.cjs
 
 # 本地依赖运行时数据（PG/Redis 数据目录，66MB+，绝不入库）
 .localstack/
