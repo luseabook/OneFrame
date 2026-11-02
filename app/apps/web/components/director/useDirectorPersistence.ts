@@ -87,7 +87,7 @@ export function useDirectorPersistence(options: DirectorPersistenceOptions) {
       const page = await api.get<{ list: DirectorSceneDto[]; total: number }>(
         `/director/scenes?project_id=${encodeURIComponent(projectId)}&page=1&page_size=1`,
       );
-      const latest = page.list[0];
+      const latest = Array.isArray(page.list) ? page.list[0] : undefined;
       if (!latest) return false;
       const detail = await api.get<DirectorSceneDto>(`/director/scenes/${latest.id}`);
       applyScene(detail);
@@ -269,7 +269,7 @@ export function useDirectorPersistence(options: DirectorPersistenceOptions) {
     if (!sceneId.value) return;
     try {
       const data = await api.post<DirectorHeartbeatDto>("/director/heartbeat", { scene_id: sceneId.value });
-      collaborators.value = data.collaborators;
+      collaborators.value = Array.isArray(data.collaborators) ? data.collaborators : [];
     } catch {
       /* 心跳失败不影响编辑：下一跳会补上 */
     }
@@ -278,7 +278,7 @@ export function useDirectorPersistence(options: DirectorPersistenceOptions) {
   async function loadPresets(): Promise<void> {
     try {
       const data = await api.get<{ list: DirectorPosePresetDto[] }>("/director/pose-presets");
-      presets.value = data.list;
+      presets.value = Array.isArray(data.list) ? data.list : [];
     } catch {
       /* 预设加载失败不阻塞导演台 */
     }
