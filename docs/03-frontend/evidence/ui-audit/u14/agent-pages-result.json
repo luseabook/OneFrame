@@ -1,0 +1,42 @@
+{
+ "total": 7,
+ "passed": 7,
+ "results": [
+  {
+   "n": "/agent/editor 不再是 404",
+   "ok": true,
+   "d": "一 | 一帧 | 首页 | 剧本创作 | 创作 Agent | 全部项目 | 工具箱 | 更多创作 | ▸ | 团队 |"
+  },
+  {
+   "n": "/agent/editor 在 app 壳内",
+   "ok": true,
+   "d": "aside=2"
+  },
+  {
+   "n": "/agent/editor 标题/说明存在",
+   "ok": true,
+   "d": "一 | 一帧 | 首页 | 剧本创作 | 创作 Agent | 全部项目 | 工具箱 | 更多创作 | ▸ | 团队 | 资产库 | 团队管理 | 影视版 | 内测 | 活动 | "
+  },
+  {
+   "n": "/agent/bigscreen 不再是 404",
+   "ok": true,
+   "d": "Agent 能做什么 | 推荐场景 / 技能墙 / 最近会话——适合投屏演示（只读，按 Esc 退出） | 退出大屏 |"
+  },
+  {
+   "n": "/agent/bigscreen 走裸壳（无侧栏）",
+   "ok": true,
+   "d": "aside=0"
+  },
+  {
+   "n": "/agent/bigscreen 三大块存在",
+   "ok": true,
+   "d": ""
+  },
+  {
+   "n": "Esc 退出大屏回 /agent",
+   "ok": true,
+   "d": "/agent"
+  }
+ ],
+ "localDraft": true
+}

@@ -1,0 +1,268 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T21:19:10.146Z",
+  "viewport": {
+    "width": 1424,
+    "height": 805
+  },
+  "total": 51,
+  "passed": 51,
+  "failed": 0,
+  "results": [
+    {
+      "name": "顶栏高 64±2",
+      "ok": true,
+      "detail": "实测 64.0"
+    },
+    {
+      "name": "侧栏宽 240±2",
+      "ok": true,
+      "detail": "实测 240.0"
+    },
+    {
+      "name": "双入口卡 2 张",
+      "ok": true,
+      "detail": "[{\"cls\":\"flow-card\",\"w\":596,\"h\":160},{\"cls\":\"canvas-card\",\"w\":480,\"h\":160}]"
+    },
+    {
+      "name": "入口卡高 160±2",
+      "ok": true,
+      "detail": "[160,160]"
+    },
+    {
+      "name": "首访自动出现引导",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "关键元素带 data-guide-target",
+      "ok": true,
+      "detail": "[\"workflow\",\"tools\",\"recent\"]"
+    },
+    {
+      "name": "第 1 步标题可读",
+      "ok": true,
+      "detail": "双入口：开始或继续"
+    },
+    {
+      "name": "高亮框套住目标（±8px）",
+      "ok": true,
+      "detail": "{\"hole\":{\"x\":282,\"y\":387,\"w\":1100,\"h\":172,\"top\":387,\"left\":282},\"target\":{\"x\":288,\"y\":392.703125,\"w\":1088,\"h\":160,\"top\":392.703125,\"left\":288}}"
+    },
+    {
+      "name": "第 2 步出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "第 3 步出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "完成按钮关闭引导",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "完成写入 localStorage 标记",
+      "ok": true,
+      "detail": "done"
+    },
+    {
+      "name": "重看入口可再次出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "跳过可关闭引导",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "主入口卡打开新建弹窗",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "新建弹窗标题走 i18n",
+      "ok": true,
+      "detail": "新建项目"
+    },
+    {
+      "name": "弹窗可关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "画布入口可跳转 /canvas",
+      "ok": true,
+      "detail": "http://127.0.0.1:3011/canvas"
+    },
+    {
+      "name": "继续创作入口存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "继续创作指向最近项目",
+      "ok": true,
+      "detail": "/projects/recent-1"
+    },
+    {
+      "name": "继续创作带项目名",
+      "ok": true,
+      "detail": "继续创作《E2E 最近项目》"
+    },
+    {
+      "name": "三张无角标禁用卡有可见原因",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "禁用卡无死点击（5/5 有反馈）",
+      "ok": true,
+      "detail": "dead=0"
+    },
+    {
+      "name": "禁用反馈是可读原因",
+      "ok": true,
+      "detail": "错字重读正在内测，暂时无法使用"
+    },
+    {
+      "name": "toast 顶部（72±8）",
+      "ok": true,
+      "detail": "y=72.0"
+    },
+    {
+      "name": "toast 水平居中（±3px）",
+      "ok": true,
+      "detail": "center=712.0"
+    },
+    {
+      "name": "toast 深色底",
+      "ok": true,
+      "detail": "rgb(27, 27, 32)"
+    },
+    {
+      "name": "toast 自动消失（不常驻）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "视频转绘卡可跳转产品页",
+      "ok": true,
+      "detail": "http://127.0.0.1:3011/video-redraw/create"
+    },
+    {
+      "name": "公告位出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "定价广告位出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "公告位可关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "定价广告位可关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "刷新后公告位仍关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "刷新后定价广告位仍关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "加载态：骨架屏可见",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "空态：文案 + 创建入口",
+      "ok": true,
+      "detail": "还没有项目，创建第一个开始创作创建项目"
+    },
+    {
+      "name": "错误态：可读文案",
+      "ok": true,
+      "detail": "最近项目加载失败，请重试重试"
+    },
+    {
+      "name": "错误态不退化成空态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "错误态重试后恢复",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "首页无横向溢出（1424）",
+      "ok": true,
+      "detail": "{\"scrollWidth\":1424,\"innerWidth\":1424}"
+    },
+    {
+      "name": "作品列表加载态：骨架可见",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "作品列表空态：EmptyState 可见",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "作品列表错误态：可读文案",
+      "ok": true,
+      "detail": "加载失败重试"
+    },
+    {
+      "name": "作品列表错误态不退化成空态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "作品列表重试后出网格",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "作品页无横向溢出（1424）",
+      "ok": true,
+      "detail": "{\"scrollWidth\":1424,\"innerWidth\":1424}"
+    },
+    {
+      "name": "英文环境弹窗标题已翻译",
+      "ok": true,
+      "detail": "New project"
+    },
+    {
+      "name": "英文环境弹窗无中文残留",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "没有向真实后端创建项目",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无未捕获 console error",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

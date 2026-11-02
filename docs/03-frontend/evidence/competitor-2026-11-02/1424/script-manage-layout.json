@@ -1,0 +1,207 @@
+{
+  "url": "/script-manage",
+  "uniQ": [
+    {
+      "tag": "DIV",
+      "cls": "script-manage-page",
+      "x": 240,
+      "y": 64,
+      "w": 1174,
+      "h": 741
+    },
+    {
+      "tag": "DIV",
+      "cls": "script-entry-flow",
+      "x": 264,
+      "y": 72,
+      "w": 1126,
+      "h": 352
+    },
+    {
+      "tag": "DIV",
+      "cls": "agent-create-page__dialog",
+      "x": 283,
+      "y": 80,
+      "w": 1088,
+      "h": 236
+    },
+    {
+      "tag": "P",
+      "cls": "agent-create-page__slogan",
+      "x": 283,
+      "y": 80,
+      "w": 1088,
+      "h": 40
+    },
+    {
+      "tag": "DIV",
+      "cls": "agent-create-page__input-shell",
+      "x": 283,
+      "y": 132,
+      "w": 1088,
+      "h": 184
+    },
+    {
+      "tag": "DIV",
+      "cls": "agent-create-page__input-card",
+      "x": 287,
+      "y": 136,
+      "w": 1080,
+      "h": 176
+    },
+    {
+      "tag": "TEXTAREA",
+      "cls": "agent-create-page__input scrollbar-thin",
+      "x": 296,
+      "y": 145,
+      "w": 1062,
+      "h": 122
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim-viewport",
+      "x": 253,
+      "y": 247,
+      "w": 240,
+      "h": 84
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim-viewport",
+      "x": 337,
+      "y": 247,
+      "w": 240,
+      "h": 84
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim-viewport",
+      "x": 421,
+      "y": 247,
+      "w": 240,
+      "h": 84
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim-viewport",
+      "x": 567,
+      "y": 247,
+      "w": 234,
+      "h": 84
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim-viewport",
+      "x": 596,
+      "y": 247,
+      "w": 407,
+      "h": 84
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim",
+      "x": 241,
+      "y": 260,
+      "w": 264,
+      "h": 59
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim",
+      "x": 325,
+      "y": 260,
+      "w": 264,
+      "h": 59
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim",
+      "x": 409,
+      "y": 260,
+      "w": 264,
+      "h": 59
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim",
+      "x": 555,
+      "y": 260,
+      "w": 257,
+      "h": 59
+    },
+    {
+      "tag": "SPAN",
+      "cls": "glass-icon-button__rim",
+      "x": 576,
+      "y": 260,
+      "w": 448,
+      "h": 59
+    },
+    {
+      "tag": "DIV",
+      "cls": "agent-entry-bar agent-create-page__composer",
+      "x": 296,
+      "y": 271,
+      "w": 1062,
+      "h": 32
+    },
+    {
+      "tag": "DIV",
+      "cls": "agent-entry-bar__tools",
+      "x": 296,
+      "y": 275,
+      "w": 1006,
+      "h": 28
+    },
+    {
+      "tag": "DIV",
+      "cls": "script-sample-chips agent-create-page__samples",
+      "x": 264,
+      "y": 336,
+      "w": 1126,
+      "h": 40
+    },
+    {
+      "tag": "DIV",
+      "cls": "script-manage-tab-panel",
+      "x": 264,
+      "y": 424,
+      "w": 1126,
+      "h": 733
+    },
+    {
+      "tag": "DIV",
+      "cls": "novel-market-tab",
+      "x": 264,
+      "y": 424,
+      "w": 1126,
+      "h": 118
+    },
+    {
+      "tag": "SECTION",
+      "cls": "script-manage-panel-shell script-manage-panel-shell--borderl",
+      "x": 264,
+      "y": 424,
+      "w": 1126,
+      "h": 118
+    },
+    {
+      "tag": "DIV",
+      "cls": "script-manage-panel-shell__header-row",
+      "x": 292,
+      "y": 424,
+      "w": 1070,
+      "h": 42
+    },
+    {
+      "tag": "DIV",
+      "cls": "script-manage-panel-shell__filters",
+      "x": 292,
+      "y": 486,
+      "w": 1070,
+      "h": 40
+    }
+  ],
+  "bodyLen": 320,
+  "text": "剧本创作\n返回旧版\n创作手册\n商务合作\n会员订阅\n1080P低至0.2元/秒\n0\n首页\n剧本创作\n创作 Agent\n全部项目\n工具箱\n\n团队\n\n资产库\n团队管理\n影视版\n申请内测\nMCP & CLI\n活动\n添加专属运营助手\n\n嗨\n，\n编\n剧\n大\n大\n！\n来\n一\n起\n写\n明\n天\n的\n榜\n一\n爆\n款\n\n灵感原创\n小说改编\n剧本裂变\n续写\n国内剧本\nTGMN 3.8 Flash\n给我写一个男频剧本，Loser逆袭的打脸爽文！\n我要一个女频爆款本，女主角重生穿越后复仇清算~\n剧本广场\n我的剧本 (0)\n全部分类\n爱情\n年代\n逆袭\n家庭\n萌宝\n悬疑\n恐怖\n志怪\n古装\n玄幻\n奇幻\n都市\n喜剧\n科幻\n灾难\n动作\n战争\n综艺\n脑洞\n末世\n豪门\n搜索"
+}

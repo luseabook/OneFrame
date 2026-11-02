@@ -1,0 +1,322 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T20:05:21.000Z",
+  "total": 58,
+  "passed": 58,
+  "failed": 0,
+  "results": [
+    {
+      "name": "匹配资产按钮存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "匹配资产按钮未禁用",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "匹配资产按钮无「即将开放」chip",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "匹配资产按钮文案",
+      "ok": true,
+      "detail": "匹配资产"
+    },
+    {
+      "name": "POST match-resources 已发出",
+      "ok": true,
+      "detail": "/v1/projects/E2E-U2-PROJECT/episodes/E2E-U2-EP1/match-resources"
+    },
+    {
+      "name": "受理后提示「已受理…等待结果」",
+      "ok": true,
+      "detail": "已受理，等待匹配结果（受理 ≠ 匹配完成）…"
+    },
+    {
+      "name": "受理阶段不出现终态结论",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "终态以 match-result.status 为准（=3 有缺失）",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "计数行含已匹配/未定稿/缺失",
+      "ok": true,
+      "detail": "共 4 · 已匹配 2 · 未定稿 1 · 缺失 1"
+    },
+    {
+      "name": "未匹配项逐条给原因",
+      "ok": true,
+      "detail": "[\"未定稿\",\"缺失\"]"
+    },
+    {
+      "name": "明确区分「匹配资产 ≠ 自动拆分镜」",
+      "ok": true,
+      "detail": "匹配资产 ≠ 自动拆分镜：本操作只做资产匹配与绑定，不新增分镜；需要补分镜请用左侧「AI拆分镜」。"
+    },
+    {
+      "name": "无匹配失败横幅",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "刷新结果 → 状态2 已全部匹配",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "抽屉宽 616（±2）",
+      "ok": true,
+      "detail": "616"
+    },
+    {
+      "name": "抽屉高 733（±2）",
+      "ok": true,
+      "detail": "733"
+    },
+    {
+      "name": "抽屉 x=152（±2）",
+      "ok": true,
+      "detail": "152"
+    },
+    {
+      "name": "抽屉 y=64（±2）",
+      "ok": true,
+      "detail": "64"
+    },
+    {
+      "name": "抽屉底色 rgb(27,27,29)",
+      "ok": true,
+      "detail": "rgb(27, 27, 29)"
+    },
+    {
+      "name": "抽屉 1px 描边 rgb(54,56,63)",
+      "ok": true,
+      "detail": "1px rgb(54, 56, 63)"
+    },
+    {
+      "name": "抽屉圆角 20",
+      "ok": true,
+      "detail": "20px"
+    },
+    {
+      "name": "抽屉三个 tab：角色/场景/道具",
+      "ok": true,
+      "detail": "[\"角色\",\"场景\",\"道具\"]"
+    },
+    {
+      "name": "角色 tab 列出两个角色",
+      "ok": true,
+      "detail": "[\"asset-char-a\",\"asset-char-b\"]"
+    },
+    {
+      "name": "未定稿资产标记为不可用(data-usable=0)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "素材信息含定稿状态",
+      "ok": true,
+      "detail": "[\"匹配E2E角色已定稿\",\"匹配E2E草稿角色未定稿\"]"
+    },
+    {
+      "name": "搜索可过滤（v-model 生效）",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "清空搜索恢复全部",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "场景 tab 列出两个场景",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "素材信息含已绑定镜数",
+      "ok": true,
+      "detail": "匹配雨夜街头已定稿 · 1 镜"
+    },
+    {
+      "name": "仅展示主体只留本集匹配到的场景",
+      "ok": true,
+      "detail": "[\"asset-scene-a\"]"
+    },
+    {
+      "name": "关闭后恢复全部场景",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "本镜提示词里出现的主体已预选",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "预选提示可见",
+      "ok": true,
+      "detail": "已预选 2 项匹配结果（点选可取消） 取消预选"
+    },
+    {
+      "name": "点选可取消预选",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "可再选回",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "匹配到的场景也已预选",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "绑定走 PUT storyboards/:id/assets",
+      "ok": true,
+      "detail": "/v1/projects/E2E-U2-PROJECT/episodes/E2E-U2-EP1/storyboards/shot-u2-1/assets"
+    },
+    {
+      "name": "绑定载荷含角色与场景",
+      "ok": true,
+      "detail": "[\"asset-scene-a\",\"asset-char-a\"]"
+    },
+    {
+      "name": "抽屉关闭",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "绑定后镜头缩略图立即出现",
+      "ok": true,
+      "detail": "0 -> 1"
+    },
+    {
+      "name": "绑定计数立即更新（总素材 2/50）",
+      "ok": true,
+      "detail": "已上传素材数：图片 2/30 · 视频 0/10 · 音频 0/10 · 总素材 2/50"
+    },
+    {
+      "name": "重新打开后保持已绑定选择",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "抽屉空态有引导标题",
+      "ok": true,
+      "detail": "还没有道具资产"
+    },
+    {
+      "name": "抽屉空态有引导说明",
+      "ok": true,
+      "detail": "先去「资产」视图用 AI 提取 / 生成 / 导入建立资产，再回来绑定"
+    },
+    {
+      "name": "取消可关闭抽屉且不改绑定",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "角色空态出现 AI 提取 CTA",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "AI 提取 CTA 未禁用",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "AI 提取 CTA 无「即将开放」chip",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "提取失败有可读原因",
+      "ok": true,
+      "detail": "AI 提取服务暂时不可用 重试"
+    },
+    {
+      "name": "失败后按钮可重试",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "失败时仍是角色空态（没有假卡片）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "AI 提取走了 POST assets/extract",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "请求体带 include_characters=true",
+      "ok": true,
+      "detail": "{\"include_characters\":true,\"episode_id\":\"E2E-U2-EX2\"}"
+    },
+    {
+      "name": "请求体带当前分集",
+      "ok": true,
+      "detail": "{\"include_characters\":true,\"episode_id\":\"E2E-U2-EX2\"}"
+    },
+    {
+      "name": "成功后错误条消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "结果计数可读（新增/更新/跳过）",
+      "ok": true,
+      "detail": "AI 提取完成：新增 2，更新 1，跳过重复 1；请校验并定稿后再用于分镜生成"
+    },
+    {
+      "name": "角色草稿回填为卡片",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "付费/写类 POST 全部被拦截",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无未捕获 console error",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "matchPosts": [
+    "/v1/projects/E2E-U2-PROJECT/episodes/E2E-U2-EP1/match-resources"
+  ],
+  "bindCalls": [
+    {
+      "path": "/v1/projects/E2E-U2-PROJECT/episodes/E2E-U2-EP1/storyboards/shot-u2-1/assets",
+      "asset_ids": [
+        "asset-scene-a",
+        "asset-char-a"
+      ]
+    }
+  ],
+  "matchResultCalls": 6,
+  "extractBodies": [
+    {
+      "include_characters": true,
+      "episode_id": "E2E-U2-EX2"
+    },
+    {
+      "include_characters": true,
+      "episode_id": "E2E-U2-EX2"
+    }
+  ]
+}

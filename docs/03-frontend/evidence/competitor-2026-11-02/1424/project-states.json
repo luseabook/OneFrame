@@ -1,0 +1,18 @@
+{
+  "url": "https://www.reelmate.cn/series-manage",
+  "cards": 0,
+  "entered": false,
+  "drawer": {
+    "ok": true,
+    "label": "资产库"
+  },
+  "exp": {
+    "ok": false,
+    "why": "not found"
+  },
+  "shots": [
+    "series_manage",
+    "project_asset_drawer",
+    "project_export_panel"
+  ]
+}

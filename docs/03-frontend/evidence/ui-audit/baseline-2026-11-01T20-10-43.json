@@ -1,0 +1,5372 @@
+{
+  "meta": {
+    "kind": "ui-parity-baseline",
+    "generatedAt": "2026-11-01T20:13:03.616Z",
+    "head": "a150ff3",
+    "base": "http://localhost:3011",
+    "viewport": {
+      "width": 1424,
+      "height": 805
+    },
+    "locale": "zh-CN",
+    "phone": "138****8000",
+    "login": {
+      "skipped": ""
+    },
+    "routeCount": 36,
+    "shotDir": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02",
+    "note": "只读我方页面；不接触竞品，不触发写操作"
+  },
+  "results": [
+    {
+      "route": "/",
+      "resolvedRoute": "/",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "[nuxt] Error fetching app manifest. FetchError: [GET] \"/_nuxt/builds/meta/dev.json\": 404 Not Found\n    at async $fetch2 (http://localhost:3011/_nuxt/@fs/E:/wanxing/app/node_modules/.pnpm/ofetch@1.5.1/node_modules/ofetch/dist/shared/ofetch.CWycOUEr.mjs?v=3747c123:332:15)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/",
+      "elapsedMs": 3755,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\01-root.png",
+      "data": {
+        "title": "一帧 · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/",
+        "bodyTextLength": 905,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 1930,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "nav-bar",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 57,
+              "visible": true,
+              "text": "一 一帧 能力 流程 定价 简体中文 English 日本語 Português (Brasil) Español 进入工作台",
+              "styles": {
+                "display": "block",
+                "position": "sticky",
+                "width": "1424px",
+                "height": "57px",
+                "backgroundColor": "rgba(0, 0, 0, 0.72)",
+                "color": "rgba(245, 248, 255, 0.8)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "links",
+              "x": 549.38,
+              "y": 18.81,
+              "w": 115.5,
+              "h": 18.38,
+              "visible": true,
+              "text": "能力 流程 定价",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "115.5px",
+                "height": "18.375px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgba(245, 248, 255, 0.8)",
+                "fontSize": "12.25px",
+                "fontWeight": "400",
+                "lineHeight": "18.375px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "21px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 15,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 14
+        }
+      }
+    },
+    {
+      "route": "/home",
+      "resolvedRoute": "/home",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "[nuxt] Error fetching app manifest. FetchError: [GET] \"/_nuxt/builds/meta/dev.json\": 404 Not Found\n    at async $fetch2 (http://localhost:3011/_nuxt/@fs/E:/wanxing/app/node_modules/.pnpm/ofetch@1.5.1/node_modules/ofetch/dist/shared/ofetch.CWycOUEr.mjs?v=3747c123:332:15)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/home",
+      "elapsedMs": 3714,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\02-home.png",
+      "data": {
+        "title": "首页 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/home",
+        "bodyTextLength": 918,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 1438,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 2,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 2,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 1373.59,
+              "visible": true,
+              "text": "3 步做出第一集 1 新建作品 粘贴小说或写一句话想法 2 生成大纲 AI 拆成 3~6 集，可逐条改 3 投递出片 选模型与预算，一键批量 开始创建 不再提示 ✦ 批量投递已上线 一次选好模型与预算，整集镜头一起投递；失败自动退还积分。 ",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "1373.59px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 57,
+          "buttons": 21,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 35
+        }
+      }
+    },
+    {
+      "route": "/pricing",
+      "resolvedRoute": "/pricing",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/pricing",
+      "elapsedMs": 3693,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\03-pricing.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/pricing",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/tools",
+      "resolvedRoute": "/tools",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/tools",
+      "elapsedMs": 3667,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\04-tools.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/tools",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/create/text-to-video",
+      "resolvedRoute": "/create/text-to-video",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/text-to-video",
+      "elapsedMs": 3647,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\05-create-text-to-video.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/create/text-to-video",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/create/image-to-video",
+      "resolvedRoute": "/create/image-to-video",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/image-to-video",
+      "elapsedMs": 3623,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\06-create-image-to-video.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/create/image-to-video",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/create/lip-sync",
+      "resolvedRoute": "/create/lip-sync",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/lip-sync",
+      "elapsedMs": 3631,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\07-create-lip-sync.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/create/lip-sync",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/create/video-effects",
+      "resolvedRoute": "/create/video-effects",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/video-effects",
+      "elapsedMs": 3646,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\08-create-video-effects.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/create/video-effects",
+        "bodyTextLength": 0,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {},
+        "controls": {
+          "visible": 0,
+          "buttons": 0,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/projects",
+      "resolvedRoute": "/projects",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": null,
+      "finalUrl": "http://localhost:3011/create/video-effects",
+      "elapsedMs": 3718,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\09-projects.png",
+      "data": {
+        "title": "视频特效 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/create/video-effects",
+        "bodyTextLength": 203,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "head",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 64,
+              "visible": true,
+              "text": "视频特效 创作手册 商务合作 会员订阅 视频低至 8 积分/条 ✦ — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "12px 20px",
+                "gap": "14px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "body",
+              "x": 0,
+              "y": 64,
+              "w": 1424,
+              "h": 741,
+              "visible": true,
+              "text": "视频特效 · 一键套用电影级特效与转场，不改画面内容 源视频* mp4 / mov / webm，≤64MB ＋ 源视频 参数 特效模板 电影感 胶片颗粒 霓虹辉光 柔光朦胧 复古录像带 强度 叠加转场 关闭 积分消耗 ✦ — 立即生成 内",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1424px",
+                "height": "741px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 14,
+          "buttons": 8,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/works",
+      "resolvedRoute": "/works",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/works",
+      "elapsedMs": 3698,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\10-works.png",
+      "data": {
+        "title": "我的作品 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/works",
+        "bodyTextLength": 736,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 1036,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 971.63,
+              "visible": true,
+              "text": "全部项目 工坊项目与无限画布在同一清单里；筛选走服务端，分页总数与列表一致。 + 新建作品 工坊项目 6 画布项目 0 全部 6 共 6 部 未归档 已归档 全部状态 全部进度 草稿 制作中 已成片 不限时间 近 7 天 近 30 天 筛选",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "971.625px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 62,
+          "buttons": 19,
+          "disabled": 0,
+          "inputs": 5,
+          "links": 38
+        }
+      }
+    },
+    {
+      "route": "/projects/{projectId}",
+      "resolvedRoute": "/projects/108320690623676416",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/projects/108320690623676416",
+      "elapsedMs": 3702,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\11-projects-108320690623676416.png",
+      "data": {
+        "title": "项目工作台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/projects/108320690623676416",
+        "bodyTextLength": 268,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".ep-head": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".episode": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "episode",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 805,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — … 资产 (0) 角色 场景 道具 其他 定妆图 1 张 2 张 3 张 4 ",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "805px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 15,
+          "buttons": 10,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/projects/{projectId}?tab=characters",
+      "resolvedRoute": "/projects/108320690623676416?tab=characters",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/projects/108320690623676416?tab=characters",
+      "elapsedMs": 3714,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\12-projects-108320690623676416-tab-characters.png",
+      "data": {
+        "title": "项目工作台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/projects/108320690623676416",
+        "bodyTextLength": 268,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".ep-head": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".episode": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "episode",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 805,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — … 资产 (0) 角色 场景 道具 其他 定妆图 1 张 2 张 3 张 4 ",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "805px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 15,
+          "buttons": 10,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/projects/{projectId}?tab=batch",
+      "resolvedRoute": "/projects/108320690623676416?tab=batch",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/projects/108320690623676416?tab=batch",
+      "elapsedMs": 3685,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\13-projects-108320690623676416-tab-batch.png",
+      "data": {
+        "title": "项目工作台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/projects/108320690623676416",
+        "bodyTextLength": 455,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 947,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".ep-head": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 导出 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".episode": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "episode",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 946.5,
+              "visible": true,
+              "text": "← 导出 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — … 导出与投递 预算触顶时该镜不投递（745703），余额不足整单拒绝；导出为",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "946.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 导出 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 16,
+          "buttons": 11,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 3
+        }
+      }
+    },
+    {
+      "route": "/projects/{projectId}?tab=timeline",
+      "resolvedRoute": "/projects/108320690623676416?tab=timeline",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/projects/108320690623676416?tab=timeline",
+      "elapsedMs": 3696,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\14-projects-108320690623676416-tab-timeline.png",
+      "data": {
+        "title": "项目工作台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/projects/108320690623676416",
+        "bodyTextLength": 426,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".ep-head": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 时间线预览 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".episode": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "episode",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 805,
+              "visible": true,
+              "text": "← 时间线预览 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — … 剧集资产 全部 已定稿 1 全景：夜色中的城市天际线，镜头缓慢下摇到",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "805px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 时间线预览 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "tl-rail",
+              "x": 8,
+              "y": 64,
+              "w": 260,
+              "h": 733,
+              "visible": true,
+              "text": "剧集资产 全部 已定稿 1 全景：夜色中的城市天际线，镜头缓慢下摇到街角 已定稿 2 中景：人物动作推进第 2 个节拍，镜头跟随 已定稿 3 中景：人物动作推进第 3 个节拍，镜头跟随 未定稿 4 特写：主角眼神坚定，画面定格，字幕升起 未",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "260px",
+                "height": "733px",
+                "backgroundColor": "rgba(194, 204, 241, 0.08)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "20px",
+                "padding": "12px",
+                "gap": "10px",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 14,
+          "buttons": 8,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/projects/{projectId}?tab=confirm",
+      "resolvedRoute": "/projects/108320690623676416?tab=confirm",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/projects/108320690623676416?tab=confirm",
+      "elapsedMs": 3680,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\15-projects-108320690623676416-tab-confirm.png",
+      "data": {
+        "title": "项目工作台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/projects/108320690623676416",
+        "bodyTextLength": 222,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".ep-head": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产校验 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".episode": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "episode",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 805,
+              "visible": true,
+              "text": "← 资产校验 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — … 资产清单校验 ➤ 批量生成资产 重新提取 ◀ 上一集 第1集 下一集 ",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "805px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "ep-head",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 56,
+              "visible": true,
+              "text": "← 资产校验 ▾ ReelFlow 验收 21:47:45 一句话想法 9:16 · 3 集 · 0 角色 3D 导演台 保存 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "56px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 18,
+          "buttons": 14,
+          "disabled": 2,
+          "inputs": 1,
+          "links": 3
+        }
+      }
+    },
+    {
+      "route": "/reelflow/list",
+      "resolvedRoute": "/reelflow/list",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [
+        {
+          "status": 404,
+          "url": "http://localhost:3011/v1/exports?page=1&page_size=20"
+        }
+      ],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/reelflow/list",
+      "elapsedMs": 3707,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\16-reelflow-list.png",
+      "data": {
+        "title": "剪辑台 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/reelflow/list",
+        "bodyTextLength": 568,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 856,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "rl-top",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 64,
+              "visible": true,
+              "text": "← 工作台 剪辑台 全部项目",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "10px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "rl-tabs",
+              "x": 0,
+              "y": 64,
+              "w": 1424,
+              "h": 43,
+              "visible": true,
+              "text": "项目 (6) 已剪辑",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "43px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "28px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 11,
+          "buttons": 3,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 2
+        }
+      }
+    },
+    {
+      "route": "/reelflow/edit/{reelflowId}",
+      "resolvedRoute": "/reelflow/edit/108320690623676416",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/reelflow/edit/108320690623676416",
+      "elapsedMs": 3697,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\17-reelflow-edit-108320690623676416.png",
+      "data": {
+        "title": "时间线导出 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/reelflow/edit/108320690623676416",
+        "bodyTextLength": 385,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".rf-rail": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "rf-rail",
+              "x": 8,
+              "y": 72,
+              "w": 298,
+              "h": 725,
+              "visible": true,
+              "text": "剧集资产 已定稿 全部 只列已定稿（出片完成）的分镜素材——未定稿进不了时间线。 共 2 / 4 个镜头。 1 全景：夜色中的城市天际线，镜头缓慢下摇到街角 已定稿 · 5s ＋ 2 中景：人物动作推进第 2 个节拍，镜头跟随 已定稿 · ",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "298px",
+                "height": "725px",
+                "backgroundColor": "rgba(194, 204, 241, 0.08)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "20px",
+                "padding": "12px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          ".rf-stage": {
+            "count": 1,
+            "first": {
+              "tag": "section",
+              "cls": "rf-stage",
+              "x": 314,
+              "y": 72,
+              "w": 1102,
+              "h": 553,
+              "visible": true,
+              "text": "↶ ↷ ▶ 分镜 1 暂无可用视频文件 更新分镜 时间线材料不会自动更新，点「更新分镜」将同步分镜创作页的全部定稿素材。",
+              "styles": {
+                "display": "grid",
+                "position": "relative",
+                "width": "1102px",
+                "height": "553px",
+                "backgroundColor": "rgb(12, 12, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "20px",
+                "padding": "12px",
+                "gap": "normal",
+                "gridTemplateColumns": "1078px",
+                "overflow": "hidden"
+              }
+            }
+          },
+          ".rf-tl": {
+            "count": 1,
+            "first": {
+              "tag": "footer",
+              "cls": "rf-tl",
+              "x": 314,
+              "y": 633,
+              "w": 1102,
+              "h": 164,
+              "visible": true,
+              "text": "播放 00:00:00 / 00:00:10 2 段 · 共 10s 片段资产 缩放 − ＋ 00:00:00 00:00:02 00:00:04 00:00:06 00:00:08 00:00:10 分镜 1 5s ✕ 分镜 2 5s ✕",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1102px",
+                "height": "164px",
+                "backgroundColor": "rgba(194, 204, 241, 0.08)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "20px",
+                "padding": "8px 10px",
+                "gap": "6px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          ".rf-top": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "rf-top",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 64,
+              "visible": true,
+              "text": "← 返回分镜创作 时间线导出 保存 ReelFlow 验收 21:47:45 第1集 第2集 第3集 切片发布 导出 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".rf-list": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "rf-list",
+              "x": 20,
+              "y": 161.19,
+              "w": 274,
+              "h": 576.81,
+              "visible": true,
+              "text": "1 全景：夜色中的城市天际线，镜头缓慢下摇到街角 已定稿 · 5s ＋ 2 中景：人物动作推进第 2 个节拍，镜头跟随 已定稿 · 5s ＋",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "274px",
+                "height": "576.812px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 2px 0px 0px",
+                "gap": "6px",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          },
+          ".rf-asset": {
+            "count": 2,
+            "first": {
+              "tag": "div",
+              "cls": "rf-asset is-in",
+              "x": 20,
+              "y": 161.19,
+              "w": 272,
+              "h": 54,
+              "visible": true,
+              "text": "1 全景：夜色中的城市天际线，镜头缓慢下摇到街角 已定稿 · 5s ＋",
+              "styles": {
+                "display": "grid",
+                "position": "static",
+                "width": "272px",
+                "height": "54px",
+                "backgroundColor": "rgba(0, 0, 0, 0.26)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "10px",
+                "padding": "6px 8px",
+                "gap": "8px",
+                "gridTemplateColumns": "40px 180px 18px",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".rf-clip": {
+            "count": 2,
+            "first": {
+              "tag": "div",
+              "cls": "rf-clip on",
+              "x": 326,
+              "y": 697,
+              "w": 237.5,
+              "h": 86,
+              "visible": true,
+              "text": "分镜 1 5s ✕",
+              "styles": {
+                "display": "block",
+                "position": "relative",
+                "width": "237.5px",
+                "height": "86px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgba(245, 248, 255, 0.8)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "8px",
+                "padding": "6px 8px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          },
+          ".rf-bubble": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "rf-bubble",
+              "x": 1064,
+              "y": 544,
+              "w": 340,
+              "h": 69,
+              "visible": true,
+              "text": "更新分镜 时间线材料不会自动更新，点「更新分镜」将同步分镜创作页的全部定稿素材。",
+              "styles": {
+                "display": "flex",
+                "position": "absolute",
+                "width": "340px",
+                "height": "69px",
+                "backgroundColor": "rgba(155, 70, 255, 0.4)",
+                "color": "rgb(255, 255, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "10px",
+                "padding": "8px 10px",
+                "gap": "2px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".rf-pill": {
+            "count": 2,
+            "first": {
+              "tag": "a",
+              "cls": "rf-pill",
+              "x": 16,
+              "y": 12,
+              "w": 126.17,
+              "h": 40,
+              "visible": true,
+              "text": "← 返回分镜创作",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "126.172px",
+                "height": "40px",
+                "backgroundColor": "rgba(194, 204, 241, 0.08)",
+                "color": "rgba(255, 255, 255, 0.8)",
+                "fontSize": "14px",
+                "fontWeight": "700",
+                "lineHeight": "21px",
+                "borderRadius": "10px",
+                "padding": "0px 12px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".rf-track": {
+            "count": 1,
+            "first": {
+              "tag": "div",
+              "cls": "rf-track",
+              "x": 324,
+              "y": 679,
+              "w": 1082,
+              "h": 110,
+              "visible": true,
+              "text": "00:00:00 00:00:02 00:00:04 00:00:06 00:00:08 00:00:10 分镜 1 5s ✕ 分镜 2 5s ✕",
+              "styles": {
+                "display": "block",
+                "position": "relative",
+                "width": "1082px",
+                "height": "110px",
+                "backgroundColor": "rgba(0, 0, 0, 0.34)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "10px",
+                "padding": "18px 0px 6px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto hidden"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "rf-top",
+              "x": 8,
+              "y": 0,
+              "w": 1408,
+              "h": 64,
+              "visible": true,
+              "text": "← 返回分镜创作 时间线导出 保存 ReelFlow 验收 21:47:45 第1集 第2集 第3集 切片发布 导出 — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1408px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 8px",
+                "gap": "12px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "rf-rail",
+              "x": 8,
+              "y": 72,
+              "w": 298,
+              "h": 725,
+              "visible": true,
+              "text": "剧集资产 已定稿 全部 只列已定稿（出片完成）的分镜素材——未定稿进不了时间线。 共 2 / 4 个镜头。 1 全景：夜色中的城市天际线，镜头缓慢下摇到街角 已定稿 · 5s ＋ 2 中景：人物动作推进第 2 个节拍，镜头跟随 已定稿 · ",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "298px",
+                "height": "725px",
+                "backgroundColor": "rgba(194, 204, 241, 0.08)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "20px",
+                "padding": "12px",
+                "gap": "8px",
+                "gridTemplateColumns": "none",
+                "overflow": "hidden"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 19,
+          "buttons": 12,
+          "disabled": 2,
+          "inputs": 3,
+          "links": 2
+        }
+      }
+    },
+    {
+      "route": "/assets",
+      "resolvedRoute": "/assets",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/assets",
+      "elapsedMs": 3687,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\18-assets.png",
+      "data": {
+        "title": "资产库 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/assets",
+        "bodyTextLength": 356,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "资产 共 0 个 · 上传图片自动压缩到 ≤1600px；删除后保留 7 天可恢复。 回收站 新建目录 上传图片 资产 资产工作台 主体库 抽取与匹配 全部目录 点资产卡片上的标签可快速筛选 ▣ 还没有资产 上传参考图，或从任务结果转存；角",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 37,
+          "buttons": 9,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/tasks",
+      "resolvedRoute": "/tasks",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/tasks",
+      "elapsedMs": 3666,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\19-tasks.png",
+      "data": {
+        "title": "任务中心 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/tasks",
+        "bodyTextLength": 958,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 985,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 920.63,
+              "visible": true,
+              "text": "任务中心 按「次」查看执行状态；成果请到作品库按剧查看。 批量下载 zip 全部 排队中 生成中 已完成 失败 已取消 共 12 条 任务 状态 模式 积分 创建时间 操作 10201344 排队中 text2video 8 2026/10",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "920.625px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 83,
+          "buttons": 56,
+          "disabled": 24,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/settings",
+      "resolvedRoute": "/settings",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/settings",
+      "elapsedMs": 3640,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\20-settings.png",
+      "data": {
+        "title": "账号设置 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/settings",
+        "bodyTextLength": 375,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".card": {
+            "count": 3,
+            "first": {
+              "tag": "section",
+              "cls": "card",
+              "x": 312,
+              "y": 159,
+              "w": 1040,
+              "h": 122.19,
+              "visible": true,
+              "text": "账号信息 昵称：用户8000 可用积分：4984 · 冻结：16",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1040px",
+                "height": "122.188px",
+                "backgroundColor": "rgb(25, 26, 33)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "14px",
+                "padding": "20px 24px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 2,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "账号设置 账号信息 昵称：用户8000 可用积分：4984 · 冻结：16 协议与隐私 用户协议 · 隐私政策 · 举报 / 投诉 注册时需确认已满 18 周岁；所有生成内容均带 AI 生成标识。 注销账号 注销后立即停止登录，任务记录将脱",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 32,
+          "buttons": 2,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 29
+        }
+      }
+    },
+    {
+      "route": "/canvas",
+      "resolvedRoute": "/canvas",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/canvas",
+      "elapsedMs": 3668,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\21-canvas.png",
+      "data": {
+        "title": "无限画布 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/canvas",
+        "bodyTextLength": 78,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "cl-topbar",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 56,
+              "visible": true,
+              "text": "工作台 一 一帧 · 无限画布 新建画布",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1424px",
+                "height": "56px",
+                "backgroundColor": "rgb(10, 10, 14)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 21px",
+                "gap": "14px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "cl-main",
+              "x": 0,
+              "y": 56,
+              "w": 1424,
+              "h": 749,
+              "visible": true,
+              "text": "◍ 还没有画布 新建一张画布，从拖入一个文本节点开始，把文本 → 图像 → 视频串成一条生成链路。 新建画布",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "749px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "21px",
+                "gap": "17.5px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 3,
+          "buttons": 2,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 1
+        }
+      }
+    },
+    {
+      "route": "/director",
+      "resolvedRoute": "/director",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Page not found: /director)"
+      ],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 404,
+      "finalUrl": "http://localhost:3011/director",
+      "elapsedMs": 6038,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\22-director.png",
+      "data": {
+        "title": "页面未找到 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/director",
+        "bodyTextLength": 5,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "notfound",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 805,
+              "visible": true,
+              "text": "页面未找到",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "805px",
+                "backgroundColor": "rgb(10, 10, 14)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "100px 16px 0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 1,
+          "buttons": 1,
+          "disabled": 0,
+          "inputs": 0,
+          "links": 0
+        }
+      }
+    },
+    {
+      "route": "/film",
+      "resolvedRoute": "/film",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/film",
+      "elapsedMs": 3680,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\23-film.png",
+      "data": {
+        "title": "一帧 OneFrame · AI 漫剧工作台 — 30 分钟产出一集短剧",
+        "lang": "zh-CN",
+        "pathname": "/film",
+        "bodyTextLength": 339,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "影视版 任务表 · 审核版本链 · 画布协同（对照 ReelMate 影视版 film 域） 刷新 请先在「团队」里选择或创建一个团队空间（影视版按团队开通） 全部项目 还没有影视项目。点右上「新建项目」创建一个：会同时生成分镜任务表与资产",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 29,
+          "buttons": 2,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/agent",
+      "resolvedRoute": "/agent",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/agent",
+      "elapsedMs": 3687,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\24-agent.png",
+      "data": {
+        "title": "创作 Agent · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/agent",
+        "bodyTextLength": 479,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 813,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 3,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 2,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 2,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 749,
+              "visible": true,
+              "text": "创作会话 ＋ 新会话 还没有会话，点「新会话」开始。 创作 Agent 未连接 说一句你想做什么 例如「一句话武侠短片：雨夜客栈，一人一剑」或「把这段小说改成剧本」。也可以直接从下面的推荐卡或 Skill 卡开始。 试试这些 按你最近在做的",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "749px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 36,
+          "buttons": 8,
+          "disabled": 2,
+          "inputs": 2,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/team",
+      "resolvedRoute": "/team",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/team",
+      "elapsedMs": 3670,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\25-team.png",
+      "data": {
+        "title": "团队管理 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/team",
+        "bodyTextLength": 393,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "团队管理 我的空间 · 席位 1/5 · 团队积分池 4984 （冻结 16）当前是个人空间 请选择 我的空间（个人） ▾ 创建团队 邀请成员 新建分组 导出 CSV 刷新 成员管理 1 积分管理 角色权限 规则说明 数据看板 → 成员 账",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 42,
+          "buttons": 12,
+          "disabled": 0,
+          "inputs": 4,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/team/dashboard",
+      "resolvedRoute": "/team/dashboard",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/team/dashboard",
+      "elapsedMs": 3679,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\26-team-dashboard.png",
+      "data": {
+        "title": "数据看板 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/team/dashboard",
+        "bodyTextLength": 637,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 962,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 6,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 897.5,
+              "visible": true,
+              "text": "数据看板 我的空间 · 1/1 位成员在岗 本月 本周 全部 刷新 团队总消耗 0 积分 · 本月 生成任务数 0 含全部状态 活跃成员 1 共 1 席位 池余额 4,984 冻结 16 积分消耗排名 导出 CSV 该时间范围内还没有消耗记",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "897.5px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 34,
+          "buttons": 7,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/knowledge",
+      "resolvedRoute": "/knowledge",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/knowledge",
+      "elapsedMs": 3665,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\27-knowledge.png",
+      "data": {
+        "title": "团队知识库 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/knowledge",
+        "bodyTextLength": 562,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 822,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 3,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 2,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 757.5,
+              "visible": true,
+              "text": "团队知识库 编辑知识库 目录 0 · 条目 0 · 标签 0 · 最多 5 层目录 刷新 全部 风格 题材 分镜构图 视频特效 AI 拆分镜 剧本拆分镜（图生视频） SeeDance2 编剧知识库 剧本拆分镜（参考生视频） 音色模版 分镜提",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "757.5px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 64,
+          "buttons": 27,
+          "disabled": 0,
+          "inputs": 11,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/activities",
+      "resolvedRoute": "/activities",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/activities",
+      "elapsedMs": 3665,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\28-activities.png",
+      "data": {
+        "title": "活动中心 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/activities",
+        "bodyTextLength": 3355,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 7767,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 2,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 7703.34,
+              "visible": true,
+              "text": "活动中心 投稿征集与命题创作：报名 → 投稿 → 入围 → 获奖 刷新 可报名活动 我报名的 隔离活动1793560160373 进行中 测试活动说明 奖励 0 积分 · 长期 ~ 长期 查看详情 去报名 投稿活动1793560160308",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "7703.34px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 131,
+          "buttons": 104,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/credits",
+      "resolvedRoute": "/credits",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/credits",
+      "elapsedMs": 3673,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\29-credits.png",
+      "data": {
+        "title": "积分 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/credits",
+        "bodyTextLength": 1670,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 1351,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 1286.5,
+              "visible": true,
+              "text": "积分 创建任务时冻结，成功结算、失败/取消解冻；Alpha 期积分不过期。 可用积分 4984 冻结中 16 累计流水 23 类型 积分 冻结 余额 备注 时间 冻结 -8 +8 4984 freeze for shot 109054147",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "1286.5px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 28,
+          "buttons": 1,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/novel",
+      "resolvedRoute": "/novel",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/novel",
+      "elapsedMs": 3650,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\30-novel.png",
+      "data": {
+        "title": "剧本工厂 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/novel",
+        "bodyTextLength": 384,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 869,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 805,
+              "visible": true,
+              "text": "剧本工厂 粘贴或上传小说 → 分章 → 内容分析 → 大纲 → 剧本 → 编辑 Agent 逐集定稿 新建改编 新建原创剧本 全部 (0) 草稿 已定稿 已归档 ✎ 还没有剧本项目 粘贴一段小说正文（或上传 txt / docx），系统会自",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "805px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 36,
+          "buttons": 9,
+          "disabled": 0,
+          "inputs": 1,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/ad-drama/create",
+      "resolvedRoute": "/ad-drama/create",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/ad-drama/create",
+      "elapsedMs": 3702,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\31-ad-drama-create.png",
+      "data": {
+        "title": "广告剧 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/ad-drama/create",
+        "bodyTextLength": 477,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".card": {
+            "count": 2,
+            "first": {
+              "tag": "section",
+              "cls": "card",
+              "x": 363,
+              "y": 177.75,
+              "w": 938,
+              "h": 252,
+              "visible": true,
+              "text": "① 商品素材 上传商品图 商品名称 * 商品亮点（一句卖点，生成多条卖点的输入） *",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "938px",
+                "height": "252px",
+                "backgroundColor": "rgb(12, 12, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "7px",
+                "padding": "17.5px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "广告剧 一张商品图 + 一句卖点，自动产出剧情方案、剧本、分镜与资产。对齐竞品 `/ad-drama/create` 五段流程。 我的广告剧项目 → ① 商品素材 上传商品图 商品名称 * 商品亮点（一句卖点，生成多条卖点的输入） * ② ",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 37,
+          "buttons": 3,
+          "disabled": 0,
+          "inputs": 7,
+          "links": 27
+        }
+      }
+    },
+    {
+      "route": "/video-redraw/create",
+      "resolvedRoute": "/video-redraw/create",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/video-redraw/create",
+      "elapsedMs": 3672,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\32-video-redraw-create.png",
+      "data": {
+        "title": "视频转绘 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/video-redraw/create",
+        "bodyTextLength": 500,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "视频转绘 已有视频 → 重绘成动漫：切集 → 分镜 → 重绘 → 绑定，四段流水线 刷新 ① 源视频 上传本地视频（≤32MB），或从资产库挑一个已有视频。源视频会作为重绘的参考输入。 选择本地视频上传 资产库里还没有视频。上面上传一个即可",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 39,
+          "buttons": 8,
+          "disabled": 1,
+          "inputs": 5,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/create/text-to-image",
+      "resolvedRoute": "/create/text-to-image",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/text-to-image",
+      "elapsedMs": 3671,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\33-create-text-to-image.png",
+      "data": {
+        "title": "图片生成 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/create/text-to-image",
+        "bodyTextLength": 574,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "head",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 64,
+              "visible": true,
+              "text": "图片生成 创作手册 商务合作 会员订阅 视频低至 8 积分/条 ✦ — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "12px 20px",
+                "gap": "14px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "body",
+              "x": 0,
+              "y": 64,
+              "w": 1424,
+              "h": 741,
+              "visible": true,
+              "text": "文生图 图生图 提示词 模型 TGI 2 · 媲美GPT image 2超强真实感、精准文字、丰富世界知识生成，角色一致性、图像编辑能力卓越 TNB 2 · 极速生成媲美全球顶尖水准的图像，细节精致、光影生动，精准支持多语言文字，实时联网让",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1424px",
+                "height": "741px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 30,
+          "buttons": 24,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/create/text-to-speech",
+      "resolvedRoute": "/create/text-to-speech",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/create/text-to-speech",
+      "elapsedMs": 3678,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\34-create-text-to-speech.png",
+      "data": {
+        "title": "文生语音 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/create/text-to-speech",
+        "bodyTextLength": 182,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "head",
+              "x": 0,
+              "y": 0,
+              "w": 1424,
+              "h": 64,
+              "visible": true,
+              "text": "文生语音 创作手册 商务合作 会员订阅 视频低至 8 积分/条 ✦ — …",
+              "styles": {
+                "display": "flex",
+                "position": "static",
+                "width": "1424px",
+                "height": "64px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "12px 20px",
+                "gap": "14px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "body",
+              "x": 0,
+              "y": 64,
+              "w": 1424,
+              "h": 741,
+              "visible": true,
+              "text": "文生语音 · 多音色配音，情绪与语速可控 台词文本* 0/2000 参数 音色 爽快思思（女） 甜美小媛（女） 渊博小叔（男） 解说小哥（男） Sarah（英） 语速 积分消耗 ✦ — 立即生成 内容由 AI 生成，请仔细甄别 生成结果 还",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1424px",
+                "height": "741px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 13,
+          "buttons": 7,
+          "disabled": 0,
+          "inputs": 2,
+          "links": 4
+        }
+      }
+    },
+    {
+      "route": "/creator-center",
+      "resolvedRoute": "/creator-center",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/creator-center",
+      "elapsedMs": 3676,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\35-creator-center.png",
+      "data": {
+        "title": "创作者中心 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/creator-center",
+        "bodyTextLength": 383,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "创作者中心 用户8000 · 作品 0/0 已通过 · 粉丝 0 刷新 我的作品 作品广场 我的资料 粉丝 / 关注 我的激励 投稿新作品 先存草稿，再点「送审」进入人工审核；只有审核通过（状态=已通过）的作品才会出现在公开列表。 创建草稿",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 2,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 44,
+          "buttons": 14,
+          "disabled": 0,
+          "inputs": 4,
+          "links": 26
+        }
+      }
+    },
+    {
+      "route": "/invite",
+      "resolvedRoute": "/invite",
+      "consoleErrors": [],
+      "pageErrors": [],
+      "apiErrors": [],
+      "httpStatus": 200,
+      "finalUrl": "http://localhost:3011/invite",
+      "elapsedMs": 3694,
+      "shot": "E:\\wanxing\\docs\\03-frontend\\evidence\\ui-audit\\ours-2026-11-02\\36-invite.png",
+      "data": {
+        "title": "邀请与兑换 · 一帧",
+        "lang": "zh-CN",
+        "pathname": "/invite",
+        "bodyTextLength": 614,
+        "hasComingSoon": false,
+        "rawI18nKeys": [],
+        "scrollWidth": 1424,
+        "scrollHeight": 805,
+        "horizontalOverflow": false,
+        "boxes": {
+          ".sidebar": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          ".topbar": {
+            "count": 1,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "header": {
+            "count": 2,
+            "first": {
+              "tag": "header",
+              "cls": "topbar",
+              "x": 240,
+              "y": 0,
+              "w": 1184,
+              "h": 64,
+              "visible": true,
+              "text": "创作手册 商务合作 简体中文 English 日本語 Português (Brasil) Español 会员订阅 视频低至 8 积分/条 — …",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "1184px",
+                "height": "64px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px 24px",
+                "gap": "16px",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "aside": {
+            "count": 1,
+            "first": {
+              "tag": "aside",
+              "cls": "sidebar",
+              "x": 0,
+              "y": 0,
+              "w": 240,
+              "h": 805,
+              "visible": true,
+              "text": "一 一帧 首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动 影视版 内测 MCP & CLI 活动 添加专属运营助手 用户协议 ",
+              "styles": {
+                "display": "flex",
+                "position": "sticky",
+                "width": "240px",
+                "height": "805px",
+                "backgroundColor": "rgb(16, 16, 21)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "main": {
+            "count": 1,
+            "first": {
+              "tag": "main",
+              "cls": "content",
+              "x": 240,
+              "y": 64,
+              "w": 1184,
+              "h": 741,
+              "visible": true,
+              "text": "邀请与兑换 邀请码归因 → 分销关系（单层）→ 奖励走积分账本 刷新 我的邀请码 一人一码（重复生成返回同一个），被邀请人核销后你与他建立单层分销关系。 OF05250E2D 复制邀请链接 http://localhost:3011/inv",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "1184px",
+                "height": "741px",
+                "backgroundColor": "rgb(11, 11, 16)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "0px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "visible"
+              }
+            }
+          },
+          "nav": {
+            "count": 1,
+            "first": {
+              "tag": "nav",
+              "cls": "nav",
+              "x": 0,
+              "y": 64,
+              "w": 239,
+              "h": 532.5,
+              "visible": true,
+              "text": "首页 剧本创作 小说改编 创作 Agent 无限画布 全部项目 剪辑台 工具箱 广告剧 视频转绘 团队 资产库 团队管理 剧本集市 团队知识库 创作者中心 活动",
+              "styles": {
+                "display": "block",
+                "position": "static",
+                "width": "239px",
+                "height": "532.5px",
+                "backgroundColor": "rgba(0, 0, 0, 0)",
+                "color": "rgb(245, 248, 255)",
+                "fontSize": "14px",
+                "fontWeight": "400",
+                "lineHeight": "21px",
+                "borderRadius": "0px",
+                "padding": "8px 14px",
+                "gap": "normal",
+                "gridTemplateColumns": "none",
+                "overflow": "auto"
+              }
+            }
+          }
+        },
+        "controls": {
+          "visible": 36,
+          "buttons": 7,
+          "disabled": 1,
+          "inputs": 3,
+          "links": 26
+        }
+      }
+    }
+  ]
+}

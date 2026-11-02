@@ -1,0 +1,224 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T21:20:19.059Z",
+  "total": 43,
+  "passed": 43,
+  "failed": 0,
+  "results": [
+    {
+      "name": "窄屏 1024 home 无横向溢出",
+      "ok": true,
+      "detail": "1024 <= 1024"
+    },
+    {
+      "name": "窄屏 1024 home 关键按钮在视口内",
+      "ok": true,
+      "detail": "662+228"
+    },
+    {
+      "name": "窄屏 1024 home 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 1024 works 无横向溢出",
+      "ok": true,
+      "detail": "1024 <= 1024"
+    },
+    {
+      "name": "窄屏 1024 works 关键按钮在视口内",
+      "ok": true,
+      "detail": "14+211"
+    },
+    {
+      "name": "窄屏 1024 works 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 1024 projects 无横向溢出",
+      "ok": true,
+      "detail": "1024 <= 1024"
+    },
+    {
+      "name": "窄屏 1024 projects 关键按钮在视口内",
+      "ok": true,
+      "detail": "442+140"
+    },
+    {
+      "name": "窄屏 1024 projects 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 1024 assets 无横向溢出",
+      "ok": true,
+      "detail": "1024 <= 1024"
+    },
+    {
+      "name": "窄屏 1024 assets 关键按钮在视口内",
+      "ok": true,
+      "detail": "849+72"
+    },
+    {
+      "name": "窄屏 1024 assets 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 900 home 无横向溢出",
+      "ok": true,
+      "detail": "900 <= 900"
+    },
+    {
+      "name": "窄屏 900 home 关键按钮在视口内",
+      "ok": true,
+      "detail": "538+228"
+    },
+    {
+      "name": "窄屏 900 home 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 900 works 无横向溢出",
+      "ok": true,
+      "detail": "900 <= 900"
+    },
+    {
+      "name": "窄屏 900 works 关键按钮在视口内",
+      "ok": true,
+      "detail": "14+35"
+    },
+    {
+      "name": "窄屏 900 works 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 900 projects 无横向溢出",
+      "ok": true,
+      "detail": "900 <= 900"
+    },
+    {
+      "name": "窄屏 900 projects 关键按钮在视口内",
+      "ok": true,
+      "detail": "380+140"
+    },
+    {
+      "name": "窄屏 900 projects 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 900 assets 无横向溢出",
+      "ok": true,
+      "detail": "900 <= 900"
+    },
+    {
+      "name": "窄屏 900 assets 关键按钮在视口内",
+      "ok": true,
+      "detail": "725+72"
+    },
+    {
+      "name": "窄屏 900 assets 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 768 home 无横向溢出",
+      "ok": true,
+      "detail": "768 <= 768"
+    },
+    {
+      "name": "窄屏 768 home 关键按钮在视口内",
+      "ok": true,
+      "detail": "406+228"
+    },
+    {
+      "name": "窄屏 768 home 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 768 works 无横向溢出",
+      "ok": true,
+      "detail": "768 <= 768"
+    },
+    {
+      "name": "窄屏 768 works 关键按钮在视口内",
+      "ok": true,
+      "detail": "14+35"
+    },
+    {
+      "name": "窄屏 768 works 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 768 projects 无横向溢出",
+      "ok": true,
+      "detail": "768 <= 768"
+    },
+    {
+      "name": "窄屏 768 projects 关键按钮在视口内",
+      "ok": true,
+      "detail": "314+140"
+    },
+    {
+      "name": "窄屏 768 projects 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "窄屏 768 assets 无横向溢出",
+      "ok": true,
+      "detail": "768 <= 768"
+    },
+    {
+      "name": "窄屏 768 assets 关键按钮在视口内",
+      "ok": true,
+      "detail": "147+72"
+    },
+    {
+      "name": "窄屏 768 assets 交互元素无横向裁切",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "连续 Tab 能推进焦点（≥3 个元素）",
+      "ok": true,
+      "detail": "拿到焦点 5/6"
+    },
+    {
+      "name": "每个获焦元素都有可见焦点环",
+      "ok": true,
+      "detail": "[\"BUTTON:\",\"A:首页\",\"A:剧本创作\",\"A:创作 Agent\",\"A:全部项目\"]"
+    },
+    {
+      "name": "/home 无「无名按钮」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "/assets 无「无名按钮」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "of_lang=en 时 html lang=en",
+      "ok": true,
+      "detail": "en"
+    },
+    {
+      "name": "英文环境渲染英文主文案",
+      "ok": true,
+      "detail": "一 OneFrame Capabilities Workflow Pricing 简体中文 English 日本語 Po"
+    },
+    {
+      "name": "英文环境无中文 UI 短语",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

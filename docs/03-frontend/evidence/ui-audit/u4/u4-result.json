@@ -1,0 +1,492 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T20:06:13.925Z",
+  "total": 58,
+  "passed": 58,
+  "failed": 0,
+  "results": [
+    {
+      "name": "左栏宽 298（±2）",
+      "ok": true,
+      "detail": "298"
+    },
+    {
+      "name": "左栏起点 x=8（±2）",
+      "ok": true,
+      "detail": "8"
+    },
+    {
+      "name": "时间线高 164（±2）",
+      "ok": true,
+      "detail": "164"
+    },
+    {
+      "name": "时间线宽 1102（±2）",
+      "ok": true,
+      "detail": "1102"
+    },
+    {
+      "name": "时间线上沿 y=633（±2）",
+      "ok": true,
+      "detail": "633"
+    },
+    {
+      "name": "时间线下沿 y=797（±2）",
+      "ok": true,
+      "detail": "797"
+    },
+    {
+      "name": "时间线右沿 x=1416（±2）",
+      "ok": true,
+      "detail": "1416"
+    },
+    {
+      "name": "顶栏高 64（±1）",
+      "ok": true,
+      "detail": "64"
+    },
+    {
+      "name": "中区右沿 = 时间线右沿",
+      "ok": true,
+      "detail": "1416"
+    },
+    {
+      "name": "初始保存状态为空（idle）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "改动后立即进入「未保存」",
+      "ok": true,
+      "detail": "未保存"
+    },
+    {
+      "name": "请求在途显示「保存中」（data-save-state=saving）",
+      "ok": true,
+      "detail": "保存中…"
+    },
+    {
+      "name": "落库后显示「已保存」",
+      "ok": true,
+      "detail": "已保存"
+    },
+    {
+      "name": "已保存文案正确",
+      "ok": true,
+      "detail": "已保存"
+    },
+    {
+      "name": "保存失败进入 error 态",
+      "ok": true,
+      "detail": "保存失败"
+    },
+    {
+      "name": "失败文案为「保存失败」",
+      "ok": true,
+      "detail": "保存失败"
+    },
+    {
+      "name": "手动保存后可回到「已保存」",
+      "ok": true,
+      "detail": "已保存"
+    },
+    {
+      "name": "左栏点选加入时间线",
+      "ok": true,
+      "detail": "[\"1\",\"2\",\"1\"]"
+    },
+    {
+      "name": "加入后撤销按钮可用",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Ctrl+Z 撤销加入",
+      "ok": true,
+      "detail": "[\"1\",\"2\"]"
+    },
+    {
+      "name": "Ctrl+Shift+Z 重做加入",
+      "ok": true,
+      "detail": "[\"1\",\"2\",\"1\"]"
+    },
+    {
+      "name": "撤销后回到基线段数",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "U1 删除撤销条仍在（回归）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "删除后少一段",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "撤销条恢复片段（回归）",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "撤销条之后 Ctrl+Z 仍可回退（两条通道不冲突）",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "Ctrl+Shift+Z 可再恢复",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "→ 前进 1 秒",
+      "ok": true,
+      "detail": "0 -> 1"
+    },
+    {
+      "name": "Shift+→ 前进 5 秒（加速）",
+      "ok": true,
+      "detail": "1 -> 6"
+    },
+    {
+      "name": "← 后退 1 秒",
+      "ok": true,
+      "detail": "6 -> 5"
+    },
+    {
+      "name": "Shift+← 后退 5 秒",
+      "ok": true,
+      "detail": "5 -> 0"
+    },
+    {
+      "name": "Space 开始播放（按钮文案切换）",
+      "ok": true,
+      "detail": "播放 -> 暂停"
+    },
+    {
+      "name": "播放头在推进（≥1s）",
+      "ok": true,
+      "detail": "0 -> 1"
+    },
+    {
+      "name": "Space 再次按下暂停",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "弹窗打开时 Space 不劫持（回归）",
+      "ok": true,
+      "detail": "1 -> 1"
+    },
+    {
+      "name": "弹窗打开时 Space 不误触关闭（初始焦点不在 ✕）",
+      "ok": true,
+      "detail": "modal=1"
+    },
+    {
+      "name": "切片越界有可读错误（回归）",
+      "ok": true,
+      "detail": "结束时间不能超过时间线总长（10 秒）"
+    },
+    {
+      "name": "Esc 仍可关闭弹窗（回归）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "遮罩点击可关闭弹窗（回归）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "拖拽换位改变顺序",
+      "ok": true,
+      "detail": "[\"1\",\"2\"] -> [\"2\",\"1\"]"
+    },
+    {
+      "name": "换位后触发落库",
+      "ok": true,
+      "detail": "[\"u4-shot-2\",\"u4-shot-1\"]"
+    },
+    {
+      "name": "右边缘裁剪 +1s",
+      "ok": true,
+      "detail": "5s -> 6s"
+    },
+    {
+      "name": "裁剪后片段变宽（约 +48px）",
+      "ok": true,
+      "detail": "237.5 -> 285.3"
+    },
+    {
+      "name": "刷新后裁剪时长仍在",
+      "ok": true,
+      "detail": "[\"6s\",\"5s\"]"
+    },
+    {
+      "name": "刷新后顺序仍在",
+      "ok": true,
+      "detail": "[\"2\",\"1\"]"
+    },
+    {
+      "name": "左栏拖入轨道新增片段",
+      "ok": true,
+      "detail": "2 -> 3"
+    },
+    {
+      "name": "默认只列已定稿（闸门不退化）",
+      "ok": true,
+      "detail": "[{\"no\":\"1\",\"finalized\":\"1\"},{\"no\":\"2\",\"finalized\":\"1\"}]"
+    },
+    {
+      "name": "「全部」视图里未定稿仍标 0",
+      "ok": true,
+      "detail": "[{\"no\":\"1\",\"finalized\":\"1\"},{\"no\":\"2\",\"finalized\":\"1\"},{\"no\":\"3\",\"finalized\":\"0\"}]"
+    },
+    {
+      "name": "3D 左面板 359（±2）",
+      "ok": true,
+      "detail": "359"
+    },
+    {
+      "name": "3D 视口 704（±2）",
+      "ok": true,
+      "detail": "704"
+    },
+    {
+      "name": "3D 右面板 359（±2）",
+      "ok": true,
+      "detail": "359"
+    },
+    {
+      "name": "3D 三列合计 = 视口宽（无溢出）",
+      "ok": true,
+      "detail": "359+704+359"
+    },
+    {
+      "name": "3D 覆盖层全屏（左右贴边 0 / 1424）",
+      "ok": true,
+      "detail": "0~1424"
+    },
+    {
+      "name": "默认场景缩放 300%",
+      "ok": true,
+      "detail": "300 / 300 %"
+    },
+    {
+      "name": "默认 FOV 50°",
+      "ok": true,
+      "detail": "50 / 50.0°"
+    },
+    {
+      "name": "默认注视目标 0 / 1.2 / 0",
+      "ok": true,
+      "detail": "0 / 1.2 / 0"
+    },
+    {
+      "name": "所有付费 POST 都被拦截",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无未捕获 console error",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "measures": {
+    "layout": {
+      "viewport": {
+        "width": 1424,
+        "height": 805
+      },
+      "rail": {
+        "x": 8,
+        "y": 72,
+        "w": 298,
+        "h": 725,
+        "right": 306,
+        "bottom": 797
+      },
+      "timeline": {
+        "x": 314,
+        "y": 633,
+        "w": 1102,
+        "h": 164,
+        "right": 1416,
+        "bottom": 797
+      },
+      "stage": {
+        "x": 314,
+        "y": 72,
+        "w": 1102,
+        "h": 553,
+        "right": 1416,
+        "bottom": 625
+      },
+      "topBar": {
+        "x": 8,
+        "y": 0,
+        "w": 1408,
+        "h": 64,
+        "right": 1416,
+        "bottom": 64
+      },
+      "body": {
+        "x": 8,
+        "y": 72,
+        "w": 1408,
+        "h": 725,
+        "right": 1416,
+        "bottom": 797
+      }
+    },
+    "director": {
+      "left": {
+        "x": 0,
+        "y": 64,
+        "w": 359,
+        "h": 741,
+        "right": 359,
+        "bottom": 805
+      },
+      "stage": {
+        "x": 360,
+        "y": 64,
+        "w": 704,
+        "h": 741,
+        "right": 1064,
+        "bottom": 805
+      },
+      "right": {
+        "x": 1065,
+        "y": 64,
+        "w": 359,
+        "h": 741,
+        "right": 1424,
+        "bottom": 805
+      },
+      "container": {
+        "x": 0,
+        "y": 0,
+        "w": 1424,
+        "h": 805,
+        "right": 1424,
+        "bottom": 805
+      }
+    },
+    "directorState": {
+      "positions": [],
+      "cameras": [
+        {
+          "id": "cam-1",
+          "name": "机位1",
+          "fov": 50
+        }
+      ],
+      "activeCamIndex": 0,
+      "viewMode": "director",
+      "selectedActorId": null,
+      "canvas": [
+        704,
+        741
+      ]
+    }
+  },
+  "putBodies": [
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 6
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        },
+        {
+          "shot_id": "u4-shot-2",
+          "duration": 6
+        },
+        {
+          "shot_id": "u4-shot-1",
+          "duration": 5
+        }
+      ]
+    }
+  ]
+}

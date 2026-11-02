@@ -1,0 +1,123 @@
+{
+  "url": "/series-manage",
+  "uniQ": [
+    {
+      "tag": "SECTION",
+      "cls": "project-manage-page relative",
+      "x": 240,
+      "y": 64,
+      "w": 1174,
+      "h": 741,
+      "txt": "返回/全部项目/(1)/短剧工作流/(0)/无限画布/(1)/影视项目/(0)/"
+    },
+    {
+      "tag": "DIV",
+      "cls": "title",
+      "x": 272,
+      "y": 80,
+      "w": 1110,
+      "h": 40,
+      "txt": "返回/全部项目/(1)/短剧工作流/(0)/无限画布/(1)/影视项目/(0)/"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-list-toolbar",
+      "x": 830,
+      "y": 80,
+      "w": 552,
+      "h": 40,
+      "txt": "项目状态"
+    },
+    {
+      "tag": "DIV",
+      "cls": "search resource-search-input",
+      "x": 1046,
+      "y": 80,
+      "w": 336,
+      "h": 40,
+      "txt": ""
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-list-title",
+      "x": 272,
+      "y": 86,
+      "w": 542,
+      "h": 28,
+      "txt": "返回/全部项目/(1)/短剧工作流/(0)/无限画布/(1)/影视项目/(0)/"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-category-tabs",
+      "x": 343,
+      "y": 86,
+      "w": 471,
+      "h": 28,
+      "txt": "全部项目/(1)/短剧工作流/(0)/无限画布/(1)/影视项目/(0)/更多"
+    },
+    {
+      "tag": "DIV",
+      "cls": "al-list-wrapper flex flex-col overflow-y-auto flex",
+      "x": 272,
+      "y": 136,
+      "w": 1110,
+      "h": 669,
+      "txt": "无限画布//未命名项目//创建人：—/|/2026-11-02 04:50:58"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-manage-page__grid",
+      "x": 272,
+      "y": 136,
+      "w": 1110,
+      "h": 345,
+      "txt": "无限画布//未命名项目//创建人：—/|/2026-11-02 04:50:58"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-manage-page__grid-item",
+      "x": 272,
+      "y": 136,
+      "w": 357,
+      "h": 265,
+      "txt": "无限画布//未命名项目//创建人：—/|/2026-11-02 04:50:58"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-card-shell__media",
+      "x": 281,
+      "y": 145,
+      "w": 339,
+      "h": 163,
+      "txt": "无限画布"
+    },
+    {
+      "tag": "svg",
+      "cls": "[object SVGAnimatedString]",
+      "x": 366,
+      "y": 186,
+      "w": 169,
+      "h": 82,
+      "txt": ""
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-card-shell__info",
+      "x": 281,
+      "y": 316,
+      "w": 339,
+      "h": 76,
+      "txt": "未命名项目//创建人：—/|/2026-11-02 04:50:58"
+    },
+    {
+      "tag": "DIV",
+      "cls": "project-manage-page__bottom-mask",
+      "x": 240,
+      "y": 725,
+      "w": 1174,
+      "h": 80,
+      "txt": ""
+    }
+  ],
+  "text": "创作手册\n商务合作\n会员订阅\n1080P低至0.2元/秒\n0\n首页\n剧本创作\n创作 Agent\n全部项目\n工具箱\n\n团队\n\n资产库\n团队管理\n影视版\n申请内测\nMCP & CLI\n活动\n添加专属运营助手\n返回\n全部项目\n(1)\n短剧工作流\n(0)\n无限画布\n(1)\n影视项目\n(0)\n更多\n项目状态\n无限画布\n\n未命名项目\n\n创建人：—\n|\n2026-11-02 04:50:58"
+}

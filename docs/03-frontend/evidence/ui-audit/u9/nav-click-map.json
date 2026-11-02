@@ -1,0 +1,57 @@
+[
+ {
+  "menu": "首页",
+  "path": "/home",
+  "ok": true
+ },
+ {
+  "menu": "剧本创作",
+  "path": "/script",
+  "ok": true
+ },
+ {
+  "menu": "创作 Agent",
+  "path": "/agent",
+  "ok": true
+ },
+ {
+  "menu": "全部项目",
+  "path": "/projects",
+  "ok": true
+ },
+ {
+  "menu": "工具箱",
+  "path": "/tools",
+  "ok": true
+ },
+ {
+  "menu": "资产库",
+  "path": "/assets",
+  "ok": true
+ },
+ {
+  "menu": "团队管理",
+  "path": "/team",
+  "ok": true
+ },
+ {
+  "menu": "影视版内测",
+  "path": "/film",
+  "ok": true
+ },
+ {
+  "menu": "MCP & CLI",
+  "path": "(disabled)",
+  "ok": false
+ },
+ {
+  "menu": "活动",
+  "path": "/activities",
+  "ok": true
+ },
+ {
+  "menu": "添加专属运营助手",
+  "path": "/report",
+  "ok": true
+ }
+]

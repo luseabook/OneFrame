@@ -1,0 +1,239 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T20:06:52.175Z",
+  "total": 37,
+  "passed": 37,
+  "failed": 0,
+  "flowClicks": 8,
+  "results": [
+    {
+      "name": "资产 tab 首帧先骨架（不是空态）",
+      "ok": true,
+      "detail": "skeleton=1 empty=0"
+    },
+    {
+      "name": "三卡入口齐全",
+      "ok": true,
+      "detail": "ai,generate,import"
+    },
+    {
+      "name": "AI 提取 CTA 可用",
+      "ok": true,
+      "detail": "disabled=false"
+    },
+    {
+      "name": "AI 提取 CTA 是白色最强按钮",
+      "ok": true,
+      "detail": "rgb(255, 255, 255)"
+    },
+    {
+      "name": "免费徽标随可用 CTA 出现",
+      "ok": true,
+      "detail": "badge=1"
+    },
+    {
+      "name": "不存在「首次免费」文案",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "配额来自服务端 media_limits",
+      "ok": true,
+      "detail": "配额：图片 1/30 · 总媒体 5/50 · 视频 / 音频用量无服务端聚合字段，如实标为未接"
+    },
+    {
+      "name": "配额标注未接字段",
+      "ok": true,
+      "detail": "配额：图片 1/30 · 总媒体 5/50 · 视频 / 音频用量无服务端聚合字段，如实标为未接"
+    },
+    {
+      "name": "kind 页签为 角色/场景/道具",
+      "ok": true,
+      "detail": "character,scene,prop"
+    },
+    {
+      "name": "AI 提取真实走通（大卡不是禁用态）",
+      "ok": true,
+      "detail": "已提取：新增 1 · 更新 0 · 跳过 0"
+    },
+    {
+      "name": "提取按集与页签传参",
+      "ok": true,
+      "detail": "{\"include_characters\":false,\"overwrite\":false,\"episode_id\":\"E2E-U5-EP\"}"
+    },
+    {
+      "name": "全选本页选中 4 个场景（含 AI 新提取）",
+      "ok": true,
+      "detail": "已选 4 个"
+    },
+    {
+      "name": "可生成数剔除无提示词资产",
+      "ok": true,
+      "detail": "下一步，批量生成资产图（3）"
+    },
+    {
+      "name": "不可生成原因可读",
+      "ok": true,
+      "detail": "没有提示词或描述，无法生成"
+    },
+    {
+      "name": "批量定稿提交草稿资产（已定稿不重复提交）",
+      "ok": true,
+      "detail": "[\"a-scene-1\",\"a-scene-2\",\"a-scene-new\"]"
+    },
+    {
+      "name": "批量生成队列为 3 行",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "进度显示已处理 3 / 3",
+      "ok": true,
+      "detail": "已处理 3 / 3"
+    },
+    {
+      "name": "两个成功一个失败",
+      "ok": true,
+      "detail": "succeeded,failed,succeeded"
+    },
+    {
+      "name": "每个资产只提交一次生图",
+      "ok": true,
+      "detail": "a-scene-1,a-scene-2,a-scene-new"
+    },
+    {
+      "name": "重试按钮带失败数",
+      "ok": true,
+      "detail": "重试失败项（1）"
+    },
+    {
+      "name": "重试后全部成功",
+      "ok": true,
+      "detail": "succeeded,succeeded,succeeded"
+    },
+    {
+      "name": "重试只重发失败项（不重复扣费）",
+      "ok": true,
+      "detail": "a-scene-1,a-scene-2,a-scene-new,a-scene-2"
+    },
+    {
+      "name": "绑定按钮带当前镜头号",
+      "ok": true,
+      "detail": "绑定选中资产到镜 1"
+    },
+    {
+      "name": "首次绑定只提交一次且只含该资产",
+      "ok": true,
+      "detail": "[{\"sid\":\"E2E-U5-SHOT-1\",\"asset_ids\":[\"a-scene-1\"]}]"
+    },
+    {
+      "name": "绑定成功提示可读",
+      "ok": true,
+      "detail": "已绑定 1 个资产到镜 1 注意：未定稿 / 无参考图的资产绑定后仍会被生成侧拒绝（400105）。"
+    },
+    {
+      "name": "重复绑定不再提交（幂等）",
+      "ok": true,
+      "detail": "puts=1"
+    },
+    {
+      "name": "重复绑定提示未重复提交",
+      "ok": true,
+      "detail": "这些资产已绑定在镜 1，未重复提交"
+    },
+    {
+      "name": "资产卡直接绑定到当前镜头（无需抽屉/二次确认）",
+      "ok": true,
+      "detail": "[\"a-scene-1\",\"a-scene-2\"]"
+    },
+    {
+      "name": "导入是页内 modal",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "导入写入项目资产",
+      "ok": true,
+      "detail": "{\"kind\":\"prop\",\"name\":\"E2E 导入道具\",\"prompt\":\"黄铜钥匙\"}"
+    },
+    {
+      "name": "新建目录不再用原生 prompt",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "禁用控件有可读原因",
+      "ok": true,
+      "detail": "目录名称不能为空"
+    },
+    {
+      "name": "目录创建走文本输入而非 prompt",
+      "ok": true,
+      "detail": "{\"name\":\"E2E 目录\"}"
+    },
+    {
+      "name": "配额随服务端变化（12/20）",
+      "ok": true,
+      "detail": "配额：图片 1/12 · 总媒体 7/20 · 视频 / 音频用量无服务端聚合字段，如实标为未接"
+    },
+    {
+      "name": "完整资产工作流点击数（6–10 次）",
+      "ok": true,
+      "detail": "8"
+    },
+    {
+      "name": "除生图外未触发其它付费接口",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无未捕获 console error（dev manifest 404 噪声除外）",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "calls": {
+    "generate": [
+      "a-scene-1",
+      "a-scene-2",
+      "a-scene-new",
+      "a-scene-2"
+    ],
+    "extract": [
+      {
+        "include_characters": false,
+        "overwrite": false,
+        "episode_id": "E2E-U5-EP"
+      }
+    ],
+    "confirm": [
+      {
+        "asset_ids": [
+          "a-scene-1",
+          "a-scene-2",
+          "a-scene-new"
+        ]
+      }
+    ],
+    "createAsset": [
+      {
+        "kind": "prop",
+        "name": "E2E 导入道具",
+        "prompt": "黄铜钥匙"
+      }
+    ],
+    "putAssets": [
+      {
+        "sid": "E2E-U5-SHOT-1",
+        "asset_ids": [
+          "a-scene-1"
+        ]
+      }
+    ],
+    "folders": [
+      {
+        "name": "E2E 目录"
+      }
+    ]
+  }
+}

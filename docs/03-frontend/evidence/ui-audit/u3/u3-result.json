@@ -1,0 +1,222 @@
+{
+  "base": "http://127.0.0.1:3011",
+  "at": "2026-11-01T20:05:40.288Z",
+  "total": 41,
+  "passed": 41,
+  "failed": 0,
+  "results": [
+    {
+      "name": "时间线视图标记为只读",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "深链 ?tab=timeline 生效",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "片段渲染 2 段",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "片段无增删排序按钮",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无「更新分镜」按钮",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无「合成导出成片」按钮",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无「下载 mp4」链接",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "只读标记可见",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "点左栏只移动播放头（时间码变化）",
+      "ok": true,
+      "detail": "00:00 / 00:08 -> 00:05 / 00:08"
+    },
+    {
+      "name": "播放头定位到该片段起点 00:05",
+      "ok": true,
+      "detail": "00:05 / 00:08"
+    },
+    {
+      "name": "点左栏不新增片段",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "只读视图没有写时间线（无 PUT）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "提供「去剪辑台」且带集数",
+      "ok": true,
+      "detail": "/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
+    },
+    {
+      "name": "导出记录区块出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "导出记录已请求 GET /projects/:id/exports",
+      "ok": true,
+      "detail": "?page=1&page_size=10"
+    },
+    {
+      "name": "渲染两条真实记录",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "分镜包行含 kind/集/状态/时间",
+      "ok": true,
+      "detail": "分镜包（zip）第1集已完成2026/11/02 10:00下载已过期"
+    },
+    {
+      "name": "分镜包行有下载链接",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "过期记录显示「已过期」",
+      "ok": true,
+      "detail": "分镜包（zip）第1集已完成2026/11/02 10:00下载已过期"
+    },
+    {
+      "name": "成片行含 kind/失败状态/失败原因",
+      "ok": true,
+      "detail": "成片（mp4）第1集失败2026/11/02 09:00ffmpeg 渲染失败长期有效"
+    },
+    {
+      "name": "成片行无下载时给可读原因",
+      "ok": true,
+      "detail": "成片（mp4）第1集失败2026/11/02 09:00ffmpeg 渲染失败长期有效"
+    },
+    {
+      "name": "成片行有效期为长期",
+      "ok": true,
+      "detail": "成片（mp4）第1集失败2026/11/02 09:00ffmpeg 渲染失败长期有效"
+    },
+    {
+      "name": "分页可见（total 25 > 10）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "翻页请求 page=2",
+      "ok": true,
+      "detail": "?page=1&page_size=10 | ?page=2&page_size=10"
+    },
+    {
+      "name": "失败态可读",
+      "ok": true,
+      "detail": "导出记录服务不可用 重试"
+    },
+    {
+      "name": "空态可读（无假数据）",
+      "ok": true,
+      "detail": "⇩还没有导出记录在「分镜工作台」投递出片，或在「导出与投递」点「导出本集 zip」后，记录会出现在这里（分镜包与成片混排）。"
+    },
+    {
+      "name": "无空间级日志时 tab 名为「已剪辑」",
+      "ok": true,
+      "detail": "已剪辑"
+    },
+    {
+      "name": "tab 标注 data-export-log=0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "「已剪辑」写清口径（导出记录在项目页）",
+      "ok": true,
+      "detail": "还没有剪辑记录「已剪辑」= 时间线里有片段；本页不展示导出记录（没有空间级导出日志）。导出历史在项目页「导出与投递」里按项目查看。进剪辑台把已定稿分镜排进时间线后，作品会出现在这里；导出记录请到项目页查看。"
+    },
+    {
+      "name": "「已剪辑」不渲染伪造的导出行",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "探测过空间级导出日志端点",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "有空间级日志时 tab 名为「已导出」",
+      "ok": true,
+      "detail": "已导出"
+    },
+    {
+      "name": "「已导出」渲染日志里的真实记录",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "记录含 kind 与状态",
+      "ok": true,
+      "detail": "类型集数状态时间下载有效期分镜包（zip）第1集已完成2026/11/02 10:00下载已过期成片（mp4）第1集失败2026/11/02 09:00未完成长期有效来自空间级导出日志的真实记录（不是按时间线时长推断）"
+    },
+    {
+      "name": "项目列表 tab 名为「已剪辑」",
+      "ok": true,
+      "detail": "已剪辑"
+    },
+    {
+      "name": "项目列表写清导出记录去项目页看",
+      "ok": true,
+      "detail": "列表页不展示导出历史：打开任一项目，在「导出与投递」视图里查看该项目的真实导出记录（分镜包 / 成片）。进项目页看「导出与投递」，或进剪辑台继续剪。"
+    },
+    {
+      "name": "付费/写类 POST 全部被拦截",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "无未捕获 console error",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "跳转到剪辑台",
+      "ok": true,
+      "detail": "http://127.0.0.1:3011/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
+    },
+    {
+      "name": "URL 保留当前集",
+      "ok": true,
+      "detail": "http://127.0.0.1:3011/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
+    },
+    {
+      "name": "本地留底当前集",
+      "ok": true,
+      "detail": "E2E-U3-EP1"
+    }
+  ],
+  "exportRequests": [
+    "?page=1&page_size=10",
+    "?page=2&page_size=10",
+    "?page=2&page_size=10",
+    "?page=2&page_size=10",
+    "?page=2&page_size=10"
+  ],
+  "timelineWrites": []
+}
