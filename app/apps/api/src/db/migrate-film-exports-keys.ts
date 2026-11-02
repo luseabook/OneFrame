@@ -1,4 +1,4 @@
-import { eq, isNull, notLike, or } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { filmExports } from "@app/db";
 import { db, pool } from "./database";
 import { StorageService } from "../storage/storage.service";
@@ -16,6 +16,8 @@ import { StorageService } from "../storage/storage.service";
  *   pnpm --filter @app/api db:migrate-film-exports-keys
  *
  * 幂等：已经是 `u/<spaceId>/` 前缀的行会跳过；对象不存在的行只告警不改库。
+ * 另外单独统计 `u/<其它 spaceId>/...`：这类行不能直接复制进当前空间（可能是
+ * 历史串号或数据污染），只告警交由运维确认，避免迁移把跨租户数据"洗白"。
  */
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -39,15 +41,25 @@ async function main(): Promise<void> {
       fileUri: filmExports.fileUri,
     })
     .from(filmExports)
-    .where(or(isNull(filmExports.fileUri), notLike(filmExports.fileUri, "u/%")));
+    .where(isNotNull(filmExports.fileUri));
 
   let migrated = 0;
   let missing = 0;
   let skipped = 0;
+  let foreign = 0;
   for (const row of rows) {
     const oldKey = row.fileUri;
-    if (!oldKey || oldKey.startsWith(`u/${row.spaceId}/`)) {
+    if (!oldKey) {
       skipped += 1;
+      continue;
+    }
+    if (oldKey.startsWith(`u/${row.spaceId}/`)) {
+      skipped += 1;
+      continue;
+    }
+    if (oldKey.startsWith("u/")) {
+      console.warn(`[foreign] export=${row.id} key 不属于当前空间：${oldKey}`);
+      foreign += 1;
       continue;
     }
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(oldKey)) {
@@ -79,7 +91,7 @@ async function main(): Promise<void> {
 
   console.log(
     JSON.stringify(
-      { dry_run: dryRun, scanned: rows.length, migrated, missing, skipped },
+      { dry_run: dryRun, scanned: rows.length, migrated, missing, skipped, foreign },
       null,
       2,
     ),

@@ -100,7 +100,11 @@ describe("canvas text derive + admin pricing e2e", () => {
       name: "待拆解视频",
       x: 600,
       y: 0,
-      params: { result_uri: "mock://results/demo.mp4", mode: "text2video", model: "seedance-1-0-lite" },
+      params: {
+        result_uri: `u/${spaceId}/tasks/demo.mp4`,
+        mode: "text2video",
+        model: "seedance-1-0-lite",
+      },
     });
     videoNodeId = video.data.id as string;
   }, 120_000);

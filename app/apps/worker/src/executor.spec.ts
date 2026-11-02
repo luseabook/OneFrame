@@ -71,6 +71,33 @@ describe("worker result transfer", () => {
     const stored = await transferResult(deps, task, 0, { uri: "u/22/tasks/11/r0.mp4" }, "video/mp4");
     expect(stored.uri).toBe("u/22/tasks/11/r0.mp4");
   });
+
+  it("rejects already-stored keys from another space instead of writing them back", async () => {
+    await expect(
+      transferResult(deps, task, 0, { uri: "u/99/tasks/11/r0.mp4" }, "video/mp4"),
+    ).rejects.toThrow(/another space/);
+  });
+
+  it("rejects non-http(s) schemes that are not storage keys", async () => {
+    await expect(
+      transferResult(deps, task, 0, { uri: "file:///etc/passwd" }, "video/mp4"),
+    ).rejects.toThrow(/storage key/);
+  });
+
+  it("decodes data: URIs into a space key instead of persisting the base64 payload", async () => {
+    const png = Buffer.from("fake-png-bytes");
+    const result = await transferResult(
+      deps,
+      task,
+      0,
+      { uri: `data:image/png;base64,${png.toString("base64")}` },
+      "image/png",
+    );
+    expect(result.uri).toBe("u/22/tasks/11/r0.png");
+    expect(result.meta?.inline_base64).toBe(true);
+    expect(result.meta?.original_uri).toBeUndefined();
+    expect((await storage.read("u/22/tasks/11/r0.png")).equals(png)).toBe(true);
+  });
 });
 
 /**

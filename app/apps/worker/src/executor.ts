@@ -207,6 +207,18 @@ export async function transferResult(
   contentType: string,
 ): Promise<GenResult> {
   if (result.text || !result.uri) return result;
+  const isDataUri = result.uri.startsWith("data:");
+  /**
+   * 适配器/上游已经转存的情况：结果必须落在本任务空间。
+   *
+   * 这个分支不能放进下面的 `try`：ADR-005 的降级会保留原 URI，
+   * 一旦把跨空间 key 或 `file:` / `data:` 之类的地址原样写回
+   * `tasks.results`，后续资产/分享链路就会把它当成合法对象使用。
+   * 归属不成立时直接抛错，让任务失败并解冻，而不是「降级成功」。
+   */
+  if (!result.uri.startsWith("mock://") && !isDataUri && !/^https?:\/\//.test(result.uri)) {
+    return { ...result, uri: assertKeyInSpace(String(task.spaceId), result.uri) };
+  }
   try {
     let data: Buffer;
     if (result.uri.startsWith("mock://")) {
@@ -221,16 +233,20 @@ export async function transferResult(
       } else {
         data = Buffer.from(`mock result for task ${task.id} #${index}\n`);
       }
-    } else if (/^https?:\/\//.test(result.uri)) {
+    } else if (isDataUri) {
+      // Ark 图片适配器在供应商只回 b64_json 时会转成 data URI（见 ark-image parseImageItem）。
+      // 这里必须解码后落本空间对象：把 data URI 原样写进 tasks.results 会让单行达到数十 MB。
+      const match = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(result.uri);
+      if (!match) throw new Error("unsupported data uri (expect data:<mime>;base64,<payload>)");
+      data = Buffer.from(match[2]!, "base64");
+    } else {
+      // 走到这里只剩 http(s)：mock:// 已在上面的分支处理，其它 scheme 已被前置守卫拒绝
       // 下载必须有上限，否则整条流水线的心跳会把"挂死的转存"一直续命（见 DEFAULT_TRANSFER_TIMEOUT_MS）
       // 第 119 批补上字节上限：超时挡「挂住不结束」，挡不住「一下子发 4GB」的 OOM。
       data = await downloadBounded(result.uri, {
         timeoutMs: deps.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS,
         maxBytes: deps.transferMaxBytes,
       });
-    } else {
-      // 已经是存储 key（适配器/上游已转存）
-      return result;
     }
     const ext = extFor(contentType);
     const key = `u/${task.spaceId}/tasks/${task.id}/r${index}.${ext}`;
@@ -246,7 +262,8 @@ export async function transferResult(
       meta: {
         ...(result.meta ?? {}),
         storage: deps.storage.driver,
-        original_uri: result.uri,
+        // data URI 本身就是产物，不把整段 base64 再抄进 meta
+        ...(isDataUri ? { inline_base64: true } : { original_uri: result.uri }),
         ...(isMockPlaceholder ? { mock_placeholder: true } : {}),
       },
     };

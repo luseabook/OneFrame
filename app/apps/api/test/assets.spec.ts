@@ -197,6 +197,31 @@ describe("assets upload/list/delete", () => {
     }
   });
 
+  it("rejects a task result key that belongs to another space", async () => {
+    const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
+    try {
+      const taskId = newId();
+      await db.insert(tasks).values({
+        id: taskId,
+        spaceId: BigInt(spaceId),
+        userId: BigInt(userId),
+        capability: "video",
+        mode: "text2video",
+        modelId: 1001n,
+        input: { prompt: "cross-space" },
+        options: {},
+        status: 3,
+        results: [{ uri: "u/999999999/tasks/other-space.mp4" }],
+      });
+
+      const res = await inject("POST", "/assets/from-task", { task_id: String(taskId), index: 0 });
+      expect(res.code).toBe(400101);
+      expect(res.msg).toContain("does not belong");
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("竞品形状：单资源详情 GET /assets/:id（与列表同一形状，软删后不可见）", async () => {
     const detail = await inject("GET", `/assets/${assetId}`);
     expect(detail.code).toBe(0);

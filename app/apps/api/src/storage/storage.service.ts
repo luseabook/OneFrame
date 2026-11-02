@@ -69,6 +69,17 @@ export class StorageService {
   }
 
   /**
+   * 任务产物 URI：本空间 storage key，或转存失败后按 ADR-005 保留的 http(s) 外链。
+   *
+   * 其它 scheme（`file:`、`data:`、`mock://` …）与跨空间 `u/<other>/...` 一律拒绝，
+   * 避免把不可归属的地址写进 assets / project_assets 后再由读取侧兜底。
+   */
+  assertResultUri(spaceId: string, uri: string, field: string): string {
+    if (/^https?:\/\//i.test(uri)) return uri;
+    return this.assertOwnedKey(spaceId, uri, field);
+  }
+
+  /**
    * 历史测试夹具使用 `u/test/...`（不是真实空间）。只允许在测试进程内放行，
    * 生产/开发一律走 `assertKeyInSpace`；共享校验器本身仍拒绝非数字空间段。
    */

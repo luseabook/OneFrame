@@ -86,6 +86,9 @@ export class AssetsService {
     const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
     const uri = results[index]?.uri;
     if (!uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
+    // 任务结果可能来自适配器直传或历史数据；写资产前再校验一次归属，
+    // 防止跨空间 key 借「一键转存」进入本空间资产库。
+    this.storage.assertResultUri(spaceId, uri, "result_uri");
 
     const [existing] = await db
       .select()

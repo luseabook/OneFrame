@@ -324,7 +324,9 @@ export class CanvasNodeTasksService {
       const list = Array.isArray(value) ? value : [value];
       for (const item of list) {
         if (typeof item !== "string" || !item) continue;
-        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(item)) continue;
+        // 只放行 http(s) 外链；`file:` / `data:` / 其它 scheme 不是供应商可访问的素材，
+        // 交给 assertOwnedKey 按非法 key 拒绝。
+        if (/^https?:\/\//i.test(item)) continue;
         this.storage.assertOwnedKey(spaceId, item, field);
       }
     }

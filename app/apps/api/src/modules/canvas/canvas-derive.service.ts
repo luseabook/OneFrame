@@ -223,7 +223,8 @@ export class CanvasDeriveService {
         field: "object_key",
       });
     }
-    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(objectKey)) {
+    // 只放行 http(s) 外链；其余 scheme（file/data/mock 等）不是可出站素材。
+    if (!/^https?:\/\//i.test(objectKey)) {
       this.storage.assertOwnedKey(auth.spaceId, objectKey, "object_key");
     }
 

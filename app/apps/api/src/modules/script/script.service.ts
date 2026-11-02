@@ -448,7 +448,9 @@ export class ScriptService {
         assetDto(
           row,
           row.refImageUri
-            ? await this.storage.signDownload(spaceId, row.refImageUri, 3600)
+            ? await this.storage
+                .signDownload(spaceId, row.refImageUri, 3600)
+                .catch(() => null)
             : null,
         ),
       ),
@@ -1366,7 +1368,7 @@ export class ScriptService {
         .filter(({ item }) => Boolean(item.uri))
         .map(async ({ item, index }) => ({
           index,
-          url: await this.storage.signDownload(spaceId, item.uri!, 3600),
+          url: await this.storage.signDownload(spaceId, item.uri!, 3600).catch(() => null),
         })),
     );
     return { task_id: String(task.id), candidates };
@@ -1391,6 +1393,7 @@ export class ScriptService {
     const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
     const picked = results[index];
     if (!picked?.uri) throw new AppError(ErrorCode.NOT_FOUND, "candidate not found");
+    const pickedUri = this.storage.assertResultUri(spaceId, picked.uri, "result_uri");
 
     const assetId = newId();
     await db.transaction(async (tx) => {
@@ -1398,7 +1401,7 @@ export class ScriptService {
         id: assetId,
         spaceId: BigInt(spaceId),
         kind: "image",
-        uri: picked.uri!,
+        uri: pickedUri,
         sourceTaskId: task.id,
         name: character.name,
         tags: ["portrait"],
@@ -1408,7 +1411,7 @@ export class ScriptService {
         .update(projectAssets)
         .set({
           portraitAssetId: assetId,
-          refImageUri: picked.uri!,
+          refImageUri: pickedUri,
           status: 2,
           finalizedAt: new Date(),
           updatedAt: new Date(),
@@ -1416,7 +1419,10 @@ export class ScriptService {
         .where(eq(projectAssets.id, character.id));
     });
     const [updated] = await db.select().from(projectAssets).where(eq(projectAssets.id, character.id));
-    return assetDto(updated, await this.storage.signDownload(spaceId, picked.uri!, 3600));
+    return assetDto(
+      updated,
+      await this.storage.signDownload(spaceId, pickedUri, 3600).catch(() => null),
+    );
   }
 
   // 定妆图转存为通用资产（跨项目复用，自动打 #角色 标签）
@@ -1450,7 +1456,12 @@ export class ScriptService {
       .returning();
     if (!asset) throw new AppError(ErrorCode.NOT_FOUND, "portrait asset not found");
     return {
-      ...assetDto(character, await this.storage.signDownload(spaceId, character.refImageUri, 3600)),
+      ...assetDto(
+        character,
+        await this.storage
+          .signDownload(spaceId, character.refImageUri, 3600)
+          .catch(() => null),
+      ),
       asset_id: String(asset.id),
       tags: asset.tags,
     };
@@ -1927,7 +1938,7 @@ export class ScriptService {
         .filter(({ item }) => Boolean(item.uri))
         .map(async ({ item, index }) => ({
           index,
-          url: await this.storage.signDownload(spaceId, item.uri!, 3600),
+          url: await this.storage.signDownload(spaceId, item.uri!, 3600).catch(() => null),
         })),
     );
     return { task_id: String(task.id), candidates };
@@ -1962,6 +1973,7 @@ export class ScriptService {
     const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
     const picked = results[input.index];
     if (!picked?.uri) throw new AppError(ErrorCode.NOT_FOUND, "candidate not found");
+    const pickedUri = this.storage.assertResultUri(spaceId, picked.uri, "result_uri");
 
     const imageAssetId = newId();
     await db.transaction(async (tx) => {
@@ -1969,7 +1981,7 @@ export class ScriptService {
         id: imageAssetId,
         spaceId: BigInt(spaceId),
         kind: "image",
-        uri: picked.uri!,
+        uri: pickedUri,
         sourceTaskId: task.id,
         name: asset.name,
         tags: [asset.kind],
@@ -1983,7 +1995,7 @@ export class ScriptService {
         .update(projectAssets)
         .set({
           portraitAssetId: imageAssetId,
-          refImageUri: picked.uri!,
+          refImageUri: pickedUri,
           status: ProjectAssetStatus.FINALIZED,
           finalizedAt: new Date(),
           updatedAt: new Date(),
@@ -2542,6 +2554,7 @@ export class ScriptService {
     const results = Array.isArray(task.results) ? (task.results as Array<{ uri?: string }>) : [];
     const uri = results[0]?.uri;
     if (!uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
+    const resultUri = this.storage.assertResultUri(spaceId, uri, "result_uri");
 
     const [existing] = await db
       .select()
@@ -2551,7 +2564,9 @@ export class ScriptService {
       return assetDto(
         existing,
         existing.refImageUri
-          ? await this.storage.signDownload(spaceId, existing.refImageUri, 3600)
+          ? await this.storage
+              .signDownload(spaceId, existing.refImageUri, 3600)
+              .catch(() => null)
           : null,
       );
     }
@@ -2561,7 +2576,7 @@ export class ScriptService {
       id: assetId,
       spaceId: BigInt(spaceId),
       kind: task.capability === "image" ? "image" : "video",
-      uri,
+      uri: resultUri,
       sourceTaskId: task.id,
       name: `material-${task.id}`,
       tags: ["shot-material"],
@@ -2573,14 +2588,17 @@ export class ScriptService {
         projectId: project.id,
         kind: "shot_material",
         name: `素材-${String(task.id).slice(-6)}`,
-        refImageUri: uri,
+        refImageUri: resultUri,
         sourceTaskId: task.id,
         portraitAssetId: assetId,
         status: 1,
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "add shot material failed");
-    return assetDto(row, await this.storage.signDownload(spaceId, uri, 3600));
+    return assetDto(
+      row,
+      await this.storage.signDownload(spaceId, resultUri, 3600).catch(() => null),
+    );
   }
 
   async listShotMaterials(spaceId: string, projectId: string) {
@@ -2595,7 +2613,9 @@ export class ScriptService {
         assetDto(
           row,
           row.refImageUri
-            ? await this.storage.signDownload(spaceId, row.refImageUri, 3600)
+            ? await this.storage
+                .signDownload(spaceId, row.refImageUri, 3600)
+                .catch(() => null)
             : null,
         ),
       ),
@@ -2740,7 +2760,7 @@ export class ScriptService {
           status: row.status,
           download_url:
             row.status === 3 && row.fileUri
-              ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+              ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
               : null,
           error: row.error,
           expires_at: row.expiresAt?.toISOString() ?? null,
@@ -2772,7 +2792,7 @@ export class ScriptService {
           status: row.status,
           download_url:
             row.status === 3 && row.fileUri
-              ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+              ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
               : null,
           error: row.error,
           expires_at: null,
@@ -2882,7 +2902,9 @@ export class ScriptService {
           status: storyboardRow.status,
           download_url:
             storyboardRow.status === 3 && storyboardRow.fileUri
-              ? await this.storage.signDownload(spaceId, storyboardRow.fileUri, 3600)
+              ? await this.storage
+                  .signDownload(spaceId, storyboardRow.fileUri, 3600)
+                  .catch(() => null)
               : null,
           error: storyboardRow.error,
           expires_at: storyboardRow.expiresAt?.toISOString() ?? null,
@@ -2900,7 +2922,7 @@ export class ScriptService {
         status: row.status,
         download_url:
           row.status === 3 && row.fileUri
-            ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+            ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
             : null,
         error: row.error,
         expires_at: null,
@@ -2935,7 +2957,7 @@ export class ScriptService {
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
     const downloadUrl =
       row.status === 3 && row.fileUri
-        ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+        ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
         : null;
     return {
       export_id: String(row.id),
@@ -3061,7 +3083,7 @@ export class ScriptService {
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "timeline export not found");
     const downloadUrl =
       row.status === 3 && row.fileUri
-        ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+        ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
         : null;
     return {
       export_id: String(row.id),

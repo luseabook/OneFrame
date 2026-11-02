@@ -741,7 +741,9 @@ export class PublishService {
         episode_no: episode?.epNo ?? null,
         status: row.status,
         // 现签 1 小时（不落库签名 URL：落库会随过期时间腐烂）
-        file_url: await this.storage.signDownload(String(row.spaceId), row.fileUri, 3600),
+        file_url: await this.storage
+          .signDownload(String(row.spaceId), row.fileUri, 3600)
+          .catch(() => null),
         duration_ms: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : null,
         published_at: row.publishedAt ? row.publishedAt.toISOString() : null,
         // 权威计数读列（Redis 只做去重闸，见 recordView 注释）
