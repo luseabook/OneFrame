@@ -12,16 +12,31 @@ const api = useApi();
  * 2. 主体库：角色/场景/道具的一致性载体（subject 6 端点）；
  * 3. 抽取与匹配：项目维度的抽取流水线 + 资产×分镜匹配（extraction / asset-match 端点）。
  */
-const tab = ref<"assets" | "subjects" | "quality">("assets");
+const tab = ref<"assets" | "workbench" | "subjects" | "quality">("assets");
 // tab 文案走 i18n：computed 而不是常量，语言切换时标签跟着变
+// U5：新增「资产工作台」——对齐竞品 /asset 的三卡入口 + 角色/场景/道具分组 + 校验→批量生成
 const TABS = computed(() => [
   { value: "assets" as const, label: t("assets.tabAssets") },
+  { value: "workbench" as const, label: t("assets.tabWorkbench") },
   { value: "subjects" as const, label: t("assets.tabSubjects") },
   { value: "quality" as const, label: t("assets.tabQuality") },
 ]);
+const pageTitle = computed(() => {
+  if (tab.value === "assets") return showDeleted.value ? t("assets.titleRecycle") : t("assets.titleAssets");
+  if (tab.value === "workbench") return t("assets.tabWorkbench");
+  if (tab.value === "subjects") return t("assets.tabSubjects");
+  return t("assets.tabQuality");
+});
+const pageSub = computed(() => {
+  if (tab.value === "assets") return t("assets.subAssets", { total: total.value });
+  if (tab.value === "workbench") return t("assets.subWorkbench");
+  if (tab.value === "subjects") return t("assets.subSubjects");
+  return t("assets.subQuality");
+});
 const list = ref<AssetDto[]>([]);
 const total = ref(0);
-const loading = ref(false);
+// U5：首帧先骨架再数据 —— loading 初值为 true（原为 false，会先闪一次空态）
+const loading = ref(true);
 const uploading = ref(false);
 const error = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -115,14 +130,39 @@ async function loadFolders(): Promise<void> {
   }
 }
 
+/**
+ * 新建目录：页内 modal（U5，替换原生的 window.prompt）。
+ * 原生 prompt 的问题：不可样式化、无法显示校验原因、移动端体验差、自动化无法断言。
+ */
+const folderOpen = ref(false);
+const folderName = ref("");
+const folderError = ref("");
+const folderBusy = ref(false);
+function openFolderModal(): void {
+  folderName.value = "";
+  folderError.value = "";
+  folderOpen.value = true;
+}
+function closeFolderModal(): void {
+  if (folderBusy.value) return;
+  folderOpen.value = false;
+}
 async function createFolder(): Promise<void> {
-  const name = prompt(t("assets.newFolderPrompt"));
-  if (!name) return;
+  const name = folderName.value.trim();
+  if (!name) {
+    folderError.value = t("assets.folderNameRequired");
+    return;
+  }
+  folderBusy.value = true;
+  folderError.value = "";
   try {
     await api.post("/asset-folders", { name });
+    folderOpen.value = false;
     await loadFolders();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t("assets.folderFailed");
+    folderError.value = e instanceof Error ? e.message : t("assets.folderFailed");
+  } finally {
+    folderBusy.value = false;
   }
 }
 
@@ -138,28 +178,31 @@ onMounted(async () => {
 
 <template>
   <div class="assets">
+    <!-- 竞品 /asset 的 64px 三视图窄轨：剧本 / 资产 / 剧集 -->
+    <EntityRail active="assets" />
     <header class="head">
       <div class="head-main">
-        <h1>{{ tab === "assets" ? (showDeleted ? t("assets.titleRecycle") : t("assets.titleAssets")) : tab === "subjects" ? t("assets.tabSubjects") : t("assets.tabQuality") }}</h1>
-        <p class="sub">
-          {{
-            tab === "assets"
-              ? t("assets.subAssets", { total })
-              : tab === "subjects"
-                ? t("assets.subSubjects")
-                : t("assets.subQuality")
-          }}
-        </p>
+        <h1>{{ pageTitle }}</h1>
+        <p class="sub">{{ pageSub }}</p>
       </div>
       <div v-if="tab === 'assets'" class="head-actions">
         <Button variant="ghost" size="sm" @click="switchDeleted">
           {{ showDeleted ? t("assets.backToAssets") : t("assets.recycleBin") }}
         </Button>
-        <Button variant="ghost" size="sm" @click="createFolder">{{ t("assets.newFolder") }}</Button>
+        <Button variant="ghost" size="sm" @click="openFolderModal">{{ t("assets.newFolder") }}</Button>
         <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onFile" />
-        <Button v-if="!showDeleted" size="sm" :disabled="uploading" @click="fileInput?.click()">
+        <Button
+          v-if="!showDeleted"
+          size="sm"
+          :disabled="uploading"
+          :aria-describedby="uploading ? 'assets-upload-why' : undefined"
+          @click="fileInput?.click()"
+        >
           {{ uploading ? t("assets.uploading") : t("assets.uploadImage") }}
         </Button>
+        <span v-if="uploading" id="assets-upload-why" class="hint" data-why="upload">
+          {{ t("assets.uploadingReason") }}
+        </span>
       </div>
     </header>
 
@@ -178,7 +221,8 @@ onMounted(async () => {
       </button>
     </nav>
 
-    <SubjectLibrary v-if="tab === 'subjects'" />
+    <AssetWorkflow v-if="tab === 'workbench'" />
+    <SubjectLibrary v-else-if="tab === 'subjects'" />
     <ProjectQualityPanel v-else-if="tab === 'quality'" />
 
     <template v-else>
@@ -241,15 +285,47 @@ onMounted(async () => {
       </div>
     </template>
     </template>
+
+    <Modal v-if="folderOpen" :title="t('assets.newFolder')" width="420px" @close="closeFolderModal">
+      <label class="folder-field">
+        <span>{{ t("assets.newFolderPrompt") }}</span>
+        <input
+          v-model="folderName"
+          class="folder-input"
+          maxlength="30"
+          data-modal="folder-name"
+          :aria-invalid="Boolean(folderError)"
+          @keyup.enter="createFolder"
+        />
+      </label>
+      <p v-if="folderError" class="err" role="alert" data-modal="folder-error">{{ folderError }}</p>
+      <template #footer>
+        <Button variant="ghost" size="sm" :disabled="folderBusy" @click="closeFolderModal">
+          {{ t("assets.folderCancel") }}
+        </Button>
+        <Button
+          size="sm"
+          :disabled="folderBusy || !folderName.trim()"
+          :aria-describedby="folderName.trim() ? undefined : 'assets-folder-why'"
+          data-modal="folder-submit"
+          @click="createFolder"
+        >
+          {{ t("assets.folderCreate") }}
+        </Button>
+        <span v-if="!folderName.trim()" id="assets-folder-why" class="hint" data-why="folder">
+          {{ t("assets.folderNameRequired") }}
+        </span>
+      </template>
+    </Modal>
   </div>
 </template>
 
 <style scoped>
 /* 页内容容器：与 home/tools 同一套 padding 节奏，最大宽度对齐 projects/index.vue */
 .assets {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 32px 72px 80px;
+  /* 竞品 /asset：左侧 64px 三视图窄轨 + 内容区铺满（x80 起），不再居中 1280 */
+  position: relative;
+  padding: 24px 24px 40px 88px;
 }
 .head {
   display: flex;
@@ -428,6 +504,27 @@ onMounted(async () => {
   flex-direction: column;
   justify-content: center;
   min-height: 420px;
+}
+
+/* 新建目录 modal（U5：替换原生 prompt） */
+.folder-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.folder-input {
+  height: var(--control-h-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  outline: none;
+}
+.folder-input:focus {
+  border-color: var(--brand-500);
 }
 
 /* 窄屏：页内容左右留白降级（与 home/tools 一致） */
