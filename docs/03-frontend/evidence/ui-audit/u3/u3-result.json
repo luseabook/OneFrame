@@ -1,6 +1,6 @@
 {
-  "base": "http://127.0.0.1:3011",
-  "at": "2026-11-01T20:05:40.288Z",
+  "base": "http://127.0.0.1:3003",
+  "at": "2026-11-02T01:34:39.683Z",
   "total": 41,
   "passed": 41,
   "failed": 0,
@@ -198,12 +198,12 @@
     {
       "name": "跳转到剪辑台",
       "ok": true,
-      "detail": "http://127.0.0.1:3011/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
+      "detail": "http://127.0.0.1:3003/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
     },
     {
       "name": "URL 保留当前集",
       "ok": true,
-      "detail": "http://127.0.0.1:3011/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
+      "detail": "http://127.0.0.1:3003/reelflow/edit/E2E-U3-PROJECT?ep=E2E-U3-EP1"
     },
     {
       "name": "本地留底当前集",

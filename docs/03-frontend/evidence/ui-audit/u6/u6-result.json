@@ -1,6 +1,6 @@
 {
-  "base": "http://127.0.0.1:3011",
-  "at": "2026-11-01T21:19:10.146Z",
+  "base": "http://127.0.0.1:3003",
+  "at": "2026-11-02T01:36:10.824Z",
   "viewport": {
     "width": 1424,
     "height": 805
@@ -97,7 +97,7 @@
     {
       "name": "画布入口可跳转 /canvas",
       "ok": true,
-      "detail": "http://127.0.0.1:3011/canvas"
+      "detail": "http://127.0.0.1:3003/canvas"
     },
     {
       "name": "继续创作入口存在",
@@ -152,7 +152,7 @@
     {
       "name": "视频转绘卡可跳转产品页",
       "ok": true,
-      "detail": "http://127.0.0.1:3011/video-redraw/create"
+      "detail": "http://127.0.0.1:3003/video-redraw/create"
     },
     {
       "name": "公告位出现",
