@@ -5,6 +5,8 @@ import type {
   ExportDto,
   MatrixDto,
   MatrixShot,
+  MatchEntryDto,
+  MatchResultDto,
   ModelDto,
   ProjectAssetDto,
   ProjectDto,
@@ -12,6 +14,12 @@ import type {
   TaskDto,
 } from "~/types/api";
 import { statusLabel } from "~/types/api";
+import {
+  isShotCommitted,
+  isShotFinalized,
+  isShotInFlight,
+  isShotRendered,
+} from "~/utils/shot-status";
 
 // 沉浸式工作台（对齐竞品 /series-manage/episode/:id）：无全站侧栏、单一 64px 顶栏。
 // 之前用 layout:"app" 会多出 240px 侧栏 + 64px 全局顶栏，工作台可用区从 1424×741
@@ -119,8 +127,12 @@ async function loadProject(): Promise<void> {
   project.value = data.project;
   episodes.value = data.episodes;
   characters.value = data.characters;
-  if (!selectedEpisodeId.value && data.episodes[0]) {
-    selectedEpisodeId.value = data.episodes[0].id;
+  // 深链 / 回跳保留集：`?ep=<episodeId>` 来自「去剪辑台」的往返（编辑台按 project 载入，
+  // 集数靠 query 带；本项目页自己也认这个参数，避免回跳后又落回第 1 集）
+  const wantedEp = String(route.query.ep ?? "");
+  const initialEp = data.episodes.find((ep) => ep.id === wantedEp) ?? data.episodes[0];
+  if (!selectedEpisodeId.value && initialEp) {
+    selectedEpisodeId.value = initialEp.id;
     await loadEpisode();
   }
 }
@@ -147,10 +159,22 @@ async function loadMatrix(): Promise<void> {
 }
 
 function matrixClass(shot: MatrixShot): string {
-  if (shot.task_status === 3 || shot.status === 5) return "success";
+  // 矩阵色表达「渲染结果」：任务失败优先，其次看分镜是否真的出片（status=5）。
+  if (shot.task_status === 3 || isShotRendered(shot)) return "success";
   if (shot.task_status === 4 || shot.task_status === 7) return "failed";
-  if (shot.task_status === 1 || shot.task_status === 2 || shot.status === 3) return "running";
+  if (isShotInFlight(shot) || shot.task_status === 1 || shot.task_status === 2) return "running";
   return "idle";
+}
+
+/**
+ * 镜头状态文案的唯一出口（已定稿 / 已投递 / 未定稿）。
+ * 项目页镜头卡、导出视图、时间线筛选、编辑台闸门共用同一 selector，
+ * 避免同一镜头在不同视图里出现第四套叫法。
+ */
+function shotStateLabel(shot: StoryboardDto): string {
+  if (isShotFinalized(shot)) return t("projectDetail.ui.shotFinalized");
+  if (isShotInFlight(shot)) return t("projectDetail.ui.shotSubmitted");
+  return t("projectDetail.ui.shotNotFinalized");
 }
 
 async function openMatrixShot(episodeId: string): Promise<void> {
@@ -208,35 +232,28 @@ async function prefillBudget(): Promise<void> {
   if (!selectedEpisodeId.value || shots.value.length === 0) return;
   await run(t("projectDetail.views.batch"), async () => {
     const byId = new Map(characters.value.map((c) => [c.id, c]));
-    // 续投场景：已投递/成功的镜头不再重复报价，只算「已消耗 + 剩余镜头报价」
-    const spentShots = shots.value.filter((shot) => shot.video_task_id !== null);
-    const pendingShots = shots.value.filter((shot) => shot.video_task_id === null);
-    const buildItem = (shot: (typeof shots.value)[number]) => ({
-      mode: "universal_reference",
-      model: modelName.value,
-      scene: "storyboard_reference_video",
-      input: {
-        prompt: shot.video_prompt ?? "",
-        reference_uris: shot.character_ids
+    // 续投场景：只把「在途（3）/ 已出片（5）」算已消耗，其余（草稿 1 / 确认 2 / 出图 4）都待投。
+    // 失败镜头 executor 回滚到 status=2 但不清空 video_task_id，所以不能按 video_task_id 分桶。
+    const committedShots = shots.value.filter(isShotCommitted);
+    const pendingShots = shots.value.filter((shot) => !isShotCommitted(shot));
+    // 报价与单镜共用 buildQuoteItem：同一套 mode / scene / 参照图口径，不再有第二套报价逻辑。
+    const items = pendingShots.map((shot) =>
+      buildQuoteItem(
+        shot,
+        shot.character_ids
           .map((id) => byId.get(id)?.portrait_url)
           .filter((url): url is string => Boolean(url)),
-      },
-      options: {
-        ratio: shot.ratio ?? project.value?.ratio ?? "9:16",
-        resolution: shot.resolution ?? "720p",
-        duration: shot.duration_s ?? 5,
-        count: 1,
-      },
-    });
-    const items = pendingShots.map(buildItem);
+      ),
+    );
     const quote = items.length
       ? await api.post<{ total_credits: number; balance_after_estimate: number; sufficient: boolean }>(
           "/credits/quote/batch",
           { items },
         )
       : { total_credits: 0, balance_after_estimate: 0, sufficient: true };
-    // 已消耗：本集已投递镜头的冻结/结算积分
-    const spent = spentShots.reduce((sum, shot) => {
+    // 已消耗：在途/已出片镜头的冻结/结算积分。失败任务会退款，所以失败镜头的旧 task 不计入。
+    // 局限：taskMap 只在批量投递后由轮询填充，进页面时为 0 → spent 可能是 0（既有局限，不在此扩大范围）。
+    const spent = committedShots.reduce((sum, shot) => {
       const task = taskMap.value[shot.video_task_id ?? ""];
       return sum + (task?.credits_settled ?? task?.credits_frozen ?? 0);
     }, 0);
@@ -411,6 +428,9 @@ async function submitBatch(): Promise<void> {
         shot_ids: shots.value.map((s) => s.id),
         budget_credits_max: budget.value,
         model: modelName.value,
+        // 批量必须带上当前模式：后端 generateVideosSchema 的 mode 默认 universal_reference，
+        // 不传会静默走到参考模式，与单镜选择的 first_frame / text2video 不一致。
+        mode: modeApi.value,
       },
     );
     batchItems.value = res.items;
@@ -472,6 +492,8 @@ async function submitExport(): Promise<void> {
     exportJob.value = created;
     info.value = t("projectDetail.exportSubmitted");
     startExportPoll();
+    // 受理即出现在导出记录里（状态 1 排队中），不需要等打包完成才可见
+    void loadExportHistory(1);
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("projectDetail.exportFailed");
   } finally {
@@ -492,12 +514,115 @@ function startExportPoll(): void {
       if (data.status === 3 || data.status === 4) {
         if (exportTimer) clearInterval(exportTimer);
         info.value = data.status === 3 ? t("projectDetail.exportDone") : t("projectDetail.exportNoVideo");
+        // 终态后刷新导出记录：下载链接是签名地址，只有完成后才存在
+        void loadExportHistory(exportHistoryPage.value);
       }
     } catch {
       /* ignore */
     }
     if (tries > 30 && exportTimer) clearInterval(exportTimer);
   }, 1500);
+}
+
+// ══════════ U3：项目级导出记录（GET /projects/:id/exports）══════════
+/**
+ * 真实导出历史：后端把两条链投影成一张日志（script.service.ts listProjectExports）
+ * - `exports`（episode 级分镜 zip）→ kind="storyboard"
+ * - `timeline_exports`（成片 mp4，含 AI 水印）→ kind="timeline"
+ * 都支持分页 / 状态 / 下载签名 / `truncated`（各链最多最近 500 条）。
+ * 前端原先这里是空占位（P1-3），本批接真数据；任何一行都能追到 export_id。
+ */
+interface ProjectExportItem {
+  export_id: string;
+  kind: "storyboard" | "timeline";
+  episode_id: string;
+  episode_no: number | null;
+  status: number;
+  download_url: string | null;
+  error: { code?: number; message?: string } | null;
+  expires_at: string | null;
+  created_at: string;
+  clip_count?: number;
+  skipped?: number;
+  duration_s?: number;
+  watermarked?: boolean;
+}
+const EXPORT_PAGE_SIZE = 10;
+const exportHistory = ref<ProjectExportItem[]>([]);
+const exportHistoryTotal = ref(0);
+const exportHistoryPage = ref(1);
+const exportHistoryLoading = ref(false);
+const exportHistoryError = ref("");
+const exportHistoryTruncated = ref(false);
+const exportHistoryPages = computed(() =>
+  Math.max(1, Math.ceil(exportHistoryTotal.value / EXPORT_PAGE_SIZE)),
+);
+
+async function loadExportHistory(page = 1): Promise<void> {
+  exportHistoryLoading.value = true;
+  exportHistoryError.value = "";
+  try {
+    const q = new URLSearchParams({ page: String(page), page_size: String(EXPORT_PAGE_SIZE) });
+    const data = await api.get<{
+      list: ProjectExportItem[];
+      total: number;
+      page: number;
+      page_size: number;
+      truncated: boolean;
+    }>(`/projects/${projectId.value}/exports?${q.toString()}`);
+    exportHistory.value = data.list ?? [];
+    exportHistoryTotal.value = data.total ?? 0;
+    exportHistoryPage.value = data.page ?? page;
+    exportHistoryTruncated.value = Boolean(data.truncated);
+  } catch (e) {
+    exportHistory.value = [];
+    exportHistoryTotal.value = 0;
+    exportHistoryError.value = e instanceof Error ? e.message : t("projectDetail.ui.exportHistoryFailed");
+  } finally {
+    exportHistoryLoading.value = false;
+  }
+}
+
+function exportKindLabel(item: ProjectExportItem): string {
+  return item.kind === "timeline"
+    ? t("projectDetail.ui.exportKindTimeline")
+    : t("projectDetail.ui.exportKindStoryboard");
+}
+/** 导出四态：1 排队 / 2 打包 / 3 完成 / 4 失败（与 API 的 exports.status 同构） */
+function exportStatusText(item: ProjectExportItem): string {
+  if (item.status === 1) return t("projectDetail.ui.exportStatusQueued");
+  if (item.status === 2) return t("projectDetail.ui.exportStatusPacking");
+  if (item.status === 3) return t("projectDetail.ui.exportStatusDone");
+  if (item.status === 4) return t("projectDetail.ui.exportStatusFailed");
+  return t("projectDetail.ui.exportStatusUnknown");
+}
+function exportStatusTone(item: ProjectExportItem): "success" | "danger" | "info" | "neutral" {
+  if (item.status === 3) return "success";
+  if (item.status === 4) return "danger";
+  if (item.status === 1 || item.status === 2) return "info";
+  return "neutral";
+}
+function exportExpired(item: ProjectExportItem): boolean {
+  if (!item.expires_at) return false;
+  const at = new Date(item.expires_at).getTime();
+  return Number.isFinite(at) && at <= Date.now();
+}
+/** 下载列的可读原因：没有签名地址时要说明是「未完成 / 已过期 / 失败」，不能只留一个破折号 */
+function exportNoDownloadReason(item: ProjectExportItem): string {
+  if (item.status === 4) return item.error?.message || t("projectDetail.ui.exportNoDownloadFailed");
+  if (item.status !== 3) return t("projectDetail.ui.exportNoDownloadPending");
+  return t("projectDetail.ui.exportNoDownloadExpired");
+}
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleString(locale.value, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 onMounted(async () => {
@@ -507,6 +632,7 @@ onMounted(async () => {
     await loadMatrix();
     await loadProjectAssets();
     await loadVideoModels();
+    await loadMatchResult();
   });
   // 数据到齐后再决定落点（见 initialTab 的注释：原来无条件进分镜会让新项目无处下手）
   tab.value = initialTab();
@@ -558,7 +684,7 @@ const viewOptions = [
   { key: "characters" as const, label: t("projectDetail.viewCards.characters"), desc: t("projectDetail.viewCards.charactersDesc") },
   { key: "storyboards" as const, label: t("projectDetail.viewCards.storyboards"), desc: t("projectDetail.viewCards.storyboardsDesc") },
   { key: "batch" as const, label: t("projectDetail.viewCards.batch"), desc: t("projectDetail.viewCards.batchDesc") },
-  { key: "timeline" as const, label: t("projectDetail.viewCards.timeline"), desc: t("projectDetail.viewCards.timelineDesc") },
+  { key: "timeline" as const, label: t("projectDetail.viewCards.timelineLabelPreview"), desc: t("projectDetail.viewCards.timelineDescPreview") },
   { key: "confirm" as const, label: t("projectDetail.viewCards.confirm"), desc: t("projectDetail.viewCards.confirmDesc") },
 ];
 const viewLabel = computed(() => viewOptions.find((v) => v.key === tab.value)?.label ?? t("projectDetail.viewFallback"));
@@ -566,6 +692,8 @@ function setView(key: "outline" | "characters" | "storyboards" | "batch" | "time
   tab.value = key;
   viewMenu.value = false;
   if (key === "timeline") void loadTimeline();
+  // 导出视图 = 本集投递/矩阵 + 项目级导出记录，进视图就取一次真实日志（不缓存假数据）
+  if (key === "batch") void loadExportHistory(1);
   // 批量投递固定走参考生视频：切到导出视图时确保当前模型支持该模式
   if (key === "batch" && models.value.length && !models.value.some((m) => m.name === modelName.value)) {
     modelName.value = models.value[0]?.name ?? modelName.value;
@@ -638,9 +766,23 @@ const selectedShot = computed<StoryboardDto | null>(
 function selectShot(id: string): void {
   selectedShotId.value = id;
 }
+/** 幂等提示：只有「在途/已出片」的镜头重复提交才会复用任务；失败回滚（status=2）会新建重试 */
+const idempotentTaskId = computed<string | null>(() => {
+  const shot = selectedShot.value;
+  if (!shot || !isShotCommitted(shot) || !shot.video_task_id) return null;
+  return shot.video_task_id;
+});
+/**
+ * 镜头缩略图：按绑定顺序取第一个「有图」的资产（角色立绘 / 场景道具参考图都算）。
+ * 这样在抽屉里绑上场景/道具后，左栏镜头卡立刻换图，不必等整页刷新。
+ */
 function shotThumb(shot: StoryboardDto): string | null {
-  const first = characters.value.find((c) => c.id === shot.character_ids[0]);
-  return first?.portrait_url ?? null;
+  for (const id of shot.character_ids) {
+    const asset = assetMap.value.get(id);
+    const image = asset ? assetImage(asset) : null;
+    if (image) return image;
+  }
+  return null;
 }
 /** 中列「全部」是否要连带渲染出片行：视频 tab 永远渲染（含空态），
  *  全部 tab 只在真有出片结果时追加，避免多出一块空 «视频» 区。 */
@@ -665,11 +807,12 @@ const shotDuration = computed<number>({
   },
 });
 const shotQuote = ref<number | null>(null);
-/** 按当前生成模式组报价/提交请求体（与后端 mode 语义一致） */
-function buildQuoteItem(shot: StoryboardDto) {
-  const imgs = boundAssets.value
-    .filter((a) => a.status === 2 && a.ref_image_uri)
-    .map((a) => a.ref_image_uri as string);
+/** 按当前生成模式组报价/提交请求体（与后端 mode 语义一致）
+ *  @param referenceUris 显式参照图（prefillBudget 用角色立绘）；不传则用当前镜头绑定的已定稿资产 */
+function buildQuoteItem(shot: StoryboardDto, referenceUris?: string[]) {
+  const imgs =
+    referenceUris ??
+    boundAssets.value.filter((a) => a.status === 2 && a.ref_image_uri).map((a) => a.ref_image_uri as string);
   const apiMode = modeApi.value;
   const prompt = shot.video_prompt || shot.shot_desc || "";
   const input: Record<string, unknown> = { prompt, reference_uris: [] as string[] };
@@ -796,7 +939,13 @@ const boundAssets = computed<ProjectAssetDto[]>(() =>
 );
 const boundImageCount = computed(() => boundAssets.value.filter((a) => assetImage(a)).length);
 
+/** 项目资产（场景 / 道具 / 其他）的加载态与错误：抽屉与列表要能显示「加载中 / 加载失败」，不能只剩空态 */
+const assetsLoading = ref(false);
+const assetsError = ref("");
+
 async function loadProjectAssets(): Promise<void> {
+  assetsLoading.value = true;
+  assetsError.value = "";
   try {
     const kinds = ["scene", "prop", "other"] as const;
     const lists = await Promise.all(
@@ -807,9 +956,12 @@ async function loadProjectAssets(): Promise<void> {
       prop: lists[1]?.list ?? [],
       other: lists[2]?.list ?? [],
     };
-  } catch {
-    // 后端未就绪（P2 接口未上线）时不阻塞其它视图：保持空列表，UI 会走空态
+  } catch (e) {
+    // 后端未就绪时不阻塞其它视图：保持空列表；但要留下可读错误，供抽屉「重试」
     projectAssets.value = { scene: [], prop: [], other: [] };
+    assetsError.value = e instanceof Error ? e.message : t("projectDetail.assetsLoadFailed");
+  } finally {
+    assetsLoading.value = false;
   }
 }
 
@@ -908,18 +1060,42 @@ async function onImportFile(event: Event): Promise<void> {
   }
 }
 
-/** 分镜 ↔ 资产绑定：整体替换（入参需含角色与场景/道具的全部 id） */
-async function setShotAssets(ids: string[]): Promise<void> {
+/**
+ * 项目资产可用性：唯一判定用 `ProjectAssetStatus.FINALIZED`（packages/shared = 2）。
+ * 未定稿资产不得当可用参照——后端会按 400105 拒绝该镜投递，绑上去只是把失败推迟到生成时。
+ */
+const ASSET_FINALIZED = 2;
+function assetFinalized(a: ProjectAssetDto): boolean {
+  return a.status === ASSET_FINALIZED;
+}
+/** 可当参考图的资产 = 已定稿 + 有参考图（与 API 侧 asset-gates 同一条判据） */
+function assetUsable(a: ProjectAssetDto): boolean {
+  return assetFinalized(a) && Boolean(a.ref_image_uri);
+}
+
+/** 分镜 ↔ 资产绑定：整体替换（入参需含角色与场景/道具的全部 id）；返回是否真的落库 */
+const bindingBusy = ref(false);
+async function setShotAssets(ids: string[]): Promise<boolean> {
   const shot = selectedShot.value;
-  if (!shot || !selectedEpisodeId.value) return;
-  await run(t("projectDetail.materialUpdated"), async () => {
+  if (!shot || !selectedEpisodeId.value) return false;
+  bindingBusy.value = true;
+  try {
     const res = await api.put<{ asset_ids: string[] }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/storyboards/${shot.id}/assets`,
       { asset_ids: ids },
     );
+    // 绑定结果以服务端回写为准：镜头缩略图与「已上传素材数」都从 shot.character_ids 派生，这里赋值即刷新
     shot.character_ids = res.asset_ids;
+    error.value = "";
     info.value = t("projectDetail.materialUpdated", { count: res.asset_ids.length });
-  });
+    return true;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("projectDetail.materialUpdateFailed");
+    info.value = "";
+    return false;
+  } finally {
+    bindingBusy.value = false;
+  }
 }
 
 async function removeShotAsset(id: string): Promise<void> {
@@ -928,30 +1104,302 @@ async function removeShotAsset(id: string): Promise<void> {
   await setShotAssets(shot.character_ids.filter((x) => x !== id));
 }
 
-/** 抽屉：按当前 tab 列出可绑定资产 */
-const drawerAssets = computed<ProjectAssetDto[]>(() => {
-  if (assetTab.value === "character") {
-    return characters.value.map((c) => assetMap.value.get(c.id)).filter((a): a is ProjectAssetDto => Boolean(a));
-  }
-  return projectAssets.value[assetTab.value] ?? [];
-});
-function openDrawer(): void {
-  drawerSelection.value = [...(selectedShot.value?.character_ids ?? [])];
-  // 默认落在有内容的 tab：当前 kind 为空时回到「角色」（参照抽屉也以角色为主）
-  const kind = assetTab.value;
-  if (kind !== "character" && (projectAssets.value[kind] ?? []).length === 0) assetTab.value = "character";
-  assetDrawer.value = true;
+// ══════════ U2：匹配资产（POST match-resources → 轮询 GET match-result）══════════
+/**
+ * 竞品把 `episode match-resources` 定义为「资产匹配 + 自动拆分镜」的组合任务；我方服务
+ * （apps/api/src/modules/script/asset-match.service.ts 的 matchResources）只做前半段：
+ * 抽取资产名 → 命中项目资产 → 写集级快照 → 把「已定稿且有参考图」的资产绑到现有分镜，
+ * **不会新增/拆分分镜**。所以 UI 只宣称「匹配资产」，并把这条差异写在按钮旁边。
+ *
+ * 第二条口径：受理成功 ≠ 匹配成功。POST 只代表动作被接受，结果一律以
+ * `GET …/match-result` 的 `status` 为准（0 未匹配 / 1 部分未定稿 / 2 全部已匹配 / 3 有缺失），
+ * 所以点完按钮要轮询到终态再报结果；等不到终态就说「还在生成」，不把受理当成功。
+ */
+const matchResult = ref<MatchResultDto | null>(null);
+const matchBusy = ref(false);
+const matchError = ref("");
+const matchNote = ref("");
+const MATCH_POLL_TRIES = 8;
+const MATCH_POLL_INTERVAL_MS = 900;
+
+function isMatchSettled(result: MatchResultDto): boolean {
+  return result.status === 1 || result.status === 2 || result.status === 3;
 }
+const matchEntries = computed<MatchEntryDto[]>(() => {
+  const result = matchResult.value;
+  if (!result) return [];
+  // 三类数组都按"可能缺失"处理：老版本 / 代理 / 错误响应的形状不完全可信，
+  // 少一个数组就让整页 setup 抛错（曾把工作台整块渲染打断），这里兜住
+  const list = (v: MatchEntryDto[] | undefined): MatchEntryDto[] => (Array.isArray(v) ? v : []);
+  return [...list(result.characters), ...list(result.scenes), ...list(result.props)];
+});
+const matchStatusLabel = computed<string>(() => {
+  const status = matchResult.value?.status ?? 0;
+  if (status === 2) return t("projectDetail.ui.matchStatusMatched");
+  if (status === 3) return t("projectDetail.ui.matchStatusMissing");
+  if (status === 1) return t("projectDetail.ui.matchStatusPartial");
+  return t("projectDetail.ui.matchStatusNone");
+});
+const matchCountsLine = computed<string>(() => {
+  const totals = matchResult.value?.totals;
+  if (!totals) return "";
+  return t("projectDetail.ui.matchCounts", {
+    total: totals.total,
+    matched: totals.matched,
+    unfinalized: totals.unfinalized,
+    missing: totals.missing,
+  });
+});
+/** 未匹配项（未定稿 / 缺失）：逐条给可读原因，不只报一个总数 */
+const matchUnavailable = computed<MatchEntryDto[]>(() =>
+  matchEntries.value.filter((entry) => entry.status !== 2).slice(0, 6),
+);
+const matchUnavailableMore = computed<number>(() =>
+  Math.max(0, matchEntries.value.filter((entry) => entry.status !== 2).length - 6),
+);
+/** match-result 里 status=2（已匹配且有资产）的资产 id：抽屉预选的唯一来源 */
+const matchedAssetIds = computed<string[]>(() =>
+  matchEntries.value
+    .filter((entry) => entry.status === 2 && Boolean(entry.resource_id))
+    .map((entry) => entry.resource_id),
+);
+
+async function loadMatchResult(): Promise<void> {
+  if (!selectedEpisodeId.value) {
+    matchResult.value = null;
+    return;
+  }
+  try {
+    const res = await api.get<MatchResultDto>(
+      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/match-result`,
+    );
+    // 只接受形状完整的响应：缺三类数组说明调用打到了别的东西，不能当匹配结果显示
+    if (!res || !Array.isArray(res.characters) || !Array.isArray(res.scenes) || !Array.isArray(res.props)) {
+      return;
+    }
+    matchResult.value = res;
+  } catch {
+    /* 读结果失败不阻塞页面：保持上一次已知状态，点「匹配资产」可重试 */
+  }
+}
+
+async function pollMatchResult(episodeId: string): Promise<MatchResultDto | null> {
+  for (let i = 0; i < MATCH_POLL_TRIES; i += 1) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, MATCH_POLL_INTERVAL_MS));
+    try {
+      const res = await api.get<MatchResultDto>(
+        `/projects/${projectId.value}/episodes/${episodeId}/match-result`,
+      );
+      if (!res || !Array.isArray(res.characters) || !Array.isArray(res.scenes) || !Array.isArray(res.props)) {
+        continue;
+      }
+      matchResult.value = res;
+      if (isMatchSettled(res)) return res;
+    } catch {
+      /* 结果接口暂时不可用：继续轮询，最后按「未完成」处理 */
+    }
+  }
+  return null;
+}
+
+async function runAssetMatch(): Promise<void> {
+  const episodeId = selectedEpisodeId.value;
+  if (!episodeId || matchBusy.value) return;
+  matchBusy.value = true;
+  matchError.value = "";
+  matchNote.value = t("projectDetail.ui.matchAccepted");
+  error.value = "";
+  info.value = "";
+  try {
+    await api.post(`/projects/${projectId.value}/episodes/${episodeId}/match-resources`, {});
+    const result = await pollMatchResult(episodeId);
+    if (!result) {
+      matchNote.value = t("projectDetail.ui.matchStillRunning");
+      return;
+    }
+    matchNote.value = "";
+    // 匹配会改写「集级快照 + 分镜资产绑定」，所以两侧都要重取，界面才不会停在旧阶段
+    await loadEpisode();
+    await loadProjectAssets();
+    if (result.status === 2) {
+      info.value = t("projectDetail.ui.matchDoneAll", {
+        matched: result.totals.matched,
+        total: result.totals.total,
+      });
+    } else if (result.status === 3) {
+      info.value = t("projectDetail.ui.matchDoneMissing", {
+        matched: result.totals.matched,
+        total: result.totals.total,
+        missing: result.totals.missing,
+      });
+    } else if (result.status === 1) {
+      info.value = t("projectDetail.ui.matchDonePartial", {
+        matched: result.totals.matched,
+        total: result.totals.total,
+        unfinalized: result.totals.unfinalized,
+      });
+    } else {
+      matchNote.value = t("projectDetail.ui.matchStillRunning");
+    }
+  } catch (e) {
+    matchError.value = e instanceof Error ? e.message : t("projectDetail.ui.matchFailed");
+    error.value = matchError.value;
+    matchNote.value = "";
+  } finally {
+    matchBusy.value = false;
+  }
+}
+
+// ══════════ U2：项目资产抽屉（616×733 覆盖面板，三 tab：角色 / 场景 / 道具）══════════
+/**
+ * 竞品实测（docs/03-frontend/_ui-audit/ref-facts.md §3.6 + 1424×805 像素扫描）：
+ * 面板 x152~768（616×733）、底 rgb(27,27,29)、1px rgb(54,56,63) 描边、r20，
+ * 三个 tab（角色 / 场景 / 道具）+ 搜索 +「仅展示主体」复选。
+ *
+ * 抽屉只做「本镜取材」，所以有自己的 tab 状态（3 个）；页面「资产」视图是 4 tab 的编辑面
+ * （多一个「其他」）。「其他」类资产不能因此变成不可绑定：它跟道具同 tab、单独分组展示。
+ */
+const drawerTab = ref<"character" | "scene" | "prop">("character");
+const drawerTabOptions = [
+  { key: "character" as const, label: t("projectDetail.assetTabs.character") },
+  { key: "scene" as const, label: t("projectDetail.assetTabs.scene") },
+  { key: "prop" as const, label: t("projectDetail.assetTabs.prop") },
+];
+const drawerTabLabel = computed(() => drawerTabOptions.find((o) => o.key === drawerTab.value)?.label ?? "");
+const drawerSearch = ref("");
+const drawerOnlySubject = ref(false);
+const drawerError = ref("");
+
+interface DrawerGroup {
+  key: string;
+  label: string;
+  showLabel: boolean;
+  items: ProjectAssetDto[];
+}
+
+/** 本集匹配结果里出现的资产 id（status 1/2 都有对应资产；3 缺失没有资产可展示） */
+const matchSubjectIds = computed<Set<string>>(() => {
+  const set = new Set<string>();
+  for (const entry of matchEntries.value) {
+    if (entry.status !== 3 && entry.resource_id) set.add(entry.resource_id);
+  }
+  return set;
+});
+
+function drawerAssetsOf(key: "character" | "scene" | "prop" | "other"): ProjectAssetDto[] {
+  if (key === "character") {
+    return characters.value
+      .map((c) => assetMap.value.get(c.id))
+      .filter((a): a is ProjectAssetDto => Boolean(a));
+  }
+  return projectAssets.value[key] ?? [];
+}
+
+const drawerGroups = computed<DrawerGroup[]>(() => {
+  const kw = drawerSearch.value.trim();
+  const keep = (a: ProjectAssetDto): boolean => {
+    if (
+      kw &&
+      !a.name.includes(kw) &&
+      !(a.description ?? "").includes(kw) &&
+      !(a.prompt ?? "").includes(kw)
+    ) {
+      return false;
+    }
+    // 「仅展示主体」= 只留本集匹配结果里出现的主体；已勾选的始终保留，否则取消不掉
+    if (drawerOnlySubject.value && !matchSubjectIds.value.has(a.id) && !drawerSelection.value.includes(a.id)) {
+      return false;
+    }
+    return true;
+  };
+  // 可用（已定稿 + 有参考图）排前面：抽屉是取材面板，不可用的放到最后但不隐藏
+  const pick = (list: ProjectAssetDto[]): ProjectAssetDto[] =>
+    list.filter(keep).sort((a, b) => Number(assetUsable(b)) - Number(assetUsable(a)));
+  const groups: DrawerGroup[] = [
+    { key: drawerTab.value, label: drawerTabLabel.value, showLabel: false, items: pick(drawerAssetsOf(drawerTab.value)) },
+  ];
+  if (drawerTab.value === "prop") {
+    const others = pick(drawerAssetsOf("other"));
+    if (others.length) {
+      groups.push({ key: "other", label: t("projectDetail.assetTabs.other"), showLabel: true, items: others });
+    }
+  }
+  return groups;
+});
+const drawerHasItems = computed(() => drawerGroups.value.some((g) => g.items.length > 0));
+const drawerEmptyTitle = computed(() =>
+  drawerSearch.value.trim()
+    ? t("projectDetail.ui.drawerEmpty")
+    : t("projectDetail.ui.drawerEmptyKind", { kind: drawerTabLabel.value }),
+);
+/** 预选里来自匹配结果的项（可取消） */
+const drawerPreselectedCount = computed(
+  () => matchedAssetIds.value.filter((id) => drawerSelection.value.includes(id)).length,
+);
+function drawerStatusText(a: ProjectAssetDto): string {
+  if (!assetFinalized(a)) return t("projectDetail.ui.drawerUnusableDraft");
+  if (!a.ref_image_uri) return t("projectDetail.ui.drawerUnusableNoRef");
+  return t("projectDetail.ui.statusFinalized");
+}
+
+function openDrawer(): void {
+  drawerError.value = "";
+  const shot = selectedShot.value;
+  const bound = [...(shot?.character_ids ?? [])];
+  // 预选匹配结果：本镜提示词/描述里出现过、且已匹配（status=2）的资产默认勾上，可逐项取消。
+  // 与后端「按名字命中 → 绑已定稿资产」同一口径，不是把整集主体一股脑塞进这一镜。
+  const text = shot ? `${shot.video_prompt ?? ""} ${shot.shot_desc ?? ""}` : "";
+  const preselected = matchEntries.value
+    .filter(
+      (entry) =>
+        entry.status === 2 &&
+        Boolean(entry.resource_id) &&
+        entry.name.trim().length > 0 &&
+        text.includes(entry.name.trim()),
+    )
+    .map((entry) => entry.resource_id)
+    .filter((id) => !bound.includes(id));
+  drawerSelection.value = [...bound, ...preselected];
+  // 落在有内容的 tab（当前 tab 空、别的 tab 有东西时才切，避免无故跳 tab）
+  if (!drawerAssetsOf(drawerTab.value).length) {
+    const firstWithAssets = drawerTabOptions.find((o) => drawerAssetsOf(o.key).length);
+    if (firstWithAssets) drawerTab.value = firstWithAssets.key;
+  }
+  assetDrawer.value = true;
+  void loadProjectAssets();
+}
+
+function closeDrawer(): void {
+  assetDrawer.value = false;
+  drawerError.value = "";
+}
+
 function toggleDrawerAsset(id: string): void {
   drawerSelection.value = drawerSelection.value.includes(id)
     ? drawerSelection.value.filter((x) => x !== id)
     : [...drawerSelection.value, id];
 }
+
+/** 取消「匹配结果」预选的那部分（保留本镜原有绑定与用户手选） */
+function clearMatchedPreselect(): void {
+  const bound = new Set(selectedShot.value?.character_ids ?? []);
+  drawerSelection.value = drawerSelection.value.filter(
+    (id) => !matchedAssetIds.value.includes(id) || bound.has(id),
+  );
+}
+
 async function applyDrawerAssets(): Promise<void> {
+  const shot = selectedShot.value;
+  if (!shot) {
+    drawerError.value = t("projectDetail.ui.pickShotFirst");
+    return;
+  }
   drawerSaving.value = true;
+  drawerError.value = "";
   try {
-    await setShotAssets(drawerSelection.value);
-    assetDrawer.value = false;
+    const ok = await setShotAssets(drawerSelection.value);
+    if (ok) assetDrawer.value = false;
+    else drawerError.value = error.value || t("projectDetail.ui.applyFailed");
   } finally {
     drawerSaving.value = false;
   }
@@ -962,12 +1410,29 @@ const draftAssets = computed<ProjectAssetDto[]>(() =>
   [...projectAssets.value.scene, ...projectAssets.value.prop, ...projectAssets.value.other].filter((a) => a.status !== 2),
 );
 
-async function extractAssets(scope: "episode" | "project"): Promise<void> {
+/**
+ * AI 提取资产：POST /projects/:id/assets/extract（script.controller.ts:835）。
+ * 契约（packages/shared/schemas/project.ts:111）：
+ * - `episode_id` 省略时用项目 source_text，给了就用该集 title/synopsis/script_text；
+ * - `include_characters` 默认 false，为 true 时才把角色也落成草稿（去重同名）；
+ * - `overwrite` 默认 false（本页不动它：重跑只补新条目，不覆盖已编辑文本）。
+ *
+ * 角色空态那张白 CTA 必须带 `include_characters: true`，否则用户点「AI 智能提取资产」
+ * 后角色 tab 还是空的——那正是这条入口此前被禁用时掩盖的问题。
+ */
+async function extractAssets(
+  scope: "episode" | "project",
+  options: { includeCharacters?: boolean } = {},
+): Promise<void> {
   if (extracting.value) return;
   extracting.value = true;
   error.value = "";
+  info.value = "";
   try {
-    const body = scope === "episode" && selectedEpisodeId.value ? { episode_id: selectedEpisodeId.value } : {};
+    const body: { episode_id?: string; include_characters: boolean } = {
+      include_characters: options.includeCharacters === true,
+    };
+    if (scope === "episode" && selectedEpisodeId.value) body.episode_id = selectedEpisodeId.value;
     const res = await api.post<{
       created: number;
       updated: number;
@@ -976,6 +1441,8 @@ async function extractAssets(scope: "episode" | "project"): Promise<void> {
       truncated?: boolean;
     }>(`/projects/${projectId.value}/assets/extract`, body);
     await loadProjectAssets();
+    // 角色草稿走 characters 接口，不重取项目就只在数据库里有、界面上看不到
+    if (options.includeCharacters) await loadProject();
     const parts = [t("projectDetail.aiExtractPartsCreated", { count: res.created }), t("projectDetail.aiExtractPartsUpdated", { count: res.updated })];
     if (res.skipped) parts.push(t("projectDetail.aiExtractPartsSkipped", { count: res.skipped }));
     info.value = t("projectDetail.aiExtractDone", {
@@ -987,6 +1454,14 @@ async function extractAssets(scope: "episode" | "project"): Promise<void> {
   } finally {
     extracting.value = false;
   }
+}
+
+/** 角色空态的 AI 提取：带上角色；失败在按钮下方留一条可读错误 + 重试（页面 banner 也照常显示） */
+const heroExtractError = ref("");
+async function extractCharactersWithAi(): Promise<void> {
+  heroExtractError.value = "";
+  await extractAssets(selectedEpisodeId.value ? "episode" : "project", { includeCharacters: true });
+  if (error.value) heroExtractError.value = error.value;
 }
 
 /** 无参考图的草稿资产：定稿也不会被后端采纳（400105），单独统计引导去生成图 */
@@ -1179,7 +1654,7 @@ const trackWidth = computed(() => Math.max(320, totalDuration.value * pxPerSec.v
 
 /** 时间线里的镜头（带出片任务）；「已定稿」筛选 = 有可用的出片结果 */
 const timelineShots = computed(() =>
-  shots.value.filter((s) => (tlFilter.value === "finalized" ? Boolean(s.video_task_id) : true)),
+  shots.value.filter((s) => (tlFilter.value === "finalized" ? isShotFinalized(s) : true)),
 );
 const activeClip = computed<TimelineClip | null>(() => {
   let acc = 0;
@@ -1190,11 +1665,9 @@ const activeClip = computed<TimelineClip | null>(() => {
   return clips.value.length ? clips.value[clips.value.length - 1] ?? null : null;
 });
 
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
-const timelineDirty = ref(false);
 const timelineLoading = ref(false);
 
-/** 本地缓存（离线兜底 / 快速首帧） */
+/** 本地缓存（离线兜底 / 快速首帧）：项目页只读，缓存只用于服务端读取失败时的兜底展示 */
 function cacheTimeline(): void {
   try {
     localStorage.setItem(timelineKey.value, JSON.stringify(clips.value));
@@ -1203,49 +1676,14 @@ function cacheTimeline(): void {
   }
 }
 
-/** 写入：本地立即缓存 + 服务端防抖保存 */
-function saveTimeline(silent = false): void {
-  cacheTimeline();
-  timelineDirty.value = true;
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    void persistTimeline(silent);
-  }, 700);
-  if (!silent) info.value = t("projectDetail.timelineSaving");
-}
-
-async function persistTimeline(silent = false): Promise<void> {
-  if (!selectedEpisodeId.value) return;
-  try {
-    const res = await api.put<{ clips: Array<{ clip_id: string; shot_id: string; task_id: string | null; name: string; duration: number }> }>(
-      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline`,
-      {
-        clips: clips.value.map((c) => ({
-          clip_id: c.id,
-          shot_id: c.shotId,
-          task_id: c.taskId,
-          name: c.name,
-          duration: c.duration,
-        })),
-      },
-    );
-    // 服务端会回填 clip_id：同步回本地
-    if (Array.isArray(res.clips) && res.clips.length === clips.value.length) {
-      clips.value = clips.value.map((c, i) => ({ ...c, id: res.clips[i]?.clip_id ?? c.id }));
-      cacheTimeline();
-    }
-    timelineDirty.value = false;
-    if (!silent) info.value = t("projectDetail.timelineSaved");
-  } catch (e) {
-    // 服务端接口不可用时保留本地缓存，不阻塞编辑
-    if (!silent)
-      error.value = e instanceof Error
-        ? t("projectDetail.timelineLocalOnlyWith", { msg: e.message })
-        : t("projectDetail.timelineLocalOnly");
-  }
-}
-
-/** 读取：优先服务端，失败回退本地缓存 */
+/**
+ * 读取：优先服务端，失败回退本地缓存。
+ *
+ * **U3 / D2：项目页时间线只做只读预览。** 编辑面只保留剪辑台（/reelflow/edit/:projectId），
+ * 所以这里没有任何写路径——没有防抖保存、没有 addShotClip / moveClip / removeClip /
+ * rebuildTimeline / 合成导出。原来那一套在本页是第二条时间线，能力又和编辑台不等，
+ * 用户在这里改完再去编辑台会看到另一份数据；现在只有「片段 + 播放头」。
+ */
 async function loadTimeline(): Promise<void> {
   playhead.value = 0;
   timelineLoading.value = true;
@@ -1296,69 +1734,55 @@ async function clipUrl(taskId: string): Promise<string | null> {
   }
 }
 
-async function addShotClip(shot: StoryboardDto): Promise<void> {
-  const clip: TimelineClip = {
-    id: `${shot.id}-${Date.now()}`,
-    shotId: shot.id,
-    shotNo: shot.shot_no,
-    name: t("projectDetail.shotSaved", { no: shot.shot_no }),
-    duration: shot.duration_s ?? 5,
-    taskId: shot.video_task_id,
-    url: null,
-  };
-  clips.value = [...clips.value, clip];
-  if (shot.video_task_id) {
-    const url = await clipUrl(shot.video_task_id);
-    const target = clips.value.find((c) => c.id === clip.id);
-    if (target) target.url = url;
+/** 当前预览的镜头（点左栏 = 把播放头对到它在时间线里的位置，不改任何数据） */
+const previewShotId = ref("");
+
+/** 左栏点镜头：只移动播放头；该镜还没进时间线时给出可行动提示，不假装能「加入」 */
+function previewShot(shot: StoryboardDto): void {
+  previewShotId.value = shot.id;
+  let acc = 0;
+  const clip = clips.value.find((c) => c.shotId === shot.id);
+  if (!clip) {
+    info.value = t("projectDetail.ui.tlPreviewShotMissing");
+    return;
   }
-  saveTimeline(true);
+  for (const c of clips.value) {
+    if (c.id === clip.id) break;
+    acc += c.duration;
+  }
+  playhead.value = acc;
 }
 
-/** 更新分镜：按当前分集重建时间线（保留有出片结果的镜头） */
-async function rebuildTimeline(): Promise<void> {
-  await run(t("projectDetail.timelineRebuilt"), async () => {
-    const list = shots.value.filter((s) => Boolean(s.video_task_id));
-    const built: TimelineClip[] = [];
-    for (const shot of list) {
-      built.push({
-        id: `${shot.id}-${Date.now()}-${built.length}`,
-        shotId: shot.id,
-        shotNo: shot.shot_no,
-        name: t("projectDetail.shotSaved", { no: shot.shot_no }),
-        duration: shot.duration_s ?? 5,
-        taskId: shot.video_task_id,
-        url: shot.video_task_id ? await clipUrl(shot.video_task_id) : null,
-      });
-    }
-    clips.value = built;
-    playhead.value = 0;
-    saveTimeline(true);
-    info.value = built.length
-      ? t("projectDetail.timelineRebuilt", { count: built.length })
-      : t("projectDetail.timelineNoShots");
-  });
-}
-
-function removeClip(id: string): void {
-  clips.value = clips.value.filter((c) => c.id !== id);
-  if (playhead.value > totalDuration.value) playhead.value = totalDuration.value;
-  saveTimeline(true);
-}
-
-function moveClip(id: string, dir: -1 | 1): void {
-  const index = clips.value.findIndex((c) => c.id === id);
-  const next = index + dir;
-  if (index < 0 || next < 0 || next >= clips.value.length) return;
-  const list = [...clips.value];
-  const [item] = list.splice(index, 1);
-  if (item) list.splice(next, 0, item);
-  clips.value = list;
-  saveTimeline(true);
+/** 「去剪辑台」：编辑面唯一入口。集数用 query 带（编辑台按 project 载入），并在本地留一份 */
+const editorHref = computed(() => {
+  const base = `/reelflow/edit/${projectId.value}`;
+  const ep = selectedEpisodeId.value;
+  return ep ? `${base}?ep=${encodeURIComponent(ep)}` : base;
+});
+function rememberEditorEpisode(): void {
+  if (!selectedEpisodeId.value) return;
+  try {
+    localStorage.setItem(`reelflow:ep:${projectId.value}`, selectedEpisodeId.value);
+  } catch {
+    /* 隐私模式下写不进去：不影响带 query 的跳转 */
+  }
 }
 
 function seekTo(seconds: number): void {
   playhead.value = Math.min(Math.max(0, seconds), totalDuration.value);
+}
+
+/**
+ * 轨道点击定位播放头。原实现用 `event.offsetX`，横向滚动后坐标会带上 scrollLeft 的偏移，
+ * 点哪里都会落到错误位置（台账 §2.4 #18）。这里改用当前元素 rect + scrollLeft。
+ * 只读视图仍然允许「定位播放头」——它是预览动作，不改数据。
+ */
+function onTrackSeek(event: MouseEvent): void {
+  const el = event.currentTarget as HTMLElement | null;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const x = event.clientX - rect.left + el.scrollLeft;
+  seekTo(x / pxPerSec.value);
 }
 
 function togglePlay(): void {
@@ -1387,85 +1811,12 @@ function togglePlay(): void {
   }
 }
 
-// ── 按时间线合成导出（服务端 ffmpeg）──
-const tlExportId = ref("");
-const tlExportStatus = ref(0);
-const tlExportUrl = ref<string | null>(null);
-const tlExportError = ref("");
-let tlExportTimer: ReturnType<typeof setInterval> | undefined;
-const tlExportLabel = computed(
-  () =>
-    ({
-      0: t("projectDetail.tlExportStatus.0"),
-      1: t("projectDetail.tlExportStatus.1"),
-      2: t("projectDetail.tlExportStatus.2"),
-      3: t("projectDetail.tlExportStatus.3"),
-      4: t("projectDetail.tlExportStatus.4"),
-    })[tlExportStatus.value] ?? "",
-);
-
-async function exportTimeline(): Promise<void> {
-  if (!selectedEpisodeId.value) return;
-  if (!clips.value.length) {
-    error.value = t("projectDetail.timelineEmptyExport");
-    return;
-  }
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = undefined;
-  }
-  await persistTimeline(true);
-  tlExportError.value = "";
-  tlExportUrl.value = null;
-  try {
-    const res = await api.post<{ export_id: string; status: number }>(
-      `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/export`,
-      {},
-    );
-    tlExportId.value = res.export_id;
-    tlExportStatus.value = res.status ?? 1;
-    info.value = t("projectDetail.composeSubmitted");
-    startTlExportPoll();
-  } catch (e) {
-    tlExportError.value = e instanceof Error ? e.message : t("projectDetail.composeSubmitFailed");
-    error.value = tlExportError.value;
-  }
-}
-
-function startTlExportPoll(): void {
-  if (tlExportTimer) clearInterval(tlExportTimer);
-  let tries = 0;
-  tlExportTimer = setInterval(async () => {
-    tries += 1;
-    try {
-      const data = await api.get<{ export_id: string; status: number; download_url: string | null; error: { message?: string } | null }>(
-        `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline/export/${tlExportId.value}`,
-      );
-      tlExportStatus.value = data.status;
-      if (data.download_url) tlExportUrl.value = data.download_url;
-      if (data.status === 3) {
-        tlExportError.value = "";
-        info.value = t("projectDetail.composeDone");
-        if (tlExportTimer) clearInterval(tlExportTimer);
-      } else if (data.status === 4) {
-        tlExportError.value = data.error?.message ?? t("projectDetail.composeFailed");
-        error.value = t("projectDetail.composeFailedWith", { msg: tlExportError.value });
-        if (tlExportTimer) clearInterval(tlExportTimer);
-      }
-    } catch {
-      /* 继续轮询 */
-    }
-    if (tries > 120 && tlExportTimer) clearInterval(tlExportTimer);
-  }, 2000);
-}
-
+/** 换集 / 换项目：重读时间线预览与本集匹配结果（都是读，没有写） */
 watch([selectedEpisodeId, projectId], () => {
+  previewShotId.value = "";
   void loadTimeline();
+  void loadMatchResult();
 });
-onUnmounted(() => {
-  if (tlExportTimer) clearInterval(tlExportTimer);
-});
-watch(clips, () => saveTimeline(true), { deep: true });
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId);
 });
@@ -1817,10 +2168,21 @@ function kindLabel(kind: string): string {
           <div class="cta-hero__text">
             <h3>{{ t("projectDetail.ui.aiExtractTitle") }} <span class="free">{{ t("projectDetail.ui.freeFirst") }}</span></h3>
             <p>{{ t("projectDetail.ui.aiExtractDescClean") }}</p>
-            <button class="btn-white" type="button" disabled :title="t('projectDetail.ui.soonExtractHint')">
-              ✦ {{ t("projectDetail.ui.aiExtractTitle") }}
-              <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+            <button
+              class="btn-white"
+              type="button"
+              data-extract-hero
+              :disabled="extracting || !!busy"
+              @click="extractCharactersWithAi"
+            >
+              ✦ {{ extracting ? t("projectDetail.ui.extracting") : t("projectDetail.ui.aiExtractTitle") }}
             </button>
+            <p v-if="heroExtractError" class="cta-hero__err" data-extract-error>
+              {{ heroExtractError }}
+              <button type="button" class="mini-link" :disabled="extracting || !!busy" @click="extractCharactersWithAi">
+                {{ t("common.retry") }}
+              </button>
+            </p>
           </div>
         </div>
         <div class="cta-two">
@@ -1906,7 +2268,7 @@ function kindLabel(kind: string): string {
               <img v-if="shotThumb(s)" :src="shotThumb(s) || ''" alt="" @error="hideBrokenImage" />
               <i v-else />
             </span>
-            <span class="shot-chip__state">{{ s.video_task_id ? t("projectDetail.ui.shotSubmitted") : s.status === 5 ? t("projectDetail.ui.shotFinalized") : t("projectDetail.ui.shotNotFinalized") }}</span>
+            <span class="shot-chip__state">{{ shotStateLabel(s) }}</span>
           </button>
         </div>
         <button class="rail-add" type="button" disabled :title="t('projectDetail.ui.soonAddShotHint')">
@@ -2043,8 +2405,8 @@ function kindLabel(kind: string): string {
           <p class="gen-hint">
             {{ t("projectDetail.ui.refHint") }}
           </p>
-          <p v-if="selectedShot?.video_task_id" class="gen-hint gen-hint--warn">
-            {{ t("projectDetail.ui.idempotentHint", { id: selectedShot.video_task_id.slice(-8) }) }}
+          <p v-if="idempotentTaskId" class="gen-hint gen-hint--warn">
+            {{ t("projectDetail.ui.idempotentHint", { id: idempotentTaskId.slice(-8) }) }}
           </p>
 
           <div class="gen-row gen-row--between">
@@ -2066,13 +2428,51 @@ function kindLabel(kind: string): string {
           <div class="gen-row gen-row--between">
             <span class="gen-label">{{ t("projectDetail.ui.promptLabel") }}</span>
             <span class="gen-row__ops">
-              <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.soonMatchHint')">
-                {{ t("projectDetail.ui.matchAssets") }} <span class="soon-chip">{{ t("common.comingSoon") }}</span>
+              <!-- U2 / P0-3：接通 POST …/match-resources；结果只认 match-result.status（受理 ≠ 匹配） -->
+              <button
+                class="mini-link match-btn"
+                type="button"
+                :disabled="matchBusy || !!busy || !selectedEpisodeId"
+                :title="t('projectDetail.ui.matchHint')"
+                @click="runAssetMatch"
+              >
+                {{ matchBusy ? t("projectDetail.ui.matching") : t("projectDetail.ui.matchAssets") }}
               </button>
               <button class="mini-link" type="button" disabled :title="t('projectDetail.ui.soonZoomHint')">
                 {{ t("projectDetail.ui.zoomEdit") }} <span class="soon-chip">{{ t("common.comingSoon") }}</span>
               </button>
             </span>
+          </div>
+          <p v-if="matchNote" class="match-note">{{ matchNote }}</p>
+          <p v-if="matchError" class="match-note match-note--err">{{ matchError }}</p>
+          <!-- 匹配结果：状态 + 三类计数 + 未匹配项的可读原因 -->
+          <div v-if="matchResult" class="match-box" :data-match-status="matchResult.status">
+            <div class="match-box__head">
+              <b>{{ t("projectDetail.ui.matchResultTitle") }}</b>
+              <Tag
+                :tone="matchResult.status === 2 ? 'success' : matchResult.status === 3 ? 'danger' : 'warning'"
+                size="sm"
+              >
+                {{ matchStatusLabel }}
+              </Tag>
+              <span class="match-box__spacer" />
+              <button class="mini-link" type="button" :disabled="matchBusy" @click="loadMatchResult">
+                {{ t("projectDetail.ui.matchRefresh") }}
+              </button>
+            </div>
+            <p v-if="matchCountsLine" class="match-box__counts">{{ matchCountsLine }}</p>
+            <ul v-if="matchUnavailable.length" class="match-box__list">
+              <li v-for="entry in matchUnavailable" :key="entry.kind + '-' + entry.name + '-' + entry.status">
+                <span>{{ entry.name }}</span>
+                <em>
+                  {{ entry.status === 3 ? t("projectDetail.ui.matchMissing") : t("projectDetail.ui.matchUnfinalized") }}
+                </em>
+              </li>
+            </ul>
+            <p v-if="matchUnavailableMore" class="match-box__more">
+              {{ t("projectDetail.ui.matchUnavailableMore", { n: matchUnavailableMore }) }}
+            </p>
+            <p class="match-box__split">{{ t("projectDetail.ui.matchNotSplit") }}</p>
           </div>
           <textarea
             v-if="selectedShot"
@@ -2161,6 +2561,100 @@ function kindLabel(kind: string): string {
         <button class="mini-link" type="button" @click="tab = 'characters'">{{ t("projectDetail.ui.goFinalizeChars") }}</button>
       </p>
 
+      <!-- 真实导出记录（U3 / P1-3）：GET /projects/:id/exports 的投影，分镜 zip + 成片 mp4 混排 -->
+      <div class="block export-history" data-export-history>
+        <div class="block__head">
+          <p class="block-label">{{ t("projectDetail.ui.exportHistoryTitle") }}</p>
+          <div class="export-history__ops">
+            <span v-if="exportHistoryTotal" class="muted">
+              {{ t("projectDetail.ui.exportHistoryTotal", { total: exportHistoryTotal }) }}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="exportHistoryLoading"
+              @click="loadExportHistory(exportHistoryPage)"
+            >
+              {{ exportHistoryLoading ? t("common.loading") : t("projectDetail.ui.refresh") }}
+            </Button>
+          </div>
+        </div>
+
+        <p v-if="exportHistoryError" class="banner banner--warn" data-export-error>
+          {{ exportHistoryError }}
+          <button type="button" class="mini-link" @click="loadExportHistory(1)">{{ t("common.retry") }}</button>
+        </p>
+        <p v-else-if="exportHistoryLoading && !exportHistory.length" class="muted">{{ t("common.loading") }}</p>
+        <div v-else-if="exportHistory.length" class="export-table">
+          <div class="export-row export-row--head">
+            <span>{{ t("projectDetail.ui.exportColKind") }}</span>
+            <span>{{ t("projectDetail.ui.exportColEpisode") }}</span>
+            <span>{{ t("projectDetail.ui.exportColStatus") }}</span>
+            <span>{{ t("projectDetail.ui.exportColTime") }}</span>
+            <span>{{ t("projectDetail.ui.exportColDownload") }}</span>
+            <span>{{ t("projectDetail.ui.exportColExpires") }}</span>
+          </div>
+          <div
+            v-for="item in exportHistory"
+            :key="item.kind + ':' + item.export_id"
+            class="export-row"
+            :data-export-kind="item.kind"
+            :data-export-id="item.export_id"
+          >
+            <span class="export-row__kind">{{ exportKindLabel(item) }}</span>
+            <span>{{ item.episode_no ? t("projectDetail.ui.epChip", { n: item.episode_no }) : "—" }}</span>
+            <span>
+              <Tag :tone="exportStatusTone(item)" size="sm" dot>{{ exportStatusText(item) }}</Tag>
+            </span>
+            <span class="mono">{{ fmtDateTime(item.created_at) }}</span>
+            <span>
+              <a v-if="item.download_url" :href="item.download_url" class="link" target="_blank" rel="noreferrer">
+                {{ t("projectDetail.ui.downloadFile") }}
+              </a>
+              <em v-else class="export-row__none">{{ exportNoDownloadReason(item) }}</em>
+            </span>
+            <span>
+              <em v-if="exportExpired(item)" class="export-row__expired">
+                {{ t("projectDetail.ui.exportExpiredTag") }}
+              </em>
+              <em v-else-if="item.expires_at" class="export-row__none">
+                {{ t("projectDetail.ui.exportExpiresAt", { time: fmtDateTime(item.expires_at) }) }}
+              </em>
+              <em v-else class="export-row__none">{{ t("projectDetail.ui.exportNoExpiry") }}</em>
+            </span>
+          </div>
+        </div>
+        <EmptyState
+          v-else
+          icon="⇩"
+          :title="t('projectDetail.ui.exportHistoryEmpty')"
+          :description="t('projectDetail.ui.exportHistoryEmptyDesc')"
+        />
+
+        <div v-if="exportHistoryTotal > EXPORT_PAGE_SIZE" class="export-pager">
+          <button
+            type="button"
+            class="mini-btn"
+            :disabled="exportHistoryLoading || exportHistoryPage <= 1"
+            @click="loadExportHistory(exportHistoryPage - 1)"
+          >
+            ‹ {{ t("projectDetail.ui.prevPage") }}
+          </button>
+          <span class="muted">{{ exportHistoryPage }} / {{ exportHistoryPages }}</span>
+          <button
+            type="button"
+            class="mini-btn"
+            :disabled="exportHistoryLoading || exportHistoryPage >= exportHistoryPages"
+            @click="loadExportHistory(exportHistoryPage + 1)"
+          >
+            {{ t("projectDetail.ui.nextPage") }} ›
+          </button>
+        </div>
+        <p v-if="exportHistoryTruncated" class="export-history__note">
+          {{ t("projectDetail.ui.exportHistoryTruncated") }}
+        </p>
+      </div>
+
       <div v-if="matrix" class="block">
         <div class="block__head">
           <p class="block-label">{{ t("projectDetail.ui.matrixTitle") }}</p>
@@ -2209,13 +2703,14 @@ function kindLabel(kind: string): string {
     </section>
 
     <!-- ══════════ ⑤ 时间线导出（左素材 / 中预览 / 下时间线） ══════════ -->
-    <div v-else-if="tab === 'timeline'" class="tl">
+    <!-- ══════════ ⑤ 时间线预览（只读；编辑面唯一入口 = 剪辑台 /reelflow/edit/:projectId） ══════════ -->
+    <div v-else-if="tab === 'timeline'" class="tl" data-tl-readonly="1">
       <aside class="tl-rail">
         <div class="tl-rail__head">
           <b>{{ t("projectDetail.ui.episodeAssets") }}</b>
           <select v-model="tlFilter" class="mini-select">
             <option value="all">{{ t("projectDetail.assetFilters.all") }}</option>
-            <option value="finalized">{{ t("projectDetail.ui.filterRendered") }}</option>
+            <option value="finalized">{{ t("projectDetail.ui.filterFinalized") }}</option>
           </select>
         </div>
         <div class="tl-list">
@@ -2224,18 +2719,21 @@ function kindLabel(kind: string): string {
             :key="s.id"
             type="button"
             class="tl-item"
-            @click="addShotClip(s)"
+            :class="{ on: previewShotId === s.id }"
+            :data-shot-id="s.id"
+            @click="previewShot(s)"
           >
             <span class="tl-item__no">{{ s.shot_no }}</span>
             <span class="tl-item__name">{{ s.shot_desc || t("projectDetail.ui.shotName", { n: s.shot_no }) }}</span>
-            <em :class="{ on: s.video_task_id }">{{ s.video_task_id ? t("projectDetail.ui.rendered") : t("projectDetail.ui.notRendered") }}</em>
+            <em :class="{ on: isShotFinalized(s) }">{{ shotStateLabel(s) }}</em>
           </button>
           <p v-if="!timelineShots.length" class="tl-empty-sm">{{ t("projectDetail.ui.tlNoShots") }}</p>
         </div>
+        <p class="tl-rail__hint">{{ t("projectDetail.ui.tlPreviewRailHint") }}</p>
       </aside>
 
       <section class="tl-stage">
-        <div class="tl-stage__bubble">{{ t("projectDetail.ui.tlBubble") }}</div>
+        <div class="tl-stage__bubble">{{ t("projectDetail.ui.tlPreviewBubble") }}</div>
         <div v-if="activeClip" class="tl-player">
           <video
             v-if="activeClip.url"
@@ -2258,7 +2756,15 @@ function kindLabel(kind: string): string {
 
       <footer class="tl-bar">
         <div class="tl-bar__head">
-          <Button size="sm" variant="ghost" :disabled="!!busy || !selectedEpisodeId" @click="rebuildTimeline">{{ t("projectDetail.ui.updateStoryboards") }}</Button>
+          <!-- 只读预览：没有「更新分镜 / 合成导出 / 片段增删排序」，唯一出路是去剪辑台 -->
+          <NuxtLink
+            class="tl-goto"
+            :to="editorHref"
+            :data-goto-editor="editorHref"
+            @click="rememberEditorEpisode"
+          >
+            {{ t("projectDetail.ui.goEditor") }} →
+          </NuxtLink>
           <button type="button" class="tl-play" @click="togglePlay">{{ playing ? t("projectDetail.ui.pause") : t("projectDetail.ui.play") }}</button>
           <span class="tl-time">{{ playheadLabel }} / {{ totalLabel }}</span>
           <span class="tl-count">{{ t("projectDetail.ui.clipsCount", { n: clips.length }) }}</span>
@@ -2267,16 +2773,10 @@ function kindLabel(kind: string): string {
             <input v-model.number="pxPerSec" type="range" min="16" max="120" step="4" />
           </label>
           <span class="tl-spacer" />
-          <Button size="sm" :disabled="!clips.length || tlExportStatus === 1 || tlExportStatus === 2" @click="exportTimeline">
-            {{ t("projectDetail.ui.composeExport") }}
-          </Button>
-          <Tag v-if="tlExportStatus" :tone="tlExportStatus === 4 ? 'danger' : tlExportStatus === 3 ? 'success' : 'info'" size="sm" dot>
-            {{ tlExportLabel }}
-          </Tag>
-          <a v-if="tlExportUrl" :href="tlExportUrl" class="link" target="_blank" rel="noreferrer">{{ t("projectDetail.ui.downloadMp4") }}</a>
+          <Tag tone="info" size="sm" dot>{{ t("projectDetail.ui.readOnlyBadge") }}</Tag>
         </div>
 
-        <div class="tl-track" @click.self="seekTo(($event.offsetX) / pxPerSec)">
+        <div class="tl-track" @click="onTrackSeek">
           <div class="tl-ruler">
             <span
               v-for="tick in Math.ceil(totalDuration / 5) + 1"
@@ -2292,20 +2792,16 @@ function kindLabel(kind: string): string {
               class="tl-clip"
               :style="{ width: `${clip.duration * pxPerSec}px` }"
               :class="{ on: activeClip?.id === clip.id }"
+              :data-clip-id="clip.id"
             >
               <b>{{ clip.name }}</b>
               <em>{{ clip.duration }}s</em>
-              <span class="tl-clip__ops">
-                <button type="button" :title="t('projectDetail.ui.moveLeft')" @click.stop="moveClip(clip.id, -1)">‹</button>
-                <button type="button" :title="t('projectDetail.ui.moveRight')" @click.stop="moveClip(clip.id, 1)">›</button>
-                <button type="button" :title="t('projectDetail.ui.remove')" @click.stop="removeClip(clip.id)">✕</button>
-              </span>
             </div>
-            <p v-if="!clips.length" class="tl-clips__empty">{{ t("projectDetail.ui.tlEmpty") }}</p>
+            <p v-if="!clips.length" class="tl-clips__empty">{{ t("projectDetail.ui.tlPreviewEmpty") }}</p>
             <div class="tl-head" :style="{ left: `${playhead * pxPerSec}px` }" />
           </div>
         </div>
-        <p class="tl-note">{{ t("projectDetail.ui.tlNote") }}</p>
+        <p class="tl-note">{{ t("projectDetail.ui.tlPreviewNote") }}</p>
       </footer>
     </div>
     <!-- ══════════ ⑥ 资产校验（对齐参照 /series-manage/asset-confirm） ══════════ -->
@@ -2401,53 +2897,110 @@ function kindLabel(kind: string): string {
         </Button>
       </div>
     </div>
-    <!-- ── 项目资产抽屉（角色 / 场景 / 道具） ── -->
+    <!-- ── 项目资产抽屉（616×733 覆盖面板；三 tab：角色 / 场景 / 道具） ── -->
     <Teleport to="body">
-      <div v-if="assetDrawer" class="drawer-mask" @click.self="assetDrawer = false">
-        <aside class="drawer">
+      <div v-if="assetDrawer" class="drawer-mask" @click.self="closeDrawer">
+        <aside
+          class="drawer"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="t('projectDetail.ui.drawerTitle')"
+          data-drawer="project-assets"
+        >
           <header class="drawer__head">
             <h3>{{ t("projectDetail.ui.drawerTitle") }}</h3>
-            <button type="button" class="ctl ctl--icon" @click="assetDrawer = false">✕</button>
+            <button type="button" class="ctl ctl--icon" :aria-label="t('common.cancel')" @click="closeDrawer">✕</button>
           </header>
-          <div class="av-tabs drawer__tabs">
+
+          <div class="drawer__tabs" role="tablist">
             <button
-              v-for="at in assetTabOptions"
-              :key="at.key"
+              v-for="dt in drawerTabOptions"
+              :key="dt.key"
               type="button"
-              class="av-tab"
-              :class="{ on: assetTab === at.key }"
-              @click="assetTab = at.key"
+              class="drawer__tab"
+              role="tab"
+              :aria-selected="drawerTab === dt.key"
+              :class="{ on: drawerTab === dt.key }"
+              :data-drawer-tab="dt.key"
+              @click="drawerTab = dt.key"
             >
-              {{ at.label }}
+              {{ dt.label }}
             </button>
           </div>
-          <input class="drawer__search" type="search" :placeholder="t('projectDetail.ui.drawerSearch', { kind: assetTabLabel })" />
-          <p class="drawer__note">
-            {{ t("projectDetail.ui.drawerHint") }}
+
+          <div class="drawer__search-row">
+            <input
+              v-model="drawerSearch"
+              class="drawer__search"
+              type="search"
+              :placeholder="t('projectDetail.ui.drawerSearch', { kind: drawerTabLabel })"
+              :aria-label="t('projectDetail.ui.drawerSearch', { kind: drawerTabLabel })"
+            />
+            <label class="drawer__subject" :title="t('projectDetail.ui.drawerOnlySubjectHint')">
+              <input v-model="drawerOnlySubject" type="checkbox" data-drawer-only-subject />
+              <span>{{ t("projectDetail.ui.drawerOnlySubject") }}</span>
+            </label>
+          </div>
+
+          <p class="drawer__note">{{ t("projectDetail.ui.drawerHint") }}</p>
+
+          <p v-if="drawerPreselectedCount" class="drawer__preselect">
+            {{ t("projectDetail.ui.drawerPreselect", { n: drawerPreselectedCount }) }}
+            <button type="button" class="mini-link" @click="clearMatchedPreselect">
+              {{ t("projectDetail.ui.drawerPreselectClear") }}
+            </button>
           </p>
+
           <p class="block-label">{{ t("projectDetail.ui.drawerAll", { n: drawerSelection.length }) }}</p>
-          <div v-if="drawerAssets.length" class="drawer__grid">
-            <button
-              v-for="a in drawerAssets"
-              :key="a.id"
-              type="button"
-              class="drawer__pick"
-              :class="{ on: drawerSelection.includes(a.id) }"
-              @click="toggleDrawerAsset(a.id)"
-            >
-              <img v-if="assetImage(a)" :src="assetImage(a) || ''" :alt="a.name" />
-              <i v-else />
-              <span>{{ a.name }}</span>
-              <em>{{ a.status === 2 ? t("projectDetail.ui.statusFinalized") : t("projectDetail.ui.statusDraftShort") }}</em>
-            </button>
-          </div>
-          <div v-else class="drawer__empty">
-            <span>▤</span>
-            <p>{{ t("projectDetail.ui.drawerEmpty") }}</p>
-          </div>
+
+          <!-- 三态可读：加载中 / 加载失败（可重试）/ 有数据或空态 -->
+          <p v-if="assetsLoading && !drawerHasItems" class="drawer__state">{{ t("common.loading") }}</p>
+          <p v-else-if="assetsError && !drawerHasItems" class="drawer__state drawer__state--err">
+            {{ assetsError }}
+            <button type="button" class="mini-link" @click="loadProjectAssets">{{ t("common.retry") }}</button>
+          </p>
+          <template v-else>
+            <div v-for="group in drawerGroups" :key="group.key" class="drawer__group">
+              <p v-if="group.showLabel" class="drawer__group-label">{{ group.label }}</p>
+              <div v-if="group.items.length" class="drawer__grid">
+                <button
+                  v-for="a in group.items"
+                  :key="a.id"
+                  type="button"
+                  class="drawer__pick"
+                  :class="{ on: drawerSelection.includes(a.id), 'is-unusable': !assetUsable(a) }"
+                  :data-asset-id="a.id"
+                  :data-usable="assetUsable(a) ? '1' : '0'"
+                  :aria-pressed="drawerSelection.includes(a.id)"
+                  @click="toggleDrawerAsset(a.id)"
+                >
+                  <img v-if="assetImage(a)" :src="assetImage(a) || ''" :alt="a.name" @error="hideBrokenImage" />
+                  <i v-else />
+                  <b v-if="matchSubjectIds.has(a.id)" class="drawer__badge">
+                    {{ t("projectDetail.ui.drawerMatchedBadge") }}
+                  </b>
+                  <span>{{ a.name }}</span>
+                  <em :class="{ ok: assetUsable(a) }">
+                    {{ drawerStatusText(a)
+                    }}<template v-if="a.bound_shot_count"> · {{ t("projectDetail.ui.boundShots", { n: a.bound_shot_count }) }}</template>
+                  </em>
+                </button>
+              </div>
+            </div>
+            <div v-if="!drawerHasItems" class="drawer__empty">
+              <span>▤</span>
+              <p>{{ drawerEmptyTitle }}</p>
+              <em>{{ t("projectDetail.ui.drawerEmptyHint") }}</em>
+            </div>
+          </template>
+
+          <p v-if="drawerError" class="drawer__state drawer__state--err">{{ drawerError }}</p>
+
           <div class="drawer__ops">
-            <Button variant="ghost" @click="assetDrawer = false">{{ t("projectDetail.ui.cancel") }}</Button>
-            <Button :disabled="drawerSaving" @click="applyDrawerAssets">{{ drawerSaving ? t("projectDetail.ui.saving") : t("projectDetail.ui.apply") }}</Button>
+            <Button variant="ghost" @click="closeDrawer">{{ t("projectDetail.ui.cancel") }}</Button>
+            <Button :disabled="drawerSaving || bindingBusy || !selectedShot" @click="applyDrawerAssets">
+              {{ drawerSaving ? t("projectDetail.ui.saving") : t("projectDetail.ui.apply") }}
+            </Button>
           </div>
         </aside>
       </div>
@@ -2984,6 +3537,15 @@ function kindLabel(kind: string): string {
   color: rgba(0, 0, 0, 0.45);
   cursor: not-allowed;
 }
+/* AI 提取失败：按钮下方就地给可读原因 + 重试（顶部 banner 同时保留，双通道不冲突） */
+.cta-hero .cta-hero__err {
+  margin: 10px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
 .cta-two {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3334,6 +3896,76 @@ function kindLabel(kind: string): string {
   display: flex;
   gap: 12px;
 }
+/* ── 匹配资产：按钮 + 结果面板（受理 ≠ 匹配，状态以 match-result 为准）── */
+.match-btn:disabled {
+  color: var(--text-5);
+  cursor: not-allowed;
+}
+.match-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-4);
+}
+.match-note--err {
+  color: var(--danger);
+}
+.match-box {
+  margin: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.25);
+}
+.match-box__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.match-box__spacer {
+  flex: 1;
+}
+.match-box__counts {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.match-box__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+}
+.match-box__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.match-box__list li em {
+  font-style: normal;
+  color: var(--warning);
+  flex-shrink: 0;
+}
+.match-box__more,
+.match-box__split {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--text-4);
+}
 .gen-select {
   flex: 1;
   height: 36px;
@@ -3570,6 +4202,60 @@ function kindLabel(kind: string): string {
   align-items: center;
   gap: 4px;
 }
+/* ── 导出记录（真实 GET /projects/:id/exports）── */
+.export-history__ops {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.export-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.export-row {
+  display: grid;
+  grid-template-columns: 132px 92px 96px 152px minmax(120px, 1fr) minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: var(--text-2);
+}
+.export-row--head {
+  color: var(--text-4);
+  font-size: 11px;
+}
+.export-row:not(.export-row--head):nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.export-row__kind {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.export-row__none {
+  font-style: normal;
+  color: var(--text-4);
+  font-size: 11px;
+}
+.export-row__expired {
+  font-style: normal;
+  color: var(--danger);
+  font-size: 11px;
+}
+.export-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.export-history__note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-4);
+}
 .dot {
   width: 7px;
   height: 7px;
@@ -3653,25 +4339,35 @@ function kindLabel(kind: string): string {
   color: var(--text-3);
 }
 
-/* ═══════════ 项目资产抽屉 ═══════════ */
+/* ═══════════ 项目资产抽屉（竞品实测：616×733 @ x152 / y64，r20） ═══════════ */
+/*
+ * 数值来源：docs/03-frontend/evidence/reelflow/05-project-assets-panel.png 的 1424×805 像素扫描
+ *   - 面板外框 x152~767 / y64~796 → 616×733（±0），圆角 20
+ *   - 底色 rgb(27,27,29)、1px 描边 rgb(54,56,63)（非 token 色，按实测值落地）
+ */
 .drawer-mask {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.55);
-  display: flex;
 }
 .drawer {
-  width: 520px;
-  max-width: 92vw;
-  height: 100%;
-  padding: 16px;
+  position: absolute;
+  left: 152px;
+  top: 64px;
+  width: 616px;
+  height: 733px;
+  max-height: calc(100vh - 72px);
+  box-sizing: border-box;
+  padding: 16px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   overflow: auto;
-  background: #12121a;
-  border-right: 1px solid var(--panel-line);
+  border-radius: 20px;
+  border: 1px solid rgb(54, 56, 63);
+  background: rgb(27, 27, 29);
+  box-shadow: 0 24px 60px #000000a0;
 }
 .drawer__head {
   display: flex;
@@ -3684,18 +4380,70 @@ function kindLabel(kind: string): string {
   font-weight: 700;
   color: var(--text-1);
 }
+/* 三 tab：激活白字 + 2px 紫下划线（竞品同款） */
 .drawer__tabs {
-  border-bottom: 1px solid var(--panel-line);
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid rgb(54, 56, 63);
+}
+.drawer__tab {
+  position: relative;
+  height: 34px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: 14px;
+  cursor: pointer;
+}
+.drawer__tab.on {
+  color: #fff;
+  font-weight: 600;
+}
+.drawer__tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-500);
+}
+.drawer__search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .drawer__search {
+  flex: 1;
+  min-width: 0;
   height: 36px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid var(--panel-line);
+  border: 1px solid rgb(54, 56, 63);
   background: rgba(0, 0, 0, 0.35);
   color: var(--text-1);
   font-size: 13px;
   outline: none;
+}
+.drawer__search:focus {
+  border-color: var(--brand-500);
+}
+/* 「仅展示主体」复选：竞品方框 16 */
+.drawer__subject {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.drawer__subject input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand-500);
 }
 .drawer__note {
   margin: 0;
@@ -3703,36 +4451,36 @@ function kindLabel(kind: string): string {
   line-height: 1.6;
   color: var(--text-4);
 }
+.drawer__preselect {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--brand-300);
+}
 .drawer__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
-.drawer__item {
-  margin: 0;
-}
-.drawer__item img {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid var(--panel-line);
-}
-.drawer__item i {
-  display: block;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  border-radius: 10px;
-  background: #0d0d13;
-}
-.drawer__item figcaption {
-  margin-top: 4px;
+.drawer__group {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
+}
+.drawer__group-label {
+  margin: 0;
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--text-4);
+}
+.drawer__state {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.drawer__state--err {
+  color: var(--danger);
 }
 .drawer__empty {
   padding: 32px 0;
@@ -3744,6 +4492,13 @@ function kindLabel(kind: string): string {
   display: block;
   font-size: 26px;
   margin-bottom: 8px;
+}
+.drawer__empty em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-5);
 }
 .drawer__ops {
   display: grid;
@@ -3762,6 +4517,14 @@ function kindLabel(kind: string): string {
   .work {
     grid-template-columns: 1fr;
     overflow: auto;
+  }
+  /* 窄屏抽屉不再固定 x152 / 616：贴边留 8px，高度按视口收 */
+  .drawer {
+    left: 8px;
+    top: 8px;
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    max-height: none;
   }
   .rail {
     max-height: 240px;
@@ -3943,6 +4706,24 @@ function kindLabel(kind: string): string {
   font-size: 10px;
   color: var(--text-5);
 }
+.drawer__pick em.ok {
+  color: var(--success);
+}
+/* 未定稿 / 缺参考图：仍然列出（用户要看得见缺什么），但压暗并排在可用项之后 */
+.drawer__pick.is-unusable {
+  opacity: 0.55;
+}
+.drawer__badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
 .af-form {
   display: flex;
   flex-direction: column;
@@ -4029,6 +4810,31 @@ function kindLabel(kind: string): string {
   justify-content: space-between;
   gap: 8px;
   font-size: 14px;
+  color: var(--text-1);
+}
+/* 只读预览：左栏点镜只移动播放头，不再「加入时间线」 */
+.tl-rail__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-4);
+}
+/* 「去剪辑台」= 唯一编辑入口 */
+.tl-goto {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-300);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.tl-goto:hover {
+  border-color: var(--brand-500);
   color: var(--text-1);
 }
 .tl-list {
@@ -4234,28 +5040,6 @@ function kindLabel(kind: string): string {
   font-style: normal;
   font-size: 10px;
   color: var(--text-4);
-}
-.tl-clip__ops {
-  position: absolute;
-  right: 2px;
-  top: 2px;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity var(--duration-fast);
-}
-.tl-clip:hover .tl-clip__ops {
-  opacity: 1;
-}
-.tl-clip__ops button {
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-2);
-  font-size: 11px;
-  cursor: pointer;
 }
 .tl-clips__empty {
   margin: 0;
