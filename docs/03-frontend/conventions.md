@@ -28,8 +28,10 @@ apps/web/
     Button · Modal · TextField · TextAreaField · SelectField · TabBar
     Card · Tag · Progress · EmptyState · Skeleton
     ToastHost · OnboardingBar
-  composables/
-    useAuth · useApi · useToast · useTaskPolling · useUpload · useTrack
+  composables/               # 现状：useAuth · useApi · useToast · useI18n · useActiveSpace
+                             #      useAdminApi · useAdminMenu · useEnsureTeamSpace
+                             #      useCanvasApi · useCanvasEditor · useCanvasAgent
+                             # 规划中（尚未落地）：useTaskPolling · useUpload · useTrack
   middleware/auth.global.ts    # 需登录页未登录 → 跳 /login?redirect=
   assets/css/tokens.css        # 设计令牌（三层：原始值 → 语义 → 组件用）
 ```
@@ -50,7 +52,7 @@ apps/web/
 
 | 项 | 约定 |
 |---|---|
-| 语言 | TS strict；API 类型一律 import 自 `packages/shared`，**禁止手抄接口类型** |
+| 语言 | TS strict；API 类型一律 import 自 `packages/shared`，**禁止手抄接口类型**。现状例外：`apps/web/types/api.ts`（约 2100 行、197 个导出类型）仍是手写契约，属待收敛债务，不是规范许可 |
 | 组件 | `<script setup lang="ts">`；props 用类型；事件 emit 声明 |
 | 样式 | Tailwind 原子类为主；复杂组件允许 scoped CSS；设计令牌见 §4 |
 | 请求 | 统一 `$api` 封装（信封解包、401 静默 refresh 单飞、错误码→文案映射表）；业务代码只见 data，不见信封 |
@@ -60,7 +62,7 @@ apps/web/
 
 ## 3. 核心交互模块规格
 
-### useTaskPolling（竞品同款模式〔RM-证据：useTaskPolling 反编译〕）
+### useTaskPolling（规划中；当前轮询逻辑仍内联在页面/`useCanvasAgent`）
 
 ```
 - 5s 间隔批量 GET /tasks?ids=<在途任务>（RE 同节奏）
@@ -69,7 +71,7 @@ apps/web/
 - 任务成功 → 刷新余额(竞品 refreshCreditsAfterTasksDone 同思路)+ SSE 不可用时的兜底
 ```
 
-### useUpload（OSS 直传）
+### useUpload（规划中；当前上传走 `/assets/upload` base64 接口，尚无 OSS 直传）
 
 ```
 POST /files/upload-token → STS → 浏览器分片直传(进度条) → POST /files/complete

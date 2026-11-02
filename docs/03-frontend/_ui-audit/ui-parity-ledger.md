@@ -3,7 +3,7 @@
 > 基线：2026-11-02 · HEAD `a150ff3` · 竞品证据截至 2026-10-25/26 的只读取证
 > 配套：[ui-ux-parity-execution-plan.md](../../07-plan/ui-ux-parity-execution-plan.md) · [competitor-ui-comparison.md](../competitor-ui-comparison.md)
 > 口径：竞品 102 条页面路由 − 9 条不可比路由 = **93 条**。不可比：`/:path(.*)*`、`/redirect/:action()`、`/redirect-callback/:action()`、`/route-permission-map`、`/api/user/logout`、`/en`、`/ja`、`/br`、`/es`。
-> 我方当前 **66 个页面文件**；一个页面可承载竞品多个路由，项目工作台、资产确认、资产提取、时间线编辑是 `projects/[id].vue` 的内嵌视图，不另建路由。
+> 我方当前 **72 个页面文件**（2026-11-02 实测）；一个页面可承载竞品多个路由，项目工作台、资产确认、资产提取、时间线编辑是 `projects/[id].vue` 的内嵌视图，不另建路由。
 
 ## 0. 标记与判定
 

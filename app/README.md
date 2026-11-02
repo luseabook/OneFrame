@@ -51,7 +51,7 @@ node ../_acceptance/compliance-check.cjs               # 仅代码侧合规清�
 - [x] P0.2 容器环境 + zod 配置层（启动即校验）
 - [x] P0.3 packages/shared + 单测
 - [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
-- [x] P1.2 数据层：drizzle schema（16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）
+- [x] P1.2 数据层：drizzle schema（初始 16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）；当前已增至 115 表 / 51 个迁移
 - [x] P1.1 鉴权（mock 短信）：sms-code/login/refresh/logout/me + 邀请码/等待名单 + JWT/HttpOnly Cookie
 - [x] P1.3 任务脊柱：models/quote(batch)/generations/tasks + 冻结-结算 ledger + BullMQ mock 执行器
 - [x] P1.6/P1.7 Web 最小闭环：登录/模型选择/报价/生成/轮询/下载入口（生产构建已浏览器验证）
@@ -85,14 +85,14 @@ node ../_acceptance/compliance-check.cjs               # 仅代码侧合规清�
 - [x] 定妆图转通用资产（自动打 `#角色` 标签，跨项目复用）
 - [x] 输出审核：供应商 review_rejected → 745802（任务状态 7）；LLM 输出同词表审核
 - [x] 账号注销（脱敏 + 30 天清理 + token 即时失效）+ `/settings` 注销入口 + 用户协议/隐私政策/举报页
-- [x] **代码侧 MVP 验收完成**：F1–F8 全部验收点落地，全仓 **89 项**测试通过（api 46 / adapters 9 / shared 13 / db 11 / worker 4 / storage 6），全栈 Compose 冒烟通过（见 `deliverables/software-company/mvp-fullstack-acceptance-2026-10-24.md`）
+- [x] **代码侧 MVP 验收完成**（2026-10-24 时点）：F1–F8 全部验收点落地，当时全仓 **89 项**测试通过（api 46 / adapters 9 / shared 13 / db 11 / worker 4 / storage 6），全栈 Compose 冒烟通过（见 `deliverables/software-company/mvp-fullstack-acceptance-2026-10-24.md`）；当前测试规模已远超该数字
 - [x] **真实支付渠道适配层**：微信支付 APIv3（SHA256-RSA2048 请求签名、Native/H5/JSAPI + 前端 paySign、查单/关单/退款、429/5xx/网络重试、4xx 不重试、统一 11 类 ChannelError）+ 支付宝 RSA2（precreate/page.pay/query/close/refund、网关可配、响应原文验签）+ 渠道工厂（凭据不全 NotConfigured，绝不静默 mock）；订单落 `pay_params` 并支持复用回放
 - [x] **回调正确性**：微信按**原始请求体字节**验签（rawBody）、支付宝 urlencoded 自解析、渠道协议 ack（微信 `{"code":"SUCCESS","message":"成功"}`/支付宝纯文本 `success`，失败真实 401/400/404）、重复回调只入账一次、金额防篡改、`PAYMENT_LIVE=true` 时 mock 端点真实 403；微信平台证书轮换（按 `Wechatpay-Serial` 选公钥，未知 serial 默认拒绝）
 - [x] **退款闭环**：管理端 `POST /ops/admin/orders/:id/refund`（AdminGuard）、仅全额、已退款幂等、余额不足拒绝（保护 `balance == Σdelta`）、渠道退款失败事务回滚（订单保持已支付、积分不冲正）、`kind=refund` 负向流水、迁移 0009；SOP 见 `docs/05-ops/deployment.md §7.2`
 - [x] **生产启动守卫（fail fast）**：api 生产拒绝仓库默认密钥/缺失 `COOKIE_SECURE`/`PAYMENT_LIVE=true` 时凭据不全的渠道（聚合报错、不含密钥值）；worker 生产禁止 `ADAPTER_MODE=mock` 且必须至少一种真实供应商
 - [x] **可运维性**：`/healthz/live`、`/healthz/ready`（依赖不可用 503）、`/metrics`（Prometheus 文本）、request_id 单行 JSON 请求日志（敏感字段脱敏/慢请求告警）、优雅停机、备份/恢复/回滚脚本（`deploy/`）
 - [x] **合规上线清单可执行化**：`docs/06-security-compliance/launch-checklist.md`（外部资质 EXT-01~20 与代码侧 47 项分离）+ `node _acceptance/compliance-check.cjs` 自动核查（PASS/FAIL/SKIP + 证据文件:行 + 非零退出码）
-- [x] **B 型「能真实收钱跑业务」可复跑验收**：`pwsh _acceptance/b-type-acceptance.ps1`（前置服务检查 → 迁移/seed → 全量测试 → typecheck/lint/build → 生产守卫正反例 → 运行态支付+退款闭环 → 回调默认拒绝 → 合规检查）；当前 **299 passed / 1 skipped**，验收 25/25
+- [x] **B 型「能真实收钱跑业务」可复跑验收**：`pwsh _acceptance/b-type-acceptance.ps1`（前置服务检查 → 迁移/seed → 全量测试 → typecheck/lint/build → 生产守卫正反例 → 运行态支付+退款闭环 → 回调默认拒绝 → 合规检查）；脚本基线 **299 passed / 1 skipped**（2026-10-26 时点），验收 25/25；当前 API 全量测试为 **119 文件 / 1399 用例**
 - [ ] 剩余外部依赖：真实 Ark/DeepSeek Key、微信商户号+APIv3 证书、支付宝应用、ICP 经营许可与 AI 双备案、短信签名、内容安全词库（详见 `docs/06-security-compliance/launch-checklist.md` 的外部区）
 - [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）

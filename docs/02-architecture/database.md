@@ -12,6 +12,8 @@
 > **v2.0 · 2026-10-26 · 四新域（F1 契约）**：新增 §12 `canvas`/`agent`/`cam`/`film` 四域表设计（21 张新表 + 3 张既有表 ALTER），
 > 迁移规划 0013–0016；团队复用 `spaces(type=2)` 不另建表（ADR-010）、账本复用 `credit_flows` 不另起（ADR-011）、
 > 任务一律复用 `tasks` 不另造（ADR-003）。逐字段证据见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`。
+> **v2.1 · 2026-11-02 · 现状校正**：`packages/db/src/schema.ts` 已定义 **115 张表**，`apps/api/drizzle` 共 **51 个迁移**；
+> 上文的 16/26/46 表等数字是各批次时点口径，不是当前总量。
 >
 > **v2.3 · 2026-10-26 · 文本类能力 + 价目约束（迁移 0017）**：§2 `model_prices` 补一条**部分唯一索引**
 > `uq_model_prices_per_call(model_id, mode, resolution) WHERE duration_s IS NULL`。
