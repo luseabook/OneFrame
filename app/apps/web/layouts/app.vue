@@ -10,35 +10,40 @@ const { t } = useI18n();
 
 /** `labelKey` 指向语言包 `sidebar.*`；模板里 t(item.labelKey) 渲染 */
 type NavItem = { key: string; to: string; labelKey: string; icon: string; disabled?: boolean };
+/**
+ * 侧栏主分组 = 竞品侧栏的 1:1 顺序（2026-11-02 U9 修）
+ *
+ * 竞品（1424 视口实测截图）：首页 · 剧本创作 · 创作 Agent · 全部项目 · 工具箱。
+ * 之前我们把「剧本创作」指到 `/projects?create=1`（项目列表 + 新建弹窗），
+ * 点下去与菜单名不是同一件事；现在 `/script` 是真正的剧本创作页。
+ * 我们额外的入口（小说改编 / 画布 / 剪辑台 / 广告剧 / 转绘 / 集市 / 知识库 / 创作者中心）
+ * 竞品侧栏没有，全部收进默认折叠的「更多创作」，不占主分组的位置。
+ */
 const mainNav: NavItem[] = [
   { key: "home", to: "/home", labelKey: "sidebar.home", icon: "home" },
-  { key: "create", to: "/projects?create=1", labelKey: "sidebar.create", icon: "script" },
-  // 2026-10-27：小说改编链（第 2 批）落地，入口开放
-  { key: "novel", to: "/novel", labelKey: "sidebar.novel", icon: "script" },
-  // 2026-10-27：创作 Agent（第 4 批）落地（对话页 + Skill 卡市场），置灰改为可进入
+  { key: "create", to: "/script", labelKey: "sidebar.create", icon: "script" },
   { key: "agent", to: "/agent", labelKey: "sidebar.agent", icon: "wand" },
-  // 2026-10-26：canvas 域后端已落地（27 路由 / 11 表），入口开放
-  { key: "canvas", to: "/canvas", labelKey: "sidebar.canvas", icon: "folder" },
-  { key: "projects", to: "/projects", labelKey: "sidebar.projects", icon: "folder" },
-  // 2026-10-27：ReelFlow 剪辑台（出片之后的时间线编辑；对齐竞品 /reelflow/list）
-  { key: "reelflow", to: "/reelflow/list", labelKey: "sidebar.reelflow", icon: "film" },
+  // 竞品「全部项目」= /series-manage，是**形态聚合页**（全部项目/短剧工作流/无限画布/影视项目），
+  // 对应我们的 /works；/projects 只是"短剧工作流"这一类，不再直接挂在菜单上。
+  { key: "projects", to: "/works", labelKey: "sidebar.projects", icon: "folder" },
   { key: "tools", to: "/tools", labelKey: "sidebar.tools", icon: "wand" },
-  // 2026-10-27（第 3 轮）：两种"项目模式"——广告剧与视频转绘。
-  // 它们复用剧本项目的集/分镜/资产骨架，只是在前面多一段专属流程，故放在主分组末尾。
+];
+/** 竞品侧栏没有、但我们已落地的入口：折叠收纳，保证可达但不打乱主分组 */
+const extraNav: NavItem[] = [
+  { key: "novel", to: "/novel", labelKey: "sidebar.novel", icon: "script" },
+  { key: "canvas", to: "/canvas", labelKey: "sidebar.canvas", icon: "folder" },
+  { key: "reelflow", to: "/reelflow/list", labelKey: "sidebar.reelflow", icon: "film" },
   { key: "ad-drama", to: "/ad-drama/create", labelKey: "sidebar.adDrama", icon: "script" },
   { key: "video-redraw", to: "/video-redraw/create", labelKey: "sidebar.videoRedraw", icon: "film" },
+  // D5（2026-11-02）：本项目只要竞品的创作能力，剧本集市属于交易域 → 入口移除（页面保留，不删代码）
+  { key: "knowledge", to: "/knowledge", labelKey: "sidebar.knowledge", icon: "folder" },
+  { key: "creator", to: "/creator-center", labelKey: "sidebar.creator", icon: "wand" },
 ];
 const teamNav: NavItem[] = [
   { key: "assets", to: "/assets", labelKey: "sidebar.assets", icon: "folder" },
-  // 2026-10-26：cam 团队域已落地（后端 17 端点 + /team 页），置灰改为可进入
   { key: "team", to: "/team", labelKey: "sidebar.team", icon: "clock" },
-  // 2026-10-27（第 2 轮 · 第 6 批）：剧本集市与团队知识库
-  { key: "market", to: "/novel-market", labelKey: "sidebar.market", icon: "script" },
-  { key: "knowledge", to: "/knowledge", labelKey: "sidebar.knowledge", icon: "folder" },
-  // 2026-10-27（第 2 轮 · 第 6 批 A）：创作者中心与活动
-  { key: "creator", to: "/creator-center", labelKey: "sidebar.creator", icon: "wand" },
-  { key: "activities", to: "/activities", labelKey: "sidebar.activities", icon: "clock" },
 ];
+const moreOpen = ref(false);
 
 const collapsed = ref(false);
 const menuOpen = ref(false);
@@ -50,10 +55,42 @@ const frozen = computed(() => auth.state.value.credits?.frozen ?? 0);
 const user = computed(() => auth.state.value.user);
 const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUpperCase());
 
+/**
+ * 顶栏左侧页面名（对齐竞品：竞品顶栏左侧是「剧本创作 + 返回旧版」）。
+ * 文件名路由没有别的来源，这里用"路径 → 侧栏 labelKey"的小表兜住；
+ * 命中不到就不显示（不猜标题）。
+ */
+const pageTitle = computed<string>(() => {
+  const path = route.path;
+  const map: Array<[string, string]> = [
+    ["/script", "sidebar.create"],
+    ["/works", "sidebar.projects"],
+    ["/projects", "sidebar.projects"],
+    ["/assets", "sidebar.assets"],
+    ["/team", "sidebar.team"],
+    ["/agent", "sidebar.agent"],
+    ["/tools", "sidebar.tools"],
+    ["/film", "sidebar.film"],
+    ["/reelflow", "sidebar.reelflow"],
+    ["/home", "sidebar.home"],
+  ];
+  const hit = map.find(([p]) => path === p || path.startsWith(p + "/"));
+  return hit ? t(hit[1]) : "";
+});
+
 function isActive(to: string, key?: string): boolean {
   if (!to) return false;
-  if (key === "create") return route.path === "/projects" && String(route.query.create ?? "") === "1";
-  if (key === "projects") return route.path === "/projects" && String(route.query.create ?? "") !== "1";
+  // U9 把「剧本创作」从 /projects?create=1 改成 /script、「全部项目」从 /projects 改成 /works；
+  // 选中态必须跟着新入口走，否则点进页面后菜单不高亮（/projects 仍归「全部项目」）。
+  if (key === "create") return route.path === "/script" || route.path.startsWith("/script/");
+  if (key === "projects") {
+    return (
+      route.path === "/works" ||
+      route.path.startsWith("/works/") ||
+      route.path === "/projects" ||
+      route.path.startsWith("/projects/")
+    );
+  }
   return route.path === to || route.path.startsWith(`${to.split("?")[0]}/`);
 }
 
@@ -127,6 +164,34 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           <span v-if="!collapsed">{{ t(item.labelKey) }}</span>
         </NuxtLink>
 
+        <!-- 更多创作：竞品侧栏没有的入口，默认折叠，避免主分组与竞品对不上 -->
+        <button
+          v-if="!collapsed"
+          type="button"
+          class="more-toggle"
+          :aria-expanded="moreOpen"
+          @click="moreOpen = !moreOpen"
+        >
+          <span>{{ t("sidebar.more") }}</span>
+          <span class="more-caret">{{ moreOpen ? "▾" : "▸" }}</span>
+        </button>
+        <template v-if="moreOpen && !collapsed">
+          <NuxtLink
+            v-for="item in extraNav"
+            :key="item.key"
+            :to="item.to"
+            class="item item--sub"
+            :class="{ active: isActive(item.to, item.key) }"
+          >
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                <circle cx="12" cy="12" r="2.6" />
+              </svg>
+            </span>
+            <span>{{ t(item.labelKey) }}</span>
+          </NuxtLink>
+        </template>
+
         <div class="divider" />
         <p v-if="!collapsed" class="group-label">{{ t("sidebar.group") }}</p>
         <NuxtLink
@@ -165,15 +230,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           <span v-if="!collapsed" class="foot-label">{{ t("sidebar.film") }}</span>
           <span v-if="!collapsed" class="tag-beta">{{ t("sidebar.beta") }}</span>
         </NuxtLink>
-        <span class="item disabled" :title="t('shell.cliMcpHint')">
-          <span class="ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
-              <path d="m7 9.5 2.5 2.5L7 14.5M12 14.5h4" />
-            </svg>
-          </span>
-          <span v-if="!collapsed">MCP &amp; CLI</span>
-        </span>
+        <!-- MCP & CLI 入口（2026-11-02 决策）：竞品是可点按钮，我们还没有 /cli 页。
+             与其留一个置灰的"看起来能点"的位置，先移除入口；等做 /cli 时整块恢复。 -->
         <NuxtLink to="/activities" class="item" :title="t('sidebar.activities')">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -204,7 +262,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 
     <div class="main">
       <header class="topbar">
-        <div class="crumb"><slot name="crumb" /></div>
+        <div class="crumb">
+          <slot name="crumb" />
+          <span v-if="pageTitle" class="crumb-title">{{ pageTitle }}</span>
+        </div>
         <div class="right">
             <span class="mini-pill disabled" :title="t('shell.manualSoon')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -262,6 +323,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                 <div v-if="menuOpen" class="menu">
                   <p class="menu-name">{{ user.nickname }}</p>
                   <NuxtLink to="/works" class="menu-item" @click="menuOpen = false">{{ t("shell.myWorks") }}</NuxtLink>
+                  <!-- 引导重看入口（U6）：首访 coach-mark 可跳过，跳过之后从这里重放 -->
+                  <NuxtLink to="/home?guide=1" class="menu-item" data-testid="menu-guide" @click="menuOpen = false">
+                    {{ t("guide.replay") }}
+                  </NuxtLink>
                   <NuxtLink to="/invite" class="menu-item" @click="menuOpen = false">{{ t("sidebar.invite") }}</NuxtLink>
                   <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">{{ t("shell.tasks") }}</NuxtLink>
                   <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">{{ t("shell.personalSettings") }}</NuxtLink>
@@ -411,6 +476,30 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .item:hover .ico {
   color: var(--text-1);
 }
+.more-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.more-toggle:hover {
+  color: var(--text-1);
+  background: rgb(194 204 241 / 8%);
+}
+.item--sub {
+  padding-left: 14px;
+  font-size: 12.5px;
+  opacity: 0.86;
+}
 .divider {
   height: 1px;
   background: var(--border-1);
@@ -462,6 +551,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+.crumb-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
 }
 .topbar {
   height: 64px;

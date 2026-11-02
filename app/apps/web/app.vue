@@ -7,6 +7,9 @@ const route = useRoute();
 
 const workspacePaths = [
   "/home",
+  // 2026-11-02（U9）：剧本创作页（竞品 /script-manage 的对应页）。
+  // 这份白名单才是壳层的真正开关：只写 definePageMeta({layout:"app"}) 不会生效。
+  "/script",
   "/works",
   "/projects",
   "/tools",
@@ -21,6 +24,8 @@ const workspacePaths = [
   // 约定：新增整页工作台时，**页面文件 + nuxt.config routeRules + 本白名单** 三处一起加，
   // 少一处就会出现「能点开但套错壳」或「直接打开白屏」。
   "/team",
+  // 影视版新建（2026-11-02）：与 /film 同属工作台，漏掉会套营销壳
+  "/film-creation",
   "/novel",
   "/agent",
   "/film",
@@ -43,7 +48,8 @@ const toolPaths = ["/create"];
 // 编辑器 100dvh 的世界坐标与框选范围会被挤变形（参照站 /canvas 同样无侧栏）。
 // ReelFlow 剪辑台同理：三区布局（左栏 290 + 播放器 + 底部时间线 150）是固定视口高，
 // 套上 240 侧栏 + 64 顶栏后播放区只剩不到 500px 宽，与竞品实测（1424 视口铺满）差太远。
-const blankPaths = ["/canvas", "/reelflow"];
+// /agent/bigscreen 是投屏用的一屏展示：裸壳（无侧栏/顶栏）才够"大屏"
+const blankPaths = ["/canvas", "/reelflow", "/agent/bigscreen"];
 /**
  * `/projects/:id`（单集分镜工作台）也走裸壳 —— 对齐竞品 `/series-manage/episode/:id`：
  * 竞品该页无侧栏、单层 64px 顶栏，三列 160/592/640 铺满 1424。套 app 壳会多出

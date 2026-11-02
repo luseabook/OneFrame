@@ -3,7 +3,8 @@
 // 左侧上传剧本 / 粘贴文本；右侧项目名称、剧目类型、画面比例；底部「立即创作」
 import type { ProjectDto } from "~/types/api";
 
-const props = defineProps<{ open: boolean }>();
+// initialTitle：从「剧本创作」页的灵感输入框带过来的初值（截到 50 字，与 title 上限一致）
+const props = defineProps<{ open: boolean; initialTitle?: string; initialDramaType?: number }>();
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
   (e: "created", project: ProjectDto): void;
@@ -11,6 +12,8 @@ const emit = defineEmits<{
 
 const api = useApi();
 const toast = useToast();
+// 五语言：弹窗内所有文案（含校验/失败提示）都走语言包，组件里不再留中文常量
+const { t } = useI18n();
 
 const title = ref("");
 const dramaType = ref(1);
@@ -27,11 +30,11 @@ const error = ref("");
 const dragging = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 
-const dramaOptions = [
-  { value: 1, label: "国内仿真人剧", img: "/images/drama/domestic-live.jpg" },
-  { value: 2, label: "海外仿真人剧", img: "/images/drama/overseas-live.jpg" },
-  { value: 3, label: "2D/3D动漫", img: "/images/drama/anime-2d3d.jpg" },
-];
+const dramaOptions = computed(() => [
+  { value: 1, label: t("projectModal.drama.domestic"), img: "/images/drama/domestic-live.jpg" },
+  { value: 2, label: t("projectModal.drama.overseas"), img: "/images/drama/overseas-live.jpg" },
+  { value: 3, label: t("projectModal.drama.anime"), img: "/images/drama/anime-2d3d.jpg" },
+]);
 const ratioOptions = [
   { value: "9:16" as const, label: "9:16", kind: "phone" },
   { value: "16:9" as const, label: "16:9", kind: "monitor" },
@@ -44,8 +47,10 @@ const titleChars = computed(() => title.value.length);
 const canSubmit = computed(() => titleChars.value > 0 && titleChars.value <= 50 && !submitting.value);
 
 function reset(): void {
-  title.value = "";
-  dramaType.value = 1;
+  // 带初值时预填标题：用户在剧本创作页已经写过一句话，不该再让他重打一遍
+  title.value = (props.initialTitle ?? "").trim().slice(0, 50);
+  // 剧本创作页的「题材」下拉决定剧目类型初值（国内 / 海外 / 动漫）
+  dramaType.value = props.initialDramaType ?? 1;
   ratio.value = "9:16";
   fileText.value = "";
   fileName.value = "";
@@ -79,11 +84,11 @@ async function parseFile(file: File): Promise<void> {
   error.value = "";
   warnings.value = [];
   if (!/\.(txt|md|csv|docx|xlsx|doc)$/i.test(file.name)) {
-    error.value = "仅支持 xlsx/xls/csv/doc/docx/txt/md 格式";
+    error.value = t("projectModal.fileFormat");
     return;
   }
   if (file.size > 8 * 1024 * 1024) {
-    error.value = "文件超过 8MB，请拆分后上传或粘贴文本";
+    error.value = t("projectModal.fileTooLarge");
     return;
   }
   parsing.value = true;
@@ -95,7 +100,7 @@ async function parseFile(file: File): Promise<void> {
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result ?? ""));
-      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onerror = () => reject(new Error(t("projectModal.readFailed")));
       reader.readAsDataURL(file);
     });
     const parsed = await api.post<{ text: string; format: string; chars: number; warnings: string[] }>(
@@ -106,12 +111,12 @@ async function parseFile(file: File): Promise<void> {
     fileFormat.value = parsed.format;
     warnings.value = parsed.warnings ?? [];
     if (!fileText.value.trim()) {
-      error.value = "未能从文件中提取到文本，请检查文件内容或改用粘贴文本";
+      error.value = t("projectModal.emptyText");
       fileName.value = "";
     }
   } catch (e) {
     fileName.value = "";
-    error.value = e instanceof Error ? e.message : "文件解析失败";
+    error.value = e instanceof Error ? e.message : t("projectModal.parseFailed");
   } finally {
     parsing.value = false;
   }
@@ -153,11 +158,11 @@ function togglePaste(): void {
 async function submit(): Promise<void> {
   error.value = "";
   if (!title.value.trim()) {
-    error.value = "请填写项目名称";
+    error.value = t("projectModal.nameRequired");
     return;
   }
   if (titleChars.value > 50) {
-    error.value = "项目名称不能超过 50 字";
+    error.value = t("projectModal.nameTooLong");
     return;
   }
   submitting.value = true;
@@ -171,11 +176,11 @@ async function submit(): Promise<void> {
       source_text: text,
       ...(fileName.value ? { source_file_name: fileName.value } : {}),
     });
-    toast.success("项目已创建，开始创作吧");
+    toast.success(t("projectModal.created"));
     emit("created", project);
     emit("update:open", false);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "创建失败";
+    error.value = e instanceof Error ? e.message : t("projectModal.failed");
   } finally {
     submitting.value = false;
   }
@@ -186,19 +191,19 @@ async function submit(): Promise<void> {
   <Teleport to="body">
     <Transition name="modal-fade">
       <div v-if="open" class="mask" @click.self="close">
-        <section class="dialog" role="dialog" aria-modal="true" aria-label="新建项目">
+        <section class="dialog" role="dialog" aria-modal="true" :aria-label="t('projectModal.aria')">
           <header class="head">
             <div>
-              <h2>新建项目</h2>
-              <p class="sub">项目设置将决定后续所有剧集的创作风格与画面比例，请谨慎选择。</p>
+              <h2>{{ t("projectModal.title") }}</h2>
+              <p class="sub">{{ t("projectModal.subtitle") }}</p>
             </div>
-            <button class="close" type="button" aria-label="关闭" @click="close">✕</button>
+            <button class="close" type="button" :aria-label="t('projectModal.close')" @click="close">✕</button>
           </header>
 
           <div class="body">
             <!-- 左：上传剧本 -->
             <div class="col left">
-              <label class="label">上传剧本</label>
+              <label class="label">{{ t("projectModal.uploadLabel") }}</label>
               <div
                 class="dropzone"
                 :class="{ dragging, filled: !!fileName }"
@@ -219,8 +224,8 @@ async function submit(): Promise<void> {
                       <path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15" />
                     </svg>
                   </span>
-                  <p class="drop-title">请上传剧本或分镜单，也可以从剧本库选择或粘贴文本</p>
-                  <p class="drop-hint">支持 xlsx/xls/csv/doc/docx/txt/md 格式</p>
+                  <p class="drop-title">{{ t("projectModal.uploadTitle") }}</p>
+                  <p class="drop-hint">{{ t("projectModal.uploadHint") }}</p>
                 </template>
 
                 <template v-else>
@@ -229,27 +234,30 @@ async function submit(): Promise<void> {
                     <div class="file-meta">
                       <p class="file-name" :title="fileName">{{ fileName }}</p>
                       <p class="file-sub">
-                        <template v-if="parsing">解析中…</template>
+                        <template v-if="parsing">{{ t("projectModal.parsing") }}</template>
                         <template v-else>
-                          {{ fileFormat ? fileFormat.toUpperCase() : "文件" }} · {{ scriptChars }} 字
+                          {{ fileFormat ? fileFormat.toUpperCase() : t("projectModal.fileFallback") }} ·
+                          {{ t("projectModal.chars", { count: scriptChars }) }}
                         </template>
                       </p>
                     </div>
-                    <button class="file-remove" type="button" :disabled="parsing" @click.stop="removeFile">移除</button>
+                    <button class="file-remove" type="button" :disabled="parsing" @click.stop="removeFile">
+                      {{ t("projectModal.remove") }}
+                    </button>
                   </div>
                   <p v-if="warnings.length" class="warn">{{ warnings.join("；") }}</p>
                 </template>
               </div>
 
               <button class="link" type="button" @click.stop="togglePaste">
-                {{ pasteMode ? "改用上传文件" : "没有文件？直接粘贴文本" }}
+                {{ pasteMode ? t("projectModal.toUpload") : t("projectModal.toPaste") }}
               </button>
 
               <textarea
                 v-if="pasteMode"
                 v-model="pasteText"
                 class="paste"
-                placeholder="粘贴小说/剧本内容（最多 5 万字）"
+                :placeholder="t('projectModal.pastePlaceholder')"
                 maxlength="50000"
               />
               <p v-if="pasteMode" class="paste-count">{{ pasteText.length }}/50000</p>
@@ -257,21 +265,21 @@ async function submit(): Promise<void> {
 
             <!-- 右：项目设置 -->
             <div class="col right">
-              <label class="label">项目名称</label>
+              <label class="label">{{ t("projectModal.nameLabel") }}</label>
               <div class="title-wrap">
                 <input
                   v-model="title"
                   class="input"
                   maxlength="50"
-                  placeholder="请输入项目名称"
+                  :placeholder="t('projectModal.namePlaceholder')"
                   @keyup.enter="submit"
                 />
                 <span class="counter" :class="{ full: titleChars >= 50 }">{{ titleChars }}/50</span>
               </div>
 
               <label class="label type-label">
-                剧目类型
-                <span class="info" title="影响后续角色风格与出片模型">?</span>
+                {{ t("projectModal.dramaLabel") }}
+                <span class="info" :title="t('projectModal.dramaHint')">?</span>
               </label>
               <div class="types">
                 <button
@@ -288,8 +296,8 @@ async function submit(): Promise<void> {
               </div>
 
               <label class="label type-label">
-                画面比例
-                <span class="info" title="竖屏 9:16 适合短视频；横屏 16:9 适合长视频">?</span>
+                {{ t("projectModal.ratioLabel") }}
+                <span class="info" :title="t('projectModal.ratioHint')">?</span>
               </label>
               <div class="ratios">
                 <button
@@ -320,7 +328,7 @@ async function submit(): Promise<void> {
 
           <footer class="foot">
             <button class="submit" type="button" :disabled="!canSubmit" @click="submit">
-              {{ submitting ? "创建中…" : "立即创作" }}
+              {{ submitting ? t("projectModal.submitting") : t("projectModal.submit") }}
             </button>
           </footer>
         </section>

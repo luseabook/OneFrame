@@ -79,6 +79,8 @@ export default defineNuxtConfig({
     "/create/**": { ssr: false },
     // ReelFlow 剪辑台（列表 + 编辑器）同一类"登录后才可用"的纯客户端页面：
     // 时间线/分镜数据全部来自登录态接口，服务端首帧必然与客户端不一致。
+    // 剧本创作（2026-11-02 U9）：竞品 /script-manage 的对应页，首屏全来自登录态接口
+    "/script": { ssr: false },
     "/reelflow": { ssr: false },
     "/reelflow/**": { ssr: false },
     // 新增三个"登录后才可用"的整页应用（第 2/4/5 批）：小说改编链、创作 Agent、影视版。
@@ -87,7 +89,11 @@ export default defineNuxtConfig({
     "/novel": { ssr: false },
     "/novel/**": { ssr: false },
     "/agent": { ssr: false },
+    // Agent 子页（editor / bigscreen）：与 /admin/**、/team/** 同理，子路径必须单独列
+    "/agent/**": { ssr: false },
     "/film": { ssr: false },
+    // 影视版新建（竞品 /film-creation 的对应页）：独立顶层路由，必须单独登记
+    "/film-creation": { ssr: false },
     "/film/**": { ssr: false },
     // 第 2 轮新增（第 6 批生态 + 收尾批次）：同样是"登录后整页应用"。
     // /activities 与 /novel-market 允许游客浏览列表（但下单/报名要登录），
