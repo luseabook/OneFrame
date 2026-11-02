@@ -208,7 +208,10 @@ export class TasksService {
             const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
             if (!shouldSign || !isStorageKey || index >= 8) return item;
             try {
-              return { ...item, url: await this.storage.signDownload(item.uri, 3600) };
+              return {
+                ...item,
+                url: await this.storage.signDownload(spaceId, item.uri, 3600),
+              };
             } catch {
               // 签名失败不影响详情可用性（前端可退化为 download-url 接口）
               return item;
@@ -397,10 +400,10 @@ export class TasksService {
    * 批量下载的合同是"单个结果失败不阻断整包"，一条坏 uri 不能把整包打成 400101。
    * 拒绝原因进结构化日志（见 `logResultSkip`），不留静默吞掉的路径。
    */
-  private async readResultUri(uri: string): Promise<Buffer | null> {
+  private async readResultUri(spaceId: string, uri: string): Promise<Buffer | null> {
     if (/^https?:\/\//i.test(uri)) return fetchGuarded(uri, URI_POLICY, DOWNLOAD_LIMITS);
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
-    return this.storage.read(uri);
+    return this.storage.read(spaceId, uri);
   }
 
   /**
@@ -466,7 +469,7 @@ export class TasksService {
         const uri = results[i]?.uri;
         if (!uri) continue;
         try {
-          const data = await this.readResultUri(uri);
+          const data = await this.readResultUri(spaceId, uri);
           if (!data) continue;
           const ext = uri.split(".").pop()?.toLowerCase() || "bin";
           const name = `task-${row.id}-${i + 1}.${ext}`;
@@ -485,8 +488,8 @@ export class TasksService {
     zip.file("manifest.json", JSON.stringify({ generated_at: new Date().toISOString(), tasks: manifest }, null, 2));
     const buffer = await zip.generateAsync({ type: "nodebuffer" });
     const key = `u/${spaceId}/downloads/${newId()}.zip`;
-    await this.storage.put(key, buffer, "application/zip");
-    const url = await this.storage.signDownload(key, 3600);
+    await this.storage.put(spaceId, key, buffer, "application/zip");
+    const url = await this.storage.signDownload(spaceId, key, 3600);
     return { url, filename: `tasks-${rows.length}-${count}.zip`, count, expires_in: 3600 };
   }
 
@@ -497,7 +500,9 @@ export class TasksService {
       : [];
     const item = results[index - 1];
     if (!item?.uri) throw new AppError(ErrorCode.NOT_FOUND, "result not found");
-    return this.signResult(row.id, index, item.uri);
+    const signed = await this.signResult(spaceId, row.id, index, item.uri);
+    if (!signed.url) throw new AppError(ErrorCode.NOT_FOUND, "result object not found");
+    return signed;
   }
 
   /**
@@ -524,16 +529,27 @@ export class TasksService {
         skipped += 1;
         continue;
       }
-      const signed = await this.signResult(row.id, i + 1, uri);
-      items.push({ index: i + 1, ...signed });
+      const signed = await this.signResult(spaceId, row.id, i + 1, uri);
+      if (!signed.url) {
+        skipped += 1;
+        continue;
+      }
+      items.push({
+        index: i + 1,
+        url: signed.url,
+        filename: signed.filename,
+        expires_in: signed.expires_in,
+      });
     }
     return { task_id: String(row.id), count: items.length, skipped, items, expires_in: 86_400 };
   }
 
   /** 存储 key（无协议前缀）→ 预签名；mock/外部 URL 原样返回 */
-  private async signResult(taskId: bigint, index: number, uri: string) {
+  private async signResult(spaceId: string, taskId: bigint, index: number, uri: string) {
     const isStorageKey = !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri);
-    const url = isStorageKey ? await this.storage.signDownload(uri, 86_400) : uri;
+    const url = isStorageKey
+      ? await this.storage.signDownload(spaceId, uri, 86_400).catch(() => null)
+      : uri;
     const ext = uri.split(".").pop()?.toLowerCase() || "bin";
     return { url, filename: `task-${taskId}-${index}.${ext}`, expires_in: 86_400 };
   }
@@ -587,7 +603,9 @@ export class TasksService {
       const isStorageKey = item.uri && !/^[a-z][a-z0-9+.-]*:\/\//i.test(item.uri);
       const url = item.uri
         ? isStorageKey
-          ? await this.storage.signDownload(item.uri, 3600)
+          ? await this.storage
+              .signDownload(String(row.spaceId), item.uri, 3600)
+              .catch(() => "")
           : item.uri
         : "";
       results.push({
@@ -853,7 +871,7 @@ export class TasksService {
       const uri = results[i]?.uri;
       if (!uri) continue;
       try {
-        const data = await this.readResultUri(uri);
+        const data = await this.readResultUri(String(share.spaceId), uri);
         if (!data) continue;
         const ext = uri.split(".").pop()?.toLowerCase() || "bin";
         const name = `result-${i + 1}.${ext}`;
@@ -881,8 +899,8 @@ export class TasksService {
     );
     const buffer = await zip.generateAsync({ type: "nodebuffer" });
     const key = `u/${String(share.spaceId)}/shares/${newId()}.zip`;
-    await this.storage.put(key, buffer, "application/zip");
-    const url = await this.storage.signDownload(key, 3600);
+    await this.storage.put(String(share.spaceId), key, buffer, "application/zip");
+    const url = await this.storage.signDownload(String(share.spaceId), key, 3600);
     return {
       url,
       filename: `share-${String(row.id)}-${files.length}.zip`,

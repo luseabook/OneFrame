@@ -32,7 +32,7 @@ describe("outbound uri resolution (P10)", () => {
   it("mock mode: raw keys pass through unchanged and sign is never called", async () => {
     const sign = vi.fn(async (key: string) => `https://cdn.test/${key}`);
     const input = rawInput();
-    const out = await resolveOutboundUris(input, { adapterMode: "mock", sign });
+    const out = await resolveOutboundUris(input, { adapterMode: "mock", spaceId: "1", sign });
     expect(sign).not.toHaveBeenCalled();
     expect(out).toBe(input); // 同一对象，mock 零改动
     expect(out.reference_uris).toEqual(["u/1/assets/a.png"]);
@@ -46,7 +46,12 @@ describe("outbound uri resolution (P10)", () => {
       first_frame_uri: "u/1/assets/f.png",
       last_frame_uri: null as string | null,
     };
-    const out = await resolveOutboundUris(input, { adapterMode: "real", sign, ttlSeconds: 7200 });
+    const out = await resolveOutboundUris(input, {
+      adapterMode: "real",
+      spaceId: "1",
+      sign,
+      ttlSeconds: 7200,
+    });
 
     expect(sign).toHaveBeenCalledTimes(2); // 仅两个 storage key（https 与空串不签）
     expect(out.reference_uris).toEqual([
@@ -68,7 +73,7 @@ describe("outbound uri resolution (P10)", () => {
     });
     const out = await resolveOutboundUris(
       { prompt: "p", reference_uris: [], first_frame_uri: "", last_frame_uri: undefined },
-      { adapterMode: "real", sign },
+      { adapterMode: "real", spaceId: "1", sign },
     );
     expect(out.reference_uris).toEqual([]);
     expect(out.first_frame_uri).toBe("");
@@ -81,7 +86,7 @@ describe("outbound uri resolution (P10)", () => {
     const sign = vi.fn(async (key: string) => `https://cdn.test/${key}`);
     const out = await resolveOutboundUris(
       { prompt: "角色定妆图", reference_uris: ["u/1/portraits/p.png"] },
-      { adapterMode: "real", sign },
+      { adapterMode: "real", spaceId: "1", sign },
     );
     expect(sign).toHaveBeenCalledWith("u/1/portraits/p.png", 21_600);
     expect(out.reference_uris).toEqual(["https://cdn.test/u/1/portraits/p.png"]);
@@ -94,7 +99,10 @@ describe("outbound uri resolution (P10)", () => {
     );
     let caught: unknown;
     try {
-      await resolveOutboundUris({ reference_uris: ["u/1/assets/a.png"] }, { adapterMode: "real", sign, logger });
+      await resolveOutboundUris(
+        { reference_uris: ["u/1/assets/a.png"] },
+        { adapterMode: "real", spaceId: "1", sign, logger },
+      );
     } catch (error) {
       caught = error;
     }
@@ -114,14 +122,28 @@ describe("outbound uri resolution (P10)", () => {
     await expect(
       resolveOutboundUris(
         { first_frame_uri: "http://localhost:3000/x.png" },
-        { adapterMode: "real", sign },
+        { adapterMode: "real", spaceId: "1", sign },
       ),
     ).rejects.toBeInstanceOf(OutboundUriError);
     expect(sign).not.toHaveBeenCalled(); // http(s) 透传不签名
 
     await expect(
-      resolveOutboundUris({ reference_uris: ["mock://results/x.mp4"] }, { adapterMode: "real", sign }),
+      resolveOutboundUris(
+        { reference_uris: ["mock://results/x.mp4"] },
+        { adapterMode: "real", spaceId: "1", sign },
+      ),
     ).rejects.toBeInstanceOf(OutboundUriError);
+  });
+
+  it("real mode: rejects a storage key owned by another space", async () => {
+    const sign = vi.fn(async (key: string) => `https://cdn.test/${key}`);
+    await expect(
+      resolveOutboundUris(
+        { reference_uris: ["u/2/assets/other.png"] },
+        { adapterMode: "real", spaceId: "1", sign },
+      ),
+    ).rejects.toThrow(/another space/);
+    expect(sign).not.toHaveBeenCalled();
   });
 
   it("isLoopbackUrl detects loopback hosts only", () => {

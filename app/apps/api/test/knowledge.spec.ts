@@ -102,8 +102,8 @@ describe("knowledge e2e", () => {
       id,
       spaceId: BigInt(spaceId),
       kind: "image",
-      uri: `s3://spec/${String(id)}.png`,
-      previewUri: `s3://spec/${String(id)}_thumb.png`,
+      uri: `u/${spaceId}/spec/${String(id)}.png`,
+      previewUri: `u/${spaceId}/spec/${String(id)}_thumb.png`,
       name,
       tags: [],
     });

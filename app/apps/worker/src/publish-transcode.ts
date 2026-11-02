@@ -22,7 +22,7 @@ import {
   runPublishTranscode,
 } from "@app/shared";
 import type { PublishTranscodeDeps, PublishTranscodeOutcome } from "@app/shared";
-import type { StorageDriver } from "@app/storage";
+import { assertKeyInSpace, type StorageDriver } from "@app/storage";
 
 export interface PublishTranscodeJobData {
   publicationId: string;
@@ -101,6 +101,7 @@ async function uniqueShareToken(db: Db): Promise<string> {
 
 export function buildPublishTranscodeDeps(
   deps: PublishTranscodeJobDeps,
+  spaceId: string,
 ): PublishTranscodeDeps {
   const { db, storage } = deps;
   const staleMinutes = deps.staleMinutes ?? PUB_TRANSCODE_STALE_MINUTES;
@@ -151,9 +152,9 @@ export function buildPublishTranscodeDeps(
         .returning({ id: timelinePublications.id });
       return claimed.length > 0;
     },
-    readSource: (key: string) => storage.read(key),
+    readSource: (key: string) => storage.read(assertKeyInSpace(spaceId, key)),
     putFile: async (key: string, buffer: Buffer) => {
-      await storage.put(key, buffer, "video/mp4");
+      await storage.put(assertKeyInSpace(spaceId, key), buffer, "video/mp4");
     },
     nextShareToken: () => uniqueShareToken(db),
     markReady: async (id: string, patch) => {
@@ -217,7 +218,7 @@ export async function runPublishTranscodeJob(
   data: PublishTranscodeJobData,
 ): Promise<PublishTranscodeOutcome> {
   const { publicationId, spaceId, sourceKey } = data;
-  const outcome = await runPublishTranscode(buildPublishTranscodeDeps(deps), {
+  const outcome = await runPublishTranscode(buildPublishTranscodeDeps(deps, spaceId), {
     publicationId,
     spaceId,
     sourceKey,

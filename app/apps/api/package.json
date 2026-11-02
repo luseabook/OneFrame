@@ -11,7 +11,8 @@
     "test": "vitest run --no-file-parallelism --passWithNoTests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "db:migrate-film-exports-keys": "tsx src/db/migrate-film-exports-keys.ts"
   },
   "dependencies": {
     "@app/db": "workspace:*",

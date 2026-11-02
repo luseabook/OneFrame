@@ -275,13 +275,16 @@ export class WorksService {
     const [rowsResult, countResult] = await Promise.all([db.execute(rowsQuery), db.execute(countQuery)]);
     const rows = (((rowsResult as unknown) as { rows?: WorkshopRow[] }).rows ?? []) as WorkshopRow[];
     const total = Number((((countResult as unknown) as { rows?: Array<{ count: number }> }).rows ?? [])[0]?.count ?? 0);
-    return { rows: await Promise.all(rows.map((row) => this.workshopDto(row))), total };
+    return {
+      rows: await Promise.all(rows.map((row) => this.workshopDto(spaceId, row))),
+      total,
+    };
   }
 
-  private async workshopDto(row: WorkshopRow) {
+  private async workshopDto(spaceId: string, row: WorkshopRow) {
     const coverKey = row.cover_uri ?? row.portrait_uri ?? null;
     const coverUrl = coverKey
-      ? await this.storage.signDownload(coverKey, 3600).catch(() => null)
+      ? await this.storage.signDownload(spaceId, coverKey, 3600).catch(() => null)
       : null;
     // 竞品两级分类的**投影**（不落列）：由 kind + project_mode 反推，映射表见 @app/shared/project-category
     const category = workCategoryOf({ kind: "workshop", projectMode: row.project_mode });
@@ -376,7 +379,9 @@ export class WorksService {
     const list = await Promise.all(
       rows.map(async (row) => {
         const coverKey = row.cover_uri ?? null;
-        const coverUrl = coverKey ? await this.storage.signDownload(coverKey, 3600).catch(() => null) : null;
+        const coverUrl = coverKey
+          ? await this.storage.signDownload(spaceId, coverKey, 3600).catch(() => null)
+          : null;
         return {
           id: row.id,
           kind: "canvas" as const,
@@ -420,5 +425,4 @@ export class WorksService {
     return { rows: list, total };
   }
 }
-
 

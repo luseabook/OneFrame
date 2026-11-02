@@ -123,7 +123,7 @@ export class CanvasDownloadService {
       const files: string[] = [];
       for (const [index, uri] of uris.entries()) {
         try {
-          const data = await this.readUri(uri);
+          const data = await this.readUri(spaceId, uri);
           if (!data) continue;
           const ext = (uri.split("?")[0] ?? "").split(".").pop()?.toLowerCase() || "bin";
           const filename = `${node.nodeType}-${node.id}-${index + 1}.${ext}`;
@@ -160,7 +160,7 @@ export class CanvasDownloadService {
     );
     const buffer = await zip.generateAsync({ type: "nodebuffer" });
     const objectKey = `u/${spaceId}/canvas-downloads/${newId()}.zip`;
-    await this.storage.put(objectKey, buffer, "application/zip");
+    await this.storage.put(spaceId, objectKey, buffer, "application/zip");
 
     const [row] = await db
       .insert(canvasDownloadLists)
@@ -243,7 +243,7 @@ export class CanvasDownloadService {
         download_list_id: listId,
       });
     }
-    const url = await this.storage.signDownload(row.objectKey, URL_TTL_S);
+    const url = await this.storage.signDownload(spaceId, row.objectKey, URL_TTL_S);
     return { url, filename: row.filename, file_count: row.fileCount, expires_in: URL_TTL_S };
   }
 
@@ -272,13 +272,13 @@ export class CanvasDownloadService {
    * 其它带协议的形态（`mock://` 等）不是真实文件，返回 null 由调用方跳过；
    * 无协议的相对 key 才是自有存储对象，走 `storage.read`（不经过网络）。
    */
-  private async readUri(uri: string): Promise<Buffer | null> {
+  private async readUri(spaceId: string, uri: string): Promise<Buffer | null> {
     if (/^https?:\/\//i.test(uri)) {
       return fetchGuarded(uri, URI_POLICY, DOWNLOAD_LIMITS);
     }
     // 其他协议（mock:// 等）不是真实文件，跳过而不是塞一个空文件进去
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
-    return this.storage.read(uri);
+    return this.storage.read(spaceId, uri);
   }
 
   /**

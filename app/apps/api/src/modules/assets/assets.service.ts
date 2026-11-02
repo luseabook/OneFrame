@@ -48,7 +48,7 @@ export class AssetsService {
     const id = newId();
     const ext = EXT[input.content_type] ?? "bin";
     const key = `u/${spaceId}/assets/${id}/orig.${ext}`;
-    await this.storage.put(key, data, input.content_type);
+    await this.storage.put(spaceId, key, data, input.content_type);
     const [row] = await db
       .insert(assets)
       .values({
@@ -275,7 +275,10 @@ export class AssetsService {
       kind: row.kind,
       name: row.name,
       uri: row.uri,
-      url: await this.storage.signDownload(row.uri, 3600),
+      // 历史坏 key 只让该条 URL 为空，不让整页列表 500；写入侧仍由 assertOwnedKey 拒绝。
+      url: await this.storage
+        .signDownload(String(row.spaceId), row.uri, 3600)
+        .catch(() => null),
       source_task_id: row.sourceTaskId ? String(row.sourceTaskId) : null,
       tags: row.tags,
       deleted_at: row.deletedAt?.toISOString() ?? null,

@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { spaceIdOfStorageKey } from "@app/storage";
 import { createHash } from "node:crypto";
 import { and, asc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import { abExperiments, abHits, homeConfigs, promoSlots, taskEvents, taskShares, tasks } from "@app/db";
@@ -247,12 +248,16 @@ export class HomeService {
     return out;
   }
 
-  /** 图片可能存的是 storage key（`u/...`，会过期）或外部 URL；前者现签，后者原样 */
+  /**
+   * 运营位是平台级内容（promo_slots 没有 space_id），不是租户对象。
+   * 这里仍要求 key 是合法的 `u/<space>/...`，按 key 声明的空间签名；
+   * 能进入这张表的只有 AdminGuard 保护的运营后台，不能把该路径当租户接口使用。
+   */
   private async signImage(uri: string | null): Promise<string | null> {
     if (!uri) return null;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return uri;
     try {
-      return await this.storage.signDownload(uri, 86_400);
+      return await this.storage.signDownload(spaceIdOfStorageKey(uri), uri, 86_400);
     } catch {
       return null;
     }

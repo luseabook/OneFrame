@@ -202,7 +202,7 @@ export class ParseService {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, input.episode_id);
     const key = input.backup_key?.trim() || this.latestKey(spaceId, episode.id);
-    const backup = await this.readBackup(key);
+    const backup = await this.readBackup(spaceId, key);
 
     const current = await this.loadStoryboards(episode.id);
     if (input.dry_run === true) {
@@ -277,7 +277,7 @@ export class ParseService {
     const key = this.latestKey(spaceId, episode.id);
     let backup: ParseBackup;
     try {
-      backup = await this.readBackup(key);
+      backup = await this.readBackup(spaceId, key);
     } catch {
       throw new AppError(
         ErrorCode.INVALID_PARAM,
@@ -448,15 +448,20 @@ export class ParseService {
     const body = Buffer.from(JSON.stringify(backup), "utf8");
     const ts = backup.created_at.replace(/[:.]/g, "-");
     const snapshotKey = `u/${spaceId}/parse-backups/${episode.id}/${ts}.json`;
-    await this.storage.put(snapshotKey, body, "application/json");
-    await this.storage.put(this.latestKey(spaceId, episode.id), body, "application/json");
+    await this.storage.put(spaceId, snapshotKey, body, "application/json");
+    await this.storage.put(
+      spaceId,
+      this.latestKey(spaceId, episode.id),
+      body,
+      "application/json",
+    );
     return snapshotKey;
   }
 
-  private async readBackup(key: string): Promise<ParseBackup> {
+  private async readBackup(spaceId: string, key: string): Promise<ParseBackup> {
     let buffer: Buffer;
     try {
-      buffer = await this.storage.read(key);
+      buffer = await this.storage.read(spaceId, key);
     } catch {
       throw new AppError(ErrorCode.INVALID_PARAM, "parse backup not found", {
         field: "backup_key",

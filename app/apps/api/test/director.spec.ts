@@ -24,6 +24,7 @@ let app: NestFastifyApplication;
 let token = "";
 let otherToken = "";
 let permToken = "";
+let spaceId = "";
 /** 被踢出 space 的用户（用来验证 403；同时也是"另一个真实用户"用于协作者昵称/预设归属） */
 let permUserId = "";
 let projectId = "";
@@ -135,6 +136,7 @@ beforeAll(async () => {
 
   token = (await loginNewUser(1)).token;
   otherToken = (await loginNewUser(2)).token;
+  spaceId = String((await inject("GET", "/me")).data.space.id);
   // 第三个用户专门用来验"非成员 403"：建完后把它的 space_members 行删掉
   const perm = await loginNewUser(3);
   permToken = perm.token;
@@ -181,7 +183,7 @@ describe("场景快照：保存 → 读回 → 列表", () => {
       name: "雨夜对峙",
       payload,
       // 缩略图存的是 /assets/upload 返回的 storage key，读时应被签名成可访问 URL
-      thumbnail_uri: "u/1/assets/test/orig.png",
+      thumbnail_uri: `u/${spaceId}/assets/test/orig.png`,
     });
     expect(created.code, created.msg).toBe(0);
     expect(created.data.version).toBe(1);
@@ -374,7 +376,7 @@ describe("乐观锁：版本冲突 746002", () => {
     const res = await inject("PUT", `/director/scenes/${sceneId}`, {
       version: 2,
       name: "只改名",
-      thumbnail_uri: "u/1/assets/test/orig.png",
+      thumbnail_uri: `u/${spaceId}/assets/test/orig.png`,
     });
     expect(res.code, res.msg).toBe(0);
     expect(res.data.version).toBe(3);
@@ -564,4 +566,3 @@ describe("权限：非 space 成员 403", () => {
     expect(res.code).toBe(403101);
   });
 });
-

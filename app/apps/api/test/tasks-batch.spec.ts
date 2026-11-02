@@ -68,7 +68,7 @@ async function seedTask(status: number, dedupeSuffix: string): Promise<string> {
     progress: status === TaskStatus.SUCCEEDED ? 100 : 0,
     results:
       status === TaskStatus.SUCCEEDED
-        ? [{ uri: "u/seed/result.png", preview_uri: "u/seed/result.png" }]
+        ? [{ uri: `u/${spaceId}/seed/result.png`, preview_uri: `u/${spaceId}/seed/result.png` }]
         : null,
     creditsFrozen: status === TaskStatus.SUCCEEDED ? 0 : 10,
     creditsSettled: status === TaskStatus.SUCCEEDED ? 10 : 0,
@@ -170,7 +170,7 @@ describe("task/result 批量快照", () => {
     expect(res.body.data.items).toHaveLength(1);
     expect(res.body.data.items[0].task_id).toBe(taskId);
     expect(res.body.data.items[0].status).toBe(TaskStatus.SUCCEEDED);
-    expect(res.body.data.items[0].results[0].uri).toBe("u/seed/result.png");
+    expect(res.body.data.items[0].results[0].uri).toBe(`u/${spaceId}/seed/result.png`);
     expect(res.body.data.missing).toEqual(["999999999999999999"]);
   });
 
@@ -298,9 +298,9 @@ describe("tasks/:id/download（竞品形状：一次拿全部结果 URL）", () 
       status: TaskStatus.SUCCEEDED,
       progress: 100,
       results: [
-        { uri: "u/seed/result.png", preview_uri: "u/seed/result.png" },
+        { uri: `u/${spaceId}/seed/result.png`, preview_uri: `u/${spaceId}/seed/result.png` },
         { uri: "https://cdn.example.test/remote.mp4" },
-        { preview_uri: "u/seed/preview-only.png" },
+        { preview_uri: `u/${spaceId}/seed/preview-only.png` },
       ],
       creditsFrozen: 0,
       creditsSettled: 10,

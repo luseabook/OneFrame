@@ -73,7 +73,9 @@ export class FilmExportsService {
         format: r.format,
         file_uri: r.fileUri,
         // 现签 URL 而不是存签名 URL（存下来会随过期时间腐烂，见 schema 注释）
-        download_url: r.fileUri ? await this.storage.signDownload(r.fileUri, 3600) : null,
+        download_url: r.fileUri
+          ? await this.storage.signDownload(spaceId, r.fileUri, 3600).catch(() => null)
+          : null,
         expires_at: r.expiresAt ? r.expiresAt.toISOString() : null,
         created_at: r.createdAt.toISOString(),
       })),
@@ -199,12 +201,12 @@ export class FilmExportsService {
         })),
       );
       contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      key = `film/exports/${String(exportId)}/tables.xlsx`;
+      key = `u/${spaceId}/film-exports/${String(exportId)}/tables.xlsx`;
     } else if (tables.length === 1) {
       delivered = "csv";
       buffer = Buffer.from(this.matrixToCsv(matrices[0]!.matrix), "utf8");
       contentType = "text/csv; charset=utf-8";
-      key = `film/exports/${String(exportId)}/${tables[0].name}.csv`;
+      key = `u/${spaceId}/film-exports/${String(exportId)}/${tables[0].name}.csv`;
     } else {
       delivered = "zip";
       const zip = new JSZip();
@@ -213,9 +215,9 @@ export class FilmExportsService {
       });
       buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
       contentType = "application/zip";
-      key = `film/exports/${String(exportId)}/tables.zip`;
+      key = `u/${spaceId}/film-exports/${String(exportId)}/tables.zip`;
     }
-    await this.storage.put(key, buffer, contentType);
+    await this.storage.put(spaceId, key, buffer, contentType);
     const expiresAt = new Date(Date.now() + EXPORT_TTL_DAYS * 24 * 3600 * 1000);
     const [row] = (await db
       .insert(filmExports)
@@ -239,7 +241,7 @@ export class FilmExportsService {
       format_requested: row.format,
       delivered_format: delivered,
       file_uri: key,
-      download_url: await this.storage.signDownload(key, 3600),
+      download_url: await this.storage.signDownload(spaceId, key, 3600),
       expires_at: expiresAt.toISOString(),
       table_count: tables.length,
       row_count: totalRows,

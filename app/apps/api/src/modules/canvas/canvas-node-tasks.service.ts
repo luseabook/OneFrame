@@ -8,6 +8,7 @@ import { toBigId } from "../../common/bigid";
 import { CreditsService } from "../credits/credits.service";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
+import { StorageService } from "../../storage/storage.service";
 import type { AuthContext } from "../../common/auth.types";
 import type { GenerationRequest } from "@app/shared";
 
@@ -123,6 +124,7 @@ export class CanvasNodeTasksService {
     @Inject(GenerationsService) private readonly generations: GenerationsService,
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(ModelsService) private readonly models: ModelsService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   /** 把节点 params 映射成 GenerationRequest（不落库，纯翻译） */
@@ -283,6 +285,7 @@ export class CanvasNodeTasksService {
       override,
       { modeCfg },
     );
+    this.assertInputKeys(spaceId, request.input);
 
     // 幂等键：节点 + 请求指纹。同一节点重复点"生成"若参数没变，命中 5 分钟内的缓存结果，
     // 不会重复扣费（GenerationsService 内部按 idemKey 做 setNx）。
@@ -308,6 +311,23 @@ export class CanvasNodeTasksService {
         task_id: row.taskId ? String(row.taskId) : null,
       },
     };
+  }
+
+  /** 用户可控的参考素材只能是本空间对象；http(s) 外链维持原语义 */
+  private assertInputKeys(spaceId: string, input: GenerationRequest["input"]): void {
+    const values: Array<[string, unknown]> = [
+      ["reference_uris", input.reference_uris],
+      ["first_frame_uri", input.first_frame_uri],
+      ["last_frame_uri", input.last_frame_uri],
+    ];
+    for (const [field, value] of values) {
+      const list = Array.isArray(value) ? value : [value];
+      for (const item of list) {
+        if (typeof item !== "string" || !item) continue;
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(item)) continue;
+        this.storage.assertOwnedKey(spaceId, item, field);
+      }
+    }
   }
 
   /**

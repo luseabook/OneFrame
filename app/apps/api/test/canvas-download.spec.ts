@@ -23,6 +23,7 @@ describe("canvas batch download e2e", () => {
   let token = "";
   let otherToken = "";
   let canvasId = "";
+  let spaceId = "";
   let storage: StorageService;
   const keys: string[] = [];
 
@@ -57,8 +58,8 @@ describe("canvas batch download e2e", () => {
 
   /** 往本地存储写一个真文件，返回可被 storage.read 的 key（等价于"节点产物已存好"） */
   async function putFile(name: string, content: string): Promise<string> {
-    const key = `u/test/canvas-download/${Date.now()}-${name}`;
-    await storage.put(key, Buffer.from(content, "utf8"), "text/plain");
+    const key = `u/${spaceId}/canvas-download/${Date.now()}-${name}`;
+    await storage.put(spaceId, key, Buffer.from(content, "utf8"), "text/plain");
     keys.push(key);
     return key;
   }
@@ -77,6 +78,8 @@ describe("canvas batch download e2e", () => {
 
     token = await loginNewUser("01");
     otherToken = await loginNewUser("02");
+    const me = await inject("GET", "/me");
+    spaceId = String(me.data.space.id);
     const created = await inject("POST", "/canvas/canvases", { title: "批量下载测试" });
     canvasId = created.data.id as string;
   }, 120_000);
@@ -135,7 +138,7 @@ describe("canvas batch download e2e", () => {
       "select object_key from canvas_download_lists where id = $1",
       [listId],
     );
-    const buffer = await storage.read(rows[0]!.object_key);
+    const buffer = await storage.read(spaceId, rows[0]!.object_key);
     const zip = await JSZip.loadAsync(buffer);
     const names = Object.keys(zip.files);
     expect(names).toContain("manifest.json");

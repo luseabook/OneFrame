@@ -679,7 +679,15 @@ export class AssetMatchService {
       .map((row) => row.projectAssetId)
       .filter((id): id is bigint => Boolean(id));
     const assets = assetIds.length
-      ? await db.select().from(projectAssets).where(inArray(projectAssets.id, assetIds))
+      ? await db
+          .select()
+          .from(projectAssets)
+          .where(
+            and(
+              inArray(projectAssets.id, assetIds),
+              eq(projectAssets.projectId, project.id),
+            ),
+          )
       : [];
     const assetById = new Map(assets.map((row) => [String(row.id), row]));
     const inFlightTaskIds = await this.inFlightTaskIds(assets.map((row) => row.sourceTaskId));
@@ -723,7 +731,9 @@ export class AssetMatchService {
         file_id: asset?.portraitAssetId ? String(asset.portraitAssetId) : null,
         ref_image_uri: asset?.refImageUri ?? null,
         ref_image_url: asset?.refImageUri
-          ? await this.storage.signDownload(asset.refImageUri, 3600).catch(() => null)
+          ? await this.storage
+              .signDownload(String(project.spaceId), asset.refImageUri, 3600)
+              .catch(() => null)
           : null,
         finalized_at: asset?.finalizedAt ? asset.finalizedAt.toISOString() : null,
         bound_shot_count: row.projectAssetId ? (boundCount.get(String(row.projectAssetId)) ?? 0) : 0,

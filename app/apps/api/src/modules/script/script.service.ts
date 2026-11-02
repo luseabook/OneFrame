@@ -445,7 +445,12 @@ export class ScriptService {
       .orderBy(projectAssets.createdAt, projectAssets.id);
     const characters = await Promise.all(
       chars.map(async (row) =>
-        assetDto(row, row.refImageUri ? await this.storage.signDownload(row.refImageUri, 3600) : null),
+        assetDto(
+          row,
+          row.refImageUri
+            ? await this.storage.signDownload(spaceId, row.refImageUri, 3600)
+            : null,
+        ),
       ),
     );
     return { project: projectDto(project), episodes: eps.map(episodeDto), characters };
@@ -937,7 +942,9 @@ export class ScriptService {
       return inserted;
     });
     return Promise.all(
-      rows.map((row) => this.storyboardDtoWithUrls(row, linkMap.get(String(row.id)) ?? [])),
+      rows.map((row) =>
+        this.storyboardDtoWithUrls(spaceId, row, linkMap.get(String(row.id)) ?? []),
+      ),
     );
   }
 
@@ -973,7 +980,9 @@ export class ScriptService {
     return {
       episode: episodeDto(episode),
       storyboards: await Promise.all(
-        shots.map((shot) => this.storyboardDtoWithUrls(shot, linkMap.get(String(shot.id)) ?? [])),
+        shots.map((shot) =>
+          this.storyboardDtoWithUrls(spaceId, shot, linkMap.get(String(shot.id)) ?? []),
+        ),
       ),
     };
   }
@@ -987,6 +996,14 @@ export class ScriptService {
   ) {
     const project = await this.findProject(spaceId, projectId);
     const episode = await this.findEpisode(project.id, episodeId);
+    const firstFrameUri = normalizeOptionalText(input.first_frame_uri);
+    const lastFrameUri = normalizeOptionalText(input.last_frame_uri);
+    if (firstFrameUri) {
+      this.storage.assertOwnedKey(spaceId, firstFrameUri, "first_frame_uri");
+    }
+    if (lastFrameUri) {
+      this.storage.assertOwnedKey(spaceId, lastFrameUri, "last_frame_uri");
+    }
     const [row] = await db
       .update(storyboards)
       .set({
@@ -997,17 +1014,17 @@ export class ScriptService {
         ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
         // P9：3D 定格图；null/"" → 清空（回退到绑定资产逻辑）
         ...(input.first_frame_uri !== undefined
-          ? { firstFrameUri: normalizeOptionalText(input.first_frame_uri) }
+          ? { firstFrameUri }
           : {}),
         ...(input.last_frame_uri !== undefined
-          ? { lastFrameUri: normalizeOptionalText(input.last_frame_uri) }
+          ? { lastFrameUri }
           : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(storyboards.id, BigInt(storyboardId)), eq(storyboards.episodeId, episode.id)))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "storyboard not found");
-    return this.storyboardDtoWithUrls(row);
+    return this.storyboardDtoWithUrls(spaceId, row);
   }
 
   /**
@@ -1084,7 +1101,7 @@ export class ScriptService {
       const [fresh] = await tx.select().from(storyboards).where(eq(storyboards.id, created!.id));
       return fresh ?? created!;
     });
-    return this.storyboardDtoWithUrls(row);
+    return this.storyboardDtoWithUrls(spaceId, row);
   }
 
   /**
@@ -1142,7 +1159,11 @@ export class ScriptService {
       // 与 episodeDetail 同一顺序：绑定顺序是契约（images[] 的 [[@imgN]] 编号依赖它）
       .orderBy(storyboardAssets.sort, storyboardAssets.projectAssetId);
     return {
-      storyboard: await this.storyboardDtoWithUrls(row, links.map((link) => String(link.assetId))),
+      storyboard: await this.storyboardDtoWithUrls(
+        spaceId,
+        row,
+        links.map((link) => String(link.assetId)),
+      ),
     };
   }
 
@@ -1181,7 +1202,9 @@ export class ScriptService {
       return tx.insert(storyboards).values(values).returning();
     });
     return {
-      storyboards: await Promise.all(rows.map((row) => this.storyboardDtoWithUrls(row, []))),
+      storyboards: await Promise.all(
+        rows.map((row) => this.storyboardDtoWithUrls(spaceId, row, [])),
+      ),
       count: rows.length,
     };
   }
@@ -1341,7 +1364,10 @@ export class ScriptService {
       results
         .map((item, index) => ({ item, index }))
         .filter(({ item }) => Boolean(item.uri))
-        .map(async ({ item, index }) => ({ index, url: await this.storage.signDownload(item.uri!, 3600) })),
+        .map(async ({ item, index }) => ({
+          index,
+          url: await this.storage.signDownload(spaceId, item.uri!, 3600),
+        })),
     );
     return { task_id: String(task.id), candidates };
   }
@@ -1390,7 +1416,7 @@ export class ScriptService {
         .where(eq(projectAssets.id, character.id));
     });
     const [updated] = await db.select().from(projectAssets).where(eq(projectAssets.id, character.id));
-    return assetDto(updated, await this.storage.signDownload(picked.uri!, 3600));
+    return assetDto(updated, await this.storage.signDownload(spaceId, picked.uri!, 3600));
   }
 
   // 定妆图转存为通用资产（跨项目复用，自动打 #角色 标签）
@@ -1424,7 +1450,7 @@ export class ScriptService {
       .returning();
     if (!asset) throw new AppError(ErrorCode.NOT_FOUND, "portrait asset not found");
     return {
-      ...assetDto(character, await this.storage.signDownload(character.refImageUri, 3600)),
+      ...assetDto(character, await this.storage.signDownload(spaceId, character.refImageUri, 3600)),
       asset_id: String(asset.id),
       tags: asset.tags,
     };
@@ -1445,7 +1471,9 @@ export class ScriptService {
       )
       .orderBy(projectAssets.createdAt, projectAssets.id);
     const counts = await this.boundShotCounts(rows.map((row) => row.id));
-    const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(row, counts)));
+    const list = await Promise.all(
+      rows.map((row) => this.projectAssetDtoOf(spaceId, row, counts)),
+    );
     return { list };
   }
 
@@ -1459,6 +1487,8 @@ export class ScriptService {
         { field: "kind" },
       );
     }
+    const refImageUri = normalizeOptionalText(input.ref_image_uri);
+    if (refImageUri) this.storage.assertOwnedKey(spaceId, refImageUri, "ref_image_uri");
     const [row] = await db
       .insert(projectAssets)
       .values({
@@ -1468,12 +1498,12 @@ export class ScriptService {
         name: input.name,
         description: normalizeOptionalText(input.description),
         prompt: normalizeOptionalText(input.prompt),
-        refImageUri: normalizeOptionalText(input.ref_image_uri),
+        refImageUri,
         status: ProjectAssetStatus.DRAFT,
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "failed to create project asset");
-    return this.projectAssetDtoOf(row);
+    return this.projectAssetDtoOf(spaceId, row);
   }
 
   /** PATCH /projects/{id}/assets/{assetId}：改名/描述/提示词/参考图/定稿状态 */
@@ -1489,7 +1519,11 @@ export class ScriptService {
     if (input.name !== undefined) patch.name = input.name;
     if (input.description !== undefined) patch.description = normalizeOptionalText(input.description);
     if (input.prompt !== undefined) patch.prompt = normalizeOptionalText(input.prompt);
-    if (input.ref_image_uri !== undefined) patch.refImageUri = normalizeOptionalText(input.ref_image_uri);
+    if (input.ref_image_uri !== undefined) {
+      const next = normalizeOptionalText(input.ref_image_uri);
+      if (next) this.storage.assertOwnedKey(spaceId, next, "ref_image_uri");
+      patch.refImageUri = next;
+    }
     if (input.status !== undefined) {
       patch.status = input.status;
       // 定稿幂等：已定稿再次置 2 时保留原 finalized_at；置 1 清空
@@ -1502,7 +1536,7 @@ export class ScriptService {
       .where(eq(projectAssets.id, asset.id))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
-    return this.projectAssetDtoOf(row);
+    return this.projectAssetDtoOf(spaceId, row);
   }
 
   /** DELETE /projects/{id}/assets/{assetId}：同事务解除分镜绑定后删除资产 */
@@ -1524,7 +1558,7 @@ export class ScriptService {
   async getProjectAsset(spaceId: string, projectId: string, assetId: string) {
     const project = await this.findProject(spaceId, projectId);
     const asset = await this.findProjectAsset(project.id, assetId);
-    return this.projectAssetDtoOf(asset);
+    return this.projectAssetDtoOf(spaceId, asset);
   }
 
   /**
@@ -1543,7 +1577,9 @@ export class ScriptService {
       .where(and(eq(projectAssets.projectId, project.id), inArray(projectAssets.id, ids)))
       .orderBy(projectAssets.createdAt, projectAssets.id);
     const counts = await this.boundShotCounts(rows.map((row) => row.id));
-    const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(row, counts)));
+    const list = await Promise.all(
+      rows.map((row) => this.projectAssetDtoOf(spaceId, row, counts)),
+    );
     const found = new Set(rows.map((row) => String(row.id)));
     const missing = ids.map((id) => String(id)).filter((id) => !found.has(id));
     return { list, missing };
@@ -1786,7 +1822,9 @@ export class ScriptService {
     });
 
     const counts = await this.boundShotCounts(changedRows.map((row) => row.id));
-    const items = await Promise.all(changedRows.map((row) => this.projectAssetDtoOf(row, counts)));
+    const items = await Promise.all(
+      changedRows.map((row) => this.projectAssetDtoOf(spaceId, row, counts)),
+    );
     return { created, updated, skipped, items, truncated };
   }
 
@@ -1887,7 +1925,10 @@ export class ScriptService {
       results
         .map((item, index) => ({ item, index }))
         .filter(({ item }) => Boolean(item.uri))
-        .map(async ({ item, index }) => ({ index, url: await this.storage.signDownload(item.uri!, 3600) })),
+        .map(async ({ item, index }) => ({
+          index,
+          url: await this.storage.signDownload(spaceId, item.uri!, 3600),
+        })),
     );
     return { task_id: String(task.id), candidates };
   }
@@ -1954,7 +1995,7 @@ export class ScriptService {
       .from(projectAssets)
       .where(eq(projectAssets.id, asset.id));
     if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "asset not found");
-    return this.projectAssetDtoOf(updated);
+    return this.projectAssetDtoOf(spaceId, updated);
   }
 
   async retryExport(spaceId: string, projectId: string, episodeId: string, exportId: string) {
@@ -2506,7 +2547,14 @@ export class ScriptService {
       .select()
       .from(projectAssets)
       .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.sourceTaskId, bigId)));
-    if (existing) return assetDto(existing, await this.storage.signDownload(existing.refImageUri ?? "", 3600));
+    if (existing) {
+      return assetDto(
+        existing,
+        existing.refImageUri
+          ? await this.storage.signDownload(spaceId, existing.refImageUri, 3600)
+          : null,
+      );
+    }
 
     const assetId = newId();
     await db.insert(assets).values({
@@ -2532,7 +2580,7 @@ export class ScriptService {
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "add shot material failed");
-    return assetDto(row, await this.storage.signDownload(uri, 3600));
+    return assetDto(row, await this.storage.signDownload(spaceId, uri, 3600));
   }
 
   async listShotMaterials(spaceId: string, projectId: string) {
@@ -2543,7 +2591,14 @@ export class ScriptService {
       .where(and(eq(projectAssets.projectId, project.id), eq(projectAssets.kind, "shot_material")))
       .orderBy(desc(projectAssets.createdAt));
     return Promise.all(
-      rows.map(async (row) => assetDto(row, row.refImageUri ? await this.storage.signDownload(row.refImageUri, 3600) : null)),
+      rows.map(async (row) =>
+        assetDto(
+          row,
+          row.refImageUri
+            ? await this.storage.signDownload(spaceId, row.refImageUri, 3600)
+            : null,
+        ),
+      ),
     );
   }
 
@@ -2685,7 +2740,7 @@ export class ScriptService {
           status: row.status,
           download_url:
             row.status === 3 && row.fileUri
-              ? await this.storage.signDownload(row.fileUri, 3600)
+              ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
               : null,
           error: row.error,
           expires_at: row.expiresAt?.toISOString() ?? null,
@@ -2717,7 +2772,7 @@ export class ScriptService {
           status: row.status,
           download_url:
             row.status === 3 && row.fileUri
-              ? await this.storage.signDownload(row.fileUri, 3600)
+              ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
               : null,
           error: row.error,
           expires_at: null,
@@ -2827,7 +2882,7 @@ export class ScriptService {
           status: storyboardRow.status,
           download_url:
             storyboardRow.status === 3 && storyboardRow.fileUri
-              ? await this.storage.signDownload(storyboardRow.fileUri, 3600)
+              ? await this.storage.signDownload(spaceId, storyboardRow.fileUri, 3600)
               : null,
           error: storyboardRow.error,
           expires_at: storyboardRow.expiresAt?.toISOString() ?? null,
@@ -2844,7 +2899,9 @@ export class ScriptService {
         episode_no: epNoOf.get(String(row.episodeId)) ?? null,
         status: row.status,
         download_url:
-          row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null,
+          row.status === 3 && row.fileUri
+            ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+            : null,
         error: row.error,
         expires_at: null,
         created_at: row.createdAt.toISOString(),
@@ -2877,7 +2934,9 @@ export class ScriptService {
       );
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "export not found");
     const downloadUrl =
-      row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null;
+      row.status === 3 && row.fileUri
+        ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+        : null;
     return {
       export_id: String(row.id),
       status: row.status,
@@ -3001,7 +3060,9 @@ export class ScriptService {
       );
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "timeline export not found");
     const downloadUrl =
-      row.status === 3 && row.fileUri ? await this.storage.signDownload(row.fileUri, 3600) : null;
+      row.status === 3 && row.fileUri
+        ? await this.storage.signDownload(spaceId, row.fileUri, 3600)
+        : null;
     return {
       export_id: String(row.id),
       status: row.status,
@@ -3150,20 +3211,32 @@ export class ScriptService {
    * 分镜 DTO + 首/尾帧派生签名 URL（P9）：前端刷新后可直接显示定格缩略图，
    * 无需自己拼签名；storage key 原值仍通过 first_frame_uri/last_frame_uri 返回。
    */
-  private async storyboardDtoWithUrls(row: StoryboardRow, characterIds: string[] = []) {
+  private async storyboardDtoWithUrls(
+    spaceId: string,
+    row: StoryboardRow,
+    characterIds: string[] = [],
+  ) {
     const dto = storyboardDto(row, characterIds);
     const [firstFrameUrl, lastFrameUrl] = await Promise.all([
-      dto.first_frame_uri ? this.storage.signDownload(dto.first_frame_uri, 3600) : Promise.resolve(null),
-      dto.last_frame_uri ? this.storage.signDownload(dto.last_frame_uri, 3600) : Promise.resolve(null),
+      dto.first_frame_uri
+        ? this.storage.signDownload(spaceId, dto.first_frame_uri, 3600).catch(() => null)
+        : Promise.resolve(null),
+      dto.last_frame_uri
+        ? this.storage.signDownload(spaceId, dto.last_frame_uri, 3600).catch(() => null)
+        : Promise.resolve(null),
     ]);
     return { ...dto, first_frame_url: firstFrameUrl, last_frame_url: lastFrameUrl };
   }
 
   /** 单个项目资产的 DTO（预签名参考图 + 被分镜引用次数）；counts 可批量预取避免 N+1 */
-  private async projectAssetDtoOf(row: ProjectAssetRow, counts?: Map<string, number>) {
+  private async projectAssetDtoOf(
+    spaceId: string,
+    row: ProjectAssetRow,
+    counts?: Map<string, number>,
+  ) {
     const boundCounts = counts ?? (await this.boundShotCounts([row.id]));
     const portraitUrl = row.refImageUri
-      ? await this.storage.signDownload(row.refImageUri, 3600)
+      ? await this.storage.signDownload(spaceId, row.refImageUri, 3600).catch(() => null)
       : null;
     return projectAssetDto(row, portraitUrl, boundCounts.get(String(row.id)) ?? 0);
   }
@@ -3264,8 +3337,3 @@ export class ScriptService {
     );
   }
 }
-
-
-
-
-

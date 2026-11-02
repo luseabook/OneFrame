@@ -136,14 +136,18 @@ export class VoiceService {
    * 为什么不复用 `tasks.detail`：列表一次会有几十行，逐行调 detail 就是 N 次额外查询 +
    * N 次 task_events 读；这里只需要「第一段音频的现签地址」，直接从 DTO 的 results 签更省。
    */
-  private async previewOf(status: number, results: unknown): Promise<string | null> {
+  private async previewOf(
+    spaceId: string,
+    status: number,
+    results: unknown,
+  ): Promise<string | null> {
     if (status !== TaskStatus.SUCCEEDED) return null;
     const items = Array.isArray(results) ? (results as ResultItem[]) : [];
     const uri = items[0]?.uri;
     if (!uri) return null;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return uri;
     try {
-      return await this.storage.signDownload(uri, 3600);
+      return await this.storage.signDownload(spaceId, uri, 3600);
     } catch {
       return null;
     }
@@ -178,7 +182,7 @@ export class VoiceService {
         task_id: task.task_id,
         name: task.title ?? "我的音色",
         status: task.status,
-        preview_url: await this.previewOf(task.status, task.results),
+        preview_url: await this.previewOf(spaceId, task.status, task.results),
         created_at: task.created_at,
         finished_at: task.finished_at,
         is_collected: favorites.has(`clone:${task.task_id}`),
@@ -198,7 +202,7 @@ export class VoiceService {
       task_id: detail.task_id,
       name: detail.title ?? "我的音色",
       status: detail.status,
-      preview_url: await this.previewOf(detail.status, detail.results),
+      preview_url: await this.previewOf(spaceId, detail.status, detail.results),
       reference_uri: reference,
       result_count: results.length,
       created_at: detail.created_at,
@@ -375,7 +379,7 @@ export class VoiceService {
         lang: "zh",
         source: "clone" as const,
         task_id: String(row.id),
-        preview_url: await this.previewOf(row.status, row.results),
+        preview_url: await this.previewOf(spaceId, row.status, row.results),
         is_collected: favorites.has(`clone:${row.id}`),
         created_at: row.createdAt.toISOString(),
       })),

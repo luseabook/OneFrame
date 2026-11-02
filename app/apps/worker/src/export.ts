@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { and, eq, inArray } from "drizzle-orm";
 import { episodes, exportJobs, storyboards, tasks } from "@app/db";
 import type { Db } from "@app/db";
-import type { StorageDriver } from "@app/storage";
+import { assertKeyInSpace, type StorageDriver } from "@app/storage";
 import { downloadBounded, trimVideoBuffer, type TrimResult } from "@app/shared";
 
 /** 注入点（测试用）：默认走真 ffmpeg 的 `trimVideoBuffer` */
@@ -100,7 +100,7 @@ export async function trimShotBuffer(
   };
 }
 
-async function readResult(deps: ExportDeps, uri: string): Promise<Buffer> {
+async function readResult(deps: ExportDeps, spaceId: string, uri: string): Promise<Buffer> {
   if (/^https?:\/\//.test(uri)) {
     // 第 119 批：原来裸 `fetch()` + `arrayBuffer()` —— 供应商 CDN 连上不发完就挂死整条导出，
     // 发 4GB 就 OOM（导出侧必须整块进内存）。统一走双上限下载。
@@ -110,7 +110,7 @@ async function readResult(deps: ExportDeps, uri: string): Promise<Buffer> {
     });
   }
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) throw new Error(`unsupported result uri: ${uri.slice(0, 20)}`);
-  return deps.storage.read(uri);
+  return deps.storage.read(assertKeyInSpace(spaceId, uri));
 }
 
 // 整集导出：只打包已成功的镜头；无可用视频 → FAILED 400106（前端提示补齐）
@@ -162,7 +162,7 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
       if (!uri) continue;
       const fileName = `shot-${String(shot.shotNo).padStart(2, "0")}.mp4`;
       try {
-        const source = await readResult(deps, uri);
+        const source = await readResult(deps, String(row.spaceId), uri);
         const trimmed = await trimShotBuffer(source, shot.durationS, {
           ffmpegPath: deps.ffmpegPath,
           trim: deps.trim,
@@ -234,7 +234,11 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
     zip.file("manifest.json", JSON.stringify(manifest, null, 2));
     const buffer = await zip.generateAsync({ type: "nodebuffer" });
     const key = `u/${row.spaceId}/exports/${id}/episode-${episode.epNo}.zip`;
-    await deps.storage.put(key, buffer, "application/zip");
+    await deps.storage.put(
+      assertKeyInSpace(String(row.spaceId), key),
+      buffer,
+      "application/zip",
+    );
     await deps.db
       .update(exportJobs)
       .set({

@@ -20,6 +20,7 @@ describe("canvas text derive + admin pricing e2e", () => {
   let token = "";
   let adminToken = "";
   let canvasId = "";
+  let spaceId = "";
   let scriptNodeId = "";
   let imageNodeId = "";
   let videoNodeId = "";
@@ -72,6 +73,7 @@ describe("canvas text derive + admin pricing e2e", () => {
     if (!adminToken) throw new Error("admin login failed");
 
     token = await loginNewUser("01");
+    spaceId = String((await inject("GET", "/me")).data.space.id);
     const created = await inject("POST", "/canvas/canvases", { title: "文本派生测试" });
     canvasId = created.data.id as string;
 
@@ -328,7 +330,7 @@ describe("canvas text derive + admin pricing e2e", () => {
 
     // 素材库上传的视频（显式 object_key）不依赖节点产物，应可拆解
     const withKey = await inject("POST", `/canvas/canvases/${canvasId}/nodes/${emptyVideo.data.id}/video-parse`, {
-      object_key: "u/space/demo-video.mp4",
+      object_key: `u/${spaceId}/demo-video.mp4`,
     });
     expect(withKey.code).toBe(0);
   }, 60_000);

@@ -1385,9 +1385,9 @@ export class TeamService {
     const csv = `\uFEFF${lines.join("\n")}`;
     const stamp = Date.now();
     const key = `u/${spaceId}/exports/points-flow-${stamp}.csv`;
-    await this.storage.put(key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
+    await this.storage.put(spaceId, key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
     const ttl = 3600;
-    const url = await this.storage.signDownload(key, ttl);
+    const url = await this.storage.signDownload(spaceId, key, ttl);
     return {
       file_uri: url,
       filename: `points-flow-${stamp}.csv`,
@@ -1858,9 +1858,9 @@ export class TeamService {
     const csv = `\uFEFF${lines.join("\n")}`;
     const stamp = Date.now();
     const key = `u/${spaceId}/exports/project-points-flow-${stamp}.csv`;
-    await this.storage.put(key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
+    await this.storage.put(spaceId, key, Buffer.from(csv, "utf8"), "text/csv; charset=utf-8");
     const ttl = 3600;
-    const url = await this.storage.signDownload(key, ttl);
+    const url = await this.storage.signDownload(spaceId, key, ttl);
     return {
       file_uri: url,
       filename: `project-points-flow-${stamp}.csv`,
@@ -2118,4 +2118,3 @@ export class TeamService {
     return { deleted: true, id: String(row.id) };
   }
 }
-

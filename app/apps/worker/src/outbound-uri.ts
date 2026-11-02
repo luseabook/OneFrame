@@ -1,4 +1,5 @@
 import { ErrorCode } from "@app/shared";
+import { assertKeyInSpace } from "@app/storage";
 
 /**
  * P10 出站素材 URI 解析（单一位置）
@@ -24,6 +25,8 @@ export interface OutboundInput {
 
 export interface OutboundUriOptions {
   adapterMode: "mock" | "real";
+  /** 任务所属空间：出站 key 只能签本空间对象 */
+  spaceId: string;
   /** storage.signDownload 的适配器（注入便于单测） */
   sign: (key: string, ttlSeconds: number) => Promise<string>;
   /** 签名有效期（秒）；默认 6h，可用 ADAPTER_URI_TTL_SECONDS 覆盖，覆盖供应商长任务 */
@@ -105,7 +108,7 @@ async function resolveOne(
     );
   } else {
     // 无 scheme → 视为 storage key，签成带时效的公网 URL
-    outbound = await opts.sign(trimmed, ttlSeconds);
+    outbound = await opts.sign(assertKeyInSpace(opts.spaceId, trimmed), ttlSeconds);
   }
 
   const publicOk = (opts.isPublicUrl ?? ((url: string) => !isLoopbackUrl(url)))(outbound);

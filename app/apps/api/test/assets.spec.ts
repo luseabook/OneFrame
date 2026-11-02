@@ -162,7 +162,7 @@ describe("assets upload/list/delete", () => {
     try {
       const storage = app.get(StorageService);
       const key = `u/${spaceId}/tasks/test-${Date.now()}.mp4`;
-      await storage.put(key, Buffer.from("result-bytes"), "video/mp4");
+      await storage.put(spaceId, key, Buffer.from("result-bytes"), "video/mp4");
       const taskId = newId();
       await db.insert(tasks).values({
         id: taskId,

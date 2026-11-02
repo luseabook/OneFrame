@@ -1,9 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { canvasCommentNodes, canvasComments, canvasMaterials, canvasNodes, canvases } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
 import { toBigId } from "../../common/bigid";
+import { StorageService } from "../../storage/storage.service";
 
 /**
  * 画布素材 + 批注（C8/C9）
@@ -24,6 +25,8 @@ const MATERIAL_TYPES = ["image", "video", "audio", "file"] as const;
 
 @Injectable()
 export class CanvasMaterialService {
+  constructor(@Inject(StorageService) private readonly storage: StorageService) {}
+
   /** 校验画布属于该 space（所有下游操作的前置） */
   private async mustGetCanvas(spaceId: string, canvasId: string) {
     const [canvas] = await db
@@ -84,6 +87,7 @@ export class CanvasMaterialService {
     if (!input.object_key.trim()) {
       throw new AppError(ErrorCode.BAD_REQUEST, "object_key is required", { field: "object_key" });
     }
+    this.storage.assertOwnedKey(spaceId, input.object_key, "object_key");
     if (input.node_id) {
       // 节点必须属于同一画布，否则会造出"画布A的素材挂在画布B的节点上"
       const [n] = await db
@@ -137,6 +141,7 @@ export class CanvasMaterialService {
     if (!input.object_key.trim()) {
       throw new AppError(ErrorCode.BAD_REQUEST, "object_key is required", { field: "object_key" });
     }
+    this.storage.assertOwnedKey(spaceId, input.object_key, "object_key");
     const id = newId();
     await db.insert(canvasMaterials).values({
       id,
@@ -469,4 +474,3 @@ function guessType(objectKey: string): string {
   if (["mp3", "wav", "aac", "m4a", "ogg", "flac"].includes(ext)) return "audio";
   return "file";
 }
-

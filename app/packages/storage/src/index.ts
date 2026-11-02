@@ -5,6 +5,7 @@ import type { StorageDriver } from "./types";
 export * from "./local";
 export * from "./s3";
 export * from "./types";
+export * from "./key";
 
 export interface StorageOptions {
   driver: "local" | "s3";

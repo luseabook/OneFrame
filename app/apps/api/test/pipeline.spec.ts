@@ -190,7 +190,7 @@ describe("script pipeline (PRD F2 backend)", () => {
       const assetId = newId();
       const uri = `u/test/portrait-${Date.now()}.png`;
       const storage = app.get(StorageService);
-      await storage.put(uri, Buffer.from("portrait"), "image/png");
+      await storage.put(spaceId, uri, Buffer.from("portrait"), "image/png");
       const [character] = await db
         .select()
         .from(projectAssets)
@@ -236,7 +236,7 @@ describe("script pipeline (PRD F2 backend)", () => {
     const userId = String(me.data.user.id);
     const storage = app.get(StorageService);
     const key = `u/${spaceId}/tasks/batch-${Date.now()}.mp4`;
-    await storage.put(key, Buffer.from("batch"), "video/mp4");
+    await storage.put(spaceId, key, Buffer.from("batch"), "video/mp4");
 
     // 直接落一条 shot 的 PENDING 任务，模拟“上一轮已投递、仍在途”
     const { db: db2, pool: pool2 } = createDb(process.env.DATABASE_URL ?? "");
@@ -329,7 +329,7 @@ describe("script pipeline (PRD F2 backend)", () => {
     const userId = String(me.data.user.id);
     const storage = app.get(StorageService);
     const key = `u/${spaceId}/tasks/material-${Date.now()}.mp4`;
-    await storage.put(key, Buffer.from("material"), "video/mp4");
+    await storage.put(spaceId, key, Buffer.from("material"), "video/mp4");
     const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
     let taskId = "";
     try {

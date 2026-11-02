@@ -480,7 +480,7 @@ export class KnowledgeService {
       .offset((page - 1) * pageSize);
     const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(knowledgeAssets).where(where);
     const assetRefs = await this.resolveAssetRefs(rows.map((r) => r.asset));
-    const covers = await this.resolveCovers(rows.map((r) => r.asset));
+    const covers = await this.resolveCovers(rows.map((r) => r.asset), spaceId);
     return {
       list: rows.map((r) =>
         this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)), covers.get(String(r.asset.id))),
@@ -546,7 +546,7 @@ export class KnowledgeService {
       .offset((page - 1) * pageSize);
     const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(knowledgeAssets).where(where);
     const assetRefs = await this.resolveAssetRefs(rows.map((r) => r.asset));
-    const covers = await this.resolveCovers(rows.map((r) => r.asset));
+    const covers = await this.resolveCovers(rows.map((r) => r.asset), spaceId);
     return {
       list: rows.map((r) =>
         this.toAssetDto(r.asset, r.dirName, r.authorName, assetRefs.get(String(r.asset.id)), covers.get(String(r.asset.id))),
@@ -569,7 +569,7 @@ export class KnowledgeService {
       ? await db.select({ nickname: users.nickname }).from(users).where(eq(users.id, row.createdBy))
       : [{ nickname: null as string | null }];
     const refs = await this.resolveAssetRefs([row]);
-    const covers = await this.resolveCovers([row]);
+    const covers = await this.resolveCovers([row], spaceId);
     return {
       asset: this.toAssetDto(row, dir?.name ?? null, author?.nickname ?? null, refs.get(String(row.id)), covers.get(String(row.id))),
     };
@@ -692,7 +692,7 @@ export class KnowledgeService {
       })
       .returning();
     // 第 75 批：新建后立刻解析封面 URL（否则调用方拿到 null 还要再查一次列表）
-    const covers = await this.resolveCovers([row!]);
+    const covers = await this.resolveCovers([row!], BigInt(auth.spaceId));
     return { asset: this.toAssetDto(row!, null, null, undefined, covers.get(String(row!.id))) };
   }
 
@@ -784,7 +784,7 @@ export class KnowledgeService {
       })
       .where(eq(knowledgeAssets.id, existing.id))
       .returning();
-    const covers = await this.resolveCovers([row!]);
+    const covers = await this.resolveCovers([row!], BigInt(auth.spaceId));
     return { asset: this.toAssetDto(row!, null, null, undefined, covers.get(String(row!.id))) };
   }
 
@@ -1688,7 +1688,10 @@ export class KnowledgeService {
    * 图片资源在私有桶里，所以统一签名 1 小时；签名失败就留空（前端退回占位图），
    * 不让一条资源的存储异常把整页列表打成 500。
    */
-  private async resolveCovers(rows: AssetRow[]): Promise<Map<string, string>> {
+  private async resolveCovers(
+    rows: AssetRow[],
+    spaceId: bigint,
+  ): Promise<Map<string, string>> {
     const wanted = rows
       .map((r) => ({ key: String(r.id), assetId: knowledgeCoverAssetId(r) }))
       .filter((x): x is { key: string; assetId: bigint } => x.assetId !== null);
@@ -1697,13 +1700,21 @@ export class KnowledgeService {
     const refs = await db
       .select({ id: assets.id, uri: assets.uri })
       .from(assets)
-      .where(and(inArray(assets.id, ids), isNull(assets.deletedAt)));
+      .where(
+        and(
+          inArray(assets.id, ids),
+          eq(assets.spaceId, spaceId),
+          isNull(assets.deletedAt),
+        ),
+      );
     const uriById = new Map(refs.map((r) => [String(r.id), r.uri]));
     const out = new Map<string, string>();
     for (const item of wanted) {
       const uri = uriById.get(String(item.assetId));
       if (!uri) continue;
-      const signed = await this.storage.signDownload(uri, 3600).catch(() => null);
+      const signed = await this.storage
+        .signDownload(String(spaceId), uri, 3600)
+        .catch(() => null);
       if (signed) out.set(item.key, signed);
     }
     return out;

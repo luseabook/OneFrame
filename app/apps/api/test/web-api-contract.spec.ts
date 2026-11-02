@@ -49,6 +49,15 @@ const UNRESOLVED_MAX = 0;
  * 将来若真出现运行时才定的前缀，把文件名登记到这里并在本注释说明原因。
  */
 const UNRESOLVED_ALLOWLIST: string[] = [];
+/**
+ * 已知「前端探测、后端本期不实现」的调用。
+ *
+ * `/reelflow/list` 每次访问会探测空间级导出日志 `GET /v1/exports`，用于决定 tab
+ * 叫「已剪辑」还是「已导出」。该端点按 D3 决策本期不新增（见
+ * `docs/07-plan/ui-ux-parity-execution-plan.md`），调用方有 catch 降级，因此
+ * 这里按「方法 + 路径」精确登记，而不是放宽整个门禁。
+ */
+const MISSING_ALLOWLIST = new Set(["GET /exports"]);
 
 function walk(dir: string, accept: (name: string) => boolean, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -120,13 +129,98 @@ const IDENT_CALL_RE = /^(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?\s*\(\s*([A-Za-z_
 /** 以 `/` 或 `${` 开头的字面量（模板字面量允许含 `${}`）。 */
 const PATH_LITERAL_RE = /"(\/(?:[^"\\\n]|\\.)*)"|'(\/(?:[^'\\\n]|\\.)*)'|`(\/(?:[^`\\]|\\.)*)`/g;
 
-/** 取某标识符声明处的模板字面量前缀（`const base = (id) => \`/canvas/canvases/${id}\``）。 */
-function helperTemplate(text: string, name: string, before: number): string | null {
+/** 按顶层 `+` 切分表达式（忽略字符串/模板字面量与括号内的加号）。 */
+function splitTopLevelPlus(expr: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < expr.length; i += 1) {
+    const ch = expr[i]!;
+    if (quote) {
+      current += ch;
+      if (ch === "\\") {
+        current += expr[i + 1] ?? "";
+        i += 1;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+    if (ch === "+" && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
+ * 把 `return` 后的表达式解析成路径前缀。
+ *
+ * 支持三类写法（U3/U4/U5 的 helper 就长这样）：
+ *   - `"/projects/" + projectId.value` → `/projects/{}`
+ *   - `projectPath() + "/episodes/" + episodeId.value` → `/projects/{}/episodes/{}`
+ *   - `` `/canvas/canvases/${id}` `` → `/canvas/canvases/{}`
+ *
+ * 运行时变量统一落成 `{}` 占位符；无法识别的部分也按单段占位符处理，
+ * 保证段数与真实 URL 一致，而不是把变量名误当成路径。
+ */
+function resolvePathExpression(expr: string, text: string, before: number, depth: number): string | null {
+  const parts = splitTopLevelPlus(expr);
+  let out = "";
+  for (const raw of parts) {
+    const part = raw.trim();
+    if (!part) continue;
+    const str = /^"((?:[^"\\\n]|\\.)*)"$/.exec(part) ?? /^'((?:[^'\\\n]|\\.)*)'$/.exec(part);
+    if (str) {
+      out += str[1]!;
+      continue;
+    }
+    const tpl = /^`([\s\S]*)`$/.exec(part);
+    if (tpl) {
+      out += tpl[1]!.replace(/\$\{[^}]*\}/g, "{}");
+      continue;
+    }
+    const call = /^([A-Za-z_$][\w$]*)\s*\(/.exec(part);
+    if (call) {
+      const nested = helperTemplate(text, call[1]!, before, depth + 1);
+      if (nested) {
+        out += nested;
+        continue;
+      }
+    }
+    out += "{}";
+  }
+  return out || null;
+}
+
+/** 取某标识符声明处的路径前缀，支持 helper 互相拼接（`episodePath()` 复用 `projectPath()`）。 */
+function helperTemplate(text: string, name: string, before: number, depth = 0): string | null {
+  if (depth > 5) return null;
   const declRe = new RegExp(`(?:const|let|var|function)\\s+${name}\\b`, "g");
   let hit: string | null = null;
   for (const m of text.matchAll(declRe)) {
     if ((m.index ?? 0) > before) continue;
-    const body = text.slice(m.index ?? 0, (m.index ?? 0) + 500);
+    const body = text.slice(m.index ?? 0, (m.index ?? 0) + 600);
+    const expr = /\breturn\s+([^;]+);/.exec(body) ?? /=>\s*([^;]+);/.exec(body);
+    if (expr) {
+      const resolved = resolvePathExpression(expr[1]!, text, m.index ?? 0, depth);
+      if (resolved?.startsWith("/")) {
+        hit = resolved;
+        continue;
+      }
+    }
     // 模板字面量（`/canvas/canvases/${id}`）优先，其次普通字符串（`"/agent/sessions"`）
     const tpl = /`(\/(?:[^`\\]|\\.)*)`/.exec(body) ?? /"(\/(?:[^"\\\n]|\\.)*)"/.exec(body);
     if (tpl) hit = tpl[1]!;
@@ -191,7 +285,11 @@ function webCalls(): { calls: WebCall[]; unresolved: string[] } {
         const call = IDENT_CALL_RE.exec(text.slice(start));
         if (call) {
           const tpl = helperTemplate(text, call[1]!, m.index ?? 0);
-          if (tpl) raws = [`${tpl}${(call[3] ?? "").trim()}`];
+          if (tpl) {
+            const suffix = (call[3] ?? "").trim().replace(/^\+\s*/, "");
+            const suffixPath = suffix ? resolvePathExpression(suffix, text, m.index ?? 0, 0) ?? "" : "";
+            raws = [`${tpl}${suffixPath}`];
+          }
         }
       }
 
@@ -269,6 +367,7 @@ describe("apps/web 的 API 路径必须对应后端真实路由", () => {
     const routes = backendRoutes();
     const missing = webCalls()
       .calls.filter((call) => !hits(routes, call.method, call.path) && !hits(routes, call.method, `/v1${call.path}`))
+      .filter((call) => !MISSING_ALLOWLIST.has(`${call.method} ${call.path}`))
       .map((call) => `${call.method} ${call.path} ← ${call.where}`);
     expect(missing, `以下 web 调用在后端路由表里不存在：\n${missing.join("\n")}`).toEqual([]);
   });

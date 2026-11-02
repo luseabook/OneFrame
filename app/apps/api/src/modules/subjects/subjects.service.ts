@@ -219,6 +219,12 @@ export class SubjectsService {
       : null;
     const kind = input.kind ?? SubjectKind.CHARACTER;
     this.assertKind(kind);
+    if (input.cover_uri) {
+      this.storage.assertOwnedKey(spaceId, input.cover_uri, "cover_uri");
+    }
+    for (const file of input.files ?? []) {
+      this.storage.assertOwnedKey(spaceId, file.uri, "files[].uri");
+    }
     const [row] = await db
       .insert(subjects)
       .values({
@@ -392,6 +398,12 @@ export class SubjectsService {
           field: "reject_reason",
         });
       }
+    }
+    if (input.cover_uri) {
+      this.storage.assertOwnedKey(spaceId, input.cover_uri, "cover_uri");
+    }
+    for (const file of input.files ?? []) {
+      this.storage.assertOwnedKey(spaceId, file.uri, "files[].uri");
     }
 
     const [updated] = await db
@@ -590,6 +602,9 @@ export class SubjectsService {
     subject: SubjectRow,
     files: SubjectFileInput[],
   ): Promise<SubjectFileRow[]> {
+    for (const file of files) {
+      this.storage.assertOwnedKey(String(subject.spaceId), file.uri, "files[].uri");
+    }
     const seen = new Set<string>();
     const values = files
       .map((file) => ({ ...file, uri: file.uri.trim() }))
@@ -666,7 +681,9 @@ export class SubjectsService {
         files.map(async (file) => ({
           id: String(file.id),
           uri: file.uri,
-          url: await this.storage.signDownload(file.uri, 3600),
+          url: await this.storage
+            .signDownload(String(row.spaceId), file.uri, 3600)
+            .catch(() => null),
           role: file.role,
           sort: file.sort,
           asset_id: file.assetId ? String(file.assetId) : null,
@@ -723,4 +740,3 @@ export class SubjectsService {
     };
   }
 }
-

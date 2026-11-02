@@ -27,7 +27,7 @@ describe("labelResults", () => {
     await storage.put("u/1/tasks/2/r0.mp4", Buffer.from("not-a-real-video"), "video/mp4");
     const results = await labelResults(
       storage,
-      { id: "2", capability: "video" },
+      { id: "2", capability: "video", spaceId: "1" },
       [{ uri: "u/1/tasks/2/r0.mp4" }],
       { enabled: true, text: "AI生成", ffmpegPath: "false" },
     );
@@ -46,7 +46,7 @@ describe("labelResults", () => {
   it("skips labeling when disabled", async () => {
     const results = await labelResults(
       storage,
-      { id: "3", capability: "image" },
+      { id: "3", capability: "image", spaceId: "1" },
       [{ uri: "u/1/tasks/3/r0.png" }],
       { enabled: false, text: "AI生成" },
     );

@@ -5,6 +5,7 @@ import { AppError, ErrorCode, generationRequestSchema, newId } from "@app/shared
 import { db } from "../../db/database";
 import { GenerationsService } from "../generations/generations.service";
 import { ModelsService } from "../models/models.service";
+import { StorageService } from "../../storage/storage.service";
 
 /** 画布当前支持的「文本类派生」能力（与 `TextMode` 一致） */
 export type DeriveKind = "script_optimization" | "storyboard_parse" | "asset_extraction";
@@ -30,6 +31,7 @@ export class CanvasDeriveService {
   constructor(
     @Inject(GenerationsService) private readonly generations: GenerationsService,
     @Inject(ModelsService) private readonly models: ModelsService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   /**
@@ -220,6 +222,9 @@ export class CanvasDeriveService {
       throw new AppError(ErrorCode.INVALID_PARAM, "video node has no media to parse, generate or upload one first", {
         field: "object_key",
       });
+    }
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(objectKey)) {
+      this.storage.assertOwnedKey(auth.spaceId, objectKey, "object_key");
     }
 
     const model = input.model

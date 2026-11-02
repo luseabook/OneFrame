@@ -354,10 +354,10 @@ export class PublishService {
     publicationId: string,
     sourceKey: string,
   ): Promise<void> {
-    await runPublishTranscode(this.transcodeDeps(), { publicationId, spaceId, sourceKey });
+    await runPublishTranscode(this.transcodeDeps(spaceId), { publicationId, spaceId, sourceKey });
   }
 
-  private transcodeDeps(): PublishTranscodeDeps {
+  private transcodeDeps(spaceId: string): PublishTranscodeDeps {
     return {
       loadPublication: async (id: string) => {
         let bigintId: bigint;
@@ -395,9 +395,9 @@ export class PublishService {
           .returning({ id: timelinePublications.id });
         return claimed.length > 0;
       },
-      readSource: (key: string) => this.storage.read(key),
+      readSource: (key: string) => this.storage.read(spaceId, key),
       putFile: async (key: string, buffer: Buffer) => {
-        await this.storage.put(key, buffer, "video/mp4");
+        await this.storage.put(spaceId, key, buffer, "video/mp4");
       },
       nextShareToken: () => this.uniqueShareToken(),
       markReady: async (id: string, patch) => {
@@ -462,7 +462,9 @@ export class PublishService {
   private async pubDto(row: typeof timelinePublications.$inferSelect) {
     const downloadUrl =
       row.status === PUB_STATUS.READY && row.fileUri
-        ? await this.storage.signDownload(row.fileUri, 3600).catch(() => null)
+        ? await this.storage
+            .signDownload(String(row.spaceId), row.fileUri, 3600)
+            .catch(() => null)
         : null;
     return {
       publication_id: String(row.id),
@@ -739,7 +741,7 @@ export class PublishService {
         episode_no: episode?.epNo ?? null,
         status: row.status,
         // 现签 1 小时（不落库签名 URL：落库会随过期时间腐烂）
-        file_url: await this.storage.signDownload(row.fileUri, 3600),
+        file_url: await this.storage.signDownload(String(row.spaceId), row.fileUri, 3600),
         duration_ms: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : null,
         published_at: row.publishedAt ? row.publishedAt.toISOString() : null,
         // 权威计数读列（Redis 只做去重闸，见 recordView 注释）

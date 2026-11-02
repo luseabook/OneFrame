@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenResult } from "@app/model-adapters";
 import { execFileBounded } from "@app/shared";
-import type { StorageDriver } from "@app/storage";
+import { assertKeyInSpace, type StorageDriver } from "@app/storage";
 
 export interface AiLabelConfig {
   enabled: boolean;
@@ -16,6 +16,7 @@ export interface AiLabelConfig {
 export interface LabelTaskRef {
   id: string;
   capability: string;
+  spaceId: string;
 }
 
 const DEFAULT_MAX_BYTES = 256 * 1024 * 1024;
@@ -50,35 +51,45 @@ export async function labelResults(
       implicit: false,
     };
 
-    if (result.uri) {
+    if (result.uri && !/^[a-z][a-z0-9+.-]*:/i.test(result.uri)) {
+      let key: string | null = null;
       try {
-        const sidecarKey = `${result.uri}.ai.json`;
-        await storage.put(
-          sidecarKey,
-          Buffer.from(JSON.stringify(label, null, 2)),
-          "application/json",
-        );
-        label.implicit = true;
-        label.sidecar_uri = sidecarKey;
+        key = assertKeyInSpace(task.spaceId, result.uri);
       } catch (error) {
-        label.implicit_reason = error instanceof Error ? error.message : String(error);
+        const reason = error instanceof Error ? error.message : String(error);
+        label.implicit_reason = reason;
+        label.explicit_reason = reason;
       }
-
-      try {
-        if (task.capability === "video" || task.capability === "image") {
-          const data = await storage.read(result.uri);
-          if (data.byteLength <= (config.maxBytes ?? DEFAULT_MAX_BYTES)) {
-            const out = await watermark(data, task.capability, config);
-            if (out) {
-              await storage.put(result.uri, out, task.capability === "video" ? "video/mp4" : "image/png");
-              label.explicit = true;
-            }
-          } else {
-            label.explicit_reason = "media_too_large";
-          }
+      if (key) {
+        try {
+          const sidecarKey = `${key}.ai.json`;
+          await storage.put(
+            sidecarKey,
+            Buffer.from(JSON.stringify(label, null, 2)),
+            "application/json",
+          );
+          label.implicit = true;
+          label.sidecar_uri = sidecarKey;
+        } catch (error) {
+          label.implicit_reason = error instanceof Error ? error.message : String(error);
         }
-      } catch (error) {
-        label.explicit_reason = error instanceof Error ? error.message.slice(0, 200) : String(error);
+
+        try {
+          if (task.capability === "video" || task.capability === "image") {
+            const data = await storage.read(key);
+            if (data.byteLength <= (config.maxBytes ?? DEFAULT_MAX_BYTES)) {
+              const out = await watermark(data, task.capability, config);
+              if (out) {
+                await storage.put(key, out, task.capability === "video" ? "video/mp4" : "image/png");
+                label.explicit = true;
+              }
+            } else {
+              label.explicit_reason = "media_too_large";
+            }
+          }
+        } catch (error) {
+          label.explicit_reason = error instanceof Error ? error.message.slice(0, 200) : String(error);
+        }
       }
     }
 

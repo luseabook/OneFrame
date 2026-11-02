@@ -130,17 +130,17 @@ export class DirectorService {
    *   - `/assets/upload` 返回的 storage key（`u/<space>/assets/<id>/orig.png`）→ 读时签成 URL；
    *   - 已经签名/外部的完整 URL → 原样返回（避免二次签名把 URL 套成 `...?url=http...`）。
    */
-  private async thumbnailUrl(uri: string | null): Promise<string | null> {
+  private async thumbnailUrl(spaceId: string, uri: string | null): Promise<string | null> {
     if (!uri) return null;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return uri;
     try {
-      return await this.storage.signDownload(uri, 86_400);
+      return await this.storage.signDownload(spaceId, uri, 86_400);
     } catch {
       return null;
     }
   }
 
-  private async toSceneDto(row: SceneRow): Promise<SceneDto> {
+  private async toSceneDto(row: SceneRow, spaceId: string): Promise<SceneDto> {
     return {
       id: String(row.id),
       project_id: row.projectId === null ? null : String(row.projectId),
@@ -148,7 +148,7 @@ export class DirectorService {
       name: row.name,
       payload: (row.payload ?? {}) as Record<string, unknown>,
       thumbnail_uri: row.thumbnailUri,
-      thumbnail_url: await this.thumbnailUrl(row.thumbnailUri),
+      thumbnail_url: await this.thumbnailUrl(spaceId, row.thumbnailUri),
       version: row.version,
       created_by: row.createdBy === null ? null : String(row.createdBy),
       created_at: row.createdAt.toISOString(),
@@ -223,6 +223,9 @@ export class DirectorService {
     const payload = this.assertPayload(input.payload);
     this.assertName(input.name);
     this.assertUri(input.thumbnail_uri);
+    if (input.thumbnail_uri) {
+      this.storage.assertOwnedKey(spaceId, input.thumbnail_uri, "thumbnail_uri");
+    }
     let projectId: bigint | null = null;
     let episodeId: bigint | null = null;
     if (input.project_id) {
@@ -247,13 +250,13 @@ export class DirectorService {
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "scene save failed");
-    return this.toSceneDto(row);
+    return this.toSceneDto(row, spaceId);
   }
 
   // ── 2. 读场景 ──────────────────────────────────────────
 
   async getScene(spaceId: string, sceneId: string): Promise<SceneDto> {
-    return this.toSceneDto(await this.requireScene(spaceId, sceneId));
+    return this.toSceneDto(await this.requireScene(spaceId, sceneId), spaceId);
   }
 
   // ── 3. 列表（按项目/全集，带缩略图）────────────────────
@@ -279,7 +282,7 @@ export class DirectorService {
       .from(directorScenes)
       .where(where);
     const list: SceneDto[] = [];
-    for (const row of rows) list.push(await this.toSceneDto(row));
+    for (const row of rows) list.push(await this.toSceneDto(row, spaceId));
     return { list, total: countRow?.count ?? 0, page: filters.page, page_size: filters.page_size };
   }
 
@@ -293,6 +296,9 @@ export class DirectorService {
     const scene = await this.requireScene(spaceId, sceneId);
     this.assertName(input.name);
     this.assertUri(input.thumbnail_uri);
+    if (input.thumbnail_uri) {
+      this.storage.assertOwnedKey(spaceId, input.thumbnail_uri, "thumbnail_uri");
+    }
     /**
      * 乐观锁：版本不一致**绝不静默覆盖**。
      *
@@ -325,7 +331,7 @@ export class DirectorService {
         field: "version",
       });
     }
-    return this.toSceneDto(row);
+    return this.toSceneDto(row, spaceId);
   }
 
   // ── 5. 软删 ────────────────────────────────────────────
@@ -366,7 +372,7 @@ export class DirectorService {
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, "scene duplicate failed");
-    return this.toSceneDto(row);
+    return this.toSceneDto(row, spaceId);
   }
 
   // ── 7. 姿态预设 ────────────────────────────────────────

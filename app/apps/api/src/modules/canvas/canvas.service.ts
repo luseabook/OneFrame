@@ -7,6 +7,7 @@ import {
   canvasNodes,
   canvasSnapshots,
   canvases,
+  tasks,
 } from "@app/db";
 import { AppError, ErrorCode, newId } from "@app/shared";
 import { db } from "../../db/database";
@@ -102,7 +103,7 @@ export class CanvasService {
     return {
       list: await Promise.all(
         rows.map(async (c) => {
-          const cover = await this.coverOf(c.id, c.coverAssetId);
+          const cover = await this.coverOf(String(c.spaceId), c.id, c.coverAssetId);
           return {
             id: String(c.id),
             title: c.title,
@@ -129,7 +130,7 @@ export class CanvasService {
   /** 取画布详情（含节点/边/分组，供前端一次性渲染） */
   async get(spaceId: string, canvasId: string) {
     const canvas = await this.mustGetCanvas(spaceId, canvasId);
-    const cover = await this.coverOf(canvas.id, canvas.coverAssetId);
+    const cover = await this.coverOf(String(canvas.spaceId), canvas.id, canvas.coverAssetId);
     const [nodes, edges, groups] = await Promise.all([
       db
         .select()
@@ -206,7 +207,7 @@ export class CanvasService {
     let assetId: bigint | null = null;
 
     if (input.node_id) {
-      assetId = await this.assetIdOfNode(canvas.id, input.node_id);
+      assetId = await this.assetIdOfNode(spaceId, canvas.id, input.node_id);
       if (!assetId) {
         // 明确区分"节点还没有产物"与"asset 不存在"：前者是用户点早了，后者是参数错
         throw new AppError(ErrorCode.NOT_FOUND, "node has no produced image asset yet");
@@ -234,7 +235,7 @@ export class CanvasService {
       .update(canvases)
       .set({ coverAssetId: assetId, updatedAt: new Date() })
       .where(eq(canvases.id, canvas.id));
-    const cover = await this.coverOf(canvas.id, assetId);
+    const cover = await this.coverOf(spaceId, canvas.id, assetId);
     return {
       cover_asset_id: cover.assetId,
       cover_uri: cover.uri,
@@ -244,22 +245,29 @@ export class CanvasService {
 
   /** 人工封面优先；否则按"画布内最近一次图片节点产物"兜底（与工坊侧 cover_uri 同口径） */
   private async coverOf(
+    spaceId: string,
     canvasId: bigint,
     coverAssetId: bigint | null,
   ): Promise<{ assetId: string | null; uri: string | null }> {
-    const id = coverAssetId ?? (await this.autoCoverAssetId(canvasId));
+    const id = coverAssetId ?? (await this.autoCoverAssetId(spaceId, canvasId));
     if (!id) return { assetId: null, uri: null };
     const [row] = await db
-      .select({ id: assets.id, uri: assets.uri })
+      .select({ id: assets.id, uri: assets.uri, spaceId: assets.spaceId })
       .from(assets)
-      .where(and(eq(assets.id, id), isNull(assets.deletedAt)))
+      .where(
+        and(
+          eq(assets.id, id),
+          eq(assets.spaceId, BigInt(spaceId)),
+          isNull(assets.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) return { assetId: null, uri: null };
-    const uri = await this.storage.signDownload(row.uri, 3600).catch(() => null);
+    const uri = await this.storage.signDownload(spaceId, row.uri, 3600).catch(() => null);
     return { assetId: String(row.id), uri };
   }
 
-  private async autoCoverAssetId(canvasId: bigint): Promise<bigint | null> {
+  private async autoCoverAssetId(spaceId: string, canvasId: bigint): Promise<bigint | null> {
     const [row] = await db
       .select({ id: assets.id })
       .from(assets)
@@ -267,6 +275,7 @@ export class CanvasService {
       .where(
         and(
           eq(canvasNodes.canvasId, canvasId),
+          eq(assets.spaceId, BigInt(spaceId)),
           isNull(canvasNodes.deletedAt),
           isNull(assets.deletedAt),
           eq(assets.kind, "image"),
@@ -277,7 +286,11 @@ export class CanvasService {
     return row?.id ?? null;
   }
 
-  private async assetIdOfNode(canvasId: bigint, nodeId: string): Promise<bigint | null> {
+  private async assetIdOfNode(
+    spaceId: string,
+    canvasId: bigint,
+    nodeId: string,
+  ): Promise<bigint | null> {
     if (!/^\d{1,20}$/.test(nodeId)) return null;
     const [node] = await db
       .select({ taskId: canvasNodes.taskId })
@@ -294,7 +307,14 @@ export class CanvasService {
     const [row] = await db
       .select({ id: assets.id })
       .from(assets)
-      .where(and(eq(assets.sourceTaskId, node.taskId), eq(assets.kind, "image"), isNull(assets.deletedAt)))
+      .where(
+        and(
+          eq(assets.sourceTaskId, node.taskId),
+          eq(assets.spaceId, BigInt(spaceId)),
+          eq(assets.kind, "image"),
+          isNull(assets.deletedAt),
+        ),
+      )
       .orderBy(desc(assets.id))
       .limit(1);
     return row?.id ?? null;
@@ -858,6 +878,38 @@ export class CanvasService {
       throw this.versionConflict(`canvas version mismatch (current ${canvas.version})`);
     }
     for (const n of input.nodes) this.assertNodeType(n.node_type);
+    const taskIds = [
+      ...new Set(
+        input.nodes
+          .map((node) => node.task_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    if (taskIds.length > 0) {
+      const invalid = taskIds.find((id) => !/^\d{1,20}$/.test(id));
+      if (invalid) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid task_id", {
+          field: "nodes[].task_id",
+          value: invalid,
+        });
+      }
+      const owned = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.spaceId, BigInt(spaceId)),
+            inArray(tasks.id, taskIds.map((id) => BigInt(id))),
+          ),
+        );
+      if (owned.length !== taskIds.length) {
+        throw new AppError(
+          ErrorCode.INVALID_PARAM,
+          "task_id does not belong to this space",
+          { field: "nodes[].task_id" },
+        );
+      }
+    }
 
     const nextVersion = canvas.version + 1;
     const canvasIdBig = canvas.id;

@@ -435,7 +435,7 @@ describe("home config / unread / ab e2e", () => {
       await seedSlot({
         title: `运营位-带图-${runTag}`,
         // 存的是 storage key（签名 URL 会过期），读时应由服务端现签
-        imageUri: "u/test/promo/banner.png",
+        imageUri: `u/${spaceId}/promo/banner.png`,
         sort: 9,
       });
 

@@ -3,7 +3,7 @@ import { assets, canvasNodes, models, projectAssets, releaseFrozen, storyboards,
 import type { Db } from "@app/db";
 import type { GenResult, AdapterRuntimeOptions, ModelAdapter } from "@app/model-adapters";
 import { resolveAdapter } from "@app/model-adapters";
-import type { StorageDriver } from "@app/storage";
+import { assertKeyInSpace, type StorageDriver } from "@app/storage";
 import { downloadBounded, newId, TaskStatus, type GenerationRequest } from "@app/shared";
 import { findUnlabeledResults, labelResults, type AiLabelConfig } from "./label";
 import { resolveOutboundUris } from "./outbound-uri";
@@ -234,7 +234,11 @@ export async function transferResult(
     }
     const ext = extFor(contentType);
     const key = `u/${task.spaceId}/tasks/${task.id}/r${index}.${ext}`;
-    const stored = await deps.storage.put(key, data, contentType);
+    const stored = await deps.storage.put(
+      assertKeyInSpace(String(task.spaceId), key),
+      data,
+      contentType,
+    );
     const isMockPlaceholder = result.uri.startsWith("mock://") && !contentType.startsWith("image/");
     return {
       ...result,
@@ -264,7 +268,7 @@ async function succeed(deps: ExecutorDeps, task: TaskRow, results: GenResult[]):
   }
   const labeled = await labelResults(
     deps.storage,
-    { id: String(task.id), capability: task.capability },
+    { id: String(task.id), capability: task.capability, spaceId: String(task.spaceId) },
     transferred,
     deps.aiLabel,
     deps.log,
@@ -542,7 +546,9 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
         (task.input ?? {}) as GenerationRequest["input"],
         {
           adapterMode: deps.adapterOptions.mode === "real" ? "real" : "mock",
-          sign: (key, ttlSeconds) => deps.storage.signDownload(key, ttlSeconds),
+          spaceId: String(task.spaceId),
+          sign: (key, ttlSeconds) =>
+            deps.storage.signDownload(assertKeyInSpace(String(task.spaceId), key), ttlSeconds),
           ttlSeconds: deps.outboundUriTtlSeconds,
           logger: deps.log,
         },

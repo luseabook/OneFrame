@@ -20,6 +20,7 @@ describe("canvas e2e", () => {
   let app: NestFastifyApplication;
   let token = "";
   let otherToken = "";
+  let spaceId = "";
 
   const inject = async (
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
@@ -68,6 +69,8 @@ describe("canvas e2e", () => {
     await app.getHttpAdapter().getInstance().ready();
     token = await loginNewUser("01");
     otherToken = await loginNewUser("02");
+    const me = await inject("GET", "/me");
+    spaceId = String(me.data.space.id);
   }, 90_000);
 
   afterAll(async () => {
@@ -858,7 +861,7 @@ describe("canvas e2e", () => {
     const canvasId = c.data.id as string;
 
     const m1 = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "canvas/a/cover.png",
+      object_key: `u/${spaceId}/canvas/a/cover.png`,
       material_type: "image",
       name: "封面图",
     });
@@ -866,7 +869,7 @@ describe("canvas e2e", () => {
     expect(m1.data.material_id).toMatch(/^\d+$/);
 
     const m2 = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "canvas/a/clip.mp4",
+      object_key: `u/${spaceId}/canvas/a/clip.mp4`,
       material_type: "video",
       name: "片段",
     });
@@ -877,7 +880,7 @@ describe("canvas e2e", () => {
     expect(all.data.total).toBe(2);
     // 只存 object_key，不存 URL
     const cover = (all.data.list as Array<Record<string, unknown>>).find((x) => x.name === "封面图");
-    expect(cover?.object_key).toBe("canvas/a/cover.png");
+    expect(cover?.object_key).toBe(`u/${spaceId}/canvas/a/cover.png`);
     expect(cover?.url).toBeUndefined();
 
     const onlyImage = await inject("GET", `/canvas/canvases/${canvasId}/materials?material_type=image`);
@@ -898,14 +901,14 @@ describe("canvas e2e", () => {
     });
 
     const badType = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "x.bin",
+      object_key: `u/${spaceId}/canvas/x.bin`,
       material_type: "executable",
     });
     expect(badType.code).toBe(400101);
 
     // 把"别的画布"的节点挂到这个画布的素材上 → 必须拒绝（不能造出跨画布引用）
     const crossNode = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "x.png",
+      object_key: `u/${spaceId}/canvas/x.png`,
       material_type: "image",
       node_id: otherNode.data.id,
     });
@@ -923,7 +926,7 @@ describe("canvas e2e", () => {
     });
 
     const m = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "canvas/out/r1.png",
+      object_key: `u/${spaceId}/canvas/out/r1.png`,
       material_type: "image",
       node_id: n.data.id,
       source: 2, // 节点产出
@@ -948,7 +951,7 @@ describe("canvas e2e", () => {
     const c = await inject("POST", "/canvas/canvases", { title: "下载" });
     const canvasId = c.data.id as string;
     const m = await inject("POST", `/canvas/canvases/${canvasId}/materials`, {
-      object_key: "canvas/d/a.png",
+      object_key: `u/${spaceId}/canvas/d/a.png`,
       material_type: "image",
     });
     const res = await inject("POST", `/canvas/canvases/${canvasId}/materials/batch-download`, {
@@ -964,10 +967,10 @@ describe("canvas e2e", () => {
     const c = await inject("POST", "/canvas/canvases", { title: "上传" });
     const canvasId = c.data.id as string;
     const up = await inject("POST", `/canvas/canvases/${canvasId}/upload-file`, {
-      object_key: "uploads/voice.mp3",
+      object_key: `u/${spaceId}/uploads/voice.mp3`,
     });
     expect(up.code).toBe(0);
-    expect(up.data.uri).toBe("uploads/voice.mp3");
+    expect(up.data.uri).toBe(`u/${spaceId}/uploads/voice.mp3`);
 
     const list = await inject("GET", `/canvas/canvases/${canvasId}/materials`);
     expect((list.data.list as Array<{ material_type: string }>)[0]!.material_type).toBe("audio");

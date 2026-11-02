@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { episodes, projectTimelines, scriptProjects, tasks, timelineExports } from "@app/db";
 import type { Db } from "@app/db";
 import { downloadBounded, execFileBounded } from "@app/shared";
-import type { StorageDriver } from "@app/storage";
+import { assertKeyInSpace, type StorageDriver } from "@app/storage";
 import { escapeDrawtext, watermarkFilter } from "./label";
 
 const FFMPEG_TIMEOUT_MS = 10 * 60_000;
@@ -64,7 +64,7 @@ async function readClipSource(deps: TimelineExportDeps, clip: TimelineClip): Pro
       });
     }
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null; // mock:// 等非存储 key
-    return await deps.storage.read(uri);
+    return await deps.storage.read(assertKeyInSpace(String(task.spaceId), uri));
   } catch {
     return null;
   }
@@ -307,7 +307,11 @@ export async function runTimelineExport(exportId: string, deps: TimelineExportDe
     if (buffer.byteLength === 0) throw new Error("ffmpeg produced empty file");
 
     const key = `u/${row.spaceId}/timelines/${exportId}.mp4`;
-    await deps.storage.put(key, buffer, "video/mp4");
+    await deps.storage.put(
+      assertKeyInSpace(String(row.spaceId), key),
+      buffer,
+      "video/mp4",
+    );
     await deps.db
       .update(timelineExports)
       .set({

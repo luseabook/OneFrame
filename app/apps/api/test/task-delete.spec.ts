@@ -75,7 +75,7 @@ async function seedTask(
     options: { ratio: "1:1", resolution: "1K", count: 1 },
     status,
     progress: status === TaskStatus.SUCCEEDED ? 100 : 0,
-    results: overrides.results ?? (status === TaskStatus.SUCCEEDED ? [{ uri: "u/seed/del.png" }] : null),
+    results: overrides.results ?? (status === TaskStatus.SUCCEEDED ? [{ uri: `u/${spaceId}/del.png` }] : null),
     creditsFrozen: overrides.creditsFrozen ?? 0,
     creditsSettled: status === TaskStatus.SUCCEEDED ? 10 : 0,
     dedupeKey: `spec-del:${tag}:${String(id)}`,

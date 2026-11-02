@@ -260,7 +260,7 @@ export class CanvasShareService {
       canvas: {
         title: snapshot.canvas.title,
         version: snapshot.canvas.source_version,
-        cover_url: await this.signUri(snapshot.canvas.cover),
+        cover_url: await this.signUri(String(share.spaceId), snapshot.canvas.cover),
         node_count: snapshot.nodes.length,
         file_count: snapshot.files.length,
         truncated: snapshot.truncated,
@@ -276,10 +276,10 @@ export class CanvasShareService {
 
   /** 公开产物地址：每次请求现签，快照里不保存会过期的签名 URL */
   async publicFileUrls(token: string) {
-    const { snapshot } = await this.mustGetPublicShare(token);
+    const { share, snapshot } = await this.mustGetPublicShare(token);
     const files = [];
     for (const file of snapshot.files) {
-      const url = await this.signUri(file.uri);
+      const url = await this.signUri(String(share.spaceId), file.uri);
       if (url) files.push({ node_id: file.node_id, kind: file.kind, url });
     }
     return { files, expires_in: URL_TTL_S, truncated: snapshot.truncated };
@@ -287,7 +287,7 @@ export class CanvasShareService {
 
   /** 缩略图：每个节点取第一张预览，没有预览就退回第一张结果（视频封面缺失时仍能显示） */
   async publicFileThumbs(token: string) {
-    const { snapshot } = await this.mustGetPublicShare(token);
+    const { share, snapshot } = await this.mustGetPublicShare(token);
     const picked = new Map<string, CanvasShareFile>();
     for (const file of snapshot.files) {
       const current = picked.get(file.node_id);
@@ -296,7 +296,7 @@ export class CanvasShareService {
     }
     const thumbs = [];
     for (const file of picked.values()) {
-      const url = await this.signUri(file.uri);
+      const url = await this.signUri(String(share.spaceId), file.uri);
       if (url) thumbs.push({ node_id: file.node_id, url });
     }
     return { thumbs, expires_in: URL_TTL_S };
@@ -438,10 +438,10 @@ export class CanvasShareService {
   }
 
   /** 存储 key 现签；http(s) 原样；其余协议（data:/mock:/blob:）公开侧无法保证可读，直接丢弃 */
-  private async signUri(uri: string | null | undefined): Promise<string | null> {
+  private async signUri(spaceId: string, uri: string | null | undefined): Promise<string | null> {
     if (!uri) return null;
     if (/^https?:\/\//i.test(uri)) return uri;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
-    return this.storage.signDownload(uri, URL_TTL_S).catch(() => null);
+    return this.storage.signDownload(spaceId, uri, URL_TTL_S).catch(() => null);
   }
 }
