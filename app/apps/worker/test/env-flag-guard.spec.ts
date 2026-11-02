@@ -257,7 +257,7 @@ describe("静态守卫：布尔 / 枚举环境变量只有一个入口", () => {
         "AI_LABEL_ENABLED",
       ]),
     );
-    expect(readEnvCallNames(WORKER_ENV_GUARD)).toEqual(["ADAPTER_MODE"]);
+    expect(readEnvCallNames(WORKER_ENV_GUARD)).toEqual(["ADAPTER_MODE", "PROVIDER_DB_RESOLVE"]);
 
     // api：两个调用时现场读的测试开关
     expect(readEnvCallNames(OAUTH_SERVICE)).toEqual(["OAUTH_MOCK"]);

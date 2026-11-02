@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res, ParseIntPipe, Inject } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, ParseIntPipe, Inject } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
@@ -7,6 +7,9 @@ import { parseOrThrow } from "../../common/zod";
 import { MAX_ID_ITEMS, parseListParam } from "../../common/list-param";
 import type { AuthedRequest } from "../../common/auth.types";
 import { TasksService } from "./tasks.service";
+
+const folderBody = z.object({ name: z.string().trim().min(1).max(80) });
+const assignFolderBody = z.object({ folder_id: z.string().regex(/^\d+$/).nullable() });
 
 @Controller()
 export class TasksController {
@@ -20,6 +23,7 @@ export class TasksController {
     @Query("page_size") pageSize?: string,
     @Query("status") status?: string,
     @Query("capability") capability?: string,
+    @Query("folder_id") folderId?: string,
     @Res({ passthrough: true }) reply?: FastifyReply,
   ) {
     const spaceId = req.auth?.spaceId ?? "";
@@ -41,7 +45,41 @@ export class TasksController {
       page_size: pageSize ? Number(pageSize) : undefined,
       status: status ? Number(status) : undefined,
       capability,
+      folder_id:
+        folderId === "" || folderId === undefined
+          ? undefined
+          : folderId === "none" || folderId === "unfiled"
+            ? null
+            : folderId,
     });
+  }
+
+  @Get("tasks/folders")
+  listFolders(@Req() req: AuthedRequest) {
+    return this.tasks.listFolders(req.auth?.spaceId ?? "");
+  }
+
+  @Post("tasks/folders")
+  createFolder(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(folderBody, body ?? {});
+    return this.tasks.createFolder(req.auth?.spaceId ?? "", input.name);
+  }
+
+  @Patch("tasks/folders/:id")
+  renameFolder(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(folderBody, body ?? {});
+    return this.tasks.renameFolder(req.auth?.spaceId ?? "", id, input.name);
+  }
+
+  @Delete("tasks/folders/:id")
+  deleteFolder(@Req() req: AuthedRequest, @Param("id") id: string) {
+    return this.tasks.deleteFolder(req.auth?.spaceId ?? "", id);
+  }
+
+  @Patch("tasks/:id/folder")
+  assignFolder(@Req() req: AuthedRequest, @Param("id") id: string, @Body() body: unknown) {
+    const input = parseOrThrow(assignFolderBody, body ?? {});
+    return this.tasks.assignFolder(req.auth?.spaceId ?? "", id, input.folder_id);
   }
 
   @Post("tasks/batch-download")

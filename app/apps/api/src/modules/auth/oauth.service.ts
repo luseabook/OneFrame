@@ -330,7 +330,7 @@ export class OauthService {
   }
 
   /** 生成授权 URL + state（state 落 Redis 5 分钟，一次性） */
-  async createAuthorizeUrl(provider: string) {
+  async createAuthorizeUrl(provider: string, bindUserId?: string) {
     const spec = this.spec(provider);
     const cfg = this.config(spec.provider);
     if (!cfg) {
@@ -343,7 +343,7 @@ export class OauthService {
     const state = randomUUID();
     await this.redis.set(
       `oauth:state:${spec.provider}:${state}`,
-      JSON.stringify({ provider: spec.provider, created_at: Date.now() }),
+      JSON.stringify({ provider: spec.provider, created_at: Date.now(), ...(bindUserId ? { bind_user_id: bindUserId } : {}) }),
       STATE_TTL_S,
     );
     return {
@@ -362,7 +362,11 @@ export class OauthService {
    * state 无论成功失败都先删：失败后重放同一个 state 也必须被拒（否则可被用来
    * 反复尝试 code）。返回的 profile 交给 AuthService 做绑定/建号。
    */
-  async exchangeCode(provider: string, code: string, state: string): Promise<{ profile: OauthProfile; mock: boolean }> {
+  async exchangeCode(
+    provider: string,
+    code: string,
+    state: string,
+  ): Promise<{ profile: OauthProfile; mock: boolean; bindUserId?: string }> {
     const spec = this.spec(provider);
     const cfg = this.config(spec.provider);
     if (!cfg) {
@@ -386,10 +390,21 @@ export class OauthService {
         reason: "state_invalid",
       });
     }
+    let bindUserId: string | undefined;
+    try {
+      const parsed = JSON.parse(stored) as { bind_user_id?: unknown };
+      bindUserId = typeof parsed.bind_user_id === "string" ? parsed.bind_user_id : undefined;
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "state payload invalid（state_invalid）", {
+        field: "state",
+        reason: "state_invalid",
+      });
+    }
     if (this.mockEnabled()) {
       // mock：用 code 派生稳定 external_id，便于断言"同一 code/同一外部账号只建一个用户"
       return {
         mock: true,
+        bindUserId,
         profile: {
           external_id: `${spec.provider}_mock_${code}`,
           nickname: `${spec.label}用户${code.slice(-2)}`,
@@ -398,7 +413,7 @@ export class OauthService {
       };
     }
     try {
-      return { mock: false, profile: await spec.exchange(cfg, code) };
+      return { mock: false, bindUserId, profile: await spec.exchange(cfg, code) };
     } catch (error) {
       if (error instanceof AppError) throw error;
       const message = error instanceof Error ? error.message : String(error);
@@ -410,5 +425,4 @@ export class OauthService {
     }
   }
 }
-
 

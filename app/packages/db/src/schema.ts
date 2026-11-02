@@ -392,6 +392,102 @@ export const modelPrices = pgTable(
   ],
 );
 
+// ── 供应商接入（设计见 docs/02-architecture/provider-management.md）──
+// 供应商账号与协议分离：同一 protocol 可接多个网关；Key 只存密文。
+export const modelProviders = pgTable(
+  "model_providers",
+  {
+    id: pk(),
+    code: text("code").notNull().unique(), // ark-main / deepseek-main / gw-a
+    name: text("name").notNull(),
+    protocol: text("protocol").notNull(), // openai-compatible|ark|http-video
+    baseUrl: text("base_url").notNull(),
+    authType: text("auth_type").notNull().default("bearer"), // bearer|header
+    authHeader: text("auth_header").notNull().default("Authorization"),
+    /** AES-256-GCM 密文（base64）；绝不回传前端 */
+    credentialsCiphertext: text("credentials_ciphertext").notNull(),
+    encryptionKeyId: text("encryption_key_id").notNull().default("v1"),
+    credentialVersion: integer("credential_version").notNull().default(1),
+    keyHint: text("key_hint").notNull().default(""), // 仅末 4 位
+    keyFingerprint: text("key_fingerprint").notNull().default(""), // sha256 前 8 位
+    options: jsonb("options").notNull().default({}),
+    status: smallint("status").notNull().default(1), // 1 启用 / 0 停用
+    lastCheckAt: timestamp("last_check_at", { withTimezone: true }),
+    lastCheckStatus: text("last_check_status"),
+    lastCheckMessage: text("last_check_message"),
+    createdBy: bigint("created_by", { mode: "bigint" }).references(() => adminUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_model_providers_status").on(t.status)],
+);
+
+/** 对方模型列表的缓存；不是可售模型，导入 `models` 前必须人工确认能力/档位 */
+export const providerModels = pgTable(
+  "provider_models",
+  {
+    id: pk(),
+    providerId: bigint("provider_id", { mode: "bigint" })
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "cascade" }),
+    remoteModelId: text("remote_model_id").notNull(),
+    displayName: text("display_name").notNull().default(""),
+    capabilityHint: text("capability_hint"),
+    raw: jsonb("raw").notNull().default({}),
+    status: smallint("status").notNull().default(1), // 1 可见 / 0 对方已下线
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_provider_models_remote").on(t.providerId, t.remoteModelId),
+    index("idx_provider_models_provider").on(t.providerId, t.status),
+  ],
+);
+
+/** 可售模型 → 供应商/对方模型的路由；Ark 的 ep-xxx 落在 remote_model_id */
+export const modelRoutes = pgTable(
+  "model_routes",
+  {
+    id: pk(),
+    modelId: bigint("model_id", { mode: "bigint" })
+      .notNull()
+      .references(() => models.id, { onDelete: "cascade" }),
+    providerId: bigint("provider_id", { mode: "bigint" })
+      .notNull()
+      .references(() => modelProviders.id),
+    remoteModelId: text("remote_model_id").notNull(),
+    priority: integer("priority").notNull().default(100),
+    weight: integer("weight").notNull().default(100),
+    active: boolean("active").notNull().default(true),
+    options: jsonb("options").notNull().default({}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_model_routes_remote").on(t.modelId, t.providerId, t.remoteModelId),
+    index("idx_model_routes_model").on(t.modelId, t.active, t.priority),
+    index("idx_model_routes_provider").on(t.providerId, t.active),
+  ],
+);
+
+// ── 任务结果文件夹（B7；竞品 result/folder 的本地落地）──
+export const taskFolders = pgTable(
+  "task_folders",
+  {
+    id: pk(),
+    spaceId: bigint("space_id", { mode: "bigint" })
+      .notNull()
+      .references(() => spaces.id),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_task_folders_space_name").on(t.spaceId, t.name),
+    index("idx_task_folders_space").on(t.spaceId, t.createdAt.desc()),
+  ],
+);
+
 // ── 任务脊柱（database §3）────────────────────────────────
 export const tasks = pgTable(
   "tasks",
@@ -413,6 +509,19 @@ export const tasks = pgTable(
     modelId: bigint("model_id", { mode: "bigint" })
       .notNull()
       .references(() => models.id),
+    /**
+     * 提交时选中的供应商路由。轮询只认 route_snapshot 里的 base_url/remote_model_id，
+     * 避免运营在异步任务执行期间改配置导致 vendor_task_id 查错供应商。
+     * 路由被删后该列置空，但快照仍保留，已提交任务可继续完成。
+     */
+    routeId: bigint("route_id", { mode: "bigint" }).references(() => modelRoutes.id, {
+      onDelete: "set null",
+    }),
+    routeSnapshot: jsonb("route_snapshot"),
+    /** 可空的用户结果文件夹；删文件夹时置空，不删任务 */
+    folderId: bigint("folder_id", { mode: "bigint" }).references(() => taskFolders.id, {
+      onDelete: "set null",
+    }),
     input: jsonb("input").notNull(),
     options: jsonb("options").notNull(),
     status: smallint("status").notNull().default(1), // 1 PENDING … 7 REVIEW_REJECTED

@@ -12,8 +12,14 @@
 > **v2.0 · 2026-10-26 · 四新域（F1 契约）**：新增 §12 `canvas`/`agent`/`cam`/`film` 四域表设计（21 张新表 + 3 张既有表 ALTER），
 > 迁移规划 0013–0016；团队复用 `spaces(type=2)` 不另建表（ADR-010）、账本复用 `credit_flows` 不另起（ADR-011）、
 > 任务一律复用 `tasks` 不另造（ADR-003）。逐字段证据见 `_acceptance/_gap/contract-draft-{canvas-agent,cam-film}.md`。
-> **v2.1 · 2026-11-02 · 现状校正**：`packages/db/src/schema.ts` 已定义 **115 张表**，`apps/api/drizzle` 共 **51 个迁移**；
-> 上文的 16/26/46 表等数字是各批次时点口径，不是当前总量。
+> **v2.1 · 2026-11-02 · 现状校正**：当时 `packages/db/src/schema.ts` 定义 **115 张表**，`apps/api/drizzle` 共 **51 个迁移**；
+> 上文的 16/26/46 表等数字是各批次时点口径，不是当前总量（v2.4 新增 3 表后见下条）。
+> **v2.4 · 2026-11-02 · 供应商接入（迁移 0051）**：新增 `model_providers` / `provider_models` / `model_routes`
+> 三张表；Key 以 AES-256-GCM 密文落 `model_providers.credentials_ciphertext`，列表只回末四位。
+> 当前 drizzle 报告 **119 张表 / 52 个迁移**（以 `schema.ts` 与 `drizzle/` 为准）。
+> **v2.5 · 2026-11-03 · 供应商运行态与任务结果文件夹（迁移 0052/0053）**：
+> `tasks` 新增 `route_id` / `route_snapshot` / `folder_id`，新增 `task_folders`。
+> 当前 drizzle 报告 **120 张表 / 54 个迁移**（0000–0053）。
 >
 > **v2.3 · 2026-10-26 · 文本类能力 + 价目约束（迁移 0017）**：§2 `model_prices` 补一条**部分唯一索引**
 > `uq_model_prices_per_call(model_id, mode, resolution) WHERE duration_s IS NULL`。
@@ -39,6 +45,9 @@ erDiagram
     spaces ||--o{ tasks : creates
     models ||--o{ tasks : used_by
     models ||--o{ model_prices : priced
+    models ||--o{ model_routes : routed_by
+    model_providers ||--o{ provider_models : discovers
+    model_providers ||--o{ model_routes : serves
     tasks ||--o{ task_events : audit
     tasks ||--o{ assets : produces
     tasks ||--o{ task_shares : shares
@@ -228,7 +237,89 @@ CREATE TABLE model_prices (
 
 > 竞品对照：结构**对齐**其 46 模型目录的 `display_name/need_vip/mode_order/params.generation.<mode>/两 scene 键/price_variants`（实测 30 video + 13 image + 3 file），按 MVP 裁剪，**不是逐字段复制**〔RM-证据：cli-out/model-all.json〕。初始数据：从该目录导入 8~10 行（Seedance 2.5/2.0 VIP、TGI 2/TGI 2.5、天幕 2.0、DeepSeek 等），导入时按上述结构映射并保留 `mode_order` 与 scene 键；`studio_asset_image` 记在 `modes` 而非 `scene_modes`。
 
+## 2.1 供应商接入与模型路由（迁移 0051）
+
+```sql
+CREATE TABLE model_providers (
+  id                     BIGINT PRIMARY KEY,
+  code                   TEXT NOT NULL UNIQUE,        -- ark-main / deepseek-main / gw-a
+  name                   TEXT NOT NULL,
+  protocol               TEXT NOT NULL,               -- openai-compatible|ark|http-video
+  base_url               TEXT NOT NULL,
+  auth_type              TEXT NOT NULL DEFAULT 'bearer',
+  auth_header            TEXT NOT NULL DEFAULT 'Authorization',
+  credentials_ciphertext TEXT NOT NULL,               -- AES-256-GCM: base64(iv).base64(tag).base64(ciphertext)
+  encryption_key_id      TEXT NOT NULL DEFAULT 'v1',
+  credential_version     INT NOT NULL DEFAULT 1,      -- 轮换时 +1；AAD 绑定 provider:id:vN
+  key_hint               TEXT NOT NULL DEFAULT '',    -- 仅末四位
+  key_fingerprint        TEXT NOT NULL DEFAULT '',    -- sha256 前 8 位，用于重复检测
+  options                JSONB NOT NULL DEFAULT '{}', -- 超时/models_path/默认 header
+  status                 SMALLINT NOT NULL DEFAULT 1, -- 1 启用 / 0 停用
+  last_check_at          TIMESTAMPTZ,
+  last_check_status      TEXT,                        -- ok|auth|network|timeout|unsupported
+  last_check_message     TEXT,
+  created_by             BIGINT REFERENCES admin_users(id),
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE provider_models (
+  id               BIGINT PRIMARY KEY,
+  provider_id      BIGINT NOT NULL REFERENCES model_providers(id) ON DELETE CASCADE,
+  remote_model_id  TEXT NOT NULL,                     -- OpenAI 模型 ID / Ark ep-xxx
+  display_name     TEXT NOT NULL DEFAULT '',
+  capability_hint  TEXT,                              -- 仅推测，不是可售能力
+  raw              JSONB NOT NULL DEFAULT '{}',
+  status           SMALLINT NOT NULL DEFAULT 1,       -- 1 可见 / 0 对方已下线
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (provider_id, remote_model_id)
+);
+
+CREATE TABLE model_routes (
+  id               BIGINT PRIMARY KEY,
+  model_id         BIGINT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+  provider_id      BIGINT NOT NULL REFERENCES model_providers(id),
+  remote_model_id  TEXT NOT NULL,
+  priority         INT NOT NULL DEFAULT 100,          -- 越小越优先
+  weight           INT NOT NULL DEFAULT 100,          -- 预留灰度/分流
+  active           BOOLEAN NOT NULL DEFAULT TRUE,
+  options          JSONB NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (model_id, provider_id, remote_model_id)
+);
+CREATE INDEX idx_model_providers_status ON model_providers(status);
+CREATE INDEX idx_provider_models_provider ON provider_models(provider_id, status);
+CREATE INDEX idx_model_routes_model ON model_routes(model_id, active, priority);
+CREATE INDEX idx_model_routes_provider ON model_routes(provider_id, active);
+```
+
+> **边界**：`provider_models` 是“对方有什么”的缓存，不等于可售商品；导入 `models` 必须人工确认
+> capability / adapter_code / modes。`model_routes` 是“商品 → 供应商模型”的供应链，Ark 的 `ep-xxx`
+> 落在 `remote_model_id`，不写进 `models.name`。
+>
+> **运行时状态（2026-11-03）**：`PROVIDER_DB_RESOLVE=off/fallback/on` 已接入 API 与 worker；
+> 任务提交时写 `route_id/route_snapshot`，轮询只认快照中的 `base_url/remote_model_id`，Key 按
+> `provider_id` 读取最新凭据版本。快照不含 Key。
+
 ## 3. 任务（脊柱）
+
+### 3.0 任务结果文件夹（迁移 0053）
+
+```sql
+CREATE TABLE task_folders (
+  id         BIGINT PRIMARY KEY,
+  space_id   BIGINT NOT NULL REFERENCES spaces(id),
+  name       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (space_id, name)
+);
+CREATE INDEX idx_task_folders_space ON task_folders(space_id, created_at DESC);
+```
+
+删除文件夹只把 `tasks.folder_id` 置空，不删任务；任务列表可用 `folder_id=none|unfiled` 查询未归档项。
 
 ```sql
 CREATE TABLE tasks (
@@ -237,6 +328,9 @@ CREATE TABLE tasks (
   user_id          BIGINT NOT NULL REFERENCES users(id),
   episode_id       BIGINT REFERENCES episodes(id), -- 任务归属(P0-03)：流水线任务必填, 工具箱任务 NULL
   shot_id          BIGINT REFERENCES storyboards(id), -- 镜级任务(分镜视频)必填, 其余 NULL
+  route_id         BIGINT REFERENCES model_routes(id) ON DELETE SET NULL,
+  route_snapshot   JSONB,                            -- {provider_id,protocol,base_url,remote_model_id,...}；不含 Key
+  folder_id        BIGINT REFERENCES task_folders(id) ON DELETE SET NULL,
   attempt_no       INT NOT NULL DEFAULT 1,         -- 同镜重试次数(第1次=1)；重试任务+1
   origin_task_id   BIGINT REFERENCES tasks(id),    -- 重试链指针(首代任务=NULL)；历史经此+shot_id 反查
   capability       TEXT NOT NULL,

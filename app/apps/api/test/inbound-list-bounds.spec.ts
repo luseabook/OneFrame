@@ -56,6 +56,7 @@ const HELPER_FILE = "apps/api/src/common/list-param.ts";
  */
 const ARRAY_SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/ad/ad.constants.ts": 6,
+  "apps/api/src/modules/admin/admin-providers.controller.ts": 1,
   "apps/api/src/modules/admin/admin.controller.ts": 3,
   "apps/api/src/modules/agent/agent-conversations.controller.ts": 1,
   "apps/api/src/modules/agent/agent-reply.service.ts": 1,
@@ -386,7 +387,7 @@ describe("入站列表上限门禁（第 120 批）", () => {
         if (scan.arrays.length > 0) actual[scan.file] = scan.arrays.length;
       }
       expect(actual).toEqual(ARRAY_SITES_BY_FILE);
-      expect(totalArrays).toBe(95);
+      expect(totalArrays).toBe(96);
     });
 
     it("z.union 内嵌 z.array 全局只剩 helper 一处（别处出现 = 绕过 helper 裸造列表）", () => {

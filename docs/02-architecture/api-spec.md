@@ -20,6 +20,9 @@
 > `VideoNode` emits `video-parse`、`task_type=video_parse`；**请求体字段名/响应内层结构未取证**，
 > 按 ADR-013「对齐行为不对齐字段名」协议自研。
 > 验收：`canvas-derive.spec`（+2 例）、`adapters.spec` mock 形状（+1 段断言）、E2E S20（5 项）。
+> **v2.8 · 2026-11-02 · 供应商接入 P0**：§11 新增供应商 CRUD/测试连接/模型发现/手工导入/路由/新模型草稿，
+> 共 12 条；Key 只回末四位，OpenAI 兼容自动发现，Ark/HTTP 私有协议手工导入。运行时路由解析尚未接入，
+> 见 `docs/02-architecture/provider-management.md` §14。
 > **v2.8 · 2026-10-27 · `cam` 团队管理收口（6 条）**：`PATCH /cam/team/info`（改名/席位/开关）、
 > `GET /cam/team/group/{id}/stats`、`GET /cam/team/member/{id}`、`PATCH …/member/{id}/name`、
 > `POST /cam/team/batch-points-allocation`（逐条独立）、`GET /cam/team/points-flow/export`（CSV 现签链接）。
@@ -717,6 +720,20 @@ POST /ops/admin/model-prices              // 新增价目（档位必须已存�
 PATCH /ops/admin/model-prices/{id}        // 改金额 / active=false 下架
 DELETE /ops/admin/model-prices/{id}       // 删除误配档位（追溯用下架，不用删除）
 
+# ── 供应商接入 / 模型发现 / 路由（2026-11-02，P0 控制面）──
+GET  /ops/admin/providers                 // 列表；只回 key_hint/key_fingerprint，绝不回明文或密文
+POST /ops/admin/providers                 // super；{code,name,protocol,base_url,api_key,auth_type?,auth_header?,options?}
+PATCH /ops/admin/providers/{id}           // super；key 省略=不变，传了=轮换并 credential_version++
+DELETE /ops/admin/providers/{id}          // super；软停用；存在 active model_routes → 400101
+POST /ops/admin/providers/{id}/test       // ops+；真实探测，返回 {ok,kind?,message?,latency_ms?}
+POST /ops/admin/providers/{id}/discover   // ops+；OpenAI 兼容 GET /v1/models；其它协议返回 supported:false
+GET  /ops/admin/provider-models?provider_id=   // 候选模型（对方有什么，不是可售商品）
+POST /ops/admin/providers/{id}/provider-models {remote_model_ids:[...]}  // 手工导入 Ark ep-xxx 等
+GET  /ops/admin/model-routes?model_id=    // 可售模型 → 供应商/远端模型
+POST /ops/admin/model-routes              // {model_id,provider_id,remote_model_id,priority?,weight?,active?,options?}
+PATCH /ops/admin/model-routes/{id}        // {remote_model_id?,priority?,weight?,active?,options?}
+POST /ops/admin/models                    // 新增可售模型草稿（visible=false；需 capability/adapter_code）
+
 # ── 任务看板 / 导出 ──
 GET  /ops/admin/tasks?status=&model_id=&mode=&page=&page_size=   // 含 model_name/adapter_code/error_code/error_message/finished_at
 GET  /ops/admin/task-metrics?model_id=&from=&to=   // 失败率 + 错误码分布 + adapter avg/p95；同一组筛选作用于全部聚合
@@ -756,6 +773,13 @@ GET  /ops/admin/ai-labels?from=&to=&only_missing=&page=&page_size= · GET /ops/a
 > JWT 带 `ver`（= `admin_users.token_version`），改密/停用后旧 token 立即失效（401101，需重登）；
 > 存量库升级时迁移 0047 会把「首个管理员」提升为 super（否则无人能管账号）。
 > 登录失败限流：同（用户名+真实客户端 IP）5 分钟内 10 次失败 → `429101`（Redis 计数，成功登录即清零）。
+>
+> **供应商接入（P0，2026-11-02）**：Key 只存 AES-256-GCM 密文，列表/详情只回 `key_hint`（末四位）；
+> `test` / `discover` 是 POST（有网络副作用，需限流），OpenAI 兼容走 `GET {base}/v1/models`，
+> Ark/HTTP 私有协议返回 `supported:false` 并只允许手工导入 endpoint。`provider_models` 只是候选缓存，
+> 不自动生成可售模型；新增模型走 `POST /ops/admin/models`，默认 `visible=false`。
+> **运行时未接**：worker 仍读环境变量；`PROVIDER_DB_RESOLVE` 与任务路由快照在后续批次落地前，
+> 不得把该控制面描述成“已可切换生产供应商”。
 >
 > **操作审计**：`/v1/ops/` 下的**写操作**（非 GET/HEAD/OPTIONS）成功后异步落 `admin_audit_logs`
 > （admin_id / action / method / path / ip / ua / metadata）。三条边界：只记成功（失败不是「改了什么」的证据，
@@ -5700,3 +5724,31 @@ I = 0      （当前未发现 —— 见 61.4）
 不需要改任何客户端代码。这一节的作用是：当有人问「为什么还差 1.6%」时，
 答案不是「还没做完」，而是**「剩下 14 项等凭据/证据、7 项等一句话」**，
 且每一项都能指到具体的人。
+
+## 62. 账号绑定与任务结果文件夹（2026-11-03）
+
+### 62.1 账号绑定（B6）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/me` | 新增 `bindings: { phone: "138****1234"\|null, providers: string[] }` |
+| POST | `/v1/auth/bind/phone` | 已登录账号绑定手机号；body `{phone, code}`。身份属于他人时 `400101 reason=identity_already_bound`，不自动合并 |
+| POST | `/v1/auth/bind/oauth/:provider/url` | 已登录账号发起渠道绑定；state 内固化 `bind_user_id` |
+| POST | `/v1/auth/oauth/:provider/callback` | state 带 `bind_user_id` 时只绑定，返回 `{bound:true, provider, bindings, mock}`，不建号、不下发 token |
+
+### 62.2 任务结果文件夹（B7）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/tasks/folders` | 文件夹列表，含 `task_count` |
+| POST | `/v1/tasks/folders` | `{name}`；同空间重名 `400101` |
+| PATCH | `/v1/tasks/folders/:id` | 重命名 |
+| DELETE | `/v1/tasks/folders/:id` | 删除文件夹并将任务置为未归档 |
+| PATCH | `/v1/tasks/:id/folder` | `{folder_id: string\|null}`；只接受本空间文件夹 |
+| GET | `/v1/tasks?folder_id=...` | 按文件夹筛选；`none` / `unfiled` 表示未归档 |
+
+### 62.3 供应商运行时
+
+新增配置 `PROVIDER_DB_RESOLVE=off|fallback|on`。提交任务时按 `model_routes.priority` 升序、
+同优先级按 `weight` 选择并写入 `tasks.route_id/route_snapshot`；worker 轮询只认快照的
+`base_url/remote_model_id`，Key 按 provider 最新凭据版本解密。`off` 完全沿用环境变量，可回滚。

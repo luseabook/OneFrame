@@ -175,6 +175,7 @@ interface CreatorAuditRow {
 }
 
 const tab = useAdminTab();
+const route = useRoute();
 const error = ref("");
 /** 成功提示（后台页没有 toast，用一行绿字） */
 const ok = ref("");
@@ -263,6 +264,17 @@ const dashboardStatuses = computed<Array<{ status: number; count: number }>>(() 
     .map(([status, count]) => ({ status: Number(status), count: Number(count) }))
     .sort((a, b) => a.status - b.status);
 });
+const dashboardTaskTotal = computed(() => Math.max(1, dashboardStatuses.value.reduce((sum, row) => sum + row.count, 0)));
+
+function statusPercent(count: number): number {
+  return Math.round((count / dashboardTaskTotal.value) * 100);
+}
+
+function queueHealth(counts: Record<string, number>): string {
+  if ((counts.failed ?? 0) > 0) return "is-bad";
+  if ((counts.active ?? 0) > 0) return "is-busy";
+  return "";
+}
 
 async function loadDashboard(): Promise<void> {
   dashboardState.loading = true;
@@ -381,6 +393,12 @@ const tasksTotal = ref(0);
 const tasksPage = ref(1);
 const taskStatus = ref<number | "">("");
 const taskModelId = ref("");
+/** 概览状态分布可点进任务审计：?tab=tasks&status=4 直接落到失败任务 */
+function syncTaskFilterFromQuery(): void {
+  const raw = Number(route.query.status);
+  taskStatus.value = (TASK_STATUSES as readonly number[]).includes(raw) ? raw : "";
+  taskModelId.value = typeof route.query.model_id === "string" ? route.query.model_id : "";
+}
 /** 区间筛选只作用于「指标」与「CSV 导出」（服务端按 tasks.created_at，契约 §2.7/§2.8） */
 const metricsFrom = ref("");
 const metricsTo = ref("");
@@ -1072,6 +1090,7 @@ async function loadTab(next: AdminTab): Promise<void> {
       break;
     case "tasks":
       // 任务页签的模型下拉复用模型表；没拉过就先补一次（直接开 /admin?tab=tasks 的场景）
+      syncTaskFilterFromQuery();
       if (models.value.length === 0) await loadModels();
       await Promise.all([loadTasks(), loadMetrics()]);
       break;
@@ -1129,31 +1148,121 @@ watch(
     <template v-if="tab === 'dashboard'">
       <p v-if="dashboardState.loading" class="muted small">{{ t("adminUi.loading") }}</p>
       <p v-else-if="dashboardState.error" class="error small">{{ dashboardState.error }}</p>
-      <section v-if="dashboard" class="cards">
-        <div class="card"><span class="muted">{{ t("adminUi.statUsers") }}</span><b>{{ dashboard.users }}</b></div>
-        <div class="card"><span class="muted">{{ t("adminUi.statTasks") }}</span><b>{{ dashboard.tasks.total }}</b></div>
-        <div class="card"><span class="muted">{{ t("adminUi.statExports") }}</span><b>{{ dashboard.exports }}</b></div>
-        <div class="card"><span class="muted">{{ t("adminUi.statShares") }}</span><b>{{ dashboard.active_shares }}</b></div>
-        <div class="card"><span class="muted">{{ t("adminUi.statAdmins") }}</span><b>{{ dashboard.admins }}</b></div>
-        <div class="card"><span class="muted">{{ t("adminUi.statPendingReports") }}</span><b>{{ dashboard.pending_reports ?? 0 }}</b></div>
+      <section v-if="dashboard" class="stat-grid">
+        <NuxtLink class="stat-card tone-purple" :to="{ path: '/admin', query: { tab: 'users' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7" />
+                <path d="M3.5 19c.6-3 2.9-4.7 5.5-4.7s4.9 1.7 5.5 4.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <path d="M16 6.4a3 3 0 010 5.2M17.5 19c-.2-1.8-.9-3.2-2-4.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statUsers") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.users }}</b>
+          <span class="stat-foot"><span>用户管理</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
+
+        <NuxtLink class="stat-card tone-blue" :to="{ path: '/admin', query: { tab: 'tasks' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.7" />
+                <path d="M8 9h8M8 13h5M8 17h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statTasks") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.tasks.total }}</b>
+          <span class="stat-foot"><span>任务审计</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
+
+        <NuxtLink class="stat-card tone-cyan" :to="{ path: '/admin', query: { tab: 'exports' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 4v10m0 0l-3.4-3.4M12 14l3.4-3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M5 16.5v1.8A1.7 1.7 0 006.7 20h10.6a1.7 1.7 0 001.7-1.7v-1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statExports") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.exports }}</b>
+          <span class="stat-foot"><span>导出审计</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
+
+        <NuxtLink class="stat-card tone-green" :to="{ path: '/admin', query: { tab: 'shares' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M10.2 13.8a4 4 0 005.7 0l2.6-2.6a4 4 0 00-5.7-5.7L11.3 7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                <path d="M13.8 10.2a4 4 0 00-5.7 0l-2.6 2.6a4 4 0 005.7 5.7l1.5-1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statShares") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.active_shares }}</b>
+          <span class="stat-foot"><span>分享管理</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
+
+        <NuxtLink class="stat-card tone-amber" :to="{ path: '/admin', query: { tab: 'admins' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3.8l6.5 2.5v5.1c0 4-2.7 7.4-6.5 8.8-3.8-1.4-6.5-4.8-6.5-8.8V6.3L12 3.8z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                <path d="M9.2 12l2 2 3.7-3.9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statAdmins") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.admins }}</b>
+          <span class="stat-foot"><span>管理员</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
+
+        <NuxtLink class="stat-card tone-red" :to="{ path: '/admin', query: { tab: 'reports' } }">
+          <span class="stat-top">
+            <span class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 4.2l8 14.1H4l8-14.1z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                <path d="M12 9.2v4.3M12 16.4v.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="stat-label">{{ t("adminUi.statPendingReports") }}</span>
+          </span>
+          <b class="stat-value">{{ dashboard.pending_reports ?? 0 }}</b>
+          <span class="stat-foot"><span>举报处置</span><span class="stat-arrow">→</span></span>
+        </NuxtLink>
       </section>
 
       <!-- 任务状态分布（契约 §4.4.8）：任务卡只显示总数，运营排查时关心的是「卡在哪个状态」 -->
       <section v-if="dashboard" class="card">
         <h2>{{ t("adminUi.tasksByStatus") }}</h2>
         <p v-if="dashboardStatuses.length === 0" class="muted small">{{ t("adminUi.noTasksYet") }}</p>
-        <div v-else class="status-chips">
-          <span v-for="row in dashboardStatuses" :key="row.status" class="chip">
-            <span class="muted">{{ taskStatusLabel(row.status) }}</span>
+        <div v-else class="status-seg-list">
+          <NuxtLink
+            v-for="row in dashboardStatuses"
+            :key="row.status"
+            class="status-seg"
+            :class="`seg-${row.status}`"
+            :to="{ path: '/admin', query: { tab: 'tasks', status: row.status } }"
+          >
+            <span class="seg-label">{{ taskStatusLabel(row.status) }}</span>
+            <span class="seg-bar"><i :style="{ width: `${statusPercent(row.count)}%` }"></i></span>
             <b>{{ row.count }}</b>
-          </span>
+            <span class="seg-pct">{{ statusPercent(row.count) }}%</span>
+          </NuxtLink>
         </div>
       </section>
 
       <section v-if="dashboard?.queues" class="queues">
         <div v-for="(counts, queue) in dashboard.queues" :key="queue" class="queue-card">
-          <b>{{ queue }}</b>
-          <span class="muted">wait {{ counts.wait ?? 0 }} · active {{ counts.active ?? 0 }} · failed {{ counts.failed ?? 0 }}</span>
+          <b class="queue-name"><i class="queue-dot" :class="queueHealth(counts)" aria-hidden="true"></i>{{ queue }}</b>
+          <div class="queue-metrics">
+            <span class="queue-metric"><em>wait</em><b>{{ counts.wait ?? 0 }}</b></span>
+            <span class="queue-metric"><em>active</em><b>{{ counts.active ?? 0 }}</b></span>
+            <span class="queue-metric" :class="{ 'is-bad': (counts.failed ?? 0) > 0 }"><em>failed</em><b>{{ counts.failed ?? 0 }}</b></span>
+          </div>
         </div>
       </section>
     </template>
@@ -1614,6 +1723,7 @@ watch(
       每个面板自己拉数据、自己管分页/错误，避免这个单页继续膨胀成"改一处怕碰十处"。
     -->
     <AdminPricePanel v-if="tab === 'prices'" />
+    <AdminProvidersPanel v-if="tab === 'providers'" />
     <AdminMarketPanel v-if="tab === 'market'" />
     <AdminSkillsPanel v-if="tab === 'skills'" />
     <AdminAuditPanel v-if="tab === 'audit'" />

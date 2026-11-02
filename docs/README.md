@@ -15,6 +15,7 @@
 | 3 | [01-product/metrics.md](01-product/metrics.md) | 北极星指标、埋点事件表 | 产品+数据 |
 | — | [01-product/reelmate-feature-map.md](01-product/reelmate-feature-map.md) | **竞品功能地图**（万兴剧厂 ReelMate 全站 7 域 / 三种编排皮 / 三份协议 / 商业闭环 / 攻击面）；分域深挖附录在 [_parts/](01-product/_parts/) | 产品+架构（对标依据） |
 | 4 | [02-architecture/system-design.md](02-architecture/system-design.md) | 总体架构、模块边界、关键时序、失败模式 | 全员技术 |
+| — | [02-architecture/provider-management.md](02-architecture/provider-management.md) | **供应商接入与模型发现**：协议/账号/商品/路由四层、三张新表、Key 加密与 SSRF 边界；P0 控制面已实施，运行时待接 | 后端+前端 |
 | 5 | [02-architecture/adr.md](02-architecture/adr.md) | 架构决策记录 ADR-001~006（为什么这么做） | 全员技术 |
 | 6 | [02-architecture/database.md](02-architecture/database.md) | 完整 DDL、ER 图、索引与数据生命周期 | 后端 |
 | 7 | [02-architecture/api-spec.md](02-architecture/api-spec.md) | 全量 API 契约（v1） | 前后端 |
@@ -40,6 +41,8 @@
 **实现进度对照（2026-10-27 新增）**：[implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) 把竞品 28 个模块逐条对照我方现状，给出三口径进度（模块加权 **35.4%** / 首发口径 **54.4%** / 核心闭环 **51.3%**）、剩余 133 权重的缺口排序与建议推进顺序。**口径是估算，引用须带文档内标注的基线 HEAD。**
 
 **补齐计划（2026-10-27 新增）**：[completion-plan-to-100.md](07-plan/completion-plan-to-100.md) 是到 100% 的执行路径——8 个批次（地基 → 出片质量 → 小说链 → 能力 → 入口 → 影视版 → 生态 → 外延），每批有 DoD、判据与排期预测。**每批 DoD 未过不进下一批**。
+
+**供应商接入设计（2026-11-02）**：[provider-management.md](02-architecture/provider-management.md) 把“填 Base URL/Key 拉模型”拆成协议适配器、供应商账号、可售模型、模型路由四层；OpenAI 兼容走自动发现，Ark 等私有协议走手工 endpoint 导入。**控制面与运行时路由均已实施；Ark/HTTP 私有协议探针仍待官方协议证据，详见该文 §14。**
 
 ## 文档维护规则
 
@@ -125,6 +128,50 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
 
 ---
+
+## 变更登记（v6.77 · 供应商运行态 + B6/B7 收口 · 2026-11-03）
+
+| # | 变更 |
+|---|---|
+| 1 | 供应商路由：`PROVIDER_DB_RESOLVE` 接入 API/worker；任务提交写 `route_id/route_snapshot`，轮询只认快照；Key 按 provider 最新版本解密 |
+| 2 | 多路由选择：同优先级按 weight 选择；不用提交后盲目重投充当“故障切换”，避免重复计费 |
+| 3 | 控制面：Key 轮换面板、test/discover 管理员级 10 次/分钟限流、DNS 解析结果 pin 到连接 |
+| 4 | 任务结果文件夹（B7）：新增 `task_folders`、`tasks.folder_id`、CRUD/归档/筛选端点与任务页入口；删文件夹只解绑任务 |
+| 5 | 账号绑定（B6）：手机号绑定、第三方渠道绑定；身份已属于其他账号时拒绝自动合并 |
+| 6 | 合规脚本：PAGE-03/04/06、AI-03/04 改为同时验证页面 i18n 引用与中文语言包值，恢复 66/66 |
+
+**B1–B7 状态**：B1 影视 FILM 聚合 tab、B2 剧本买断交易、B3 许可范围、B5 画布 crop/video_clip 已在既有批次实现；
+B4 子账号密码按既定判断不做；B6/B7 本批补齐。
+
+**仍未做（非代码可独立完成）**：Ark/HTTP 私有协议安全探针需官方协议证据；ASR/供应商 Key/商户资质/
+审核 Key/渠道测试号/法务文案仍需外部输入；上线 72 小时演练需生产环境。
+
+---
+
+## 变更登记（v6.76 · 供应商接入 P0 控制面 · 2026-11-02）
+
+补上“填 Base URL + Key → 测试连接 → 拉取模型列表”的控制面。范围刻意收窄：**只做管理面，不接运行时**，
+避免在任务链路未验证时把生成路由切到数据库配置。
+
+| # | 变更 | 说明 |
+|---|---|---|
+| 1 | 数据 | 迁移 `0051_dizzy_franklin_richards.sql` 新增 `model_providers` / `provider_models` / `model_routes`；drizzle 当前 **119 表 / 52 迁移** |
+| 2 | Key 安全 | AES-256-GCM 落库；AAD 绑定 `provider:id:vN`；列表只回末四位与 sha256 前 8 位指纹；生产要求 `PROVIDER_ENCRYPTION_KEY`，非生产从 `JWT_SECRET` 派生 |
+| 3 | API | 新增 12 个端点：供应商 CRUD/软停用、测试连接、模型发现、手工导入、路由 CRUD、新增可售模型草稿；super 才能建/改 Key，ops 可测试/发现/导入 |
+| 4 | OpenAI 兼容 | `GET {base}/v1/models` 自动发现；结果只进 `provider_models` 候选缓存，不自动生成可售模型/价格 |
+| 5 | Ark/HTTP 私有协议 | 明确返回 `supported:false`，走手工 `ep-xxx` / 模型 ID 导入；没有伪造“连接成功” |
+| 6 | 后台 | 新增“供应商接入”面板（业务监控分组）：新增、测试连接、拉取模型、查看候选、手工导入、启停 |
+| 7 | 安全边界 | 软停用前检查 active 路由；测试/发现为 POST 且受 AdminGuard 保护（独立频率限制未做）；生产拒绝 HTTP/私网/回环目标 |
+
+**验证**：`pnpm --filter @app/api typecheck`、`pnpm --filter @app/api lint`（0 error）、
+`pnpm --filter @app/web typecheck`、`pnpm --filter @app/web lint`（0 error，26 条既有 warning）均通过；
+新增 `provider-crypto.spec.ts` 4 例 + `admin-providers.spec.ts` 7 例，**11/11 通过**；
+API 全量 **1410/1410 通过**（含两处新增站点登记：`inbound-list-bounds` / `outbound-fetch-bounds`）；
+真浏览器 UI 冒烟：新增供应商 → 测试连接 5ms → 发现 2 个模型 → 页面无 Key 明文、无 console error。
+
+**仍未做**：worker/API 运行时仍读环境变量（`PROVIDER_DB_RESOLVE` 未接）；任务路由快照未落；
+Ark/HTTP 私有协议没有安全测试探针；Key 轮换只有后端 PATCH、无面板入口；SSRF 已做协议/私网/重定向/超时/响应大小校验，
+但未把 DNS 解析结果 pin 到连接。以上未完成前，不能把该控制面描述成“已能生产切换供应商”。
 
 ## 变更登记（v6.75 · 配置面三面对齐：声明 ↔ 读取 ↔ `.env.example` · 2026-11-01）
 

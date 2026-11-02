@@ -10,6 +10,8 @@ import { AdminAuthController, AdminController } from "./admin.controller";
 import { AdminAiLabelController, AdminCommunityController } from "./admin-community.controller";
 import { AdminGuard } from "./admin.guard";
 import { AdminOpsController, OpsConfigController } from "./admin-ops.controller";
+import { AdminProvidersController } from "./admin-providers.controller";
+import { AdminProvidersService } from "./admin-providers.service";
 import { AdminService } from "./admin.service";
 
 @Module({
@@ -27,6 +29,8 @@ import { AdminService } from "./admin.service";
     // 动的是真实用户数据，与运维面（配置/审计）分文件，风险模型不混。
     AdminCommunityController,
     AdminAiLabelController,
+    // 供应商接入（控制面）：Key 加密、测试连接、模型发现、路由
+    AdminProvidersController,
   ],
   providers: [
     AdminAuthService,
@@ -37,6 +41,7 @@ import { AdminService } from "./admin.service";
     AdminConfigService,
     AdminCommunityService,
     AdminAiLabelService,
+    AdminProvidersService,
   ],
   // AdminAuthService：MarketModule/AgentModule 的 AdminGuard 依赖它（跨模块解析）；
   // AdminAuditService：全局 AdminAuditInterceptor 在 AppModule 注册，必须能从本模块取出

@@ -69,7 +69,8 @@
 ## 2. 代码侧可验证项（脚本逐条 PASS/FAIL/SKIP）
 
 命令：`node _acceptance/compliance-check.cjs`（本地无依赖、不联网；**共 66 项**，`LOG-04` 为本地运行态探测，服务未起即 SKIP）。
-服务未启动：**65 PASS / 0 FAIL / 1 SKIP**；`API_URL` 指向在跑的 api：**66 PASS / 0 FAIL / 0 SKIP**。
+服务未启动：**66 PASS / 0 FAIL / 0 SKIP**（2026-11-03 起把 i18n 引用纳入证据，不再因多语言化假红）；
+`API_URL` 指向在跑的 api 时仍为 **66 PASS / 0 FAIL / 0 SKIP**。
 
 | 编号 | 事项 | 证据（脚本输出 文件:行） | 验收方式 | 状态 | 阻塞级别 |
 |---|---|---|---|---|---|

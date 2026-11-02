@@ -8,6 +8,7 @@ import { downloadBounded, newId, TaskStatus, type GenerationRequest } from "@app
 import { findUnlabeledResults, labelResults, type AiLabelConfig } from "./label";
 import { resolveOutboundUris } from "./outbound-uri";
 import { mockPngBuffer } from "./mock-media";
+import { resolveTaskAdapterOptions, type ProviderDbResolveMode } from "./provider-runtime";
 
 export type TaskRow = typeof tasks.$inferSelect;
 
@@ -15,6 +16,10 @@ export interface ExecutorDeps {
   db: Db;
   storage: StorageDriver;
   adapterOptions: AdapterRuntimeOptions;
+  /** 供应商路由来源；off 时严格沿用 adapterOptions，保证可回滚 */
+  providerDbResolve?: ProviderDbResolveMode;
+  /** 供应商 Key 解密主密钥；仅在 providerDbResolve != off 时使用 */
+  providerSecretKey?: Buffer;
   log?: (obj: Record<string, unknown>, msg: string) => void;
   /**
    * AI 标识配置。**必填**：合规硬门依赖它判定“这条产物有没有标识”，
@@ -542,7 +547,22 @@ export async function runGenerationTask(taskId: string, deps: ExecutorDeps): Pro
     // 第 113 批：心跳覆盖整条流水线，直到结算/失败事务返回后才停（见 startTaskHeartbeat）
     stopHeartbeat = startTaskHeartbeat(deps, id, taskId, deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
-    const adapter = (deps.resolveAdapter ?? resolveAdapter)(model.adapterCode, deps.adapterOptions);
+    const runtimeOptions =
+      deps.providerDbResolve && deps.providerDbResolve !== "off"
+        ? await resolveTaskAdapterOptions({
+            db: deps.db,
+            task,
+            model,
+            base: deps.adapterOptions,
+            mode: deps.providerDbResolve,
+            secretKey:
+              deps.providerSecretKey ??
+              (() => {
+                throw new Error("provider credential key is not configured");
+              })(),
+          })
+        : deps.adapterOptions;
+    const adapter = (deps.resolveAdapter ?? resolveAdapter)(model.adapterCode, runtimeOptions);
     let vendorTaskId: string;
     if (claim.action === "resume") {
       /**

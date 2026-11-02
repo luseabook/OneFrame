@@ -201,6 +201,20 @@ const envSchema = z.object({
   ADMIN_JWT_SECRET: z.string().min(16).optional(),
   ADMIN_JWT_TTL_S: z.coerce.number().int().min(300).default(7200),
   /**
+   * 供应商 Key 的落库加密主密钥（≥32 字符）。
+   * 生产必须显式配置；非生产缺省从 JWT_SECRET 派生，避免本地/CI 多配一个变量。
+   * 这里不强制启动失败：控制面未启用时不能因为多了这把钥匙就阻断旧部署。
+   */
+  PROVIDER_ENCRYPTION_KEY: z.string().min(32).optional(),
+  PROVIDER_ENCRYPTION_KEY_ID: z.string().min(1).max(32).default("v1"),
+  /**
+   * 供应商路由模式：
+   * - off：完全沿用环境变量（默认，回滚路径）
+   * - fallback：有 active 路由走数据库，没有回落环境变量
+   * - on：只走数据库，缺路由直接失败，不静默 mock
+   */
+  PROVIDER_DB_RESOLVE: z.enum(["off", "fallback", "on"]).default("off"),
+  /**
    * 工具目录（`tool-catalog.ts`）是否用代码定义强制覆盖库内工具模型/价目。
    *
    * 默认 **false**：工具模型也是运营资产，后台改价/上下架/排序必须能持久

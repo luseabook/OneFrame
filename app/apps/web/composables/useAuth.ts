@@ -69,6 +69,34 @@ export const useAuth = () => {
     ready.value = true;
   }
 
+  /** OAuth 回调落地页：拿服务端下发的一次性 access 建前端会话（refresh 仍走 Cookie）。 */
+  async function completeOauth(
+    provider: string,
+    code: string,
+    oauthState: string,
+    ageConfirmed = true,
+  ): Promise<{ bound: boolean }> {
+    const data = await call<
+      | { access_token: string; expires_in: number; user: AuthUser; space_id: string }
+      | { bound: true; provider: string }
+    >(`/auth/oauth/${provider}/callback`, {
+      method: "POST",
+      body: { code, state: oauthState, age_confirmed: ageConfirmed },
+    });
+    if ("bound" in data && data.bound) return { bound: true };
+    if (!("access_token" in data)) throw new Error("OAuth 回调响应缺少 access_token");
+    state.value = {
+      accessToken: data.access_token,
+      user: data.user,
+      spaceId: data.space_id,
+      credits: null,
+      onboarded: state.value.onboarded,
+    };
+    await me();
+    ready.value = true;
+    return { bound: false };
+  }
+
   // refresh 单飞：同一页面的 bootstrap 与路由中间件会并发触发 refresh；
   // refresh token 是单次消费（服务端轮换），并发调用会有一次拿到旧 token 失败，
   // 导致「刚登录却被重定向回登录页」。这里共享同一个在途 Promise。
@@ -144,5 +172,5 @@ export const useAuth = () => {
     }
   }
 
-  return { state, ready, login, refresh, me, logout, bootstrap, dismissOnboarding };
+  return { state, ready, login, completeOauth, refresh, me, logout, bootstrap, dismissOnboarding };
 };

@@ -348,6 +348,67 @@ describe("auth oauth (SSO) + 双 token e2e", () => {
     }
   });
 
+  it("已登录账号可绑定手机号与第三方渠道；已属于他人的身份拒绝自动合并", async () => {
+    setOauthEnv({
+      OAUTH_WECHAT_APP_ID: "wx_test_app",
+      OAUTH_WECHAT_SECRET: "wx_test_secret",
+      OAUTH_WECHAT_REDIRECT_URI: "http://127.0.0.1:3002/v1/auth/oauth/wechat/callback",
+      OAUTH_MOCK: "1",
+    });
+    try {
+      const phoneUser = await loginNewUser("bind1");
+      expect(phoneUser.token).toBeTruthy();
+
+      const externalCode = `bind-${String(Date.now()).slice(-8)}`;
+      const bindUrl = await inject("POST", "/auth/bind/oauth/wechat/url", {}, phoneUser.token);
+      expect(bindUrl.code).toBe(0);
+      const bindState = (bindUrl.data as { state: string }).state;
+      const bound = await inject("POST", "/auth/oauth/wechat/callback", { code: externalCode, state: bindState });
+      expect(bound.code).toBe(0);
+      expect(bound.data).toMatchObject({ bound: true, provider: "wechat", mock: true });
+
+      const me = await inject("GET", "/me", undefined, phoneUser.token);
+      expect((me.data as { user: { id: string }; bindings: { providers: string[] } }).user.id).toBe(phoneUser.userId);
+      expect((me.data as { bindings: { providers: string[] } }).bindings.providers).toContain("wechat");
+
+      const otherUser = await loginNewUser("bind2");
+      const otherUrl = await inject("POST", "/auth/bind/oauth/wechat/url", {}, otherUser.token);
+      const otherState = (otherUrl.data as { state: string }).state;
+      const conflict = await inject("POST", "/auth/oauth/wechat/callback", {
+        code: externalCode,
+        state: otherState,
+      });
+      expect(conflict.code).toBe(400101);
+      expect(conflict.msg).toContain("不能自动合并");
+
+      const oauthUser = await inject("POST", "/auth/oauth/wechat/url", {});
+      const oauthState = (oauthUser.data as { state: string }).state;
+      const oauthLogin = await inject("POST", "/auth/oauth/wechat/callback", {
+        code: `phone-bind-${String(Date.now()).slice(-6)}`,
+        state: oauthState,
+      });
+      const oauthToken = (oauthLogin.data as { access_token: string }).access_token;
+      const tail = String(Date.now()).slice(-8);
+      const phone = `1${tail}77`;
+      const sms = await inject("POST", "/auth/sms-code", { phone });
+      const phoneBind = await inject(
+        "POST",
+        "/auth/bind/phone",
+        { phone, code: (sms.data as { debug_code?: string }).debug_code },
+        oauthToken,
+      );
+      expect(phoneBind.code).toBe(0);
+      expect((phoneBind.data as { phone: string }).phone).toBe(`${phone.slice(0, 3)}****${phone.slice(-4)}`);
+    } finally {
+      setOauthEnv({
+        OAUTH_WECHAT_APP_ID: undefined,
+        OAUTH_WECHAT_SECRET: undefined,
+        OAUTH_WECHAT_REDIRECT_URI: undefined,
+        OAUTH_MOCK: undefined,
+      });
+    }
+  });
+
   // ── 5. 双 token 边界：master 不得用于业务端点 ───────────
 
   it("双 token：master 打业务端点 → 401；master 只能经 /auth/renew 换 access", async () => {
@@ -456,4 +517,3 @@ describe("auth oauth (SSO) + 双 token e2e", () => {
     expect(user.body.refresh_token).toBeUndefined();
   });
 });
-

@@ -34,6 +34,7 @@ const APP = path.join(ROOT, "app");
 const API_SRC = path.join(APP, "apps", "api", "src");
 const API_TEST = path.join(APP, "apps", "api", "test");
 const WEB = path.join(APP, "apps", "web");
+const WEB_ZH_LOCALE = path.join(WEB, "i18n", "locales", "zh-CN.json");
 const WORKER_SRC = path.join(APP, "apps", "worker", "src");
 const PKG_DB = path.join(APP, "packages", "db", "src");
 const PKG_SHARED = path.join(APP, "packages", "shared", "src");
@@ -99,6 +100,29 @@ function hit(absPath, pattern, label) {
 /** 同一文件多处命中，返回 `file:l1 + file:l2` */
 function hits(absPath, patterns, label) {
   return patterns.map((pattern) => hit(absPath, pattern, label)).join(" + ");
+}
+
+/** 从 JSON 文件按点分路径取值；路径不存在时返回 undefined */
+function jsonValueAt(absPath, keyPath) {
+  const parsed = JSON.parse(readText(absPath, "语言包"));
+  let current = parsed;
+  for (const segment of keyPath.split(".")) {
+    if (!current || typeof current !== "object" || !(segment in current)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+/** 断言中文语言包的某个 key 包含指定文案，返回 `file:key` 作为证据 */
+function localeHit(keyPath, pattern, label) {
+  const value = jsonValueAt(WEB_ZH_LOCALE, keyPath);
+  if (typeof value !== "string") {
+    fail(`${rel(WEB_ZH_LOCALE)} 缺少 ${keyPath}${label ? `（${label}）` : ""}`);
+  }
+  if (!toRe(pattern).test(value)) {
+    fail(`${rel(WEB_ZH_LOCALE)}:${keyPath} 未包含 ${String(pattern)}${label ? `（${label}）` : ""}`);
+  }
+  return `${rel(WEB_ZH_LOCALE)}:${keyPath}`;
 }
 
 /** 断言文件不存在该模式（用于"禁止事项"，如日志不得记录手机号字段） */
@@ -195,6 +219,7 @@ const F = {
   // worker / packages
   workerLabel: path.join(WORKER_SRC, "label.ts"),
   workerMain: path.join(WORKER_SRC, "main.ts"),
+  workerEnvFlags: path.join(WORKER_SRC, "env-flags.ts"),
   workerMaintenance: path.join(WORKER_SRC, "maintenance.ts"),
   workerEnvGuard: path.join(WORKER_SRC, "env-guard.ts"),
   workerEnvGuardSpec: path.join(WORKER_SRC, "env-guard.spec.ts"),
@@ -230,15 +255,19 @@ check("A 法务页面与入口", "PAGE-02", "隐私政策页 /privacy 存在且�
 );
 
 check("A 法务页面与入口", "PAGE-03", "举报投诉页 /report 存在", () =>
-  hits(F.reportPage, ["举报"], "举报入口页"),
+  `${hit(F.reportPage, 't\\("report\\.title"\\)', "举报页标题引用")} + ${localeHit(
+    "report.title",
+    "举报",
+    "举报入口页",
+  )}`,
 );
 
 check("A 法务页面与入口", "PAGE-04", "公开分享页 /share/:token 含 AI 声明与举报入口", () =>
-  `${hits(F.sharePage, ["内容由 AI 生成"], "AI 声明")} + ${hits(
-    F.sharePage,
-    ["/share/\\$\\{[^}]+\\}/report|submitReport|举报"],
-    "页内举报入口",
-  )}`,
+  `${hit(F.sharePage, 't\\("share\\.expires"', "AI 声明引用")} + ${localeHit(
+    "share.expires",
+    "内容由 AI 生成",
+    "AI 声明",
+  )} + ${hits(F.sharePage, ["/share/\\$\\{[^}]+\\}/report|submitReport|举报"], "页内举报入口")}`,
 );
 
 check("A 法务页面与入口", "PAGE-05", "三类页面均有页脚入口（用户协议/隐私政策/举报）", () => {
@@ -250,7 +279,11 @@ check("A 法务页面与入口", "PAGE-05", "三类页面均有页脚入口（�
 });
 
 check("A 法务页面与入口", "PAGE-06", "ICP 备案号位置已预留（上线前须替换真实号）", () => {
-  const evidence = hits(F.landingPage, ["ICP"], "备案号占位");
+  const evidence = `${hit(F.landingPage, 't\\("landing\\.footerNote"\\)', "页脚引用")} + ${localeHit(
+    "landing.footerNote",
+    "ICP",
+    "备案号占位",
+  )}`;
   return `${evidence}（占位符，真实备案号属外部待办 EXT-03）`;
 });
 
@@ -361,14 +394,22 @@ check("F AI 标识", "AI-02", "隐式标识：旁车元数据 <key>.ai.json + �
 );
 
 check("F AI 标识", "AI-03", "生产环境默认开启标识（AI_LABEL_ENABLED=true）", () => {
-  const worker = hits(F.workerMain, ["AI_LABEL_ENABLED !== \"false\""], "默认开启");
+  const worker = `${hit(
+    F.workerMain,
+    'readEnvFlag\\("AI_LABEL_ENABLED", AI_LABEL_ENABLED_SPEC\\)',
+    "统一取值",
+  )} + ${hit(F.workerEnvFlags, "AI_LABEL_ENABLED_SPEC[\\s\\S]*default: true", "默认开启")}`;
   const envProd = hits(F.envProd, ["AI_LABEL_ENABLED=true"], "生产模板");
   return `${worker} + ${envProd}`;
 });
 
 check("F AI 标识", "AI-04", "页面披露：协议声明双重标识 + 分享页/工具页 AI 提示", () => {
   const terms = hits(F.termsPage, ["显式水印|隐式元数据"], "协议声明");
-  const share = hit(F.sharePage, "内容由 AI 生成", "分享页提示");
+  const share = `${hit(F.sharePage, 't\\("share\\.expires"', "分享页提示引用")} + ${localeHit(
+    "share.expires",
+    "内容由 AI 生成",
+    "分享页提示",
+  )}`;
   return `${terms} + ${share}`;
 });
 

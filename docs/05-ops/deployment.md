@@ -71,6 +71,8 @@ NODE_ENV / APP_DOMAIN / DATABASE_URL / REDIS_URL
 JWT_SECRET / REFRESH_SECRET
 # 运营后台独立密钥（PR-05，2026-10-30）：生产必填；与用户 JWT 拆开的目的是「用户 token 泄露 ≠ admin token 可伪造」
 ADMIN_JWT_SECRET
+# 供应商 Key 落库加密主密钥（≥32 字符；生产必填；非生产缺省从 JWT_SECRET 派生）
+PROVIDER_ENCRYPTION_KEY / PROVIDER_ENCRYPTION_KEY_ID=v1
 # 存储（S3 兼容：OSS / MinIO；ADR-005）
 STORAGE_DRIVER=local|s3
 STORAGE_DIR / STORAGE_PUBLIC_BASE / STORAGE_SIGN_SECRET
@@ -404,5 +406,4 @@ storage key（如 `u/<space>/assets/<id>/orig.png`，无 scheme），直接发�
 - worker 日志：`outbound uri is not publicly reachable for real adapter`（含 `hint`、字段名、URL origin）；
 - 自检：在 worker 机器上 `curl -I '<签名 URL>'` 应 200 且公网可访问；检查 `STORAGE_PUBLIC_BASE`/`STORAGE_S3_PUBLIC_ENDPOINT`、
   反代是否白名单限制、供应商出口是否可达；**不要**把 `ADAPTER_URI_TTL_SECONDS` 设得小于供应商最长任务时长（默认 6h）。
-
 

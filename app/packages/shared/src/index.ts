@@ -24,3 +24,4 @@ export * from "./http-bounded";
 export * from "./env-number";
 // 第 124 批：布尔 / 枚举环境变量的唯一读取入口 —— 拼错一个字母不再静默走到另一侧
 export * from "./env-flag";
+export * from "./provider-secret";

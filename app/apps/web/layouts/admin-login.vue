@@ -9,12 +9,16 @@ const envLabel = computed(() => {
 </script>
 
 <template>
-  <div class="admin-auth">
+  <div id="admin-root" class="admin-auth">
+    <div class="auth-grid" aria-hidden="true"></div>
     <header class="auth-head">
       <span class="logo-mark" aria-hidden="true">一</span>
-      <span class="brand-text">一帧</span>
-      <span class="console-badge">运营后台</span>
-      <span class="env-chip">{{ envLabel }}</span>
+      <span class="brand-block">
+        <span class="brand-text">一帧</span>
+        <span class="brand-sub">ONEFRAME CONSOLE</span>
+      </span>
+      <span class="console-badge">ADMIN</span>
+      <span class="env-chip"><i class="env-dot" aria-hidden="true"></i>{{ envLabel }}</span>
     </header>
     <main class="auth-main">
       <slot />
@@ -25,58 +29,52 @@ const envLabel = computed(() => {
 
 <style scoped>
 .admin-auth {
+  position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background:
-    radial-gradient(1100px 520px at 50% -10%, #33288f55, transparent 70%),
-    var(--bg-app);
+    radial-gradient(900px 480px at 50% -12%, rgba(155, 70, 255, 0.2), transparent 68%),
+    radial-gradient(700px 420px at 100% 100%, rgba(79, 209, 197, 0.05), transparent 70%),
+    #0b0c11;
   color: var(--text-1);
 }
 
+.auth-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 28%, #000 0%, transparent 72%);
+  -webkit-mask-image: radial-gradient(circle at 50% 28%, #000 0%, transparent 72%);
+}
+
 .auth-head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 18px 24px;
 }
 
-.logo-mark {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--brand-500);
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
+.auth-head .logo-mark {
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
 }
 
-.brand-text {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.console-badge {
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--brand-500);
-  color: var(--brand-300);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.env-chip {
+.auth-head .env-chip {
   margin-left: auto;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--bg-raised);
-  color: var(--text-3);
-  font-size: 12px;
 }
 
 .auth-main {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: grid;
   place-items: center;
@@ -84,9 +82,12 @@ const envLabel = computed(() => {
 }
 
 .auth-foot {
-  padding: 16px 24px 22px;
+  position: relative;
+  z-index: 1;
+  padding: 16px 24px 24px;
   text-align: center;
   color: var(--text-4);
-  font-size: 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
 }
 </style>

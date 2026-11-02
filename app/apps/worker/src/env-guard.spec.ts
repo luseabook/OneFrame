@@ -52,6 +52,25 @@ describe("worker production env guard", () => {
     expect(problems.join("\n")).toContain("至少配置一种真实供应商");
   });
 
+  it("requires a provider encryption key when database routing is enabled", () => {
+    const problems = collectWorkerProductionProblems({
+      NODE_ENV: "production",
+      ADAPTER_MODE: "real",
+      ARK_API_KEY: "ark-key",
+      PROVIDER_DB_RESOLVE: "on",
+    });
+    expect(problems.join("\n")).toContain("PROVIDER_ENCRYPTION_KEY");
+    expect(
+      collectWorkerProductionProblems({
+        NODE_ENV: "production",
+        ADAPTER_MODE: "real",
+        ARK_API_KEY: "ark-key",
+        PROVIDER_DB_RESOLVE: "on",
+        PROVIDER_ENCRYPTION_KEY: "x".repeat(32),
+      }),
+    ).toEqual([]);
+  });
+
   it("assertWorkerEnv throws an aggregated message without leaking values", () => {
     let message = "";
     try {

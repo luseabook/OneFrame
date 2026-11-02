@@ -65,6 +65,10 @@ const oauthCallbackBody = z.object({
 const renewBody = z.object({
   master_token: z.string().min(10).optional(),
 });
+const bindPhoneBody = z.object({
+  phone: z.string().regex(/^1\d{10}$/),
+  code: z.string().regex(/^\d{6}$/),
+});
 
 @Controller()
 export class AuthController {
@@ -241,6 +245,15 @@ export class AuthController {
     return result;
   }
 
+  /** 已登录账号绑定手机号；不自动合并既有账号。 */
+  @Post("auth/bind/phone")
+  async bindPhone(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    const input = parseOrThrow(bindPhoneBody, body ?? {});
+    return this.auth.bindPhone(auth.userId, input.phone, input.code);
+  }
+
   @Public()
   @Post("waitlist")
   async waitlist(@Body() body: unknown) {
@@ -269,6 +282,14 @@ export class AuthController {
     return this.oauth.createAuthorizeUrl(provider);
   }
 
+  /** 已登录账号发起第三方渠道绑定；state 里固化当前用户，回调只绑不建号。 */
+  @Post("auth/bind/oauth/:provider/url")
+  async oauthBindUrl(@Param("provider") provider: string, @Req() req: AuthedRequest) {
+    const auth = req.auth;
+    if (!auth) throw new AppError(ErrorCode.UNAUTHORIZED, "login required");
+    return this.oauth.createAuthorizeUrl(provider, auth.userId);
+  }
+
   /**
    * 回调：校验 state → code 换用户信息 → 绑定/建号 → 发双 token。
    *
@@ -284,7 +305,11 @@ export class AuthController {
     @Res({ passthrough: true }) res: FastifyReply,
   ) {
     const input = parseOrThrow(oauthCallbackBody, body ?? {});
-    const { profile, mock } = await this.oauth.exchangeCode(provider, input.code, input.state);
+    const { profile, mock, bindUserId } = await this.oauth.exchangeCode(provider, input.code, input.state);
+    if (bindUserId) {
+      const bound = await this.auth.bindOAuth(bindUserId, provider, profile);
+      return { ...bound, mock };
+    }
     const result = await this.auth.loginWithOAuth(provider, profile);
     this.setRefreshCookie(res, result.refresh_token);
     const { refresh_token: _ignored, ...payload } = result;

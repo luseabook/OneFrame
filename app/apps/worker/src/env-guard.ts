@@ -9,7 +9,7 @@
  * 纯函数实现，便于单测；错误信息只包含变量名与原因，不含任何密钥值。
  */
 import { parseEnvEnum } from "@app/shared";
-import { ADAPTER_MODE_SPEC } from "./env-flags";
+import { ADAPTER_MODE_SPEC, PROVIDER_DB_RESOLVE_SPEC } from "./env-flags";
 
 export interface WorkerEnvLike {
   NODE_ENV?: string;
@@ -17,6 +17,8 @@ export interface WorkerEnvLike {
   ARK_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   HTTP_VIDEO_BASE_URL?: string;
+  PROVIDER_DB_RESOLVE?: string;
+  PROVIDER_ENCRYPTION_KEY?: string;
 }
 
 function filled(value: string | undefined): boolean {
@@ -54,6 +56,17 @@ export function collectWorkerProductionProblems(env: WorkerEnvLike = process.env
   const configured = vendors.filter(([, value]) => filled(value)).map(([name]) => name);
   if (configured.length === 0) {
     problems.push("生产必须至少配置一种真实供应商：ARK_API_KEY / DEEPSEEK_API_KEY / HTTP_VIDEO_BASE_URL");
+  }
+
+  const providerMode = (() => {
+    try {
+      return parseEnvEnum("PROVIDER_DB_RESOLVE", env.PROVIDER_DB_RESOLVE, PROVIDER_DB_RESOLVE_SPEC.values) ?? "off";
+    } catch {
+      return "off";
+    }
+  })();
+  if (providerMode !== "off" && !filled(env.PROVIDER_ENCRYPTION_KEY)) {
+    problems.push("PROVIDER_DB_RESOLVE 启用时生产必须显式配置 PROVIDER_ENCRYPTION_KEY");
   }
   return problems;
 }

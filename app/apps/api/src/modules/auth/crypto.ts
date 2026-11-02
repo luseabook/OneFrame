@@ -26,6 +26,11 @@ export function decryptPhone(payload: string): string {
   return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
 }
 
+/** 展示用手机号打码：138****1234 */
+export function maskPhone(phone: string): string {
+  return phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : "****";
+}
+
 /**
  * 通用密文（BYOK 第三方 Key 等「只存密文+哈希」的凭据）。
  *

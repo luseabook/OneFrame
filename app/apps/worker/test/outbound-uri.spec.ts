@@ -204,7 +204,7 @@ describe("executor outbound uri integration (P10)", () => {
       vendor: "fake",
       submit: async (req) => {
         captured.push(req);
-        return { sync_results: [{ uri: "u/test/out.mp4" }] };
+        return { sync_results: [{ uri: `u/${spaceId}/out.mp4` }] };
       },
       poll: async () => ({ status: "failed" as const }),
       cancel: async () => {},

@@ -16,6 +16,7 @@ import {
   ToolInputError,
   toolForMode,
 } from "./tool-catalog";
+import { selectProviderRoute } from "./provider-route";
 
 const IDEM_TTL_S = 300;
 
@@ -105,6 +106,7 @@ export class GenerationsService {
       }
 
       const taskId = newId();
+      const providerRoute = await selectProviderRoute(priced.model.id);
       await db.transaction(async (tx) => {
         await tx.insert(tasks).values({
           id: taskId,
@@ -114,6 +116,8 @@ export class GenerationsService {
           mode: request.mode,
           scene: request.scene ?? null,
           modelId: priced.model.id,
+          routeId: providerRoute?.routeId ?? null,
+          routeSnapshot: providerRoute?.snapshot ?? null,
           input: request.input,
           options: request.options,
           status: 1,
@@ -131,7 +135,12 @@ export class GenerationsService {
           id: newId(),
           taskId,
           type: "task.created",
-          payload: { mode: request.mode, model: request.model, scene: request.scene ?? null },
+          payload: {
+            mode: request.mode,
+            model: request.model,
+            scene: request.scene ?? null,
+            ...(providerRoute ? { route_id: providerRoute.snapshot.route_id } : {}),
+          },
         });
       });
 

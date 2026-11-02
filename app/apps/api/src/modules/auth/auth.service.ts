@@ -20,7 +20,7 @@ import { AppError, ErrorCode, newId } from "@app/shared";
 import { MAX_TAG_ITEMS, parseListParam } from "../../common/list-param";
 import { env } from "../../config/env";
 import { db } from "../../db/database";
-import { encryptPhone, hashPhone } from "./crypto";
+import { decryptPhone, encryptPhone, hashPhone, maskPhone } from "./crypto";
 import { SmsService } from "./sms.service";
 import { TokenService } from "./token.service";
 
@@ -414,6 +414,7 @@ export class AuthService {
       .from(creditAccounts)
       .where(eq(creditAccounts.spaceId, BigInt(spaceId)));
     if (!user || !space || !account) throw new AppError(ErrorCode.NOT_FOUND, "account not found");
+    const bindings = await this.bindingsOf(userId);
     return {
       user: {
         id: String(user.id),
@@ -427,7 +428,110 @@ export class AuthService {
       vip: null,
       /** 新手引导是否已关闭（PRD 增补 §3）：false 时工作台展示引导条 */
       onboarded: user.onboardedAt !== null,
+      bindings,
     };
+  }
+
+  private async bindingsOf(userId: string) {
+    const rows = await db
+      .select({ provider: identities.provider, phoneCipher: identities.phoneCipher, externalId: identities.externalId })
+      .from(identities)
+      .where(eq(identities.userId, BigInt(userId)));
+    const phone = rows.find((row) => row.provider === "phone" && row.phoneCipher);
+    const external = rows
+      .filter((row) => row.provider !== "phone" && row.externalId)
+      .map((row) => row.provider)
+      .sort();
+    return {
+      phone: phone ? maskPhone(decryptPhone(phone.phoneCipher!)) : null,
+      providers: external,
+    };
+  }
+
+  /**
+   * 已登录账号绑定手机号。只做"绑到当前账号"，不自动合并两个既有账号——
+   * 无法证明两个账号属于同一人时自动合并会成为账号劫持入口。
+   */
+  async bindPhone(userId: string, phone: string, code: string) {
+    await this.sms.verify(phone, code);
+    const hash = hashPhone(phone);
+    await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(identities)
+        .where(and(eq(identities.provider, "phone"), eq(identities.phoneHash, hash)))
+        .for("update");
+      const existing = rows[0];
+      if (existing && String(existing.userId) !== userId) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "该手机号已绑定其他账号，不能自动合并", {
+          reason: "identity_already_bound",
+          field: "phone",
+        });
+      }
+      const own = await tx
+        .select()
+        .from(identities)
+        .where(and(eq(identities.userId, BigInt(userId)), eq(identities.provider, "phone")))
+        .for("update");
+      if (!existing && own[0]) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "当前账号已绑定其他手机号", {
+          reason: "phone_already_bound",
+          field: "phone",
+        });
+      }
+      if (!existing) {
+        await tx.insert(identities).values({
+          id: newId(),
+          userId: BigInt(userId),
+          provider: "phone",
+          phoneHash: hash,
+          phoneCipher: encryptPhone(phone),
+        });
+      }
+    });
+    return { bound: true, phone: maskPhone(phone), bindings: await this.bindingsOf(userId) };
+  }
+
+  /** 已登录账号绑定第三方渠道；同一渠道只允许绑定一个外部账号。 */
+  async bindOAuth(
+    userId: string,
+    provider: string,
+    profile: { external_id: string; nickname: string; avatar: string | null },
+  ) {
+    await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(identities)
+        .where(and(eq(identities.provider, provider), eq(identities.externalId, profile.external_id)))
+        .for("update");
+      const existing = rows[0];
+      if (existing && String(existing.userId) !== userId) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "该渠道账号已绑定其他账号，不能自动合并", {
+          reason: "identity_already_bound",
+          field: "provider",
+        });
+      }
+      const own = await tx
+        .select()
+        .from(identities)
+        .where(and(eq(identities.userId, BigInt(userId)), eq(identities.provider, provider)))
+        .for("update");
+      if (!existing && own[0]) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "当前账号已绑定该渠道的其他账号", {
+          reason: "provider_already_bound",
+          field: "provider",
+        });
+      }
+      if (!existing) {
+        await tx.insert(identities).values({
+          id: newId(),
+          userId: BigInt(userId),
+          provider,
+          externalId: profile.external_id,
+        });
+      }
+    });
+    return { bound: true, provider, bindings: await this.bindingsOf(userId) };
   }
 
   /**

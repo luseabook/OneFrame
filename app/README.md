@@ -51,7 +51,7 @@ node ../_acceptance/compliance-check.cjs               # 仅代码侧合规清�
 - [x] P0.2 容器环境 + zod 配置层（启动即校验）
 - [x] P0.3 packages/shared + 单测
 - [x] P0.4 Nuxt 壳 + 设计令牌 + Button/Modal/TextField + 落地页静态稿
-- [x] P1.2 数据层：drizzle schema（初始 16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）；当前已增至 115 表 / 51 个迁移
+- [x] P1.2 数据层：drizzle schema（初始 16 表）+ 初始 migration + 首批 10 模型 seed（占位价，定价决策后热更）；当前已增至 120 表 / 54 个迁移
 - [x] P1.1 鉴权（mock 短信）：sms-code/login/refresh/logout/me + 邀请码/等待名单 + JWT/HttpOnly Cookie
 - [x] P1.3 任务脊柱：models/quote(batch)/generations/tasks + 冻结-结算 ledger + BullMQ mock 执行器
 - [x] P1.6/P1.7 Web 最小闭环：登录/模型选择/报价/生成/轮询/下载入口（生产构建已浏览器验证）

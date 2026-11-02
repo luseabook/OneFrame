@@ -15,6 +15,10 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
 const statusFilter = ref<string>("");
+const folderFilter = ref<string>("");
+const folders = ref<Array<{ id: string; name: string; task_count: number }>>([]);
+const newFolderName = ref("");
+const folderBusy = ref(false);
 const detail = ref<TaskDto | null>(null);
 const shareInfo = ref<{ share_path: string; expires_at: string } | null>(null);
 const error = ref("");
@@ -28,6 +32,7 @@ async function load(): Promise<void> {
   loading.value = true;
   const query = new URLSearchParams({ page: String(page.value), page_size: String(pageSize) });
   if (statusFilter.value) query.set("status", statusFilter.value);
+  if (folderFilter.value) query.set("folder_id", folderFilter.value);
   try {
     const data = await api.get<{ list: TaskDto[]; total: number }>(`/tasks?${query.toString()}`);
     list.value = data.list;
@@ -41,6 +46,45 @@ async function load(): Promise<void> {
     loading.value = false;
   }
 }
+
+async function loadFolders(): Promise<void> {
+  try {
+    const data = await api.get<{ list: Array<{ id: string; name: string; task_count: number }> }>("/tasks/folders");
+    folders.value = data.list;
+  } catch {
+    folders.value = [];
+  }
+}
+
+async function createFolder(): Promise<void> {
+  const name = newFolderName.value.trim();
+  if (!name) return;
+  folderBusy.value = true;
+  try {
+    await api.post("/tasks/folders", { name });
+    newFolderName.value = "";
+    await loadFolders();
+    info.value = t("tasks.folderCreated");
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("tasks.folderCreateFailed");
+  } finally {
+    folderBusy.value = false;
+  }
+}
+
+async function assignFolder(taskId: string, folderId: string): Promise<void> {
+  try {
+    const updated = await api.patch<TaskDto>(`/tasks/${taskId}/folder`, {
+      folder_id: folderId || null,
+    });
+    if (detail.value?.task_id === taskId) detail.value = { ...detail.value, folder_id: updated.folder_id };
+    await Promise.all([load(), loadFolders()]);
+    info.value = t("tasks.folderAssigned");
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("tasks.folderAssignFailed");
+  }
+}
+
 async function openDetail(item: TaskDto): Promise<void> {
   detail.value = await api.get<TaskDto>(`/tasks/${item.task_id}`);
   shareInfo.value = null;
@@ -76,6 +120,7 @@ async function cancel(item: TaskDto): Promise<void> {
   try {
     await api.post(`/tasks/${item.task_id}/cancel`);
     await load();
+    await loadFolders();
     await auth.me();
     info.value = t("tasks.canceled");
   } catch (e) {
@@ -249,6 +294,18 @@ onMounted(() => {
         <span class="total">{{ t("common.totalItems", { count: total }) }}</span>
       </nav>
 
+      <div class="folder-bar">
+        <select v-model="folderFilter" class="mini-select" @change="page = 1; load()">
+          <option value="">{{ t("tasks.folderAll") }}</option>
+          <option value="unfiled">{{ t("tasks.folderUnfiled") }}</option>
+          <option v-for="folder in folders" :key="folder.id" :value="folder.id">
+            {{ folder.name }} ({{ folder.task_count }})
+          </option>
+        </select>
+        <input v-model="newFolderName" class="folder-input" maxlength="80" :placeholder="t('tasks.folderNamePlaceholder')" />
+        <Button size="sm" variant="ghost" :loading="folderBusy" @click="createFolder">{{ t("tasks.createFolder") }}</Button>
+      </div>
+
       <p v-if="error" class="err">{{ error }}</p>
       <p v-if="info" class="ok">{{ info }}</p>
 
@@ -321,6 +378,15 @@ onMounted(() => {
             <dd>{{ detail.options?.ratio }} / {{ detail.options?.resolution }}</dd>
           </div>
           <div class="kv"><dt>{{ t("tasks.detailResult") }}</dt><dd class="mono break">{{ detail.results?.[0]?.uri ?? "—" }}</dd></div>
+          <div class="kv">
+            <dt>{{ t("tasks.folderTitle") }}</dt>
+            <dd>
+              <select class="mini-select" :value="detail.folder_id ?? ''" @change="assignFolder(detail.task_id, ($event.target as HTMLSelectElement).value)">
+                <option value="">{{ t("tasks.folderNone") }}</option>
+                <option v-for="folder in folders" :key="folder.id" :value="folder.id">{{ folder.name }}</option>
+              </select>
+            </dd>
+          </div>
         </dl>
         <p v-if="detail.error" class="err">{{ detail.error.message }}</p>
 
@@ -429,6 +495,22 @@ onMounted(() => {
   color: var(--text-4);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
+}
+.folder-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px 0 20px;
+}
+.folder-input {
+  min-height: 32px;
+  width: 200px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-1);
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 .err {

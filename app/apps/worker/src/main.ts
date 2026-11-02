@@ -9,6 +9,7 @@ import {
   readEnvEnum,
   readEnvFlag,
   readEnvNumber,
+  deriveProviderSecretKey,
   STORAGE_DRIVER_SPEC,
   STORAGE_S3_FORCE_PATH_STYLE_SPEC,
 } from "@app/shared";
@@ -18,6 +19,7 @@ import {
   AI_LABEL_ENABLED_SPEC,
   ARK_IMAGE_RESPONSE_FORMAT_SPEC,
   ARK_IMAGE_WATERMARK_SPEC,
+  PROVIDER_DB_RESOLVE_SPEC,
 } from "./env-flags";
 import {
   auditLedger,
@@ -54,6 +56,13 @@ const storageDir = process.env.STORAGE_DIR ?? resolve(process.cwd(), "../../data
 // 布尔 / 枚举配置统一走 @app/shared 的唯一入口（第 124 批）：拼错不静默落到另一侧，
 // 坏值启动即抛（`STORAGE_DRIVER=S3` 不再被裸转换当成未知驱动）。
 const storageDriver = readEnvEnum("STORAGE_DRIVER", STORAGE_DRIVER_SPEC);
+const providerDbResolve = readEnvEnum("PROVIDER_DB_RESOLVE", PROVIDER_DB_RESOLVE_SPEC);
+const providerSecretMaterial =
+  process.env.PROVIDER_ENCRYPTION_KEY?.trim() ||
+  (process.env.NODE_ENV === "production"
+    ? ""
+    : `provider:${process.env.JWT_SECRET?.trim() || "oneframe-local-provider-secret"}`);
+const providerSecretKey = providerDbResolve === "off" ? undefined : deriveProviderSecretKey(providerSecretMaterial);
 const storage = createStorage({
   driver: storageDriver,
   rootDir: storageDir,
@@ -151,6 +160,8 @@ const deps: ExecutorDeps = {
   db,
   storage,
   adapterOptions,
+  providerDbResolve,
+  ...(providerSecretKey ? { providerSecretKey } : {}),
   aiLabel,
   log: (obj, msg) => log.info(obj, msg),
   pollIntervalMs: readEnvNumber("POLL_INTERVAL_MS", { default: 1000, min: 1, integer: true }),

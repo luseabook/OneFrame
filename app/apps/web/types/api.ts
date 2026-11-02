@@ -27,6 +27,8 @@ export interface MeResponse {
   vip: null;
   /** 新手引导是否已关闭（PRD 增补 §3） */
   onboarded?: boolean;
+  /** 账号已绑定的登录方式（手机号只回打码结果） */
+  bindings?: { phone: string | null; providers: string[] };
 }
 
 export interface ResolutionOption {
@@ -97,6 +99,8 @@ export interface TaskDto {
   finished_at: string | null;
   input?: { prompt?: string };
   options?: { ratio?: string; resolution?: string; duration?: number };
+  title?: string | null;
+  folder_id?: string | null;
 }
 
 export interface Paginated<T> {
@@ -2320,4 +2324,3 @@ export interface ScriptEpisodeDetailDto {
     asset_ids?: string[];
   }>;
 }
-

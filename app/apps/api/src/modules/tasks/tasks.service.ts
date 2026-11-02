@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   freezeCredits,
   releaseFrozen,
+  taskFolders,
   taskEvents,
   taskOutstandingFrozen,
   taskShares,
@@ -77,6 +78,7 @@ export interface TaskDto {
   title?: string | null;
   /** 用户反馈 {reaction, comment?} */
   feedback?: unknown;
+  folder_id?: string | null;
 }
 
 @Injectable()
@@ -107,6 +109,7 @@ export class TasksService {
       finished_at: row.finishedAt ? row.finishedAt.toISOString() : null,
       title: row.title ?? null,
       feedback: row.feedback ?? null,
+      folder_id: row.folderId ? String(row.folderId) : null,
     };
   }
 
@@ -149,7 +152,14 @@ export class TasksService {
 
   async list(
     spaceId: string,
-    query: { page?: number; page_size?: number; status?: number; capability?: string; mode?: string },
+    query: {
+      page?: number;
+      page_size?: number;
+      status?: number;
+      capability?: string;
+      mode?: string;
+      folder_id?: string | null;
+    },
   ) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.page_size ?? 20));
@@ -163,6 +173,22 @@ export class TasksService {
      * 而这张表的读接口必须留在 TasksService 里（ADR：禁止跨模块直查 tasks）。
      */
     if (query.mode) conditions.push(eq(tasks.mode, query.mode));
+    if (query.folder_id === null) {
+      conditions.push(isNull(tasks.folderId));
+    } else if (query.folder_id !== undefined) {
+      let folderId: bigint;
+      try {
+        folderId = BigInt(query.folder_id);
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, "invalid folder_id", { field: "folder_id" });
+      }
+      const [folder] = await db
+        .select({ id: taskFolders.id })
+        .from(taskFolders)
+        .where(and(eq(taskFolders.id, folderId), eq(taskFolders.spaceId, BigInt(spaceId))));
+      if (!folder) throw new AppError(ErrorCode.NOT_FOUND, "task folder not found");
+      conditions.push(eq(tasks.folderId, folderId));
+    }
     const where = and(...conditions);
 
     const rows = await db
@@ -180,6 +206,101 @@ export class TasksService {
       page,
       page_size: pageSize,
     };
+  }
+
+  async listFolders(spaceId: string) {
+    const rows = await db
+      .select({
+        id: taskFolders.id,
+        name: taskFolders.name,
+        created_at: taskFolders.createdAt,
+        task_count: sql<number>`(select count(*)::int from tasks t where t.folder_id = task_folders.id and t.deleted_at is null)`,
+      })
+      .from(taskFolders)
+      .where(eq(taskFolders.spaceId, BigInt(spaceId)))
+      .orderBy(asc(taskFolders.createdAt));
+    return {
+      list: rows.map((row) => ({
+        id: String(row.id),
+        name: row.name,
+        task_count: row.task_count,
+        created_at: row.created_at.toISOString(),
+      })),
+    };
+  }
+
+  async createFolder(spaceId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new AppError(ErrorCode.INVALID_PARAM, "folder name is required", { field: "name" });
+    try {
+      const [row] = await db
+        .insert(taskFolders)
+        .values({ id: newId(), spaceId: BigInt(spaceId), name: trimmed.slice(0, 80) })
+        .returning();
+      return { id: String(row!.id), name: row!.name, task_count: 0, created_at: row!.createdAt.toISOString() };
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505") {
+        throw new AppError(ErrorCode.INVALID_PARAM, "folder name already exists", { field: "name" });
+      }
+      throw error;
+    }
+  }
+
+  async renameFolder(spaceId: string, folderId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new AppError(ErrorCode.INVALID_PARAM, "folder name is required", { field: "name" });
+    try {
+      const [row] = await db
+        .update(taskFolders)
+        .set({ name: trimmed.slice(0, 80), updatedAt: new Date() })
+        .where(and(eq(taskFolders.id, toBigId(folderId, "folder_id")), eq(taskFolders.spaceId, BigInt(spaceId))))
+        .returning();
+      if (!row) throw new AppError(ErrorCode.NOT_FOUND, "task folder not found");
+      return { id: String(row.id), name: row.name };
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505") {
+        throw new AppError(ErrorCode.INVALID_PARAM, "folder name already exists", { field: "name" });
+      }
+      throw error;
+    }
+  }
+
+  async deleteFolder(spaceId: string, folderId: string) {
+    const id = toBigId(folderId, "folder_id");
+    return db.transaction(async (tx) => {
+      const [folder] = await tx
+        .select({ id: taskFolders.id })
+        .from(taskFolders)
+        .where(and(eq(taskFolders.id, id), eq(taskFolders.spaceId, BigInt(spaceId))))
+        .for("update");
+      if (!folder) throw new AppError(ErrorCode.NOT_FOUND, "task folder not found");
+      await tx
+        .update(tasks)
+        .set({ folderId: null, updatedAt: new Date() })
+        .where(and(eq(tasks.spaceId, BigInt(spaceId)), eq(tasks.folderId, id)));
+      await tx.delete(taskFolders).where(eq(taskFolders.id, id));
+      return { ok: true };
+    });
+  }
+
+  async assignFolder(spaceId: string, taskId: string, folderIdRaw: string | null) {
+    const task = await this.findTask(spaceId, taskId);
+    let folderId: bigint | null = null;
+    if (folderIdRaw !== null) {
+      folderId = toBigId(folderIdRaw, "folder_id");
+      const [folder] = await db
+        .select({ id: taskFolders.id })
+        .from(taskFolders)
+        .where(and(eq(taskFolders.id, folderId), eq(taskFolders.spaceId, BigInt(spaceId))));
+      if (!folder) throw new AppError(ErrorCode.NOT_FOUND, "task folder not found");
+    }
+    const [updated] = await db
+      .update(tasks)
+      .set({ folderId, updatedAt: new Date() })
+      .where(and(eq(tasks.id, task.id), eq(tasks.spaceId, BigInt(spaceId))))
+      .returning();
+    if (!updated) throw new AppError(ErrorCode.NOT_FOUND, "task not found");
+    return this.toDto(updated);
   }
 
   async detail(spaceId: string, id: string) {

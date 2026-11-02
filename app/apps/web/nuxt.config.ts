@@ -18,7 +18,14 @@ export default defineNuxtConfig({
   // 顺序放在 tokens.css 之后：canvas.css 里的 --cv-* 用 var() 引用了 tokens 的层二令牌。
   // canvas-agent.css 同理（Agent 面板的 .cv-agent* 前缀类），必须排在 canvas.css 之后：
   // 它复用了 canvas.css 里的 --cv-* 令牌，反过来顺序会让变量拿到空值而静默失色。
-  css: ["~/assets/css/tokens.css", "~/assets/css/canvas.css", "~/assets/css/canvas-agent.css"],
+  // admin.css 只作用于 #admin-root，复用 tokens 的字体/动效变量；
+  // 放在最后，保证后台统一视觉能覆盖各面板 scoped 样式里复制的旧口径。
+  css: [
+    "~/assets/css/tokens.css",
+    "~/assets/css/canvas.css",
+    "~/assets/css/canvas-agent.css",
+    "~/assets/css/admin.css",
+  ],
   runtimeConfig: {
     public: {
       // 空 = 同源 /v1（本地由 NUXT_API_PROXY 代理，生产由 nginx 反代）
@@ -66,6 +73,8 @@ export default defineNuxtConfig({
     // 教训相同：凡是有子路由的前缀，`**` 必须单独列一行。
     "/team/**": { ssr: false },
     "/login": { ssr: false },
+    "/auth": { ssr: false },
+    "/auth/**": { ssr: false },
     "/pricing": { ssr: false },
     "/report": { ssr: false },
     "/privacy": { ssr: false },

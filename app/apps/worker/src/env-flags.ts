@@ -26,3 +26,9 @@ export const ARK_IMAGE_WATERMARK_SPEC: EnvFlagSpec = { default: true };
 
 /** AI 标识：默认开启（合规硬闸门，默认值不变） */
 export const AI_LABEL_ENABLED_SPEC: EnvFlagSpec = { default: true };
+
+/** 供应商路由来源：off=环境变量 / fallback=有路由走库 / on=只走库 */
+export const PROVIDER_DB_RESOLVE_SPEC: EnvEnumSpec<"off" | "fallback" | "on"> = {
+  values: ["off", "fallback", "on"],
+  default: "off",
+};

@@ -258,7 +258,8 @@ describe("出站 fetch 上限门禁（第 119 批）", () => {
       const actual: Record<string, number> = {};
       for (const site of allSites) actual[site.file] = (actual[site.file] ?? 0) + 1;
       expect(actual).toEqual(SITES_BY_FILE);
-      // 6 处 API + CLI 2 处 + model-adapters 1 处（worker 三处下载已改走 downloadBounded）
+      // 6 处 API + CLI 2 处 + model-adapters 1 处（provider 探测改用 pinned http/https，
+      // worker 三处下载已改走 downloadBounded）
       expect(allSites).toHaveLength(9);
     });
 

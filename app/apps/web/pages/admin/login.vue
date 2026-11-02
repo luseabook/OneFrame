@@ -82,62 +82,89 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .auth-card {
-  width: min(420px, 92vw);
+  position: relative;
+  width: min(440px, 92vw);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 28px;
-  border-radius: 14px;
-  background: var(--bg-surface);
-  border: 1px solid #ffffff17;
-  box-shadow: 0 20px 60px #00000066;
+  gap: 14px;
+  padding: 34px 32px 30px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #171821 0%, #121319 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 30px 80px -30px rgba(0, 0, 0, 0.9),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+}
+
+.auth-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(155, 70, 255, 0.7), transparent);
 }
 
 h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
+  letter-spacing: -0.02em;
 }
 
 .sub {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
   color: var(--text-3);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 12.5px;
+  line-height: 1.65;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
+  gap: 7px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
 .input {
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid #ffffff1f;
-  background: var(--bg-raised);
+  height: 42px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0f1016;
   color: var(--text-1);
   font-size: 14px;
   outline: none;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .input:focus {
-  border-color: var(--brand-500);
+  border-color: rgba(155, 70, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(155, 70, 255, 0.13);
 }
 
 .submit {
-  margin-top: 6px;
-  height: 40px;
-  border-radius: 9px;
+  margin-top: 8px;
+  height: 44px;
+  border-radius: 10px;
   border: 0;
-  background: var(--brand-500);
+  background: linear-gradient(180deg, #a45cff 0%, #8b35ea 100%);
   color: #fff;
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
+  box-shadow: 0 10px 24px -12px rgba(155, 70, 255, 0.9);
+  transition: filter var(--duration-fast), transform var(--duration-fast);
+}
+
+.submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.submit:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .submit:disabled {
@@ -147,10 +174,11 @@ h1 {
 
 .error {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--danger-bg);
-  color: var(--danger);
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 103, 103, 0.3);
+  background: rgba(245, 103, 103, 0.1);
+  color: #ff9b9b;
   font-size: 12px;
 }
 
