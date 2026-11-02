@@ -154,12 +154,79 @@ const groups = computed<Group[]>(() => {
     .map((label) => ({ label, items: buckets.get(label) ?? [] }));
 });
 
-/** 「已剪辑」tab：只留剪过且成片过的（时间线时长 > 0），按长度倒序 */
-const exported = computed(() =>
-  [...list.value]
-    .filter((w) => (w.timeline_duration_s ?? 0) > 0)
-    .sort((a, b) => (b.timeline_duration_s ?? 0) - (a.timeline_duration_s ?? 0)),
+// ══════════ U3 / D3：列表 tab 的命名与数据口径 ══════════
+/**
+ * D3（2026-11-02 已定）：**有空间级导出日志才叫「已导出」，否则保持「已剪辑」**，并且不许用
+ * `timeline_duration_s > 0` 或「项目里有视频」去反推导出记录——那是把时长当导出历史，属于伪造。
+ *
+ * 旧实现 (`timeline_duration_s > 0` 的卡片列表) 就是那个「猜」：它既不证明导出过，也不给出
+ * 导出状态/下载/过期。本批改成：
+ *   1. 探测空间级导出日志（`GET /exports`）。本期后端**没有**这个端点（D3 已明说不新增），
+ *      探测失败 → tab 名保持「已剪辑」，页面写清口径（导出记录在项目页）；
+ *   2. 探测成功 → tab 名切「已导出」，直接渲染日志里的真实记录（kind / 集数 / 状态 / 时间 / 下载 / 过期），
+ *      不做任何本地推断，也不放占位假数据。
+ * 探测只发一次、静默失败，不弹错误、不阻塞列表。
+ */
+interface SpaceExportItem {
+  export_id: string;
+  kind: "storyboard" | "timeline";
+  project_id?: string | null;
+  project_title?: string | null;
+  episode_no?: number | null;
+  status: number;
+  download_url: string | null;
+  created_at: string;
+  expires_at: string | null;
+}
+const spaceExports = ref<SpaceExportItem[]>([]);
+const exportLogAvailable = ref(false);
+const exportLogLoading = ref(false);
+const exportLogError = ref("");
+
+async function probeExportLog(): Promise<void> {
+  exportLogLoading.value = true;
+  exportLogError.value = "";
+  try {
+    const q = new URLSearchParams({ page: "1", page_size: "20" });
+    const data = await api.get<{ list: SpaceExportItem[] }>(`/exports?${q.toString()}`);
+    spaceExports.value = data.list ?? [];
+    exportLogAvailable.value = true;
+  } catch {
+    // 端点未上线（当前预期）：保持「已剪辑」口径，不制造任何行
+    spaceExports.value = [];
+    exportLogAvailable.value = false;
+  } finally {
+    exportLogLoading.value = false;
+  }
+}
+
+/** tab 名：有日志 → 已导出；没有 → 已剪辑（D3） */
+const exportedTabLabel = computed(() =>
+  exportLogAvailable.value ? t("reelflow.tabExported") : t("reelflow.tabEdited"),
 );
+
+function exportKindLabel(item: SpaceExportItem): string {
+  return item.kind === "timeline"
+    ? t("projectDetail.ui.exportKindTimeline")
+    : t("projectDetail.ui.exportKindStoryboard");
+}
+function exportStatusText(item: SpaceExportItem): string {
+  if (item.status === 1) return t("projectDetail.ui.exportStatusQueued");
+  if (item.status === 2) return t("projectDetail.ui.exportStatusPacking");
+  if (item.status === 3) return t("projectDetail.ui.exportStatusDone");
+  if (item.status === 4) return t("projectDetail.ui.exportStatusFailed");
+  return t("projectDetail.ui.exportStatusUnknown");
+}
+function exportStatusTone(item: SpaceExportItem): "success" | "danger" | "info" | "neutral" {
+  if (item.status === 3) return "success";
+  if (item.status === 4) return "danger";
+  return "info";
+}
+function exportExpired(item: SpaceExportItem): boolean {
+  if (!item.expires_at) return false;
+  const at = new Date(item.expires_at).getTime();
+  return Number.isFinite(at) && at <= Date.now();
+}
 
 function fmtEdited(iso: string | undefined): string {
   if (!iso) return "—";
@@ -197,6 +264,8 @@ function openEditor(item: WorkDto): void {
 
 onMounted(() => {
   void load();
+  // 探测空间级导出日志：决定 tab 名（已导出 / 已剪辑）与是否渲染真实记录
+  void probeExportLog();
 });
 </script>
 
@@ -210,13 +279,19 @@ onMounted(() => {
       <NuxtLink to="/projects" class="rl-link">{{ t("reelflow.allProjects") }}</NuxtLink>
     </header>
 
-    <!-- tab 行：项目 (N) / 已剪辑（竞品左上角，白字 + 2px 紫下划线） -->
+    <!-- tab 行：项目 (N) / 已剪辑（有空间级导出日志时才是「已导出」——D3） -->
     <nav class="rl-tabs">
       <button type="button" class="rl-tab" :class="{ active: tab === 'projects' }" @click="switchTab('projects')">
         {{ t("reelflow.tabProjects", { count: total }) }}
       </button>
-      <button type="button" class="rl-tab" :class="{ active: tab === 'exported' }" @click="switchTab('exported')">
-        {{ t("reelflow.tabEdited") }}
+      <button
+        type="button"
+        class="rl-tab"
+        :class="{ active: tab === 'exported' }"
+        :data-export-log="exportLogAvailable ? '1' : '0'"
+        @click="switchTab('exported')"
+      >
+        {{ exportedTabLabel }}
       </button>
     </nav>
 
@@ -288,45 +363,67 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- 已剪辑 tab（切 tab 会重拉第 1 页，加载中同样走骨架，避免闪一下假空态） -->
+      <!-- 已剪辑 / 已导出 tab：有日志 → 真实记录；没有 → 「已剪辑」+ 口径说明（不猜、不造假行） -->
       <template v-else>
-        <Skeleton v-if="loading" :rows="4" />
-        <div v-else-if="exported.length" class="rl-grid">
-          <article
-            v-for="item in exported"
-            :key="item.id"
-            class="rl-card"
-            :data-project-id="item.id"
-            role="button"
-            tabindex="0"
-            @click="openEditor(item)"
-            @keydown.enter="openEditor(item)"
-          >
-            <div class="rl-cover" :style="{ background: COVER[item.drama_type] ?? COVER[1] }">
-              <img v-if="item.cover_uri" :src="item.cover_uri" alt="" class="rl-cover__img" />
-              <span class="rl-cover__play" aria-hidden="true">▶</span>
-              <span class="rl-cover__ratio">{{ fmtDuration(item.timeline_duration_s) }}</span>
+        <Skeleton v-if="exportLogLoading" :rows="4" />
+        <template v-else-if="exportLogAvailable">
+          <div v-if="spaceExports.length" class="rl-exports" data-space-exports>
+            <div class="rl-exports__row rl-exports__row--head">
+              <span>{{ t("projectDetail.ui.exportColKind") }}</span>
+              <span>{{ t("projectDetail.ui.exportColEpisode") }}</span>
+              <span>{{ t("projectDetail.ui.exportColStatus") }}</span>
+              <span>{{ t("projectDetail.ui.exportColTime") }}</span>
+              <span>{{ t("projectDetail.ui.exportColDownload") }}</span>
+              <span>{{ t("projectDetail.ui.exportColExpires") }}</span>
             </div>
-            <div class="rl-card__body">
-              <p class="rl-card__title" :title="item.title">{{ item.title }}</p>
-              <p class="rl-card__meta">
-                <span>{{ t("reelflow.clippedEpisodes", { count: item.timeline_episode_count ?? 0 }) }}</span>
-                <span class="rl-dot">·</span>
-                <span>{{ t("reelflow.finalDuration", { duration: fmtDuration(item.timeline_duration_s) }) }}</span>
-              </p>
-              <p class="rl-card__edited">{{ t("reelflow.editedAt", { time: fmtEdited(item.updated_at ?? item.created_at) }) }}</p>
+            <div
+              v-for="item in spaceExports"
+              :key="item.kind + ':' + item.export_id"
+              class="rl-exports__row"
+              :data-export-kind="item.kind"
+            >
+              <span class="rl-exports__kind">{{ exportKindLabel(item) }}</span>
+              <span>{{ item.episode_no ? t("projectDetail.ui.epChip", { n: item.episode_no }) : "—" }}</span>
+              <span><Tag :tone="exportStatusTone(item)" size="sm" dot>{{ exportStatusText(item) }}</Tag></span>
+              <span class="mono">{{ fmtEdited(item.created_at) }}</span>
+              <span>
+                <a v-if="item.download_url" :href="item.download_url" class="rl-export-link" target="_blank" rel="noreferrer">
+                  {{ t("projectDetail.ui.downloadFile") }}
+                </a>
+                <em v-else class="rl-exports__none">{{ t("projectDetail.ui.exportNoDownloadPending") }}</em>
+              </span>
+              <span>
+                <em v-if="exportExpired(item)" class="rl-exports__expired">
+                  {{ t("projectDetail.ui.exportExpiredTag") }}
+                </em>
+                <em v-else-if="item.expires_at" class="rl-exports__none">{{ fmtEdited(item.expires_at) }}</em>
+                <em v-else class="rl-exports__none">{{ t("projectDetail.ui.exportNoExpiry") }}</em>
+              </span>
             </div>
-          </article>
-        </div>
-        <div v-else class="rl-empty">
+            <p class="rl-exports__note">{{ t("reelflow.exportLogHint") }}</p>
+          </div>
+          <div v-else class="rl-empty">
+            <span class="rl-empty__art" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5" />
+                <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
+              </svg>
+            </span>
+            <p class="rl-empty__text">{{ t("projectDetail.ui.exportHistoryEmpty") }}</p>
+            <p class="rl-empty__hint">{{ t("projectDetail.ui.exportHistoryEmptyDesc") }}</p>
+          </div>
+        </template>
+        <!-- 没有空间级导出日志：保持「已剪辑」，并把口径写清楚（导出记录在项目页） -->
+        <div v-else class="rl-empty" data-clipped-panel="1">
           <span class="rl-empty__art" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5" />
-              <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
+              <rect x="2.5" y="7" width="19" height="12" rx="2.5" />
+              <path d="M7 11h4M7 14h7" opacity="0.6" />
             </svg>
           </span>
-          <p class="rl-empty__text">{{ t("reelflow.exportedEmptyTitle") }}</p>
-          <p class="rl-empty__hint">{{ t("reelflow.exportedEmptyHint") }}</p>
+          <p class="rl-empty__text">{{ t("reelflow.clippedEmptyTitle") }}</p>
+          <p class="rl-empty__hint">{{ t("reelflow.clippedHint") }}</p>
+          <p class="rl-empty__hint">{{ t("reelflow.clippedEmptyHint") }}</p>
         </div>
       </template>
 
@@ -584,6 +681,53 @@ onMounted(() => {
   font-size: 11px;
   color: var(--text-4);
   font-variant-numeric: tabular-nums;
+}
+
+/* 空间级导出日志（有日志才渲染，见脚本里的 D3 说明） */
+.rl-exports {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.rl-exports__row {
+  display: grid;
+  grid-template-columns: 132px 92px 96px 152px minmax(120px, 1fr) minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--text-2);
+}
+.rl-exports__row--head {
+  color: var(--text-4);
+  font-size: 12px;
+}
+.rl-exports__row:not(.rl-exports__row--head):nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.rl-exports__kind {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.rl-exports__none {
+  font-style: normal;
+  color: var(--text-4);
+  font-size: 12px;
+}
+.rl-exports__expired {
+  font-style: normal;
+  color: var(--danger);
+  font-size: 12px;
+}
+.rl-exports__note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.rl-export-link {
+  color: var(--brand-300);
+  font-size: 12px;
 }
 
 /* 空态 */

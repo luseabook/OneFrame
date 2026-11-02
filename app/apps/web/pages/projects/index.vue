@@ -130,8 +130,15 @@ onMounted(async () => {
       <button type="button" class="tab" :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
         {{ t("projects.tabProjects") }}
       </button>
-      <button type="button" class="tab" :class="{ active: tab === 'exports' }" @click="tab = 'exports'">
-        {{ t("projects.tabExports") }}
+      <!-- D3：没有空间级导出日志 → 这个 tab 就叫「已剪辑」，不伪装成导出历史 -->
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: tab === 'exports' }"
+        data-list-tab="clipped"
+        @click="tab = 'exports'"
+      >
+        {{ t("projects.tabClipped") }}
       </button>
     </nav>
 
@@ -178,15 +185,16 @@ onMounted(async () => {
       </div>
     </template>
 
-    <div v-else class="empty exports">
+    <!-- D3：列表页不展示导出历史（没有空间级导出日志）。这里只写口径，不摆假记录。 -->
+    <div v-else class="empty exports" data-list-tab-panel="clipped">
       <span class="empty-art small" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5" />
           <path d="M4 16.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1.5" />
         </svg>
       </span>
-      <p class="empty-text">{{ t("projects.exportsEmpty") }}</p>
-      <p class="empty-hint">{{ t("projects.exportsHint") }}</p>
+      <p class="empty-text">{{ t("projects.clippedHint") }}</p>
+      <p class="empty-hint">{{ t("projects.clippedEmptyDesc") }}</p>
     </div>
 
     <div class="fab-wrap">

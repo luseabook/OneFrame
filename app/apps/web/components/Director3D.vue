@@ -27,11 +27,20 @@ const viewMode = ref<"director" | "camera">("director");
 const gridSnap = ref(true);
 const showLabels = ref(true);
 const groundOpacity = ref(0.4);
-const sceneScale = ref(100);
+/**
+ * 默认值对齐竞品 3D 导演台（docs/03-frontend/_ui-audit/ref-facts.md §3.10：1424×805 截图 + DOM 实测）：
+ * 场景缩放 `300 %`、视野角 `50.0°`、注视坐标 `0 / 1.2 / 0`。三处默认值只在这里定义一次，
+ * 机位追加 / 重置视角 / 「场景中心 · 第一个角色」三个入口都读同一组常量，避免漂移。
+ */
+const DEFAULT_SCENE_SCALE = 300;
+const DEFAULT_CAM_TARGET_Y = 1.2;
+const DEFAULT_CAM_POS = { x: 2.4, y: 2.2, z: 3.2 };
+const DEFAULT_FOV = 50;
+const sceneScale = ref(DEFAULT_SCENE_SCALE);
 const sceneRot = reactive({ x: 0, y: 0, z: 0 });
-const camPos = reactive({ x: 2.4, y: 2.2, z: 3.2 });
-const camTarget = reactive({ x: 0, y: 1, z: 0 });
-const fov = ref(50);
+const camPos = reactive({ ...DEFAULT_CAM_POS });
+const camTarget = reactive({ x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 });
+const fov = ref(DEFAULT_FOV);
 const facingMode = ref<"manual" | "actor" | "center">("manual");
 const search = ref("");
 const snapMsg = ref("");
@@ -67,7 +76,13 @@ const POSE_META: Record<PoseKey, { label: string; scaleY: number; lift: number; 
 
 const positions = ref<Actor[]>([]);
 const cameras = ref<Cam[]>([
-  { id: "cam-1", name: "机位1", pos: { x: 2.4, y: 2.2, z: 3.2 }, target: { x: 0, y: 1, z: 0 }, fov: 50 },
+  {
+    id: "cam-1",
+    name: "机位1",
+    pos: { ...DEFAULT_CAM_POS },
+    target: { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 },
+    fov: DEFAULT_FOV,
+  },
 ]);
 const activeCamIndex = ref(0);
 const selectedActorId = ref<string | null>(null);
@@ -109,8 +124,8 @@ function addCamera(): void {
       id: `cam-${Date.now()}`,
       name: `机位${idx}`,
       pos: { x: -2.4, y: 2.0, z: 3.0 },
-      target: { x: 0, y: 1, z: 0 },
-      fov: 50,
+      target: { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 },
+      fov: DEFAULT_FOV,
     },
   ];
   switchCamera(cameras.value.length - 1);
@@ -268,18 +283,18 @@ function applySceneSnapshot(payload: Record<string, unknown>): void {
         z: num(record.z, fallback.z),
       };
     };
-    Object.assign(camPos, readVec(payload.camPos, { x: 2.4, y: 2.2, z: 3.2 }));
-    Object.assign(camTarget, readVec(payload.camTarget, { x: 0, y: 1, z: 0 }));
-    fov.value = num(payload.fov, 50);
+    Object.assign(camPos, readVec(payload.camPos, { ...DEFAULT_CAM_POS }));
+    Object.assign(camTarget, readVec(payload.camTarget, { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 }));
+    fov.value = num(payload.fov, DEFAULT_FOV);
     groundOpacity.value = Math.min(1, Math.max(0, num(payload.groundOpacity, 0.4)));
 
     if (Array.isArray(payload.cameras) && payload.cameras.length > 0) {
       cameras.value = (payload.cameras as Array<Record<string, unknown>>).map((raw, index) => ({
         id: typeof raw.id === "string" ? raw.id : `cam-${index + 1}`,
         name: typeof raw.name === "string" && raw.name ? raw.name : `机位${index + 1}`,
-        pos: readVec(raw.pos, { x: 2.4, y: 2.2, z: 3.2 }),
-        target: readVec(raw.target, { x: 0, y: 1, z: 0 }),
-        fov: num(raw.fov, 50),
+        pos: readVec(raw.pos, { ...DEFAULT_CAM_POS }),
+        target: readVec(raw.target, { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 }),
+        fov: num(raw.fov, DEFAULT_FOV),
       }));
       activeCamIndex.value = Math.min(Math.max(0, num(payload.activeCamIndex, 0)), cameras.value.length - 1);
     }
@@ -298,7 +313,7 @@ function applySceneSnapshot(payload: Record<string, unknown>): void {
     viewMode.value = settings.viewMode === "camera" ? "camera" : "director";
     gridSnap.value = settings.gridSnap !== false;
     showLabels.value = settings.showLabels !== false;
-    sceneScale.value = Math.min(200, Math.max(60, num(settings.sceneScale, 100)));
+    sceneScale.value = Math.min(400, Math.max(60, num(settings.sceneScale, DEFAULT_SCENE_SCALE)));
     Object.assign(sceneRot, readVec(settings.sceneRot, { x: 0, y: 0, z: 0 }));
 
     // 相机缓冲跟随当前机位（与 switchCamera 的后置状态一致）
@@ -773,8 +788,8 @@ function resetView(): void {
   orbit.theta = Math.PI * 0.15;
   orbit.phi = Math.PI * 0.42;
   orbit.radius = 9;
-  Object.assign(camPos, { x: 2.4, y: 2.2, z: 3.2 });
-  Object.assign(camTarget, { x: 0, y: 1, z: 0 });
+  Object.assign(camPos, DEFAULT_CAM_POS);
+  Object.assign(camTarget, { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 });
   sceneRot.x = 0;
   sceneRot.y = 0;
   sceneRot.z = 0;
@@ -801,10 +816,10 @@ function onFovChange(value: number): void {
 }
 function applyFacing(): void {
   if (facingMode.value === "center") {
-    Object.assign(camTarget, { x: 0, y: 1, z: 0 });
+    Object.assign(camTarget, { x: 0, y: DEFAULT_CAM_TARGET_Y, z: 0 });
   } else if (facingMode.value === "actor") {
     const first = positions.value[0];
-    if (first) Object.assign(camTarget, { x: first.x, y: 1, z: first.z });
+    if (first) Object.assign(camTarget, { x: first.x, y: DEFAULT_CAM_TARGET_Y, z: first.z });
   }
   saveState();
 }
@@ -999,7 +1014,7 @@ onUnmounted(() => {
 
               <label class="d3-range">
                 <span>场景缩放</span>
-                <input v-model.number="sceneScale" type="range" min="60" max="200" step="5" />
+                <input v-model.number="sceneScale" type="range" min="60" max="400" step="5" />
                 <em>{{ sceneScale }} %</em>
               </label>
               <label class="d3-range">
@@ -1147,6 +1162,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/*
+ * 全屏覆盖（竞品 §3.10：左栏 0~359 / 视口 360~1064 / 右栏 1065~1424，无外边距、无圆角）。
+ * 1424 下：359 + 1(gap) + 704 + 1(gap) + 359 = 1424，视口正好 704 —— 差值 0。
+ * 之前的 min(1440px,100%) + 16 外边距 + 12 内距会吃掉 56px，视口只能到 746 且左右栏各 300。
+ */
 .d3-mask {
   position: fixed;
   inset: 0;
@@ -1155,21 +1175,24 @@ onUnmounted(() => {
   backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: 0;
 }
 .d3 {
-  width: min(1440px, 100%);
-  height: min(920px, 100%);
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: var(--radius-panel);
-  border: 1px solid var(--panel-line);
+  gap: 0;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
   background: #0e0f14;
   overflow: hidden;
 }
 .d3-top {
+  flex-shrink: 0;
+  height: 64px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1260,6 +1283,7 @@ onUnmounted(() => {
 }
 
 .d3-conflict {
+  margin: 8px 12px 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1273,7 +1297,7 @@ onUnmounted(() => {
 }
 
 .d3-error {
-  margin: 0;
+  margin: 8px 12px 0;
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--danger-bg);
@@ -1309,17 +1333,23 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 300px;
-  gap: 10px;
+  grid-template-columns: 359px minmax(0, 1fr) 359px;
+  gap: 1px;
+}
+/* 窄屏（<1180）：固定 359×2 会把视口挤没，退回 300/1fr/300（主场景仍是 1424） */
+@media (max-width: 1180px) {
+  .d3-body {
+    grid-template-columns: 300px minmax(0, 1fr) 300px;
+  }
 }
 .d3-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border-radius: 14px;
-  border: 1px solid var(--panel-line);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0;
+  border: 0;
+  background: #17181f;
   overflow: auto;
 }
 .d3-group {
@@ -1442,8 +1472,8 @@ onUnmounted(() => {
 }
 .d3-stage {
   position: relative;
-  border-radius: 14px;
-  border: 1px solid var(--panel-line);
+  border-radius: 0;
+  border: 0;
   overflow: hidden;
   background: #08080c;
 }

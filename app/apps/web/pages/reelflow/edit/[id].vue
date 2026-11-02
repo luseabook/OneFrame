@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { EpisodeDto, ProjectDto, StoryboardDto, TimelineClipAssetDto, TimelinePublicationDto } from "~/types/api";
+import { isShotFinalized } from "~/utils/shot-status";
 
 /**
  * ReelFlow 剪辑台（对齐竞品 /reelflow/edit/:projectId）
  *
  * 结构（竞品登录态实测，docs/03-frontend/reference-reelflow-spec.md §4.2 FLOW:77-86）：
  *   顶栏 64      ← 返回分镜创作 / 时间线导出（选中态）/ 保存 + 右侧集数选择、导出
- *   左栏 290     ← 「剧集资产」，只列**已定稿**的分镜素材（一致性闸门）
+ *   左栏 298     ← 「剧集资产」，只列**已定稿**的分镜素材（一致性闸门）
  *   中区          ← 播放器 + 「请在左侧选择分镜资产加入至时间线」
- *   底部 150      ← 时间线轨道（片段可拖拽排序 / 可裁剪时长）+ 播放头 + 缩放 + 刻度尺
+ *   底部 164      ← 时间线轨道（片段可拖拽排序 / 可裁剪时长）+ 播放头 + 缩放 + 刻度尺
  *
  * 三条必须说清的实现决定：
  *
@@ -67,9 +68,9 @@ const loadError = ref("");
 type RailFilter = "finalized" | "all";
 const railFilter = ref<RailFilter>("finalized");
 
-/** 闸门：出片完成且有视频任务 = 可进成片的料 */
+/** 闸门：出片完成且有视频任务 = 可进成片的料（与项目页共用 ~/utils/shot-status 的同一 selector） */
 function isFinalized(shot: StoryboardDto): boolean {
-  return shot.status === 5 && Boolean(shot.video_task_id);
+  return isShotFinalized(shot);
 }
 
 const finalizedShots = computed(() => shots.value.filter(isFinalized));
@@ -174,7 +175,11 @@ async function loadProject(): Promise<void> {
   const data = await api.get<{ project: ProjectDto; episodes: EpisodeDto[] }>(`/projects/${projectId.value}`);
   project.value = data.project;
   episodes.value = data.episodes;
-  if (!selectedEpisodeId.value) selectedEpisodeId.value = data.episodes[0]?.id ?? "";
+  // U3：项目页「去剪辑台」带 ?ep=<episodeId>，编辑器必须按该集载入——
+  // 否则用户从第 3 集跳过来，剪辑台却把选中集重置成第 1 集，等于跳转丢了上下文。
+  const wanted = String(route.query.ep ?? "");
+  const hit = wanted ? data.episodes.find((ep) => ep.id === wanted) : undefined;
+  if (!selectedEpisodeId.value) selectedEpisodeId.value = hit?.id ?? data.episodes[0]?.id ?? "";
 }
 
 async function loadEpisode(): Promise<void> {
@@ -225,23 +230,51 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-// ── 保存（显式 + 防抖）────────────────────────────────────
+// ── 保存（显式 + 防抖 + 三态可见）────────────────────────
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 const dirty = ref(false);
 
+/**
+ * 保存状态三态（竞品「保存」按钮在无改动时不可见/不高亮，我们把它做成常驻可见的状态位）：
+ *   idle   —— 本次会话还没有要保存的改动（显示为无）
+ *   dirty  —— 有改动未落库（防抖 700ms 内 → 显示「未保存」）
+ *   saving —— 请求在途（显示「保存中…」）
+ *   saved  —— 上一次 PUT 成功（显示「已保存」）
+ *   error  —— 上一次 PUT 失败（显示「保存失败」，红色；不做成只在 toast 里一闪而过）
+ */
+type SavePhase = "idle" | "dirty" | "saving" | "saved" | "error";
+const savePhase = ref<SavePhase>("idle");
+
+const savePhaseLabel = computed<string>(() => {
+  switch (savePhase.value) {
+    case "saving":
+      return t("editor.saveSaving");
+    case "saved":
+      return t("editor.saveSaved");
+    case "error":
+      return t("editor.saveFailed");
+    case "dirty":
+      return t("editor.unsaved");
+    default:
+      return "";
+  }
+});
+
 function scheduleSave(): void {
   dirty.value = true;
+  savePhase.value = "dirty";
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => void persistTimeline(true), 700);
 }
 
-async function persistTimeline(silent: boolean): Promise<boolean> {
+async function persistTimeline(silent: boolean, keepalive = false): Promise<boolean> {
   if (!selectedEpisodeId.value) return false;
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = undefined;
   }
   saving.value = true;
+  savePhase.value = "saving";
   try {
     const res = await api.put<{ clips: Array<{ clip_id: string }> }>(
       `/projects/${projectId.value}/episodes/${selectedEpisodeId.value}/timeline`,
@@ -254,6 +287,8 @@ async function persistTimeline(silent: boolean): Promise<boolean> {
           duration: c.duration,
         })),
       },
+      // 卸载/刷新时普通 fetch 会被浏览器取消；keepalive 让这最后一个写请求能发出（同源同鉴权，不新造机制）
+      keepalive ? { keepalive: true } : {},
     );
     // 服务端会回填/重建 clip_id：同步回本地，否则下次覆盖写会一直新建 id
     if (Array.isArray(res.clips) && res.clips.length === clips.value.length) {
@@ -261,14 +296,29 @@ async function persistTimeline(silent: boolean): Promise<boolean> {
       clips.value = clips.value.map((c, i) => ({ ...c, clip_id: ids[i] ?? c.clip_id }));
     }
     dirty.value = false;
+    savePhase.value = "saved";
     if (!silent) toast.success(t("editor.saved"));
     return true;
   } catch (e) {
+    savePhase.value = "error";
     toast.error(e instanceof Error ? t("editor.saveFailedWith", { msg: e.message }) : t("editor.saveFailed"));
     return false;
   } finally {
     saving.value = false;
   }
+}
+
+/**
+ * 卸载 / 刷新 / 切后台时的最后一道保险：先清防抖 timer，再把未落库的改动用 keepalive 发出去。
+ * 不 await —— 浏览器不会等 promise；keepalive 才能让请求在文档销毁后继续完成。
+ */
+function flushPendingSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+  }
+  if (!dirty.value || !selectedEpisodeId.value) return;
+  void persistTimeline(true, true);
 }
 
 // ── 加入 / 移除 / 更新分镜 ────────────────────────────────
@@ -294,6 +344,60 @@ function clipFromShot(shot: StoryboardDto): Clip {
 
 const info = ref("");
 
+/** 删除后的页内撤销条：8s 内可还原（toast 只有 success/error/info，没有 action/undo API，所以不做成 toast 动作） */
+const removedClip = ref<{ clip: Clip; index: number } | null>(null);
+let undoTimer: ReturnType<typeof setTimeout> | undefined;
+
+// ── 撤销 / 重做（Ctrl+Z / Ctrl+Shift+Z，可见安全网）──────────
+/**
+ * 两条撤销通道各管一段，互不冲突：
+ * 1. 删除后的页内撤销条（8s，位置可还原）——「刚删错」的即时反馈；
+ * 2. 本段历史栈——时间线上所有编辑（加入 / 删除 / 换位 / 裁剪 / 更新分镜）都能回退，
+ *    删掉撤销条过期之后也还能救。
+ *
+ * 存的是**整份片段数组快照**而不是命令对象：后端 clip 契约只有 clip_id/shot_id/task_id/
+ * name/duration 五个字段，一集几十段，快照体量可以忽略；命令模式要为 5 种操作各写一对
+ * do/undo，出错面反而更大。
+ */
+const HISTORY_LIMIT = 50;
+const historyPast = ref<Clip[][]>([]);
+const historyFuture = ref<Clip[][]>([]);
+
+function snapshotClips(): Clip[] {
+  return clips.value.map((c) => ({ ...c }));
+}
+
+/** 在任何改动落盘前调用：把「改动前」的状态压栈，并清空重做栈 */
+function pushHistory(): void {
+  historyPast.value = [...historyPast.value, snapshotClips()].slice(-HISTORY_LIMIT);
+  historyFuture.value = [];
+}
+
+const canUndo = computed(() => historyPast.value.length > 0);
+const canRedo = computed(() => historyFuture.value.length > 0);
+
+function applyHistory(next: Clip[]): void {
+  clips.value = next.map((c) => ({ ...c }));
+  if (playhead.value > totalDuration.value) playhead.value = totalDuration.value;
+  scheduleSave();
+}
+
+function undoClips(): void {
+  const prev = historyPast.value[historyPast.value.length - 1];
+  if (!prev) return;
+  historyPast.value = historyPast.value.slice(0, -1);
+  historyFuture.value = [...historyFuture.value, snapshotClips()];
+  applyHistory(prev);
+}
+
+function redoClips(): void {
+  const next = historyFuture.value[historyFuture.value.length - 1];
+  if (!next) return;
+  historyFuture.value = historyFuture.value.slice(0, -1);
+  historyPast.value = [...historyPast.value, snapshotClips()];
+  applyHistory(next);
+}
+
 async function addShot(shot: StoryboardDto, atIndex?: number): Promise<void> {
   if (!isFinalized(shot)) {
     toast.error(t("editor.shotNotFinalized", { no: shot.shot_no }));
@@ -303,6 +407,7 @@ async function addShot(shot: StoryboardDto, atIndex?: number): Promise<void> {
   const list = [...clips.value];
   const index = atIndex === undefined ? list.length : Math.max(0, Math.min(list.length, atIndex));
   list.splice(index, 0, clip);
+  pushHistory();
   clips.value = list;
   if (clip.task_id) {
     const url = await clipUrl(clip.task_id);
@@ -314,9 +419,37 @@ async function addShot(shot: StoryboardDto, atIndex?: number): Promise<void> {
 }
 
 function removeClip(clipId: string): void {
-  clips.value = clips.value.filter((c) => c.clip_id !== clipId);
+  const index = clips.value.findIndex((c) => c.clip_id === clipId);
+  if (index < 0) return;
+  pushHistory();
+  const [clip] = clips.value.splice(index, 1);
+  if (!clip) return;
   if (playhead.value > totalDuration.value) playhead.value = totalDuration.value;
+  removedClip.value = { clip, index };
+  if (undoTimer) clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => {
+    removedClip.value = null;
+    undoTimer = undefined;
+  }, 8000);
   scheduleSave();
+  toast.info(t("editor.clipRemoved", { name: clip.name }));
+}
+
+function undoRemoveClip(): void {
+  const pending = removedClip.value;
+  if (!pending) return;
+  removedClip.value = null;
+  if (undoTimer) {
+    clearTimeout(undoTimer);
+    undoTimer = undefined;
+  }
+  const next = [...clips.value];
+  next.splice(Math.min(pending.index, next.length), 0, pending.clip);
+  // 撤销条本身也是一次改动：压栈后可再用 Ctrl+Z 反悔（与历史栈不冲突）
+  pushHistory();
+  clips.value = next;
+  scheduleSave();
+  toast.success(t("editor.clipRestored", { name: pending.clip.name }));
 }
 
 /**
@@ -338,6 +471,7 @@ async function rebuildFromStoryboards(): Promise<void> {
   });
   // 记录被移除的镜头（不再定稿 / 已删除），提示用户而不是静默丢
   const removed = clips.value.filter((c) => !finals.some((s) => s.id === c.shot_id)).length;
+  pushHistory();
   clips.value = rebuilt;
   playhead.value = Math.min(playhead.value, totalDuration.value);
   await hydrateClipUrls();
@@ -365,11 +499,25 @@ interface DragState {
   moved: boolean;
   /** 指针在轨道内的横向位置（drop 位置提示） */
   dropIndex: number | null;
+  /** 裁剪前的时间线快照（一次拖动 = 一个撤销步；没真改就丢掉，不留空步） */
+  baseline: Clip[] | null;
 }
 
 const drag = ref<DragState | null>(null);
 const dragGhost = ref<{ x: number; y: number; label: string } | null>(null);
 const trackEl = ref<HTMLElement | null>(null);
+
+/**
+ * 插入指示线：把「过滤后的插入位」换算回原始数组里「插在谁之前」，
+ * 否则向右拖动时那根 2px 线会画在被拖片段自己身上（位置对不上手感）。
+ */
+const dropBeforeIndex = computed<number | null>(() => {
+  const state = drag.value;
+  if (!state || state.kind !== "reorder" || state.dropIndex === null) return null;
+  const from = clips.value.findIndex((c) => c.clip_id === state.clipId);
+  if (from < 0) return null;
+  return state.dropIndex <= from ? state.dropIndex : state.dropIndex + 1;
+});
 
 /** 屏幕 x → 轨道内的时间线索引（按片段中点判定插入位置） */
 function indexAtX(clientX: number, ignoreClipId?: string): number {
@@ -418,6 +566,7 @@ function onRailPointerDown(ev: PointerEvent, shot: StoryboardDto, finalized: boo
     originDuration: 0,
     moved: false,
     dropIndex: null,
+    baseline: null,
   };
   dragGhost.value = { x: ev.clientX, y: ev.clientY, label: t("editor.shotClip", { no: shot.shot_no }) };
 }
@@ -437,6 +586,7 @@ function onClipPointerDown(ev: PointerEvent, clip: Clip, mode: "reorder" | "trim
     originDuration: clip.duration,
     moved: false,
     dropIndex: null,
+    baseline: mode === "trim" ? snapshotClips() : null,
   };
 }
 
@@ -495,10 +645,27 @@ function onPointerUp(): void {
     const list = [...clips.value];
     const [item] = list.splice(from, 1);
     if (!item) return;
-    // 移除后目标索引要按原位置回退一位
-    const insertAt = Math.max(0, Math.min(list.length, to > from ? to - 1 : to));
+    /*
+     * indexAtX 返回的是「把被拖片段摘掉之后」的插入位，所以**右移不能再回退一位**：
+     * 旧写法 `to > from ? to - 1 : to` 会让「把第 1 段拖到第 2 段右边」插回原位，
+     * 也就是向右拖永远不动（U4 e2e 实测复现，见 reports/U4.md §2.5）。
+     */
+    const insertAt = Math.max(0, Math.min(list.length, to));
     list.splice(insertAt, 0, item);
+    pushHistory();
     clips.value = list;
+    scheduleSave();
+    return;
+  }
+
+  if (state.kind === "trim" && state.moved) {
+    // 只有真的改动了时长才记一步：拖歪了又拖回去不该占一格历史
+    const changed =
+      state.baseline?.some((c, i) => clips.value[i]?.duration !== c.duration) ?? false;
+    if (changed && state.baseline) {
+      historyPast.value = [...historyPast.value, state.baseline].slice(-HISTORY_LIMIT);
+      historyFuture.value = [];
+    }
     scheduleSave();
     return;
   }
@@ -517,6 +684,7 @@ function onClipKeydown(ev: KeyboardEvent, clip: Clip): void {
     const [item] = list.splice(from, 1);
     if (!item) return;
     list.splice(to, 0, item);
+    pushHistory();
     clips.value = list;
     scheduleSave();
   } else if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -688,6 +856,69 @@ function downloadComposed(): void {
 
 // ── 切片发布（timeline_publications：1 排队 / 2 转码中 / 3 可播放 / 4 失败 / 5 已下架）──
 const showPublish = ref(false);
+// ── 弹窗无障碍：aria-modal + 遮罩关闭 + Esc + Tab 焦点陷阱 + 关闭后焦点归还 ──
+const publishPanel = ref<HTMLElement | null>(null);
+const clipAssetsPanel = ref<HTMLElement | null>(null);
+let modalReturnFocus: HTMLElement | null = null;
+/** 任一弹窗打开时，全局 Space / 方向键不得再控制播放与 seek */
+const modalOpen = computed(() => showPublish.value || (showClipAssets.value && Boolean(assetClip.value)));
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function rememberFocus(): void {
+  const el = document.activeElement;
+  if (el instanceof HTMLElement && !el.closest(".rf-modal")) modalReturnFocus = el;
+}
+
+function focusablesIn(panel: HTMLElement | null): HTMLElement[] {
+  if (!panel) return [];
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
+}
+
+/**
+ * 初始焦点落在**面板容器**（tabindex="-1"），而不是第一个可聚焦元素。
+ *
+ * 原因（U4 e2e 实测）：第一个可聚焦元素是右上角 ✕，弹窗一开焦点就在它身上，
+ * 用户按 Space（本意是「别播放」或只是习惯性按键）会直接激活 ✕ 把弹窗关掉，
+ * 已输入的标题一起丢。落在容器上：读屏仍会播报 aria-label / 标题，Space 不触发任何按钮，
+ * Tab 第一次落到 ✕，方向与视觉焦点顺序一致。
+ */
+function focusFirstIn(panel: HTMLElement | null): void {
+  const target = panel ?? focusablesIn(panel)[0];
+  target?.focus();
+}
+
+function closeModals(): void {
+  if (!modalOpen.value) return;
+  showPublish.value = false;
+  showClipAssets.value = false;
+  const back = modalReturnFocus;
+  modalReturnFocus = null;
+  void nextTick(() => back?.focus());
+}
+
+/** Tab 首尾循环：焦点不能跑到 aria-modal 背后的页面上 */
+function trapFocus(ev: KeyboardEvent, panel: HTMLElement | null): void {
+  if (ev.key !== "Tab") return;
+  const list = focusablesIn(panel);
+  if (!list.length) return;
+  const first = list[0]!;
+  const last = list[list.length - 1]!;
+  const active = document.activeElement;
+  const inside = panel?.contains(active as Node | null) ?? false;
+  // 焦点可能停在面板容器本身（初始焦点）：Shift+Tab 必须回卷到最后一个，否则会漏到弹窗背后
+  const atStart = active === first || active === panel || !inside;
+  if (ev.shiftKey && atStart) {
+    ev.preventDefault();
+    last.focus();
+  } else if (!ev.shiftKey && (active === last || !inside)) {
+    ev.preventDefault();
+    first.focus();
+  }
+}
+
 const publications = ref<TimelinePublicationDto[]>([]);
 const pubTitle = ref("");
 const pubStartS = ref(0);
@@ -695,6 +926,8 @@ const pubEndS = ref(0);
 const publishing = ref(false);
 const pubError = ref("");
 let pubTimer: ReturnType<typeof setInterval> | undefined;
+/** 切片最短 1 秒（后端不校验时长，前端是唯一闸门：0.4s 的片子没人能看，还白花一次转码） */
+const MIN_SLICE_S = 1;
 
 const PUB_STATUS = computed<Record<number, { text: string; tone: "info" | "success" | "danger" | "neutral" }>>(() => ({
   1: { text: t("editor.pubStatusQueued"), tone: "info" },
@@ -717,12 +950,14 @@ async function loadPublications(): Promise<void> {
 }
 
 async function openPublish(): Promise<void> {
+  rememberFocus();
   showPublish.value = true;
   pubError.value = "";
   pubTitle.value = t("editor.titles.slice", { title: project.value?.title ?? "", episode: episodeLabel.value });
   // 默认整集：起止按当前时间线总时长（单位秒，提交时换算 ms）
   pubStartS.value = 0;
   pubEndS.value = Math.round(totalDuration.value);
+  void nextTick(() => focusFirstIn(publishPanel.value));
   await loadPublications();
 }
 
@@ -744,8 +979,19 @@ function pollPublications(): void {
 
 async function publishSlice(): Promise<void> {
   if (!selectedEpisodeId.value) return;
+  const total = Math.round(totalDuration.value);
+  // 三道闸门按「上限 → 先后 → 最短」的顺序给可读原因，不让用户对着 500 猜
+  if (pubStartS.value < 0) pubStartS.value = 0;
   if (pubEndS.value <= pubStartS.value) {
     pubError.value = t("editor.endAfterStart");
+    return;
+  }
+  if (pubEndS.value > total) {
+    pubError.value = t("editor.endBeyondTimeline", { total });
+    return;
+  }
+  if (pubEndS.value - pubStartS.value < MIN_SLICE_S) {
+    pubError.value = t("editor.sliceTooShort", { min: MIN_SLICE_S });
     return;
   }
   // 发布读的是服务端时间线：先落库，否则会发出旧内容
@@ -806,9 +1052,11 @@ const projectAssetList = ref<
 >([]);
 
 async function openClipAssets(clip: Clip): Promise<void> {
+  rememberFocus();
   showClipAssets.value = true;
   assetClip.value = clip;
   clipAssetError.value = "";
+  void nextTick(() => focusFirstIn(clipAssetsPanel.value));
   try {
     const data = await api.get<{ list: typeof projectAssetList.value }>(`/projects/${projectId.value}/assets`);
     // 只列已定稿且有参考图的资产：未定稿挂上去在成片里也是空引用
@@ -910,6 +1158,10 @@ watch(selectedEpisodeId, async (next, prev) => {
   showPublish.value = false;
   showClipAssets.value = false;
   publications.value = [];
+  // 历史栈是按「本集时间线」记的：换集必须清空，否则 Ctrl+Z 会把上一集的片段插到这一集
+  historyPast.value = [];
+  historyFuture.value = [];
+  removedClip.value = null;
   exportStatus.value = 0;
   exportUrl.value = null;
   exportError.value = "";
@@ -919,8 +1171,31 @@ watch(selectedEpisodeId, async (next, prev) => {
 
 function onKeydown(ev: KeyboardEvent): void {
   const target = ev.target as HTMLElement | null;
-  // 输入框里不劫持快捷键
+  // ① Esc 最先处理：弹窗打开时（哪怕焦点在输入框里）都能关
+  if (ev.key === "Escape" && modalOpen.value) {
+    ev.preventDefault();
+    closeModals();
+    return;
+  }
+  // ② 弹窗打开期间不劫持全局快捷键：Space / 方向键留给弹窗自身
+  if (modalOpen.value) return;
+  // ③ 输入框里不劫持快捷键（输入框内的 Ctrl+Z 必须是原生文本撤销）
   if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+  // ④ 撤销 / 重做：Ctrl+Z / ⌘Z；Shift 变重做；Ctrl+Y 也当重做（Windows 习惯）
+  if (ev.ctrlKey || ev.metaKey) {
+    const combo = ev.key.toLowerCase();
+    if (combo === "z") {
+      ev.preventDefault();
+      if (ev.shiftKey) redoClips();
+      else undoClips();
+      return;
+    }
+    if (combo === "y") {
+      ev.preventDefault();
+      redoClips();
+      return;
+    }
+  }
   if (ev.code === "Space") {
     ev.preventDefault();
     togglePlay();
@@ -933,11 +1208,28 @@ function onKeydown(ev: KeyboardEvent): void {
   }
 }
 
+/** 刷新/关闭标签：有未落库改动时先 keepalive 冲一次，再让浏览器弹确认 */
+function onBeforeUnload(ev: BeforeUnloadEvent): void {
+  if (!dirty.value) return;
+  flushPendingSave();
+  ev.preventDefault();
+  // 现代浏览器忽略文案，但必须赋值 returnValue 才会弹确认
+  ev.returnValue = "";
+}
+
+/** 切后台/切标签：页面可能再也回不来，先冲一次 */
+function onVisibilityChange(): void {
+  if (document.visibilityState === "hidden") flushPendingSave();
+}
+
 onMounted(async () => {
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
   window.addEventListener("keydown", onKeydown);
+  window.addEventListener("pagehide", flushPendingSave);
+  window.addEventListener("beforeunload", onBeforeUnload);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   await bootstrap();
 });
 
@@ -946,10 +1238,15 @@ onUnmounted(() => {
   window.removeEventListener("pointerup", onPointerUp);
   window.removeEventListener("pointercancel", onPointerUp);
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("pagehide", flushPendingSave);
+  window.removeEventListener("beforeunload", onBeforeUnload);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   if (rafId) cancelAnimationFrame(rafId);
-  if (saveTimer) clearTimeout(saveTimer);
   if (exportTimer) clearInterval(exportTimer);
   if (pubTimer) clearInterval(pubTimer);
+  if (undoTimer) clearTimeout(undoTimer);
+  // 先移除监听、取消定时器，再冲未落库改动（不 await：浏览器不会等）
+  flushPendingSave();
 });
 
 const episodeLabel = computed(() => {
@@ -971,7 +1268,17 @@ const episodeLabel = computed(() => {
 
       <div class="rf-top__mid">
         <b class="rf-title" :title="project?.title">{{ project?.title ?? t("editor.titleFallback") }}</b>
-        <span v-if="dirty" class="rf-dirty">{{ t("editor.unsaved") }}</span>
+        <!-- 保存三态（dirty / saving / saved / error）：常驻可见，不只靠 3s 就消失的 toast -->
+        <span
+          v-if="savePhase !== 'idle'"
+          class="rf-save"
+          :class="`rf-save--${savePhase}`"
+          :data-save-state="savePhase"
+          role="status"
+          aria-live="polite"
+        >
+          <i class="rf-save__dot" aria-hidden="true" />{{ savePhaseLabel }}
+        </span>
       </div>
 
       <div class="rf-top__right">
@@ -996,7 +1303,7 @@ const episodeLabel = computed(() => {
 
     <p v-if="loadError" class="rf-err">{{ loadError }}</p>
 
-    <!-- ═════════ 三区：左栏 290 / 中区播放器 / 底部时间线 150 ═════════ -->
+    <!-- ═════════ 三区：左栏 298 / 中区播放器 / 底部时间线 164（竞品 1424×805 实测 298 / 1102×164）═════════ -->
     <div class="rf-body" :class="{ 'is-loading': loading }">
       <!-- 左栏「剧集资产」 -->
       <aside class="rf-rail">
@@ -1061,6 +1368,34 @@ const episodeLabel = computed(() => {
 
       <!-- 中区播放器 -->
       <section class="rf-stage">
+        <!--
+          撤销 / 重做：键盘 Ctrl+Z / Ctrl+Shift+Z 的**可见**安全网。
+          位置对齐竞品（播放器上方居中的两枚图标，1424 下 ≈x836~900 / y85~100）。
+        -->
+        <div class="rf-hist">
+          <button
+            type="button"
+            class="rf-hist__btn"
+            :disabled="!canUndo"
+            :title="t('editor.undoTitle')"
+            :aria-label="t('editor.undoTitle')"
+            data-hist="undo"
+            @click="undoClips"
+          >
+            ↶
+          </button>
+          <button
+            type="button"
+            class="rf-hist__btn"
+            :disabled="!canRedo"
+            :title="t('editor.redoTitle')"
+            :aria-label="t('editor.redoTitle')"
+            data-hist="redo"
+            @click="redoClips"
+          >
+            ↷
+          </button>
+        </div>
         <div v-if="previewComposed && exportUrl" class="rf-player">
           <video :src="exportUrl" class="rf-video" controls playsinline />
           <button type="button" class="rf-switch" @click="previewComposed = false">{{ t("editor.backToPreview") }}</button>
@@ -1098,7 +1433,7 @@ const episodeLabel = computed(() => {
         </div>
       </section>
 
-      <!-- 底部时间线 150 -->
+      <!-- 底部时间线 164 -->
       <footer class="rf-tl">
         <div class="rf-tl__bar">
           <button type="button" class="rf-play" @click="togglePlay">{{ playing ? t("editor.pause") : t("editor.play") }}</button>
@@ -1140,7 +1475,7 @@ const episodeLabel = computed(() => {
               class="rf-clip"
               :class="{
                 on: activeClipIndex === i,
-                'is-dropbefore': drag?.dropIndex === i,
+                'is-dropbefore': dropBeforeIndex === i,
                 'is-dragging': drag?.clipId === clip.clip_id && drag.moved,
               }"
               :style="{ width: `${clip.duration * pxPerSec}px` }"
@@ -1171,12 +1506,30 @@ const episodeLabel = computed(() => {
       </footer>
     </div>
 
+    <!-- ═════════ 删除撤销条：误删可还原（8s）═════════ -->
+    <div v-if="removedClip" class="rf-undo" role="status">
+      <span class="rf-undo__text">{{ t("editor.clipRemoved", { name: removedClip.clip.name }) }}</span>
+      <button type="button" class="rf-undo__btn" @click="undoRemoveClip">{{ t("editor.undo") }}</button>
+    </div>
+
     <!-- ═════════ 切片发布（wf/publish + wf/video-slicing）═════════ -->
-    <div v-if="showPublish" class="rf-modal" role="dialog" :aria-label="t('editor.publishModalAria')">
-      <div class="rf-modal__panel">
+    <div
+      v-if="showPublish"
+      class="rf-modal"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('editor.publishModalAria')"
+      @click.self="closeModals"
+    >
+      <div ref="publishPanel" class="rf-modal__panel" tabindex="-1" @keydown="trapFocus($event, publishPanel)">
         <header class="rf-modal__head">
           <b>{{ t("editor.publishSlice") }}</b>
-          <button type="button" class="rf-modal__x" @click="showPublish = false">✕</button>
+          <button
+            type="button"
+            class="rf-modal__x"
+            :aria-label="t('editor.closeModal')"
+            @click="closeModals"
+          >✕</button>
         </header>
         <p class="rf-modal__hint">
           {{ t("editor.publishIntro") }}
@@ -1190,11 +1543,25 @@ const episodeLabel = computed(() => {
           </label>
           <label>
             <span>{{ t("editor.startLabel") }}</span>
-            <input v-model.number="pubStartS" class="rf-input" type="number" min="0" step="1" />
+            <input
+              v-model.number="pubStartS"
+              class="rf-input"
+              type="number"
+              min="0"
+              :max="Math.max(0, Math.round(totalDuration) - 1)"
+              step="1"
+            />
           </label>
           <label>
             <span>{{ t("editor.endLabel") }}</span>
-            <input v-model.number="pubEndS" class="rf-input" type="number" min="1" step="1" />
+            <input
+              v-model.number="pubEndS"
+              class="rf-input"
+              type="number"
+              :min="Math.round(pubStartS) + 1"
+              :max="Math.round(totalDuration)"
+              step="1"
+            />
           </label>
           <Button size="sm" :loading="publishing" :disabled="!clips.length" @click="publishSlice">
             {{ t("editor.publishAction") }}
@@ -1259,11 +1626,23 @@ const episodeLabel = computed(() => {
     </div>
 
     <!-- ═════════ 片段资产（wf/clip-bind-asset，快照语义）═════════ -->
-    <div v-if="showClipAssets && assetClip" class="rf-modal" role="dialog" :aria-label="t('editor.clipAssetsModalAria')">
-      <div class="rf-modal__panel">
+    <div
+      v-if="showClipAssets && assetClip"
+      class="rf-modal"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('editor.clipAssetsModalAria')"
+      @click.self="closeModals"
+    >
+      <div ref="clipAssetsPanel" class="rf-modal__panel" tabindex="-1" @keydown="trapFocus($event, clipAssetsPanel)">
         <header class="rf-modal__head">
           <b>{{ t("editor.clipAssetsTitleWith", { name: assetClip.name }) }}</b>
-          <button type="button" class="rf-modal__x" @click="showClipAssets = false">✕</button>
+          <button
+            type="button"
+            class="rf-modal__x"
+            :aria-label="t('editor.closeModal')"
+            @click="closeModals"
+          >✕</button>
         </header>
         <p class="rf-modal__hint">
           {{ t("editor.clipAssetsIntro") }}
@@ -1357,10 +1736,45 @@ const episodeLabel = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rf-dirty {
+/* 保存状态：dirty / saving / saved / error 四色同形（圆点 + 文案），不靠 toast 一闪而过 */
+.rf-save {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
+  white-space: nowrap;
+  color: var(--text-4);
+}
+.rf-save__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+.rf-save--dirty {
   color: var(--warning);
+}
+.rf-save--saving {
+  color: var(--text-3);
+}
+.rf-save--saving .rf-save__dot {
+  animation: rf-save-pulse 900ms ease-in-out infinite;
+}
+.rf-save--saved {
+  color: var(--success);
+}
+.rf-save--error {
+  color: var(--danger);
+}
+@keyframes rf-save-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .rf-pill {
   display: inline-flex;
@@ -1424,13 +1838,17 @@ const episodeLabel = computed(() => {
   font-size: 13px;
 }
 
-/* ── 三区网格：左栏 290 跨两行；右列上=播放器，下=时间线 150 ── */
+/* ── 三区网格：左栏 298 跨两行；右列上=播放器，下=时间线 164 ──
+ * 竞品 1424×805 实测：左栏 x8~306（298）、时间线块 1102×164（x314~1416, y633~797）。
+ * 本页 .rf 左右内距 8 + 列间距 8，故 1424 → 298 + 8 + 1102 = 1408 正好；
+ * 时间线 164 + 8 间距 + 64 顶栏 + 8 底部内距 = 805 → 上沿 y633，与竞品同位。
+ */
 .rf-body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 150px;
+  grid-template-columns: 298px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 164px;
   gap: 8px;
 }
 .rf-body.is-loading {
@@ -1589,6 +2007,36 @@ const episodeLabel = computed(() => {
   border-radius: 12px;
   background: #000;
 }
+.rf-hist {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+.rf-hist__btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: rgb(0 0 0 / 34%);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-hist__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.rf-hist__btn:hover:not(:disabled) {
+  border-color: var(--brand-500);
+  color: var(--brand-300);
+}
 .rf-switch {
   position: absolute;
   top: 4px;
@@ -1675,7 +2123,7 @@ const episodeLabel = computed(() => {
   cursor: pointer;
 }
 
-/* ── 底部时间线（高 150） ── */
+/* ── 底部时间线（高 164，竞品 1102×164） ── */
 .rf-tl {
   min-height: 0;
   display: flex;
@@ -1907,7 +2355,7 @@ const episodeLabel = computed(() => {
 @media (max-width: 1100px) {
   .rf-body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 180px minmax(0, 1fr) 150px;
+    grid-template-rows: 180px minmax(0, 1fr) 164px;
   }
   .rf-rail {
     grid-row: 1;
@@ -1916,6 +2364,43 @@ const episodeLabel = computed(() => {
 }
 
 /* ═════════ 切片发布 / 片段资产 浮层（wf/publish + wf/clip-bind-asset）═════════ */
+/* 删除撤销条：底部居中，压在时间线上方，8s 自动消失 */
+.rf-undo {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: var(--z-toast, 60);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-btn, 10px);
+  border: 1px solid var(--panel-line);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-pop, 0 10px 30px rgb(0 0 0 / 45%));
+  font-size: 13px;
+  color: var(--text-1);
+}
+.rf-undo__text {
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-undo__btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--brand, #9b46ff);
+  background: transparent;
+  color: var(--brand, #9b46ff);
+  font-size: 13px;
+  cursor: pointer;
+}
+.rf-undo__btn:hover {
+  background: rgb(155 70 255 / 12%);
+}
 .rf-modal {
   position: fixed;
   inset: 0;
