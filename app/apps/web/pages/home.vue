@@ -13,14 +13,29 @@ useHead({ title: () => t("home.metaTitle") });
  * 用 `computed` 而不是常量：常量在 setup 期只算一次，切语言后卡片标题不会变
  * （这是本批最容易漏的一处——页面数据数组里混着文案与行为）。
  */
-const tools = computed(() => [
-  { label: t("home.tools.script.label"), desc: t("home.tools.script.desc"), to: "/projects", icon: "script", enabled: true, modal: true },
-  { label: t("home.tools.plaza.label"), desc: t("home.tools.plaza.desc"), to: null, icon: "plaza", enabled: false, modal: false, tag: t("home.tools.plaza.tag"), tagKind: "soon" },
-  { label: t("home.tools.spark.label"), desc: t("home.tools.spark.desc"), to: null, icon: "spark", enabled: false, modal: false, tag: t("home.tools.spark.tag"), tagKind: "member" },
-  { label: t("home.tools.lips.label"), desc: t("home.tools.lips.desc"), to: null, icon: "lips", enabled: false, modal: false, tag: t("home.tools.lips.tag"), tagKind: "soon" },
-  { label: t("home.tools.t2v.label"), desc: t("home.tools.t2v.desc"), to: null, icon: "t2v", enabled: false, modal: false },
-  { label: t("home.tools.i2v.label"), desc: t("home.tools.i2v.desc"), to: null, icon: "i2v", enabled: false, modal: false },
-  { label: t("home.tools.hd.label"), desc: t("home.tools.hd.desc"), to: null, icon: "hd", enabled: false, modal: false },
+type HomeTool = {
+  /** 稳定标识：模板 key / e2e 选择器 / 埋点都用它，不用会随语言变化的 label */
+  key: string;
+  label: string;
+  desc: string;
+  to: string | null;
+  icon: string;
+  enabled: boolean;
+  modal: boolean;
+  tag?: string;
+  tagKind?: "soon" | "member";
+  /** 连角标都没有的禁用卡：可见原因（不能只靠 hover title） */
+  note?: string;
+};
+const tools = computed<HomeTool[]>(() => [
+  { key: "script", label: t("home.tools.script.label"), desc: t("home.tools.script.desc"), to: "/projects", icon: "script", enabled: true, modal: true },
+  { key: "plaza", label: t("home.tools.plaza.label"), desc: t("home.tools.plaza.desc"), to: null, icon: "plaza", enabled: false, modal: false, tag: t("home.tools.plaza.tag"), tagKind: "soon" },
+  // U6：视频转绘的产品页已经落地（/video-redraw/create），旧值 to:null + 禁用 = 假死入口
+  { key: "spark", label: t("home.tools.spark.label"), desc: t("home.tools.spark.desc"), to: "/video-redraw/create", icon: "spark", enabled: true, modal: false, tag: t("home.tools.spark.tag"), tagKind: "member" },
+  { key: "lips", label: t("home.tools.lips.label"), desc: t("home.tools.lips.desc"), to: null, icon: "lips", enabled: false, modal: false, tag: t("home.tools.lips.tag"), tagKind: "soon" },
+  { key: "t2v", label: t("home.tools.t2v.label"), desc: t("home.tools.t2v.desc"), to: null, icon: "t2v", enabled: false, modal: false, note: t("home.toolPendingNote") },
+  { key: "i2v", label: t("home.tools.i2v.label"), desc: t("home.tools.i2v.desc"), to: null, icon: "i2v", enabled: false, modal: false, note: t("home.toolPendingNote") },
+  { key: "hd", label: t("home.tools.hd.label"), desc: t("home.tools.hd.desc"), to: null, icon: "hd", enabled: false, modal: false, note: t("home.toolPendingNote") },
 ]);
 
 // 新建项目弹窗（参照产品：短剧工作流 / 剧本创作 → 新建项目）
@@ -30,18 +45,24 @@ const toast = useToast();
 function openCreate(): void {
   showCreate.value = true;
 }
-function comingSoon(name: string): void {
-  toast.info(t("home.comingSoon", { name }));
-}
 function onProjectCreated(project: { id: string }): void {
   showCreate.value = false;
   void router.push(`/projects/${project.id}`);
 }
 
-function onToolClick(tool: { enabled: boolean; modal: boolean; to: string | null }): void {
-  if (!tool.enabled) return;
-  if (tool.modal) openCreate();
-  else if (tool.to) void router.push(tool.to);
+/**
+ * 工具矩阵点击：
+ * - 可用的：弹「新建项目」或跳产品页（视频转绘 → /video-redraw/create）；
+ * - 禁用的：**不是死点击** —— 每次点击都给出可读原因（顶部居中 toast），
+ *   不依赖 hover title（旧值 `if (!tool.enabled) return;` 就是零反馈）。
+ */
+function onToolClick(tool: HomeTool): void {
+  if (tool.enabled) {
+    if (tool.modal) openCreate();
+    else if (tool.to) void router.push(tool.to);
+    return;
+  }
+  toast.info(t("home.toolUnavailable", { name: tool.label }));
 }
 
 // 轮播：颜色是设计值（留在代码里），文案走 i18n
@@ -73,19 +94,53 @@ const DRAMA_GRADIENT: Record<number, string> = {
   2: "linear-gradient(150deg, #14303e, #0e161c)",
   3: "linear-gradient(150deg, #2f1a44, #15101f)",
 };
+/** 最近项目三态（loading / error / empty）：错误态必须可见且可重试，不能静默退成空态 */
+const recentError = ref("");
 async function loadRecent(): Promise<void> {
+  recentLoading.value = true;
+  recentError.value = "";
   try {
     const data = await api.get<{ list: ProjectDto[]; total: number }>("/projects?page=1&page_size=4");
     recentProjects.value = data.list.slice(0, 4);
   } catch {
     recentProjects.value = [];
+    // 面向用户的固定文案：服务端 msg 可能是内部口径（如 Internal server error）
+    recentError.value = t("home.recentError");
   } finally {
     recentLoading.value = false;
   }
 }
-onMounted(() => {
-  void loadRecent();
-});
+
+// ── 运营位：公告 / 定价广告（可关闭，关闭状态本地记忆）──────────────────
+// 后端 /home/config 目前只回 sections 的 visible/sort，没有公告与定价广告的字段；
+// 文案先落在语言包里（前端默认值），关闭状态存 localStorage。接后台配置时要补的字段
+// 记在 U6 报告 §5「未接线」。
+const ANNOUNCE_KEY = "of_home_announce_v1";
+const AD_KEY = "of_home_pricing_ad_v1";
+const announceOpen = ref(true);
+const adOpen = ref(true);
+function flagSet(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+function persistFlag(key: string): void {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    /* 隐私模式写不了：本会话内已隐藏，刷新后会再出现 */
+  }
+}
+function dismissAnnounce(): void {
+  announceOpen.value = false;
+  persistFlag(ANNOUNCE_KEY);
+}
+function dismissPricingAd(): void {
+  adOpen.value = false;
+  persistFlag(AD_KEY);
+}
 
 // 新手引导（PRD 增补 §3.2）：服务端记录是否已关闭，避免反复打扰
 const auth = useAuth();
@@ -93,6 +148,23 @@ const showOnboarding = computed(() => auth.state.value.onboarded === false);
 async function dismissOnboarding(): Promise<void> {
   await auth.dismissOnboarding();
 }
+
+// 「继续创作」入口：最近项目的第一条（模板里不写非空断言，靠 computed 收口）
+const latestProject = computed(() => recentProjects.value[0] ?? null);
+const resumeTo = computed(() => (latestProject.value ? `/projects/${latestProject.value.id}` : ""));
+const resumeTitle = computed(() => latestProject.value?.title ?? "");
+
+// 3 步 coach-mark：首次访问自动出现；标题旁「重看引导」调 start()
+const guide = ref<{ start: () => void } | null>(null);
+function replayGuide(): void {
+  guide.value?.start();
+}
+
+onMounted(() => {
+  announceOpen.value = !flagSet(ANNOUNCE_KEY);
+  adOpen.value = !flagSet(AD_KEY);
+  void loadRecent();
+});
 
 // ── 首页配置驱动 / 未读长轮询 / AB 位（模块 #1 收尾）────────────────────
 //
@@ -103,11 +175,14 @@ async function dismissOnboarding(): Promise<void> {
 //    （红点只要一个比特，长轮询可随客户端断开即时释放，且不引入第二套推送语义）。
 // 3. AB 位按 config 声明的 `ab_slots[].experiment` 取变体；一人一变体由服务端保证。
 const DEFAULT_SECTION_ORDER: Record<string, number> = {
+  // 运营位（U6 新增）：公告最顶，定价广告在轮播之后、案例墙之前
+  announcement: 5,
   hero: 10,
   workflow: 20,
   canvas: 30,
   tools: 40,
   banner: 50,
+  pricingAd: 55,
   recent: 60,
 };
 const homeConfig = ref<HomeConfigDto | null>(null);
@@ -210,10 +285,32 @@ onUnmounted(() => {
       <OnboardingBar v-if="showOnboarding" @dismiss="dismissOnboarding" />
     </ClientOnly>
 
+    <!-- 公告位（可关闭；后端 /home/config 暂无该字段，默认文案在语言包里） -->
+    <section
+      v-if="sectionVisible('announcement') && announceOpen"
+      class="announce"
+      :style="sectionStyle('announcement')"
+      data-testid="home-announcement"
+    >
+      <span class="announce-ico" aria-hidden="true">✦</span>
+      <p class="announce-text">
+        <b>{{ t("home.announce.title") }}</b>
+        <em>{{ t("home.announce.desc") }}</em>
+      </p>
+      <NuxtLink to="/projects" class="announce-cta">{{ t("home.announce.cta") }}</NuxtLink>
+      <button type="button" class="announce-close" :aria-label="t('home.announce.close')" @click="dismissAnnounce">
+        ✕
+      </button>
+    </section>
+
     <h1 v-if="sectionVisible('hero')" class="hero-title" :style="sectionStyle('hero')">
       {{ t("home.heroTitle") }}
       <button v-if="unreadCount > 0" type="button" class="unread-badge" @click="openUnread">
         {{ t("home.unread", { count: unreadCount }) }}
+      </button>
+      <!-- 可重看入口：首次访问的 coach-mark 被跳过/完成后，还能从这里重放 -->
+      <button type="button" class="guide-replay" data-testid="guide-replay" @click="replayGuide">
+        {{ t("guide.replay") }}
       </button>
     </h1>
 
@@ -226,6 +323,8 @@ onUnmounted(() => {
       class="hero-cards"
       :class="{ single: !(sectionVisible('workflow') && sectionVisible('canvas')) }"
       :style="sectionStyle(sectionVisible('workflow') ? 'workflow' : 'canvas')"
+      data-guide-target="workflow"
+      data-testid="home-hero-cards"
     >
       <button v-if="sectionVisible('workflow')" type="button" class="flow-card" @click="openCreate">
         <div class="flow-icon" aria-hidden="true">
@@ -242,7 +341,13 @@ onUnmounted(() => {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </span>
       </button>
-      <button v-if="sectionVisible('canvas')" type="button" class="canvas-card" @click="comingSoon(t('home.canvasTitle'))">
+      <button
+        v-if="sectionVisible('canvas')"
+        type="button"
+        class="canvas-card"
+        data-testid="home-canvas-card"
+        @click="router.push('/canvas')"
+      >
         <div class="flow-icon flat" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 4v16M16 4v16M4 8h16M4 16h16" />
@@ -259,12 +364,16 @@ onUnmounted(() => {
       </button>
     </section>
 
-    <section v-if="sectionVisible('tools')" class="tool-row" :style="sectionStyle('tools')">
-      <div v-for="tool in tools" :key="tool.label" class="tool-cell">
+    <section v-if="sectionVisible('tools')" class="tool-row" :style="sectionStyle('tools')" data-guide-target="tools">
+      <div v-for="tool in tools" :key="tool.key" class="tool-cell">
         <button
           type="button"
           class="tool-card"
           :class="{ disabled: !tool.enabled }"
+          :data-tool-key="tool.key"
+          :data-unavailable="tool.enabled ? undefined : 'true'"
+          :title="tool.enabled ? tool.label : t('home.toolUnavailable', { name: tool.label })"
+          :aria-label="tool.enabled ? tool.label : t('home.toolUnavailable', { name: tool.label })"
           @click="onToolClick(tool)"
         >
           <span v-if="tool.tag" class="corner-tag" :data-kind="tool.tagKind">{{ tool.tag }}</span>
@@ -303,6 +412,8 @@ onUnmounted(() => {
           </span>
         </button>
         <p class="tool-label" :class="{ dim: !tool.enabled }">{{ tool.label }}</p>
+        <!-- 可见的禁用原因：角标之外的三张卡不再"只有 hover title" -->
+        <p v-if="tool.note" class="tool-note">{{ tool.note }}</p>
       </div>
     </section>
 
@@ -340,15 +451,45 @@ onUnmounted(() => {
       />
     </div>
 
-    <section v-if="sectionVisible('recent')" class="cases" :style="sectionStyle('recent')">
+    <!-- 定价广告位（可关闭；同上，后台配置暂未接线） -->
+    <section
+      v-if="sectionVisible('pricingAd') && adOpen"
+      class="price-ad"
+      :style="sectionStyle('pricingAd')"
+      data-testid="home-pricing-ad"
+    >
+      <div class="price-ad-text">
+        <b>{{ t("home.pricingAd.title") }}</b>
+        <p>{{ t("home.pricingAd.desc") }}</p>
+      </div>
+      <NuxtLink to="/pricing" class="price-ad-cta">{{ t("home.pricingAd.cta") }}</NuxtLink>
+      <button type="button" class="price-ad-close" :aria-label="t('home.pricingAd.close')" @click="dismissPricingAd">
+        ✕
+      </button>
+    </section>
+
+    <section v-if="sectionVisible('recent')" class="cases" :style="sectionStyle('recent')" data-guide-target="recent">
       <div class="cases-head">
         <h3>{{ t("home.recentTitle") }}</h3>
-        <NuxtLink to="/projects" class="more">{{ t("home.viewAll") }}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-        </NuxtLink>
+        <div class="cases-actions">
+          <!-- 继续创作：最近项目存在时，1 击回到上次的工作台（与「新建」同为首屏双入口） -->
+          <NuxtLink v-if="latestProject" :to="resumeTo" class="resume" data-testid="home-resume">
+            {{ t("home.resume", { title: resumeTitle }) }}
+          </NuxtLink>
+          <NuxtLink to="/projects" class="more">{{ t("home.viewAll") }}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+          </NuxtLink>
+        </div>
       </div>
 
-      <div v-if="recentLoading" class="recent-skeleton">{{ t("home.loading") }}</div>
+      <div v-if="recentLoading" class="recent-skeleton" role="status" :aria-label="t('home.loading')" data-testid="home-recent-loading">
+        <div v-for="i in 4" :key="i" class="sk" />
+      </div>
+
+      <div v-else-if="recentError" class="recent-error" role="alert" data-testid="home-recent-error">
+        <p>{{ recentError }}</p>
+        <button type="button" class="recent-retry" @click="loadRecent">{{ t("common.retry") }}</button>
+      </div>
 
       <div v-else-if="recentProjects.length" class="case-grid">
         <NuxtLink
@@ -374,6 +515,8 @@ onUnmounted(() => {
   </main>
 
   <CreateProjectModal v-model:open="showCreate" @created="onProjectCreated" />
+  <!-- 3 步 coach-mark：首访自动出现，跳过/完成后可从「重看引导」重放 -->
+  <GuideCoachmark ref="guide" />
 </template>
 
 <style scoped>
@@ -401,6 +544,84 @@ onUnmounted(() => {
 .page > * {
   position: relative;
   z-index: 1;
+}
+/* 公告位：一条 40 高的深色条，可关闭（关闭状态存 localStorage） */
+.announce {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 12px;
+  border: 1px solid #ffffff14;
+  background: #191a22;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.announce-ico {
+  color: var(--brand-400);
+  font-size: 13px;
+}
+.announce-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  align-items: baseline;
+}
+.announce-text b {
+  color: var(--text-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.announce-text em {
+  font-style: normal;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.announce-cta {
+  color: var(--brand-400);
+  white-space: nowrap;
+}
+.announce-close,
+.price-ad-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-4);
+  font-size: 12px;
+  cursor: pointer;
+}
+.announce-close:hover,
+.price-ad-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+/* 重看引导：h1 内的小胶囊，沿用 unread-badge 的"标题内联"处理，不额外占一行 */
+.guide-replay {
+  margin-left: 10px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.guide-replay:hover {
+  border-color: var(--border-3);
+  color: var(--text-1);
 }
 .hero-title {
   margin: 24px 0 36px;
@@ -620,6 +841,14 @@ onUnmounted(() => {
   color: var(--text-3);
   font-weight: 400;
 }
+/* 禁用原因（可见）：只给没有角标的禁用卡，11px 灰字，不抢标签层级 */
+.tool-note {
+  margin: 4px 0 0;
+  text-align: center;
+  color: var(--text-4);
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* ── 活动轮播 ── */
 .carousel {
@@ -706,6 +935,49 @@ onUnmounted(() => {
 }
 .dot.on {
   background: var(--text-1);
+}
+
+/* 定价广告位：一条横向促销卡（可关闭），比轮播轻、比文字链重 */
+.price-ad {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 14px 14px 14px 18px;
+  border-radius: 16px;
+  border: 1px solid #ffffff14;
+  background:
+    radial-gradient(120% 200% at 0% 50%, #7e70ff26, transparent 62%),
+    #16161c;
+}
+.price-ad-text {
+  flex: 1;
+  min-width: 0;
+}
+.price-ad-text b {
+  display: block;
+  font-size: 15px;
+  color: var(--text-1);
+}
+.price-ad-text p {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.price-ad-cta {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.price-ad-cta:hover {
+  background: var(--brand-hover);
 }
 
 /* ── 案例墙 ── */
@@ -821,19 +1093,93 @@ onUnmounted(() => {
 .recent-create:hover {
   background: var(--brand-hover);
 }
+/* 三态之一：加载态用 4 块骨架而不是一行"加载中…"（同尺寸占位，加载完不跳动） */
 .recent-skeleton {
-  height: 170px;
   display: grid;
-  place-items: center;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.sk {
+  height: 170px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-raised) 37%, var(--bg-surface) 63%);
+  background-size: 400% 100%;
+  animation: home-shimmer 1.4s ease infinite;
+}
+@keyframes home-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+/* 三态之二：错误态可读 + 可重试（旧值 catch 里静默退成空态，用户看到"还没有项目"） */
+.recent-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 170px;
   border-radius: var(--radius-xl);
-  border: 1px solid var(--border-1);
-  color: var(--text-4);
+  border: 1px dashed #6b2b2b;
+  color: var(--text-3);
   font-size: 13px;
+}
+.recent-error p {
+  margin: 0;
+}
+.recent-retry {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  cursor: pointer;
+}
+.recent-retry:hover {
+  background: var(--bg-hover);
+}
+.cases-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+/* 继续创作：首屏除了「新建」以外的第二个入口，1 击回到上次工作台 */
+.resume {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  max-width: 320px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #7769ff55;
+  background: #7769ff1f;
+  color: #cfc8ff;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resume:hover {
+  background: #7769ff33;
 }
 
 @media (max-width: 1080px) {
   .hero-cards {
     grid-template-columns: 1fr;
+  }
+  .recent-skeleton {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .announce-text em {
+    display: none;
+  }
+  .price-ad {
+    flex-wrap: wrap;
   }
   .tool-row {
     grid-template-columns: repeat(4, 1fr);

@@ -24,7 +24,30 @@ const pageSize = 24;
 const hasMore = ref(false);
 const tabCounts = ref<{ workshop: number; canvas: number }>({ workshop: 0, canvas: 0 });
 /** 形态：工坊 / 画布 / 全部（对应后端 tab） */
-const tab = ref<"workshop" | "canvas" | "all">("workshop");
+// 竞品 /series-manage 的默认 tab 是「全部项目」（实测 2026-11-02，首个 tab 为全部项目）；这里对齐
+const tab = ref<"workshop" | "canvas" | "film" | "all">("all");
+/**
+ * 影视项目（竞品 /series-manage 的第 4 个 tab「影视项目」）。
+ * 数据源是既有接口 GET /film/projects（film.controller.ts:176），不新增后端。
+ */
+const filmList = ref<Array<{ project_id: string; title: string; table_count: number; task_count: number; updated_at: string }>>([]);
+async function loadFilm(): Promise<void> {
+  loading.value = true;
+  error.value = "";
+  try {
+    const data = await api.get<{ list: typeof filmList.value }>("/film/projects");
+    filmList.value = data.list ?? [];
+    // 影视 tab 没有服务端分页，总数就是本次返回的行数；否则「共 N 部」会沿用上一个 tab 的值
+    total.value = filmList.value.length;
+    hasMore.value = false;
+  } catch {
+    error.value = t("errors.load");
+    filmList.value = [];
+    total.value = 0;
+  } finally {
+    loading.value = false;
+  }
+}
 /** 归档维度 + 四态 + 关键词 + 时间范围，全部下发到服务端筛选 */
 const statusFilter = ref<"active" | "archived" | "all">("active");
 const stateFilter = ref<"all" | "draft" | "producing" | "ready">("all");
@@ -70,6 +93,10 @@ function fromIso(): string | undefined {
 }
 
 async function load(): Promise<void> {
+  if (tab.value === "film") {
+    await loadFilm();
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
@@ -86,8 +113,9 @@ async function load(): Promise<void> {
     total.value = data.total;
     hasMore.value = data.has_more;
     tabCounts.value = data.tabs;
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : t("errors.load");
+  } catch {
+    // 面向用户的可读文案：不把服务端内部 msg 直接铺到页面上（三态里的错误态要可读、可重试）
+    error.value = t("errors.load");
   } finally {
     loading.value = false;
   }
@@ -128,7 +156,7 @@ async function changeGroup(work: WorkDto, next: string): Promise<void> {
   }
 }
 
-function switchTab(next: "workshop" | "canvas" | "all"): void {
+function switchTab(next: "workshop" | "canvas" | "all" | "film"): void {
   tab.value = next;
   page.value = 1;
   // 画布没有归档/四态概念，切过去时把不适用的筛选归零并提示
@@ -232,9 +260,10 @@ onMounted(() => {
     <nav class="tabs">
       <button
         v-for="tabItem in [
+          { key: 'all' as const, label: t('works.tabAll') },
           { key: 'workshop' as const, label: t('works.tabWorkshop') },
           { key: 'canvas' as const, label: t('works.tabCanvas') },
-          { key: 'all' as const, label: t('works.tabAll') },
+          { key: 'film' as const, label: t('works.tabFilm') },
         ]"
         :key="tabItem.key"
         type="button"
@@ -243,25 +272,27 @@ onMounted(() => {
         @click="switchTab(tabItem.key)"
       >
         {{ tabItem.label }}
-        <span class="tab-count">{{ tabCounts[tabItem.key === "all" ? "workshop" : tabItem.key] ?? 0 }}</span>
+        <span class="tab-count">{{
+          tabItem.key === "film" ? filmList.length : (tabCounts[tabItem.key === "all" ? "workshop" : tabItem.key] ?? 0)
+        }}</span>
       </button>
       <span class="total">{{ t("works.totalWorks", { count: total }) }}</span>
     </nav>
 
     <!-- 二级筛选：状态 / 四态 / 时间 / 关键词（画布视图下归档与四态不适用） -->
     <div class="filters">
-      <select v-if="tab !== 'canvas'" v-model="statusFilter" class="mini-select" @change="applyFilters">
+      <select v-if="(tab !== 'canvas' && tab !== 'film')" v-model="statusFilter" class="mini-select" @change="applyFilters">
         <option value="active">{{ t("works.statusActive") }}</option>
         <option value="archived">{{ t("works.statusArchived") }}</option>
         <option value="all">{{ t("works.statusAllStatus") }}</option>
       </select>
-      <select v-if="tab !== 'canvas'" v-model="stateFilter" class="mini-select" @change="applyFilters">
+      <select v-if="(tab !== 'canvas' && tab !== 'film')" v-model="stateFilter" class="mini-select" @change="applyFilters">
         <option value="all">{{ t("works.stateAll") }}</option>
         <option value="draft">{{ t("works.stateDraft") }}</option>
         <option value="producing">{{ t("works.stateProducing") }}</option>
         <option value="ready">{{ t("works.stateReady") }}</option>
       </select>
-      <select v-if="tab !== 'canvas' && groups.length" v-model="groupFilter" class="mini-select" @change="applyFilters">
+      <select v-if="tab !== 'canvas' && tab !== 'film' && groups.length" v-model="groupFilter" class="mini-select" @change="applyFilters">
         <option value="">{{ t("works.groupAll") }}</option>
         <option value="0">{{ t("works.groupNone") }}</option>
         <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
@@ -282,12 +313,32 @@ onMounted(() => {
       <Button size="sm" variant="text" :disabled="loading" @click="resetFilters">{{ t("works.reset") }}</Button>
     </div>
 
-    <p v-if="error" class="err">{{ error }}</p>
+    <!-- 三态：加载（骨架）/ 错误（可重试，不退化成空态）/ 空态（EmptyState + CTA） -->
+    <Skeleton v-if="loading" :rows="3" avatar data-testid="works-loading" />
 
-    <Skeleton v-if="loading" :rows="3" avatar />
+    <div v-else-if="error && !list.length" class="state-error" role="alert" data-testid="works-error">
+      <p>{{ error }}</p>
+      <Button variant="ghost" @click="load()">{{ t("common.retry") }}</Button>
+    </div>
 
     <template v-else>
-      <div v-if="list.length" class="grid">
+      <p v-if="error" class="err" role="alert">{{ error }}</p>
+      <!-- 影视项目：竞品 /series-manage 的第 4 个 tab（数据源 GET /film/projects） -->
+      <div v-if="tab === 'film' && filmList.length" class="grid" data-testid="works-film-grid">
+        <article v-for="f in filmList" :key="f.project_id" class="work-card">
+          <NuxtLink :to="`/film/${f.project_id}`" class="cover">
+            <div class="cover-empty"><span>FILM</span></div>
+            <Tag class="state-tag" tone="brand" size="sm" dot>{{ t("works.filmTag") }}</Tag>
+          </NuxtLink>
+          <div class="body">
+            <NuxtLink :to="`/film/${f.project_id}`" class="title">{{ f.title }}</NuxtLink>
+            <p class="meta">{{ t("works.filmTables", { tables: f.table_count, tasks: f.task_count }) }}</p>
+            <p class="time">{{ new Date(f.updated_at).toLocaleDateString(locale) }}</p>
+          </div>
+        </article>
+      </div>
+
+      <div v-if="tab !== 'film' && list.length" class="grid" data-testid="works-grid">
         <article v-for="w in list" :key="`${w.kind ?? 'workshop'}-${w.id}`" class="work-card">
           <!-- 画布项目：只读投影，跳画布编辑器，不提供归档/续做 -->
           <template v-if="w.kind === 'canvas'">
@@ -376,7 +427,7 @@ onMounted(() => {
         </article>
       </div>
 
-      <div v-else class="empty-wrap">
+      <div v-else class="empty-wrap" data-testid="works-empty">
         <EmptyState
           icon="▦"
           :title="tab === 'canvas' ? t('works.emptyCanvasTitle') : t('works.emptyWorksTitle')"
@@ -514,6 +565,22 @@ onMounted(() => {
   color: var(--warning);
 }
 
+.state-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-16) var(--space-6);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-xl);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.state-error p {
+  margin: 0;
+}
 .err {
   margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
@@ -524,12 +591,17 @@ onMounted(() => {
 }
 
 .grid {
+  /* 竞品实测（1424×805）：网格宽 1110、卡片 357×265、媒体 339×163、列距 20 */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, 357px);
+  gap: 20px;
+  justify-content: flex-start;
 }
 /* 卡片范式 C：实底面板 + 1px 白 8% 边框 + 16 圆角，hover 只提亮边框，不加投影光晕 */
 .work-card {
+  height: 265px;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-surface);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-2xl);
@@ -545,7 +617,8 @@ onMounted(() => {
 .cover {
   position: relative;
   display: block;
-  aspect-ratio: 4 / 3;
+  height: 163px;
+  flex: 0 0 163px;
   background: var(--bg-sunken);
   overflow: hidden;
 }
@@ -572,7 +645,9 @@ onMounted(() => {
   left: var(--space-2);
 }
 .body {
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 10px 12px;
 }
 .title {
   display: block;
