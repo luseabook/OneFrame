@@ -137,3 +137,79 @@ POST /files/upload-token → STS → 浏览器分片直传(进度条) → POST /
 ## 7. i18n 预留
 
 MVP 仅 zh-CN，但文案 **不得硬编码**：一律 `t('key')`；竞品 5 语言路由前缀方案（/en /ja…）作为 Ph3 出海时的实现参考〔RM-证据：路由表 i18n 前缀〕。
+
+## 8. SSR 口径（2026-11-03 裁定，替代「所有顶层路由一律 ssr:false」）
+
+**背景**：旧守卫 `apps/api/test/web-route-rules.spec.ts:57` 要求 `pages/` 下**每个**顶层路由都必须
+`routeRules: { ssr: false }`。这条规则是为修 `/team`、`/share` 的「首帧与客户端不一致 → 整页空白」而设，
+但把 `/terms`、`/privacy`、`/report` 一并关掉后，**合规页对爬虫与监管抓取只剩一个 SPA 骨架**，
+而 sitemap 又列了它们 —— 内容与声明不一致。
+
+**裁定：分两类显式清单，未分类即红。**
+
+| 类别 | 路由 | 理由 |
+|---|---|---|
+| **必须服务端渲染（ssr 不为 false）** | `/`（SEO 入口）、`/terms`、`/privacy`、`/report` | 内容不依赖登录态与异步数据，SSR 是纯收益；且属「法律义务展示」，需可抓取、可审计、可公证 |
+| **必须 `ssr: false`** | 其余全部顶层路由（含 `/share`、`/canvas`、`/create`、`/team`、`/works`…） | 鉴权靠内存 token + refresh Cookie，服务端无会话 → 服务端渲染必然首帧空白；`/share` 内容依赖异步接口，首帧一致优先于抓取 |
+
+**守卫要求（Backend 改 spec，与 Frontend 改配置同一 PR 落地）**
+
+1. 两份清单必须**恰好覆盖** `pages/` 的顶层路由全集：多一个（新增未分类）少一个（清单过期）都判红；
+2. 清单 1 的路由：`routeRules` 中不得有 `ssr: false`，且页面 `definePageMeta` 不得含 `ssr: false`；
+3. 清单 2 的路由：必须存在 `"/x"` 或 `"/x/**"` 的 `{ ssr: false }`（允许两形态任一）；
+4. 根路由 `""` 保持非 `ssr:false`（旧守卫已有此断言，保留）。
+
+**已知取舍（本轮不改，登记在案）**：`/pricing` 现为 `definePageMeta({ ssr: false, requiresAuth: true })`。
+定价页是营销入口、本应可抓取，但它被要求登录后可见 —— 属产品口径问题，非工程缺陷；
+若改为公开可抓取，同 PR 需把它移入清单 1 并去掉 `requiresAuth`。
+
+### 8.1 法律页的多语言口径（2026-11-03 裁定：只标中文）
+
+开 SSR 后暴露的问题：`curl -H "Accept-Language: en-US" /terms` 返回 `<html lang="en">` + 英文 `<title>`，
+**正文仍是中文**。而 `i18n/index.ts` 的 `PUBLIC_PATHS` 把 `/terms` `/privacy` `/report` 一并列进
+5 语言 sitemap + hreflang —— 等于对外声明有 5 个语言版本，实际只有一个。
+
+**裁定：只有 `/terms` `/privacy` 两页声明 `zh-CN`**（法律文本现实中只有中文版具效力，翻译版还要重新法务，本轮不做）。
+
+**`/report` 不在其列（2026-11-03 修正）**：它是投诉**表单**而不是法律文本，且已完全 i18n 化
+（20 处 `t()`、模板零硬编码中文）。强加 `lang=zh-CN` 会把一个本来正确的多语页面改成错的。
+→ 收窄为两页；`/report` 与 `/` `/pricing` `/login` 一样保留 5 语 hreflang。
+
+1. `page lang` 固定 `zh-CN`：内容语言即声明语言，不随 `Accept-Language` 漂；
+2. sitemap / hreflang 只列 `zh-CN` 一条（其余 4 语不再列这两页，避免虚假声明）；
+3. 非中文界面进入这两页时，页首用当前 UI 语言显示一行「本页法律文本以中文版为准」（5 语各一条）；
+4. `/` `/pricing` `/login` `/report` 保留 5 语 hreflang。
+
+**验证**：`curl -H "Accept-Language: en-US" /terms` 的 `<html lang>` 必须是 `zh-CN`；
+`/sitemap.xml` 里 `/terms` `/privacy` 各只出现 1 次且 alternate 只有 `zh-CN`，
+而 `/report` 仍出现 5 次（5 语）。
+
+**静态化（`nuxt generate`）的定位**：2026-11-03 实测可行（15 条 prerender、`.output/public` 4.1M），
+但会丢掉 `server/routes/robots.txt` 与 `sitemap.xml`、把 sitemap origin 固化成构建机地址、深链要靠
+`try_files … /200.html`。结论：**验收环境走 node server；静态化只作为内存撑不住时的降级预案**，
+启用前必须先补 `nitro.prerender.routes` 与 `NUXT_PUBLIC_SITE_URL` 兜底。
+
+## 9. 信封与鉴权判决的唯一入口（2026-11-03）
+
+**背景**：本仓 API 的信封是 **HTTP 200 + `code` 业务码**（未登录返回 `code:401101`，不是裸 401）。
+因此“未登录/失败”只能从 `code !== 0` 判出来，**`catch` 只能抓到抛错**。
+任何一处只看 HTTP 状态码、或只看 `access_token` 是否存在就放过的代码，都会把 401101 当成功——
+这类缺陷的表现是“静默”（横幅不显示、登录态错乱），而不是报错。
+
+**判决入口共三处（按客户端类型分，不是“到处各判一次”）**
+
+| 包装 | 位置 | 适用 |
+|---|---|---|
+| 用户态 `call()` | `composables/useAuth.ts:43` | 登录用户的 `/v1/**`；`code !== 0` 即抛错，`doRefresh()` 的 `catch { return false }` 接的就是它 |
+| 通用 `useApi` | `composables/useApi.ts:52` | 业务数据请求 |
+| 管理端 `useAdminApi` | `composables/useAdminApi.ts:83` | `/v1/ops/**`（独立 `admin_token`，不走用户 Cookie） |
+
+**已登记的两处页面级例外（不得再新增，除非在此登记）**
+
+| 位置 | 为什么例外 |
+|---|---|
+| `pages/login.vue:84`（发码） | 登录前无用户态、且要读 `data.debug_code` 做开发态提示，并区分“发码失败”文案 |
+| `pages/admin/login.vue:37`（管理员登录） | 管理端独立口令与 token 存储（`localStorage.admin_token`），不属用户态包装范围 |
+
+**规则**：新增代码**不得**在页面/组件里直接用 `$fetch` 判 `code`；需要例外时在本节登记「文件:行 + 理由」，
+并说明为什么不能用现有三个包装。**判定入口必须可枚举**——这是“未登录不算失败”这类静默缺陷的唯一防线。

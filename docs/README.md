@@ -29,6 +29,7 @@
 | 15 | [07-plan/wbs.md](07-plan/wbs.md) | 工作分解、里程碑 DoD、依赖 | 全员 |
 | — | [07-plan/implement-progress-vs-reelmate.md](07-plan/implement-progress-vs-reelmate.md) | **以竞品为标准的实现进度对照**（28 模块逐条 / 三口径进度 / 缺口排序 / 可复现命令）；排期与投入优先级的事实基线 | 产品+架构 |
 | — | [07-plan/completion-plan-to-100.md](07-plan/completion-plan-to-100.md) | **补齐计划（8 批次）**：从 35.4% 到 100% 的分批执行路径、每批 DoD、排期预测、风险与明确不做项 | 全员 |
+| — | [07-plan/launch-gap-2026-11-03.md](07-plan/launch-gap-2026-11-03.md) | **上线差距清单**：外部行政项（EXT，P0/P1/P2 + 负责人）与代码侧待办（真待写 / 只差材料 / 只能跑）分开列；含部署规格预警与 N 系列新缺口 | 创始人+全员 |
 
 ## 与《复刻蓝图》的关系
 
@@ -126,6 +127,27 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 **同时修正的代码缺陷（不只是文档）**：
 1. `canvas.service.ts` `commit`：非雪花 id 抛 `SyntaxError` → 500。改为"非雪花 id = 新节点"，并回传 `id_map`；补 2 条回归测试。
 2. `assets/css/canvas.css` 未被任何地方 import → 所有 `cv-*` 类运行时不存在（typecheck/lint 发现不了）。已在 `nuxt.config.ts` 的 `css` 数组挂载。
+
+---
+
+## 变更登记（v6.83 · 上线差距清单 + 部署规格预警 · 2026-11-03）
+
+新增 `07-plan/launch-gap-2026-11-03.md`，把「代码完成」到「可对外上线」的差距按性质切开（外部行政 / 真实密钥 / 部署规格），并登记本轮实证发现的 4 个新缺口：
+
+| # | 变更 |
+|---|---|
+| 1 | **N-03（P0）部署规格预警**：`05-ops/deployment.md` §2 要求 4C8G + 2C4G 两台 + 托管 PG/Redis/OSS；现测试机 2C/1.7G 一台全塞，与 MySQL/Java 共存。常驻粗算 1.05–1.3G，余量 <700M，批量投递即 OOM。**测试机定位为功能验收环境，不能当生产环境**；给出 swap 2G / `WORKER_CONCURRENCY=1` / web 静态托管 / 显式限堆四条不改码的缓解 |
+| 2 | **N-01（P1）GAP-05 证据过期**：备案号占位已 i18n 化到 6 个语言包（`apps/web/i18n/locales/{zh-CN,en,ja,es,pt-BR}.json:132`），`launch-checklist.md:183` 仍写 `pages/index.vue:182`。按旧行号换号会漏 5 个语言版本 |
+| 3 | **N-02（P2）LOG-04 可假绿**：`_acceptance/compliance-check.cjs:655-672` 只判 `x-request-id` 存在不看状态码；实测本机 3000 被非本项目进程占用（PID 8164），`GET /v1/ping` 返回 404 仍 PASS，与 `launch-checklist.md:71`「未启动即 SKIP」的承诺不符 |
+| 4 | **N-04（P2）端口预检**：api 计划 3000 在本机已被他人占用，部署前必须 `ss -ltnp` 预检四端口 |
+
+| 5 | **合规脚本判据收紧（66 → 67 项）**：`LOG-04` 从「有 `x-request-id` 头即 PASS」改为「**200 + `pong:true` + 头**」（实测陌生进程对 `/v1/ping` 返 404 却自带该头 → 旧判据假绿）；`PAGE-06` 改为验证新事实来源（`SiteLegal.vue` + `runtimeConfig` + 两处页脚 + 5 语言标签 + 占位串不得残留）；新增 `PAGE-07`（生产未配备案号即拒绝启动）——**当前 FAIL，Frontend 待补** |
+| 6 | **`05-ops/deployment.md` §4 重写**：原文列了 **22 个代码 0 命中**的幽灵变量（`SMS_*×5 / SENTRY_DSN / CAPTCHA_SID·SECRET / VOLC_*×3 / KLING_*×2 / VIDU_KEY / DEEPSEEK_KEY / ALIYUN_DASHSCOPE_KEY / APP_DOMAIN / REFRESH_SECRET / ADMIN_BOOTSTRAP_PASSWORD / PAY_WECHAT_*×3`），照它配会以为短信/监控/供应商都通了。改为按「A fail-fast / B 能起但坏 / C 静默假成功」三组，逐条给守卫函数位置；幽灵变量单列并给真实对应关系 |
+| 7 | **前端 SSR 口径裁定**（`03-frontend/conventions.md` §8）：旧守卫「所有顶层路由一律 `ssr:false`」改为**两类显式清单 + 全集闭合**——合规页 `/terms` `/privacy` `/report` 必须服务端渲染（可抓取可审计），其余含 `/share` `/canvas` 必须 `ssr:false`，新增路由未分类即红 |
+
+**当前门禁状态（诚实口径）**：`node _acceptance/compliance-check.cjs` → **PASS 66 / FAIL 1 / SKIP 1**（共 67 项）。
+FAIL = `PAGE-07`（备案号空值守卫，Frontend P0）；SKIP = `LOG-04`（本机 3000 被他人进程占用）。
+**代码侧不再是「零缺口」**：本轮暴露 3 条 P0 —— 短信网关未接（用户收不到码）、`LLM_MODE` 生产可静默走 mock、备案号空值无守卫，均已进 `launch-gap` §2 A 表。
 
 ---
 

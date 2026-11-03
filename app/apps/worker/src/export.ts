@@ -144,6 +144,13 @@ export async function runExport(exportId: string, deps: ExportDeps): Promise<voi
     const manifest = {
       export_id: exportId,
       episode: { ep_no: episode.epNo, title: episode.title, synopsis: episode.synopsis },
+      /**
+       * N-12（2026-11-03）：本集的 synopsis/scriptText 是否由 mock LLM 生成。
+       * 与 `ai_label` 同源但**不同义**：`ai_label` 说"这是 AI 生成的"，
+       * `llm_mock` 说"这是**假** AI 生成的（确定性占位文案，不是真模型输出）"。
+       * 导出物离开系统后这是唯一能自证来源的字段，所以必须写进 manifest。
+       */
+      llm_mock: episode.llmMock === true,
       generated_at: new Date().toISOString(),
       ai_label: { ai_generated: true, standard: "GB 45438 / 生成合成内容标识办法", explicit: false, implicit: true },
       /** 每个镜头文件的处理方式汇总（第 77 批）：`ffmpeg` = 按分镜时长真裁过，`copy` = 原样复制 */

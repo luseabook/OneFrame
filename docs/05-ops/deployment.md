@@ -60,59 +60,116 @@ services:
       - ./deploy/acme-webroot:/var/www/certbot:ro
 ```
 
-## 4. 环境变量清单（模板：`apps/api/.env.example`、`apps/worker/.env.example`、`.env.production.example`；本节为摘要）
+## 4. 环境变量：三组口径（fail-fast / 能起但坏 / 静默假成功）
 
-> 注：仓库根 `app/.env.example` 只含 `DATABASE_URL`/`REDIS_URL` 两项（本地速用），**不是**权威全集。
-> 生产/联调请以 `app/.env.production.example` 与各 app 自己的 `.env.example` 为准（`launch-checklist.md` GAP-03 已记录此口径）。
+> **权威来源**（不要用本节替代它们）：
+> `apps/api/.env.example`（93 个名字，覆盖 `envSchema` 全部键）、`apps/worker/.env.example`（54 个）、
+> `.env.production.example`（生产模板）。三者与代码的一致性由 `apps/api/test/env-example-coverage.spec.ts`（5 例）守着。
+> 仓库根 `app/.env.example` 只有 `DATABASE_URL`/`REDIS_URL`，**不是**全集（GAP-03）。
+>
+> **本节按「缺了会怎样」分组**，因为运维真正要回答的是「我漏配这一行，上线后会怎样」：
+> A = 进程起不来；B = 起得来但功能坏；C = **起得来、不报错、结果是假的**（最危险）。
+
+### 4.1 A 组：fail-fast（生产守卫聚合报错，缺一项就拒绝启动）
+
+api 侧守卫：`apps/api/src/config/env.ts` → `collectProductionProblems`（:470）、`collectSecretProblems`（:345）、
+`collectPaymentModeProblems`（:387）、`collectPaymentProblems`（:416）、`collectLlmProblems`（:517），
+聚合抛错在 `buildEnv`（:529）。报错**只含变量名与原因，不含值**（OPS-06）。
+
+| 变量 | 格式 | 读取方 | 缺了会怎样 |
+|---|---|---|---|
+| `NODE_ENV` | 字面 `production` | api + worker | 不设则**整套守卫全部失效**，按开发态裸奔 |
+| `DATABASE_URL` | `postgres://USER:PASS@127.0.0.1:55432/oneframe` | api + worker | 回落 `localhost:5432` → 连不上 |
+| `REDIS_URL` | `redis://:PASS@127.0.0.1:6380` | api + worker | 回落 6379 |
+| `JWT_SECRET` | `openssl rand -base64 32`（≥16 字符、≥3 类字符） | api | 拒绝启动 |
+| `ADMIN_JWT_SECRET` | 同上，**必须与 `JWT_SECRET` 不同** | api | 拒绝启动；⚠️守卫只查强度**不比对两者是否相同**，须人工保证 |
+| `PHONE_HMAC_PEPPER` | `openssl rand -base64 32`（≥8 字符） | api | 拒绝启动 |
+| `PHONE_ENC_KEY` | 同上。**上线后不可改**（改了旧手机号解不开） | api | 拒绝启动 |
+| `STORAGE_SIGN_SECRET` | `openssl rand -base64 32` | api + worker | 仓库默认 `dev-only-*` 被拒 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 口令 ≥8 字符、非 `change-me` 一类模板值 | api | 拒绝启动；首启自动建 `super` 管理员（`admin-auth.service.ts:78-96`） |
+| `PAYMENT_LIVE` | 只能是 `true` / `false`，**必须显式写** | api | 拒绝启动（不允许用默认值替部署者决定收不收钱） |
+| `COOKIE_SECURE` | 显式 `true`（nginx 443 终止 TLS） | api | 拒绝启动；写 `false` → 刷新即掉登录 |
+| `METRICS_TOKEN` | `openssl rand -base64 32`，≥16 字符 | api | 拒绝启动（`/v1/metrics` 含任务与资金指标） |
+| 支付渠道（仅 `PAYMENT_LIVE=true`） | 微信：`WECHAT_APP_ID` `WECHAT_MCH_ID` `WECHAT_MCH_SERIAL_NO` `WECHAT_API_V3_KEY` `WECHAT_NOTIFY_URL` + `WECHAT_MCH_PRIVATE_KEY(_PATH)` + `WECHAT_PLATFORM_PUBLIC_KEY(_PATH)`（或 `WECHAT_PLATFORM_PUBLIC_KEYS(_PATH)` 轮换映射）；支付宝：`ALIPAY_APP_ID` `ALIPAY_NOTIFY_URL` + `ALIPAY_APP_PRIVATE_KEY(_PATH)` + `ALIPAY_PUBLIC_KEY(_PATH)` | api | 两渠道都不全 → 拒绝启动；**只配一半的渠道也拒**（避免上线后回调验不过） |
+| `ADAPTER_MODE` | 必须 `real` | worker | 拒绝启动（禁止 mock 假生成，OPS-08） |
+| 真实供应商 Key | `ARK_API_KEY` / `DEEPSEEK_API_KEY` / `HTTP_VIDEO_BASE_URL` 至少一个 | worker | 拒绝启动 |
+| `PROVIDER_ENCRYPTION_KEY` | ≥32 字符 | api + worker | `PROVIDER_DB_RESOLVE≠off` 时 worker 拒绝启动 |
+
+### 4.2 B 组：起得来但功能坏
+
+- **存储**：`STORAGE_DRIVER=local|s3`。`local` 需 `STORAGE_DIR` + `STORAGE_PUBLIC_BASE`；`s3` 需 `STORAGE_S3_BUCKET/_REGION/_ENDPOINT/_ACCESS_KEY_ID/_SECRET_ACCESS_KEY/_PUBLIC_ENDPOINT/_FORCE_PATH_STYLE`。
+- **真实供应商跑通的硬条件**：出站素材 URI 必须**公网可达**，loopback 会被 worker 拦成 `745900`（`apps/worker/src/outbound-uri.ts:15,63,114`）。单机部署用 `STORAGE_DRIVER=local` + `STORAGE_PUBLIC_BASE=https://<对外域名>/v1`（nginx 把 `/v1` 直代 `api:3000`），或直接上 OSS。
+- `ADAPTER_URI_TTL_SECONDS=21600`；`ARK_MODEL_MAP` / `ARK_IMAGE_MODEL_MAP`（JSON：我方模型名 → Ark 接入点）、`ARK_IMAGE_REPLACE_CODES`。
+- `PUBLISH_TRANSCODE_MODE=worker`（生产形态；`inline` 会让 ffmpeg 跑进 API 进程）。
+- AI 标识：`AI_LABEL_ENABLED=true`、`AI_LABEL_TEXT`、**`AI_LABEL_FONT_PATH`（必须装中文字体，否则水印变豆腐块）**、`FFMPEG_PATH` / `FFPROBE_PATH`。
+- 前端（web 进程/构建）：`NUXT_API_PROXY`（**构建期**常量，Nitro 编译进 `.output/server`，运行期改无效）、`NUXT_PUBLIC_ICP_BEIAN` / `NUXT_PUBLIC_ICP_POLICE`（备案号，见 4.3）、`NUXT_PUBLIC_SITE_URL`。
+- 其余：`APP_VERSION`、`SMS_IP_HOURLY_LIMIT=20`、`WORKER_ID`（多实例必须各不同）、`LOG_LEVEL`、`WORKER_CONCURRENCY`、`HOME_UNREAD_TIMEOUT_MS=25000`（须低于反代 30s 读超时）。
+- **API 不会自动建表**：`main.ts` 无迁移调用。必须先 `db:migrate`（54 个 migration）再 `db:seed`（模型与价目；不 seed 则报价无价可算）。
+
+### 4.3 C 组：能启动、不报错、结果是假的（上线前逐条确认）
+
+| 项 | 现状 | 后果 | 归口 |
+|---|---|---|---|
+| `LLM_MODE` 未设 / `mock` / `real` 缺 Key | **三者一律拒绝启动**（`env.ts:538-548`，与 worker 的 `ADAPTER_MODE` 同口径） | 生产大纲/角色/剧本/分镜若走 mock 就是假文案；现在起不来而不是静默假 | Backend（已实现） |
+| **验收机例外** `ONEFRAME_ALLOW_MOCK_LLM=1` | 只认字面 `1`，写错即响亮失败；每次启动 WARN；**且必须可被机器判定**（`/v1/healthz/ready` 返回 `llmMode/mockAllowed`，`/v1/metrics` 出 gauge） | 没有它这台机器今天发不出 N-09（`HOST=127.0.0.1`）；有它则“在跑假文案”是显式声明而非静默 | Backend 实现；对外机器禁止设置，`STRICT=1` 门禁判红 |
+| 短信验证码 | `apps/api/src/modules/auth/sms.service.ts` 只把 6 位码写进 Redis，**无任何网关调用**；`SMS_PROVIDER/SMS_AK/SMS_SK/SMS_SIGN_NAME/SMS_TEMPLATE_CODE` 在代码里 **0 命中** | 上线后真实用户**永远收不到码，一个都登不进来**（登录唯一入口 `auth.controller.ts:113,121`） | Backend 接网关 或 改邀请制（Chief 定，P0） |
+| `NUXT_PUBLIC_ICP_BEIAN` 空 | `components/SiteLegal.vue` 空串**整段不渲染**且不报错；已加启动守卫 `apps/web/server/plugins/icp-guard.ts`（`NODE_ENV=production` 且号为空 → 进程退出） | 忘配则起不来；**验收机可用 `ONEFRAME_ALLOW_MISSING_ICP=1` 放行，但每次启动必打 WARN，对外机器禁止设置** | Frontend（已实现，`PAGE-07` 守） |
+| `PROVIDER_DB_RESOLVE≠off` 但 Key 轮换未做 | worker 启动即拒（这一条是**有意**的，不算漏配） | 明确失败，好过静默降级 | — |
+| `SENTRY_DSN` | 代码 **0 命中**（未接 Sentry） | 误以为已上报；实际无错误采集（EXT-18 未完成） | Ops/后端 Ph2 |
+| `CAPTCHA_PROVIDER` | 只有 `CAPTCHA_ENFORCE` / `CAPTCHA_REQUIRED` 被读，`CAPTCHA_SID/SECRET` **0 命中** | 以为接了验证码，实际只有开关没有实现 | 记入 EXT/P2 |
+
+### 4.4 web 侧（Nuxt）配什么 —— 变量清单与「可读面」的例外
+
+> ⚠️ `apps/web/.env.example` **位于工具层的凭据围栏内**（路径含 `.env`）：
+> `ops_read_files` 返回 `CREDENTIAL_DENIED`，`ops_glob('.env*')` 直接跳过（`skipReasons.credential`）。
+> 这不是权限问题，切更宽的权限模式也没用；**要读它只能用 shell**（`grep`/`cat`）。
+> 因此本节保留一份等价清单，避免「围栏内的文件 = 运维看不见」。
+
+验收机实际落在 `/etc/oneframe/web.env`（600），变量与用途：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `NUXT_API_PROXY` | 是 | **构建期**常量（Nitro 编译进 `.output/server`，运行期改无效） |
+| `NUXT_PUBLIC_API_BASE` | 否 | 空 = 同源 `/v1` |
+| `NUXT_PUBLIC_ICP_BEIAN` | **生产必填** | 形如 `京ICP备2024000000号-1`；缺失 → `server/plugins/icp-guard.ts` 抛错退出（PAGE-07） |
+| `NUXT_PUBLIC_ICP_POLICE` | 否 | 形如 `京公网安备11010500000000号`；空则页脚不显示该项 |
+| `ONEFRAME_ALLOW_MISSING_ICP` | **仅非对外验收机** | 设 `1` 放行「无备案号」启动，每次启动必打 WARN。**对外机器禁止设置** |
+| `NUXT_PUBLIC_SITE_URL` | 建议 | sitemap 的 canonical 兜底（静态化时尤其需要） |
+
+#### 备案号的合法形状（单一事实来源：`apps/web/server/plugins/icp-guard.ts`，`08-post-icp.sh` 必须共用）
+
+| 类别 | 形态 | 处置 |
+|---|---|---|
+| 合法 · 经营性 | `京ICP证030173号` | 通过 |
+| 合法 · 非经营性 | `京ICP备2024000000号` / `京ICP备2024000000号-1` | 通过（`-N` 可选） |
+| **排版差异** | `京 ICP 备 2024000000 号-1`、`京ICP备2024000000号 -1` | **必须先归一化空白再匹配**——备案系统页面上就是这么显示的，按原文粘贴很常见，误杀等于“号下来了却起不来” |
+| 占位值 | `pending` / `TODO` / `待备案` / `TEST-京ICP备…` / `…（上线前替换）` | 拒绝启动（INC-01 里写进线上的正是 `TEST-` 前缀这一种） |
+| 另一种备案 | `京公网安备11010502030123号` | 属于 `NUXT_PUBLIC_ICP_POLICE`，**不是**本变量，填错会被拒 |
+
+- 省简称整表（31 个，已核对无缺）：京 津 沪 渝 冀 豫 云 辽 黑 湘 皖 鲁 新 苏 浙 赣 鄂 桂 甘 晋 蒙 陕 吉 闽 贵 粤 青 藏 川 宁 琼
+- **判据要紧在语义上（占位 vs 真号），不能紧在排版上（空格）**——INC-01 的教训是“判据太宽会放过假号”，但矫枉过正会变成“真号也起不来”。
+
+**`08-post-icp.sh` 的前置要求**：写 `web.env` 之前用同一套形状判据校验，**不合法就不写盘**。
+靠“写完 → 重启失败 → systemd failed”兜底会把线上推进「文件已写坏 + 服务 failed」的双故障态；
+INC-01 之所以要两次恢复，正是因为它先写了坏值。
+
+### 4.5 已从本节删除的"幽灵变量"（文档写过、代码从不读取）
+
+2026-11-03 逐个 grep（`apps/` + `packages/`，排除 node_modules/.nuxt）**全部 0 命中**，故删除；
+它们留在文档里会让运维「照清单配完，以为短信/监控/供应商都好了」：
 
 ```
-# 通用
-NODE_ENV / APP_DOMAIN / DATABASE_URL / REDIS_URL
-JWT_SECRET / REFRESH_SECRET
-# 运营后台独立密钥（PR-05，2026-10-30）：生产必填；与用户 JWT 拆开的目的是「用户 token 泄露 ≠ admin token 可伪造」
-ADMIN_JWT_SECRET
-# 供应商 Key 落库加密主密钥（≥32 字符；生产必填；非生产缺省从 JWT_SECRET 派生）
-PROVIDER_ENCRYPTION_KEY / PROVIDER_ENCRYPTION_KEY_ID=v1
-# 存储（S3 兼容：OSS / MinIO；ADR-005）
-STORAGE_DRIVER=local|s3
-STORAGE_DIR / STORAGE_PUBLIC_BASE / STORAGE_SIGN_SECRET
-STORAGE_S3_BUCKET / STORAGE_S3_REGION / STORAGE_S3_ENDPOINT
-STORAGE_S3_PUBLIC_ENDPOINT   # 预签名 URL 的对外地址（内网 SDK 与公网下载分离）
-STORAGE_S3_ACCESS_KEY_ID / STORAGE_S3_SECRET_ACCESS_KEY / STORAGE_S3_FORCE_PATH_STYLE
-# P10：real 模式出站素材（reference_uris/first_frame_uri/last_frame_uri）签名有效期（秒），默认 21600=6h
-ADAPTER_URI_TTL_SECONDS=21600
-# 服务端取结果文件的守卫（PR-04，2026-10-30；api-spec §2 同名小节）
-# 空值 = 只允许存储自身 host，绝不默认放行任意 host；对外 CDN/OSS 域名必须显式列出，否则批量下载会全部跳过
-CANVAS_DOWNLOAD_HOST_ALLOWLIST=
-CANVAS_DOWNLOAD_MAX_BYTES=209715200   # 200MiB，单文件流式上限
-# 供应商（仅 worker.env）
-VOLC_AK / VOLC_SK / VOLC_MODEL_ENDPOINT
-ARK_API_KEY / ARK_BASE_URL / ARK_MODEL_MAP     # 火山方舟专用适配器（volcengine:* 任务）
-HTTP_VIDEO_BASE_URL / HTTP_VIDEO_API_KEY / HTTP_VIDEO_MODEL_MAP  # 通用 HTTP 视频网关
-ALIYUN_DASHSCOPE_KEY / KLING_AK / KLING_SK / VIDU_KEY / DEEPSEEK_KEY
-# 三方
-SMS_PROVIDER=aliyun / SMS_AK / SMS_SK / SMS_SIGN_NAME / SMS_TEMPLATE_CODE
-CAPTCHA_PROVIDER=tencent / CAPTCHA_SID / CAPTCHA_SECRET
-SENTRY_DSN                      # 境内/自建，禁境外 SaaS（compliance D4）
+APP_DOMAIN / REFRESH_SECRET / ADMIN_BOOTSTRAP_PASSWORD
+SMS_PROVIDER / SMS_AK / SMS_SK / SMS_SIGN_NAME / SMS_TEMPLATE_CODE
+CAPTCHA_SID / CAPTCHA_SECRET / SENTRY_DSN
 PAY_WECHAT_MCH_ID / PAY_WECHAT_API_V3_KEY / PAY_WECHAT_SERIAL
-# 支付（api-spec §10.4；生产开启 PAYMENT_LIVE=true 前必须齐全，否则启动守卫拒绝启动）
-PAYMENT_LIVE=true
-WECHAT_APP_ID / WECHAT_MCH_ID / WECHAT_MCH_SERIAL_NO / WECHAT_API_V3_KEY
-WECHAT_MCH_PRIVATE_KEY（或 _PATH） / WECHAT_PLATFORM_PUBLIC_KEY（或 _PATH）
-# 平台证书轮换（推荐）：JSON {serial:PEM}，可同时配置新旧证书
-WECHAT_PLATFORM_PUBLIC_KEYS（或 _PATH） / WECHAT_API_BASE / WECHAT_NOTIFY_URL
-ALIPAY_APP_ID / ALIPAY_APP_PRIVATE_KEY（或 _PATH） / ALIPAY_PUBLIC_KEY（或 _PATH）
-ALIPAY_GATEWAY / ALIPAY_NOTIFY_URL
-# AI 标识后处理（worker 镜像内置 ffmpeg + fonts-noto-cjk）
-FFMPEG_PATH=/usr/bin/ffmpeg
-AI_LABEL_FONT_PATH=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
-AI_LABEL_ENABLED=true / AI_LABEL_TEXT=AI生成
-# 内容审核（PRD F7）
-MODERATION_ENABLED=true / MODERATION_WORDS=词1,词2
-# 维护任务（worker 内置，PR 周期）
-MAINTENANCE_INTERVAL_MS=21600000
-ADMIN_BOOTSTRAP_PASSWORD   # 首次启动建号后改密并移除
+VOLC_AK / VOLC_SK / VOLC_MODEL_ENDPOINT / KLING_AK / KLING_SK / VIDU_KEY
+DEEPSEEK_KEY / ALIYUN_DASHSCOPE_KEY
 ```
+
+真实对应关系：`ADMIN_BOOTSTRAP_PASSWORD` → **`ADMIN_PASSWORD`**；`DEEPSEEK_KEY` → **`DEEPSEEK_API_KEY`**；
+`*_AK/_SK` 类 → worker 侧 **`ARK_API_KEY` / `HTTP_VIDEO_API_KEY`**（见 4.2）；
+`SENTRY_DSN` / `SMS_*` / `CAPTCHA_SID/SECRET` 属**功能未实现**，不是「配了就会通」（见 4.3）。
 
 ## 5. 备份与灾备
 
@@ -264,6 +321,134 @@ readinessProbe: { httpGet: { path: /v1/healthz/ready, port: 3000 }, periodSecond
 - worker：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须 `real` 且至少一种真实供应商 Key，否则拒绝启动。
 - 部署自检：`docker compose logs api | grep "配置校验失败"` 为空；容器启动即崩溃时优先按错误里列出的变量名补齐 Secrets。
 
+### 7.4.1 部署顺序与部署后自检（2026-11-03 实测教训）
+
+**顺序不能反。** 新构建的 web 带 ICP 启动守卫，所以：
+
+```
+1) 先写 env（/etc/oneframe/web.env：NUXT_PUBLIC_ICP_BEIAN，或验收机显式 ONEFRAME_ALLOW_MISSING_ICP=1）
+2) 再传产物（.output）
+3) 再 systemctl restart oneframe-web
+4) 最后跑自检（见下）
+```
+
+**只传产物不配 env = 站点直接下线**（进程退出，systemd failed）；这是有意的 fail-fast，不是故障。
+
+**打包规则**：只排除**根** `node_modules`，**不要**排除 `.output/server/node_modules`。
+实测踩过：`tar --exclude='node_modules'` 把它一起排掉 → web 报 `Cannot find package 'vue-bundle-renderer'` 500。
+`.output` 本身是自包含的（16 个包 / 4.2M，均为真实目录而非符号链接），整个传上去即可运行。
+
+**部署后自检三件套**（缺一不可，且要留输出）：
+
+| # | 检查 | 判据 |
+|---|---|---|
+| 1 | **跑的是新构建** | `curl -s -H "Host: <域名>" http://<ip>/terms | wc -c` ≈ 48K 且 `<title>` 为「用户协议 · 一帧」；若与 `/pricing` 字节数完全相同 = 还是 SPA 壳（旧构建） |
+| 2 | **版本一致** | 健康检查/响应头里的 `APP_VERSION` 与本次构建 tag 一致（避免「传了却没重启」） |
+| 3 | **合规可复跑** | `API_URL=http://127.0.0.1:3000 node _acceptance/compliance-check.cjs --runtime-only` → **0 FAIL**、`LOG-04` 为 PASS。部署机只有产物、没有 `docs/`，用 `--runtime-only` 让文档类判据诚实 SKIP（缺文件 ≠ 系统坏了；内容不符仍 FAIL） |
+
+**7 条断言（`app/deploy/verify-deploy.sh` 固化，缺一不可）**
+
+| # | 断言 | 判据 | 为什么是这条 |
+|---|---|---|---|
+| 1 | 新构建生效 | `/terms` 字节 ≥45000 且 `<title>` 含「用户协议」；`/pricing` 字节与之不同 | 旧构建三路由同字节（39951B） |
+| 2 | **依赖清单** | 逐条比对 `.output/server/package.json` 的 dependencies：缺失或版本不符即 fail（本机 `PASS 24`） | 阈值型（`tar 条目 ≥200`）拦不住“少一个 `vue-bundle-renderer`”，那正是踩过的 500 |
+| 3 | `APP_VERSION` | `api.env` 与 `.release` 一致 | 防“传了产物但没重启” |
+| 4 | 语言钉死 | `/terms` 用 `Accept-Language: en-US` 与 `ja-JP` 均返回 `lang="zh-CN"` | 不带头的默认中文会被误判成“被钉死” |
+| 5 | 语言跟随 | `/report` 随 `Accept-Language` 变化（en/ja/zh） | 已 i18n 的表单页被误钉会制造新错误 |
+| 6 | `<loc>` 条数 | sitemap 中 `/terms` 恰好 1 条 | 旧逻辑是 5 语 5 条 |
+| 7 | 合规复跑 | `--runtime-only` → 0 FAIL 且 `LOG-04` = PASS | 见 §7.4.1 上文 |
+
+**两条纪律（都是踩过才知道的）**
+
+1. **sitemap 字节数只做一次性取证，不进日常门禁**：14069B 与 `Host: oneframe.zltik.top` 精确对应（本机同产物 `Host: 127.0.0.1:3093` 是 13493B，差 576B = 5 字符 × 114 处 URL），它能证明“跑的是这份代码”，但**域名一换就红**。日常门禁用第 2/4/5/6 条（与 Host 无关）。
+2. **部署机上 `PAGE-07` 会是 SKIP，属预期而非通过**：产物里没有 `apps/web/.env.example`（源文件不进构建），`--runtime-only` 据“本机无该文件”降级。真正的备案守卫在运行时（`server/plugins/icp-guard.ts` 抛错即进程退出），静态那条只在仓库侧成立。
+
+> 教训来源：2026-11-03 线上跑的是**改动前旧构建**，`/terms` `/home` `/pricing` 三路由字节数完全相同（39951B），
+> 而当时本地门禁全绿 —— **门禁验的是仓库，不是线上**。部署后自检必须单独做。
+
+### 7.4.2 会写 env / 改配置的脚本：默认 dry-run，负向用例只准打副本
+
+**起因（2026-11-03 真实事故 INC-01）**：`08-post-icp.sh` 的负向用例本该只证明「该拒绝」，
+结果**真的改写了线上 `/etc/oneframe/web.env`**（写入 TEST 备案号、删掉逃生舱、`COOKIE_SECURE=true`）。
+根因是 TLS 探测返回 `000000`，而判据写成 `!= "000"`，被误判成「TLS 可用」，于是跳过了本应中止的分支。
+
+**三条硬规则（写进脚本，不靠人记）**
+
+1. **默认 dry-run**：任何会写 `env` / `nginx` / `systemd` 的脚本，不带显式 `--apply` 时只打印将要做的改动，
+   带 `--apply` 才落地。`07-verify.sh` 这类只读脚本不受限。
+2. **负向用例只准打副本**：把待改文件 `cp` 到临时目录，在副本上验证「应该失败」，**绝不指向 `/etc/oneframe/*.env`**。
+   判据是「脚本对坏输入返回非 0 且给出具体原因」，不是「真的把坏值写进去再观察」。
+3. **HTTP 状态码这类取值禁止用不等号判断**：`!= "000"` 放过了 `000000`。一律用精确集合匹配或长度校验。
+4. **改完脚本必须核对远端内容**：只上传一部分、或改了本地没上传，判据都会替你发现（`selftest` 那次就是这样红的），
+   但更省时的做法是上传后立刻比 `sha256` / CR 计数，并在部署输出里打印这份清单。
+   “我上传过了”不是证据，“远端内容是这份 sha256”才是。
+5. **备份必须证明“拍在改动之前”**：INC-01 的第二伤害就是回滚到了一份**在坏状态之后生成的备份**。
+   规则：改动前先生成备份，并在备份同目录写一份 `*.manifest`（时间戳 + 目标文件 sha256 + 生成该备份的脚本与参数）；
+   回滚时先校验目标文件当前 sha256 与 manifest 中的“改动前值”不同、且与“改动后值”相同，否则拒绝回滚并提示换用更早的备份。
+   **没有 manifest 的备份只能算“某个时刻的副本”，不能算可回滚点。**
+6. **迁移“已应用”的判据在目标库，不在执行端**：脚本退出码 0 只能证明“脚本没报错”，
+   不能证明“目标库有这个变更”。必须查：① `__drizzle_migrations` 的 journal 计数（与 `apps/api/drizzle/*.sql` 数量对齐）；
+   ② 该迁移引入的**列/表存在性**（`information_schema.columns` / `\d table`）。
+   实例（2026-11-03）：`0054` 在本地库 apply 成功，服务器仍是 `journal=54` 且无 `episodes.llm_mock` ——
+7. **产物新鲜度必须被断言，不能靠“我改完了”**：产物清单是 **`api` / `web` / `worker` / `packages/db`（内部包也算）**，
+   每个都要 ①**内容 sha256 与本地 `pnpm build` 产物双向核对** ②**本次改动的可辨识标记**。
+   **时间戳只作提示，不作判据** —— 部署树只有 `dist` 没有 `src`，且 rsync 会重置 mtime，比时间永远比不出来。
+   三个实例（2026-11-03 同一天发生）：部署树的 `drizzle/` 缺 `0054` 与 `meta/_journal.json` 条目 →
+   `drizzle-kit` 报 applied 但库没变；`worker/dist` 是 05:05 的旧构建 → 导出 manifest 静默缺 `llm_mock`；
+   `web` 产物余留 `NUXT_API_PROXY` 测试值 → `/v1` 代理到不存在的端口。
+   **基准（`.artifacts.json`）的生成协议**（2026-11-03 裁定，防止“拿现状当正确”）：
+
+   1. **由部署脚本在“构建完成后、上传之前”自动生成**，不由 `⑩` 或上传后生成 —— 后者等于把线上现状写成基准；
+   2. 基准文件必须内嵌 **commit sha（`git rev-parse --short HEAD`）+ 生成时间 + 每个产物的 `{files, sha256}`**；
+   3. **`⑩` 必须先校验基准里的 commit sha 与当前 HEAD 一致**，不一致直接判红并提示“基准过期，请重新构建并生成基准”。
+      否则会出现最难发现的一种假绿：**旧基准比对旧产物，全绿**。
+   **基准来源的校验强度（2026-11-03 写死，不得拔高）**
+
+   - 服务器上**没有 `.git`**（共享机不保留完整版本库），因此 `⑩` 无法 `git rev-parse`。
+     替代做法：部署时写入 `.deploy-commit`，`⑩` 比对「基准内嵌 commit」vs「`.deploy-commit`」。
+   - **这一层的强度弱于真实 HEAD 校验**：若有人同时手工写入「错基准 + 错 `.deploy-commit`」，两者会自洽。
+   - 因此本机制**这里防的是误用，不防恶意**。它能拦住的场景是：忘了重新生成基准、拿旧基准比旧产物、
+     手工生成一份“当时正确”的基准——这三类正是实际发生过或最容易发生的。
+   - 需要更强保证时的做法（当前不做）：用 `git archive` 带 `HEAD` 文件部署，或在校验端持有独立来源的 commit 记录。
+
+   4. 摘要算法固定为「按路径排序后逐文件 sha256，再对整串取一次 sha256」，**不跳过 `node_modules`**
+      （`.output/server/node_modules` 正是当初导致 500 的那一层，跳过它摘要就失去意义）。
+
+   **失败形态都是“静默缺失”，不是报错** —— 所以必须有断言。
+   **部署树里的工具脚本也是产物**：`artifact_digest.py` / `compare_artifacts.py` 陈旧会让 `⑩` 误报
+   （实例 2026-11-03：旧版 `artifact_digest.py` 不支持 `--commit`，把 `--commit 5835575` 解析成两个空条目，
+   校验端读不到 `commit` 字段 → `[FAIL] 基准未记录 commit`）。它们同样要按 sha256 与仓库逐字节核对。
+   **“我在临时目录验过”不覆盖部署树** —— 这是规则 4 在工具自身上的重演。
+
+   **跨包边界尤其危险**：`packages/db/dist` 陈旧 → `episodes.llm_mock` 映射缺失 → 字段被静默丢掉，
+   而报错信息（`expected false to be true`）**完全指向调用方，不指向包**。只盯三个 app 产物会漏掉这一层。
+   两侧都“没报错”，但目标环境并没有这个变更。与规则 4 同源：**执行成功不是证据，目标状态才是。**
+
+**事故后的验收口径**：恢复后三项须同时成立——`web.env` 里有 `ONEFRAME_ALLOW_MISSING_ICP=1` 且无 ICP 号、
+`COOKIE_SECURE=false`、`systemctl is-active oneframe-web` = active；再跑 `07-verify.sh` 保持 `EXIT=0`。
+
+### 7.4.5 发布顺序与「登录能用」的假象（2026-11-03 实测）
+
+**顺序：内部包 → `db` → `api` → `web` → `worker`。** 违反顺序会得到一种特别坏的半坏状态：
+
+| 现象 | 真实原因 |
+|---|---|
+| `POST /v1/auth/email/register` → **500** | `packages/db/dist` 陈旧，未导出新表 → `insert(...).values({...userCredentials.id})` 里列对象是 `undefined`，报 `Cannot read properties of undefined (reading 'Symbol(drizzle:Columns)')` |
+| `POST /v1/auth/login/password` → **401101（正常）** | 登录路径只读 `identities`，**不碰新表**，所以新表没就位照样工作 |
+
+**由此得出两条验收纪律**：
+
+1. **「登录能用」不能当作「这批已上线」的证据**：任何新增表/新增列的功能，验收必须走**写入路径**（注册、下单、导出），
+   因为读路径可能根本不经过新结构。本例中注册 500 而登录正常，只看登录会误判整批成功。
+2. **内部包（`packages/*`）与 api 同批发布**，各自 sha256 双向核对（见规则 7）；`db` 包先于 `api`。
+
+**迁移判据的 schema 限定（修正我自己写错过的一条）**：`__drizzle_migrations` 在 **`drizzle` schema** 里，不在 `public`。
+写成 `select count(*) from __drizzle_migrations` 在只查 `public` 的连接上会报“表不存在”，从而误判“迁移没跑”。正确的是：
+
+```sql
+select count(*) from drizzle.__drizzle_migrations;
+```
+
 ## 7.5 账本对账与修复 SOP（ledger repair）
 
 **不变式**（database.md §4，PRD F6）：
@@ -407,3 +592,13 @@ storage key（如 `u/<space>/assets/<id>/orig.png`，无 scheme），直接发�
 - 自检：在 worker 机器上 `curl -I '<签名 URL>'` 应 200 且公网可访问；检查 `STORAGE_PUBLIC_BASE`/`STORAGE_S3_PUBLIC_ENDPOINT`、
   反代是否白名单限制、供应商出口是否可达；**不要**把 `ADAPTER_URI_TTL_SECONDS` 设得小于供应商最长任务时长（默认 6h）。
 
+
+### 7.4.3 验收脚本的归属（2026-11-03 裁定）
+
+**`_acceptance/` 是验收资产目录，不属任何单个 app**，浏览器 e2e / 合规脚本 / 桩服务一律放这里：
+`compliance-check.cjs`、`b-type-acceptance.ps1`、`_check-env-banner.cjs`、`_stub-api.cjs` 同源。
+理由：这些脚本跨 app（web + api + 部署），放任何一个 app 目录都会让另一个 app 的 CI 依赖它。
+
+**两条纪律**：
+1. **桩必须自证是桩**：桩模式下输出必须带 `STUB` 标记，报告里不得与真栈结果混写（`OPS-14b` 即按此记录）。
+2. **桩跑通 ≠ 真后端联调**：备案/Key 到位后必须对真实栈复跑同一份脚本（`OPS-14c`），断言不改。

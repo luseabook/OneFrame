@@ -1,0 +1,31 @@
+[Unit]
+Description=OneFrame Worker (supplier adapters + ffmpeg)
+After=network-online.target oneframe-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oneframe
+Group=oneframe
+WorkingDirectory={{BASE}}/app/apps/worker
+EnvironmentFile={{ENVD}}/worker.env
+Environment=NODE_OPTIONS=--max-old-space-size=320
+ExecStart=/usr/bin/node {{BASE}}/app/apps/worker/dist/main.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:{{BASE}}/logs/worker/worker.log
+StandardError=append:{{BASE}}/logs/worker/worker.err.log
+
+# 2 核机器：WORKER_CONCURRENCY=1（默认 5 会让多个 ffmpeg 互相饿死，见 apps/worker/src/main.ts）
+MemoryMax=420M
+TasksMax=256
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{BASE}}/storage {{BASE}}/logs/worker
+
+[Install]
+WantedBy=multi-user.target

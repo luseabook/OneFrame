@@ -35,6 +35,8 @@ const API_SRC = path.join(APP, "apps", "api", "src");
 const API_TEST = path.join(APP, "apps", "api", "test");
 const WEB = path.join(APP, "apps", "web");
 const WEB_ZH_LOCALE = path.join(WEB, "i18n", "locales", "zh-CN.json");
+/** 与 `apps/web/i18n/index.ts` 的 SUPPORTED_LOCALES 同口径；多语言相关判据一律按这 5 个遍历 */
+const LOCALES = ["zh-CN", "en", "ja", "pt-BR", "es"];
 const WORKER_SRC = path.join(APP, "apps", "worker", "src");
 const PKG_DB = path.join(APP, "packages", "db", "src");
 const PKG_SHARED = path.join(APP, "packages", "shared", "src");
@@ -49,6 +51,17 @@ const QUIET = process.argv.includes("--quiet");
 
 /** 当前检查收到的一条证据/状态 */
 const results = [];
+
+/**
+ * `--runtime-only`：只在**已部署产物**上跑运行态检查。
+ *
+ * 为什么需要它：部署机通常只上传构建产物，不带 `docs/`、`_acceptance/*.ps1` 与部分源文件。
+ * 此前在服务器上跑全量会得到若干 FAIL（缺 docs → DOC/ACC 类；缺源文件 → 静态类），
+ * 那些 FAIL 与被测系统无关，却会污染「部署后自检」的判断。
+ * 该模式把「文件不在本机」一律降为 SKIP 并写明原因 —— 诚实降级，不是放宽标准：
+ * 真正对不上（文件在但内容不符）仍然 FAIL。
+ */
+const RUNTIME_ONLY = process.argv.includes("--runtime-only");
 
 class CheckFailure extends Error {}
 
@@ -153,16 +166,32 @@ function existsMatching(dir, pattern, label) {
 }
 
 /** 执行一条同步检查；fn 返回证据字符串 */
+/** 运行态模式下不适用（验的是仓库文档/验收脚本，不是被测系统）的条目 */
+const RUNTIME_SKIP_IDS = new Set([
+  "DOC-01", "DOC-02", "DOC-03", "DOC-04",
+  "ACC-01", "ACC-02", "ACC-03",
+]);
+
 function check(group, id, title, fn) {
+  if (RUNTIME_ONLY && RUNTIME_SKIP_IDS.has(id)) {
+    skipResult(group, id, title, "运行态模式：文档/验收脚本判据在部署机不适用（仓库侧已验证）");
+    return;
+  }
   try {
     const evidence = fn();
     results.push({ group, id, title, status: "PASS", evidence });
   } catch (err) {
-    if (err instanceof CheckFailure) {
-      results.push({ group, id, title, status: "FAIL", evidence: err.message });
+    const message = err && err.message ? err.message : String(err);
+    // 运行态模式：只降级「本机没有这个文件」，内容不符仍然 FAIL
+    if (RUNTIME_ONLY && /ENOENT|no such file|无法读取|不存在/.test(message)) {
+      skipResult(group, id, title, `运行态模式：本机无该源文件，跳过静态判据（${message}）`);
       return;
     }
-    results.push({ group, id, title, status: "FAIL", evidence: `检查脚本异常：${err && err.message}` });
+    if (err instanceof CheckFailure) {
+      results.push({ group, id, title, status: "FAIL", evidence: message });
+      return;
+    }
+    results.push({ group, id, title, status: "FAIL", evidence: `检查脚本异常：${message}` });
   }
 }
 
@@ -183,6 +212,11 @@ const F = {
   layoutDefault: path.join(WEB, "layouts", "default.vue"),
   layoutApp: path.join(WEB, "layouts", "app.vue"),
   settingsPage: path.join(WEB, "pages", "settings.vue"),
+  // 备案号展示的唯一来源（2026-11-03 改造：号段从 5 个语言包里抽出，走 runtimeConfig）
+  siteLegal: path.join(WEB, "components", "SiteLegal.vue"),
+  icpGuard: path.join(WEB, "server", "plugins", "icp-guard.ts"),
+  webEnvExample: path.join(WEB, ".env.example"),
+  nuxtConfig: path.join(WEB, "nuxt.config.ts"),
 
   // 后端
   appModule: path.join(API_SRC, "app.module.ts"),
@@ -278,14 +312,76 @@ check("A 法务页面与入口", "PAGE-05", "三类页面均有页脚入口（�
   return [terms[0], privacy[0], report[0]].join(" · ") + `（共 ${layouts.length} 个布局/落地页均含三链路）`;
 });
 
-check("A 法务页面与入口", "PAGE-06", "ICP 备案号位置已预留（上线前须替换真实号）", () => {
-  const evidence = `${hit(F.landingPage, 't\\("landing\\.footerNote"\\)', "页脚引用")} + ${localeHit(
-    "landing.footerNote",
-    "ICP",
-    "备案号占位",
-  )}`;
-  return `${evidence}（占位符，真实备案号属外部待办 EXT-03）`;
-});
+check(
+  "A 法务页面与入口",
+  "PAGE-06",
+  "ICP 备案号展示位：runtimeConfig 注入 + 两处页脚挂载 + 5 语言标签齐备",
+  () => {
+    // 2026-11-03 口径变更：号段不再抄进语言包（5 份 JSON 各存一份会漂移，换号必漏），
+    // 改为 `components/SiteLegal.vue` 读 `runtimeConfig.public.icpBeian/icpPolice`；
+    // 因此判据从「zh-CN 的 footerNote 含 ICP 字样」改为「唯一来源 + 两处页脚都挂上 + 标签五语齐」。
+    const source = hit(F.siteLegal, "runtimeConfig\\.public\\.icpBeian", "备案号取自 runtimeConfig");
+    const envEntry = hit(F.nuxtConfig, "NUXT_PUBLIC_ICP_BEIAN", "环境变量入口");
+    const landingMount = hit(F.landingPage, "<SiteLegal", "落地页页脚挂载");
+    const layoutMount = hit(F.layoutDefault, "<SiteLegal", "默认布局页脚挂载");
+    const labels = LOCALES.map((loc) => {
+      const file = path.join(WEB, "i18n", "locales", `${loc}.json`);
+      const value = jsonValueAt(file, "shell.icpLabel");
+      if (typeof value !== "string" || value.trim() === "") {
+        fail(`${rel(file)} 缺少 shell.icpLabel（备案号标签，5 语必须齐）`);
+      }
+      return loc;
+    });
+    // 旧占位串必须已清除：留着就是「上线前替换」这句话又变成纸面任务
+    const leftovers = LOCALES.filter((loc) =>
+      /0000\s*0000/.test(readText(path.join(WEB, "i18n", "locales", `${loc}.json`))),
+    );
+    if (leftovers.length > 0) fail(`占位串仍残留在：${leftovers.join(", ")}`);
+    return `${source} + ${envEntry} + ${landingMount} + ${layoutMount} + 标签 ${labels.join("/")}（真实号属外部待办 EXT-03）`;
+  },
+);
+
+check(
+  "A 法务页面与入口",
+  "PAGE-07",
+  "生产未配备案号即拒绝启动：Nitro 启动守卫 + 逃生舱留痕 + 运维可发现",
+  () => {
+    // 判据位置 2026-11-03 由 nuxt.config 改为 Nitro 插件（Frontend 提出，采纳）：
+    // nuxt.config 只在**构建期**执行一次，而部署链是「构建 → 上传产物 → systemd 注入 env 启动」；
+    // 守卫放构建期会让「备案号还没下发」的每次 build 都失败，且不能证明运行期真的配了。
+    // 真正的 fail-fast 必须在进程启动时：抛错 → 进程退出 → systemd failed，运维立刻看见。
+    const guard = readText(F.icpGuard);
+    if (!/defineNitroPlugin/.test(guard)) {
+      fail(rel(F.icpGuard) + " 不是 Nitro 插件：启动期守卫必须在进程启动时执行");
+    }
+    if (!/NODE_ENV/.test(guard) || !/production/.test(guard)) {
+      fail(rel(F.icpGuard) + " 缺少生产环境判定（NODE_ENV === \"production\"）");
+    }
+    if (!/throw new Error/.test(guard)) {
+      fail(rel(F.icpGuard) + " 缺少 throw：备案号为空时必须阻断启动，不能只告警");
+    }
+    // 逃生舱（验收机跑生产构建时用）必须存在，但必须留痕 ——「悄悄没有备案号」正是本项要防的事
+    if (!/ONEFRAME_ALLOW_MISSING_ICP/.test(guard)) {
+      fail(rel(F.icpGuard) + " 缺少逃生舱 ONEFRAME_ALLOW_MISSING_ICP（验收机跑生产构建时无法启动）");
+    }
+    if (!/console\.(warn|error)/.test(guard)) {
+      fail(rel(F.icpGuard) + " 逃生舱放行时必须有醒目日志（每次启动留痕），否则等于静默逃逸");
+    }
+    // 运维可发现性（v6.75 的教训：代码里有 ≠ 运维能发现）
+    const webEnv = readText(F.webEnvExample);
+    const need = ["NUXT_PUBLIC_ICP_BEIAN", "NUXT_PUBLIC_ICP_POLICE", "ONEFRAME_ALLOW_MISSING_ICP"];
+    const missing = need.filter((key) => !new RegExp(key).test(webEnv));
+    if (missing.length > 0) {
+      fail(
+        rel(F.webEnvExample) + " 未登记 " + missing.join(", ") +
+          "（运维按示例配会漏：缺了生产起不来，或反过来误开逃生舱）",
+      );
+    }
+    return (
+      rel(F.icpGuard) + "（Nitro 守卫 + throw + 逃生舱留痕）+ " + rel(F.webEnvExample) + " 三变量已登记"
+    );
+  },
+);
 
 // ───────────────────────── B. 未成年人 / 年龄门禁 ─────────────────────────
 
@@ -587,6 +683,59 @@ check("I 安全", "SEC-01", "运营后台口令以 scrypt 加盐哈希存储（�
   hits(F.adminAuthService, ["scryptSync", "timingSafeEqual"], "口令哈希"),
 );
 
+check("I 安全", "SEC-04", "密码登录必须有失败限流（上线闸门，见清单 SEC-04）", () => {
+  // 2026-11-03：邮箱+密码登录上线时，短信路径有 per-IP 小时限与 tries 计数，密码路径完全没有。
+  //
+  // 第一版判据写成「整个 modules/auth 里出现 fail 键 + RATE_LIMITED」—— 立刻假绿：
+  // 短信路径本来就有 RATE_LIMITED，于是密码路径缺失也照样 PASS。
+  // 所以判据必须**按函数体收窄**：定位 `loginWithPassword` 定义，只在其后窗口内判。
+  const dir = path.join(API_SRC, "modules", "auth");
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".ts"));
+  let window = "";
+  let where = "";
+  for (const f of files) {
+    const src = readText(path.join(dir, f));
+    const at = src.indexOf("loginWithPassword");
+    if (at >= 0 && /async\s+loginWithPassword|loginWithPassword\s*\(/.test(src)) {
+      window += src.slice(at, at + 6000);
+      where += (where ? ", " : "") + rel(path.join(dir, f));
+    }
+  }
+  if (window === "") {
+    fail("找不到 loginWithPassword 的实现（密码登录入口被移除或改名？），无法判定限流是否存在");
+  }
+  const hasFailKey = /login:fail:|password:fail:|login-fail/i.test(window);
+  const hasRateLimited = /RATE_LIMITED/.test(window);
+  if (!hasFailKey || !hasRateLimited) {
+    fail(
+      `密码登录（${where}）缺少失败限流：失败计数键 ${hasFailKey ? "有" : "缺失"}、` +
+        `限流错误码 ${hasRateLimited ? "有" : "缺失"}。参照 admin-auth.service.ts:105 的 ` +
+        "admin:login:fail:<user>:<ip> 口径；本项是上线闸门（Chief 明示不可后补），修好后本项才转绿",
+    );
+  }
+  return `loginWithPassword 函数体内存在失败计数键与 RATE_LIMITED（${where}）`;
+});
+check("I 安全", "SEC-03", "默认口令字样不得进入 web 客户端（语言包 + 登录页，防回退）", () => {
+  // 2026-11-03：后台登录页曾把「非生产默认 admin / admin12345」写进 i18n，语言包整包进客户端，
+  // 生产构建照样能 grep 到 —— 功能无用，却等于告诉攻击者该撞哪个账号。
+  // 这里守的是「源码不得复现该字面量」；产物级判据在部署侧（07 ⑦），两者互补：
+  // 源码守卫能离线跑、能防回退；产物守卫能抓「源码没了但摇树没生效」。
+  const offenders = [];
+  for (const loc of LOCALES) {
+    const file = path.join(WEB, "i18n", "locales", `${loc}.json`);
+    if (/admin12345/.test(readText(file))) offenders.push(rel(file));
+  }
+  const loginPage = path.join(WEB, "pages", "admin", "login.vue");
+  if (/admin12345/.test(readText(loginPage))) offenders.push(rel(loginPage));
+  if (offenders.length > 0) {
+    fail(
+      `默认口令字样仍出现在：${offenders.join(", ")} —— 语言包整包打进客户端，` +
+        "生产产物里能直接 grep 到，等于对外公布该尝试哪个账号名",
+    );
+  }
+  return `5 个语言包 + pages/admin/login.vue 均不含 admin12345（部署侧产物判据见 07 ⑦ / SEC-03）`;
+});
+
 check("I 安全", "SEC-02", "分享 token 高熵随机 + 有过期时间", () =>
   hits(F.tasksService, ["randomBytes\\(", "expiresAt"], "token 生成"),
 );
@@ -650,28 +799,62 @@ function probeRequestIdHeader() {
     return Promise.resolve();
   }
 
+  const TITLE = "运行态：我方 api 应答 200 + pong=true + x-request-id";
+
   return new Promise((resolve) => {
     const req = http.get(target, { timeout: 1500 }, (res) => {
       const id = res.headers["x-request-id"];
-      res.resume();
-      if (!id) {
+      const status = res.statusCode;
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        if (body.length < 4096) body += chunk;
+      });
+      res.on("end", () => {
+        // 判据三件套（2026-11-03 收紧）：状态码 200 + 业务体 pong===true + x-request-id 头。
+        // 只判响应头会把「端口被别的服务占用」判成 PASS —— 实测本机 3000 被陌生进程占着，
+        // 它对 /v1/ping 返回 404 且自带 x-request-id，旧判据直接给绿灯（与清单「未启动即 SKIP」矛盾）。
+        let parsed = null;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          parsed = null;
+        }
+        // 2026-11-03 修正（Ops 在真实部署上发现）：全局信封是 `{code,msg,data}`，
+        // `pong` 在 `data.pong` 里；只认顶层会让「服务在线」永远判成 SKIP。
+        const pong = parsed !== null && (parsed.pong === true || (parsed.data && parsed.data.pong === true));
+        const ourApi = status === 200 && pong;
+        if (!ourApi) {
+          const why =
+            parsed === null ? "非 JSON 响应" : "JSON 但无 pong:true";
+          skipResult(
+            "K 运行态",
+            "LOG-04",
+            TITLE,
+            `${target.href} 返回 ${status}（${why}）—— 应答者不是本项目的 api，跳过运行态校验` +
+              `（静态接线见 LOG-03）；若已启动 api，先查端口是否被其它进程占用：ss -ltnp | grep :${target.port}`,
+          );
+          return resolve();
+        }
+        if (!id) {
+          results.push({
+            group: "K 运行态",
+            id: "LOG-04",
+            title: TITLE,
+            status: "FAIL",
+            evidence: `${target.href} 返回 200 且 pong=true，但没有 x-request-id 响应头`,
+          });
+          return resolve();
+        }
         results.push({
           group: "K 运行态",
           id: "LOG-04",
-          title: "运行态：响应头 x-request-id 存在",
-          status: "FAIL",
-          evidence: `${target.href} 返回 ${res.statusCode} 但没有 x-request-id 响应头`,
-        });
-      } else {
-        results.push({
-          group: "K 运行态",
-          id: "LOG-04",
-          title: "运行态：响应头 x-request-id 存在",
+          title: TITLE,
           status: "PASS",
-          evidence: `GET ${target.pathname} → ${res.statusCode}, x-request-id=${id}`,
+          evidence: `GET ${target.pathname} → 200, pong=true, x-request-id=${id}`,
         });
-      }
-      resolve();
+        return resolve();
+      });
     });
     req.on("timeout", () => {
       req.destroy();

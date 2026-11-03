@@ -41,6 +41,24 @@ const SCAN_ROOTS = ["apps", "packages"] as const;
 const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", ".next"]);
 /** 运行时注入的环境判定，不走「配置接受表」 */
 const RUNTIME_KEYS = new Set(["NODE_ENV"]);
+/**
+ * web 侧的启动期逃生舱（`apps/web/server/plugins/*`）。
+ *
+ * 为什么需要这份具名例外：`apps/web` 没有 api/worker 那套配置 schema，也（有意地）
+ * 不依赖 `@app/shared`——为一个 Nitro 启动插件加一个 workspace 依赖不划算。但扫描范围
+ * 是 `apps`（本该如此：新加的 web 环境判定同样值得被盯住），所以只能**逐键**登记，
+ * 而不是把 `apps/web` 整个排除。
+ *
+ * 登记条件（三条都要）：① 只在进程启动时读一次；② 每次启动必打 WARN 或被启动守卫拦住；
+ * ③ 不参与业务分支。业务型布尔变量请走 `readEnvFlag` + 取值表，不许挂到这里。
+ *
+ * 2026-11-03 复核（Frontend 把逃生舱改成「只认字面 `1`」后）：本例外仍然安全，因为
+ * 它**刻意不走接受表**——`ONEFRAME_ALLOW_MISSING_ICP=true/yes/on` 一律拒绝启动并把
+ * 实际值回报出来，而不是像 `=== "true"` 那样静默判成另一侧。也就是说这个键的
+ * 「写法分歧」不会变成静默错向，它只可能变成一次响亮的启动失败。
+ * 若哪天它开始接受多种拼写、或参与业务分支，就把它挪进 `@app/shared` 的取值表。
+ */
+const WEB_BOOTSTRAP_KEYS = new Set(["ONEFRAME_ALLOW_MISSING_ICP"]);
 const EQUALITY_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsEqualsEqualsToken,
   ts.SyntaxKind.ExclamationEqualsEqualsToken,
@@ -98,7 +116,7 @@ function collectProcessEnvKeys(node: ts.Node, out: string[] = []): string[] {
 }
 
 function involvesConfigEnv(node: ts.Node): boolean {
-  return collectProcessEnvKeys(node).some((key) => !RUNTIME_KEYS.has(key));
+  return collectProcessEnvKeys(node).some((key) => !RUNTIME_KEYS.has(key) && !WEB_BOOTSTRAP_KEYS.has(key));
 }
 
 function isLiteralValue(node: ts.Node): boolean {
@@ -243,6 +261,19 @@ describe("静态守卫：布尔 / 枚举环境变量只有一个入口", () => {
 
   it("生产源码（apps/*/src + packages/*/src）零直接决策", () => {
     expect(scanProductionTree().map((s) => `${s.file}:${s.line} ${s.shape}`)).toEqual([]);
+  });
+
+  it("web 启动期逃生舱是具名例外，且例外不能靠改文件名蒙混", () => {
+    // 已登记：web 的 ICP 逃生舱只做启动判定，每次启动必 WARN
+    expect(scanDirectFlagDecisions("web.ts", `const a = process.env.ONEFRAME_ALLOW_MISSING_ICP === "1";`)).toEqual(
+      [],
+    );
+    // 未登记的同名形态照样报：例外是「键」粒度，不是「目录」粒度
+    expect(scanDirectFlagDecisions("web.ts", `const b = process.env.ONEFRAME_SOMETHING_ELSE === "1";`)).toHaveLength(
+      1,
+    );
+    // 登记表不许无限膨胀——每加一项都要过一遍「是否只是启动期判定」
+    expect(WEB_BOOTSTRAP_KEYS.size).toBeLessThanOrEqual(3);
   });
 
   it("已知 10 个站点全部改道 readEnvFlag / readEnvEnum / env 快照", () => {

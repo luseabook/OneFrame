@@ -36,11 +36,15 @@ x-app-env: &app-env
   STORAGE_S3_SECRET_ACCESS_KEY: "${S3_SECRET_KEY:?S3_SECRET_KEY is required (minioadmin is a public known password)}"
   STORAGE_S3_FORCE_PATH_STYLE: "true"
   # LLM 步骤（大纲/角色/剧本/分镜）：real 走 DeepSeek，mock 为确定性假文案。
-  # 显式透传而非隐式默认：NODE_ENV=production 下若设 LLM_MODE=real 而缺 DEEPSEEK_API_KEY，
-  # api 启动守卫会直接 fail fast（apps/api/src/config/env.ts collectLlmProblems）。
-  LLM_MODE: ${LLM_MODE:-mock}
+  # 2026-11-03 收紧：api 生产守卫已拒绝 mock / 未设置（与 worker 的 ADAPTER_MODE 同口径，
+  # 见 apps/api/src/config/env.ts collectLlmProblems），所以这里不再给 `mock` 默认值 ——
+  # 缺省必须在 `docker compose up` 的解析阶段就报错，而不是让容器 CrashLoop。
+  LLM_MODE: "${LLM_MODE:?LLM_MODE is required (real for production; mock is rejected by the startup guard)}"
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+  # 监听地址：容器内必须 0.0.0.0，否则同网络的 nginx 按服务名连不上 api。
+  # api 的默认值是 127.0.0.1（见 apps/api/src/config/env.ts HOST），"对外"由这里显式声明。
+  HOST: "0.0.0.0"
 
 services:
   postgres:

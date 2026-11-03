@@ -1,0 +1,31 @@
+[Unit]
+Description=OneFrame API (NestJS + fastify)
+After=network-online.target postgresql@16-main.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oneframe
+Group=oneframe
+WorkingDirectory={{BASE}}/app/apps/api
+EnvironmentFile={{ENVD}}/api.env
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/node {{BASE}}/app/apps/api/dist/main.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:{{BASE}}/logs/api/api.log
+StandardError=append:{{BASE}}/logs/api/api.err.log
+
+# 1.7G 共享机：超限杀自己，不拖垮同机的 MySQL/Java
+MemoryMax=450M
+TasksMax=256
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{BASE}}/storage {{BASE}}/logs/api
+
+[Install]
+WantedBy=multi-user.target

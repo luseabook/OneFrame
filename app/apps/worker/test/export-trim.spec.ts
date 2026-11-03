@@ -182,11 +182,16 @@ describe("runExport clip manifest", () => {
   });
 
   /** 造「一集一镜」：源视频进 storage，任务成功且 results 指向它，分镜 authored 时长 2s */
-  async function seedEpisode(source: Buffer, opts: { durationS: number | null } = { durationS: 2 }): Promise<bigint> {
+  async function seedEpisode(
+    source: Buffer,
+    opts: { durationS: number | null; llmMock?: boolean } = { durationS: 2 },
+  ): Promise<bigint> {
     epCounter += 1;
     const episodeId = newId();
     episodeIds.push(episodeId);
-    await db.insert(episodes).values({ id: episodeId, projectId, epNo: epCounter, title: `第${epCounter}集` });
+    await db
+      .insert(episodes)
+      .values({ id: episodeId, projectId, epNo: epCounter, title: `第${epCounter}集`, llmMock: opts.llmMock ?? false });
     const taskId = newId();
     const key = `u/${spaceId}/tasks/${taskId}.mp4`;
     await storage.put(key, source, "video/mp4");
@@ -260,6 +265,24 @@ describe("runExport clip manifest", () => {
     expect(shot.file_bytes).toBe(trimmed.byteLength);
     // zip 里放的确实是被裁过的字节，而不是源文件
     expect(files["shot-01.mp4"]!.equals(trimmed)).toBe(true);
+  });
+
+  it("N-12：manifest 自证「本集文本是不是 mock 假文案」（episodes.llm_mock → manifest.llm_mock）", async () => {
+    // 进程级 gauge 只能证明"这台机器在 mock"，证明不了"这份大纲是假的"。
+    // 导出物离开系统后，`llm_mock` 是唯一能自证来源的字段 —— 与 ai_label 同源但不同义：
+    // ai_label.ai_generated 恒 true（"是 AI 生成的"），llm_mock 只标"是假 AI 生成的"。
+    const source = Buffer.from("SOURCE-CLIP-BYTES");
+    const realExportId = await seedEpisode(source, { durationS: 2, llmMock: false });
+    const mockExportId = await seedEpisode(source, { durationS: 2, llmMock: true });
+
+    await runExport(String(realExportId), { db, storage, trim: async () => ({ ok: false, reason: "n/a" }) });
+    await runExport(String(mockExportId), { db, storage, trim: async () => ({ ok: false, reason: "n/a" }) });
+
+    const realManifest = await readZipManifest(realExportId);
+    const mockManifest = await readZipManifest(mockExportId);
+    expect(realManifest.manifest.llm_mock).toBe(false);
+    expect(mockManifest.manifest.llm_mock).toBe(true);
+    expect((mockManifest.manifest.ai_label as Record<string, unknown>).ai_generated).toBe(true);
   });
 
   it("degrades to copy and says why when trimming is unavailable", async () => {
