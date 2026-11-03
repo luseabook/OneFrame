@@ -58,6 +58,8 @@ onMounted(() => {
     <header class="head">
       <h1>{{ t("tools.title") }}</h1>
       <div class="head-right">
+        <!-- 第 133 批：CLI 公测页入口（竞品 /cli 的工具页，不在工具箱卡片目录里） -->
+        <NuxtLink to="/cli" class="asset-btn">{{ t("cliPage.navLabel") }}</NuxtLink>
         <!-- TB1（02 §11 批次 2「删 :136-143 提示框」）：竞品页头右上**只有一个按钮**
              （tools-recheck.png x1276–1405 / y80–116），我方多出的提示卡用 3 个体系外色值
              （#2a1744 / #d9d2ff / #a78bfa）且占 280px，与"页头只留主 CTA"的构型冲突。 -->

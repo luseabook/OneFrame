@@ -38,6 +38,9 @@ export default defineNuxtConfig({
       // 空串 = 未下发，页脚不渲染该段（上线前必须由 env 注入，见 docs/06 上线清单）。
       icpBeian: process.env.NUXT_PUBLIC_ICP_BEIAN ?? "",
       icpPolice: process.env.NUXT_PUBLIC_ICP_POLICE ?? "",
+      // CLI 公测页的 Skill 分发地址（第 133 批）。空 = 未配置，页面只显示仓库内可跑的
+      // 本地命令，不伪造公网 zip 地址。
+      cliSkillUrl: process.env.NUXT_PUBLIC_CLI_SKILL_URL ?? "",
       // 短信登录开关（2026-11-04 决策：不接短信网关）。空串 = 跟随构建环境：
       // dev/验收构建显示验证码 tab，生产构建默认隐藏，只剩邮箱+密码与微信占位。
       // 与后端 AUTH_SMS_ENABLED 同口径（后端关闭时两个入口都回 400101）。
@@ -111,6 +114,8 @@ export default defineNuxtConfig({
     // 第 132 批：竞品 /script-view/:id 的只读正文页（正文/分集来自 /projects/:id）
     "/script-view": { ssr: false },
     "/script-view/**": { ssr: false },
+    // 第 133 批：CLI 公测页（竞品 /cli），页面数据全部客户端拉取/静态快照
+    "/cli": { ssr: false },
     // 第 132 批：竞品 /short-film/:id 的别名承接（短剧=脚本项目工作台）
     "/short-film": { ssr: false },
     "/short-film/**": { ssr: false },
