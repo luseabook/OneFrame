@@ -1248,6 +1248,11 @@ mock 形状一致的产出（产出 JSON 与真实路径同形）；接真实能
 | POST | `/cam/project/{project_id}/members/bind` | 特权 | 绑定（含 `participation_type`） |
 | POST | `/cam/project/{project_id}/members/delete` | 特权 | 解绑 |
 
+> **绑定/解绑请求体（2026-11-04 修正）**：`bind` 的 `project_id` **可选**——路径参数已是权威来源，
+> body 传它只是覆盖（handler `input.project_id ?? projectId`）。此前 schema 误写必填，
+> 按路径调用的客户端一律 `400101 Required`；已修正并由 `apps/api/test/project-members.spec.ts`
+> 覆盖（绑定→列表可见→解绑消失、重复绑定幂等、跨空间成员拒绝）。`delete` 只接受 `{user_id, project_kind}`。
+
 **偏离说明**：
 1. 参照用 `/cam/team/{team_id}/info` 把 team_id 放路径；我方**省略**，因为 `X-Space-Id` 已表达当前空间（ADR-010），路径带 ID 会产生"路径 ID 与头不一致"的二义性。
 2. 席位上限错误码为新码 **400108**（参照侧未见同义码，属我方自造，已在码表登记）。

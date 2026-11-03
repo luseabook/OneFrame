@@ -81,7 +81,7 @@
 | 35 | `/series-manage/asset-extract` | A | 🔶 `projects/[id].vue` AI 提取视图 | 🟡 04-project-assets | 🟡 代码初审 | 🟡 端点测试 | 🟡 静态截图 | 🟢 截图 + 代码 | 大卡点击无反馈 | U2 |
 | 36 | `/episode-list` | C | 🔶 项目页剧集栏 | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 无独立剧集列表页 | U8 |
 | 37 | `/script-manage` | C | 🟢 `pages/script/index.vue`（U9 新建） | 🟡 首屏结构对齐（用户提供的竞品截图） | 🟡 代码初审 | 🟡 端点测试 | 🟡 仅 1 张用户提供截图 | 🟢 `evidence/ui-audit/u9/u9-script-1424.png` | 竞品该页动态态（生成中/我的剧本有数据）仍未取证 | U9 |
-| 38 | `/script-view/:id()` | C | 🟢 `pages/script-view/[id].vue` | ⏳ 竞品无截图 | 🟡 代码初审 | 🟡 端点（`GET /projects/:id` 一次给全） | ⏳ 未取证 | 🟢 代码 | 竞品同状态截图/录屏缺失；只读页，编辑回项目工作台 | 132 |
+| 38 | `/script-view/:id()` | C | 🟢 `pages/script-view/[id].vue` | ⏳ 竞品无截图 | 🟡 代码初审 | 🟡 端点（`GET /projects/:id` 一次给全） | ⏳ 未取证 | 🟢 代码 | **`:id` 语义未取证**（组件 chunk `CDpLjKgj.js` 未捕获），本轮按“项目 ID”实现；若后续证据为剧本 ID，只需换数据源、页面结构不动 | 132 |
 | 39 | `/short-film/:id()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证（13 个路由 chunk 均未捕获） | ❌ | **取证结论（2026-11-04）：现有证据无法判定它与 `/series-manage/:id` 的语义差异**（只有 router 引用，无页面/响应体）；按“不猜”原则暂不实现，解锁条件=竞品录屏或响应体 | 待证据 |
 
 ## 6. 小说改编 / 创作 Agent（9）
@@ -121,7 +121,7 @@
 | 60 | `/team` | B | 🟢 `pages/team/index.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 竞品零截图 | U6 |
 | 61 | `/team/dashboard` | B | 🟢 `pages/team/dashboard.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
 | 62 | `/team/knowledge-base` | B | 🔶 `pages/knowledge/index.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 团队知识库与全局知识库关系待定 | U6 |
-| 63 | `/project-members` | C | 🟢 `pages/project-members.vue` | ⏳ | 🟡 代码初审 | 🟡 端点（members / bind / delete） | ⏳ 未取证 | 🟢 代码 | 竞品截图缺；绑定写入未做真机验证 | 132 |
+| 63 | `/project-members` | C | 🟢 `pages/project-members.vue` | ⏳ | 🟡 代码初审 | 🟢 e2e（`apps/api/test/project-members.spec.ts`：绑定→可见→解绑、幂等、跨空间拒绝） | ⏳ 未取证 | 🟢 代码 | 竞品截图缺；页面与后端绑定闭环已验证；`bind` 的 `project_id` 必填误设已修正 | 132 |
 
 ## 9. 影视版（6）
 

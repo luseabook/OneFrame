@@ -47,7 +47,13 @@ const recoverBody = z.object({
 const bindProjectBody = z.object({
   user_id: z.string().min(1),
   project_kind: z.number().int().min(1).max(2),
-  project_id: z.string().min(1),
+  /**
+   * 路径参数 `:project_id` 已经给了项目；body 里这一项是**可选覆盖**（见 handler
+   * `input.project_id ?? projectId`）。此前 schema 写成必填，导致按路径调用的客户端
+   * （含 `apps/web/pages/project-members.vue`）一律 400101「Required」——
+   * 契约注释与校验规则自相矛盾，本轮按注释修正为 optional。
+   */
+  project_id: z.string().min(1).optional(),
   participation_type: z.number().int().min(1).max(3).optional(),
 });
 const createTeamBody = z.object({

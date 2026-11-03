@@ -11,6 +11,10 @@ import type { CharacterDto, EpisodeDto, ProjectDto } from "~/types/api";
  * 数据来源是既有端点 `GET /v1/projects/:id`（返回 `{project, episodes, characters}`），
  * **不新增后端端点**：这一页要的 project / 分集正文 / 角色，该端点已经一次给全。
  *
+ * `:id` 语义：竞品该路由的组件 chunk（`CDpLjKgj.js`）在捕获集里缺失，无法证明它是
+ * 剧本 ID 还是项目 ID；本轮按**项目 ID**实现（与 `/projects/:id` 同源）。若后续拿到
+ * 响应体证据证明是剧本 ID，只需换数据源，页面结构不动。
+ *
  * 三态齐备：加载骨架、空态（无分集/无正文）、错误可重试。只读，不提供保存入口——
  * 编辑一律回 `/projects/:id`，避免两处都能改、版本分叉。
  */
