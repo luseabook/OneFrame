@@ -1,0 +1,1 @@
+ALTER TABLE "episodes" ADD COLUMN "llm_mock" boolean DEFAULT false NOT NULL;

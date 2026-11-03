@@ -3,7 +3,10 @@ import type { FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
 import { Public } from "../common/public.decorator";
 import { db } from "../db/database";
+import { env } from "../config/env";
 import { metricsAuthorized } from "./metrics-auth";
+import { llmStatus } from "./llm-status";
+import { COUNTER_RATE_LIMIT_UNAVAILABLE, counterValue } from "./runtime-counters";
 
 /**
  * Prometheus 文本格式指标（deployment.md §4）。
@@ -37,6 +40,34 @@ export class MetricsController {
     }
 
     const lines: string[] = [];
+
+    // ── LLM 形态（B 方案约束 2：假文案必须机器可判定，不能只靠翻日志）──
+    // 这两个 gauge 不需要查库，放在最前，保证即使 DB 抖动也能读到。
+    {
+      const llm = llmStatus(env);
+      lines.push(
+        "# HELP oneframe_llm_mock_allowed 1 = 生产允许 mock 文案（验收逃生舱 ONEFRAME_ALLOW_MOCK_LLM=1 已开）；对外环境必须为 0",
+      );
+      lines.push("# TYPE oneframe_llm_mock_allowed gauge");
+      lines.push(`oneframe_llm_mock_allowed ${llm.mock_allowed ? 1 : 0}`);
+      lines.push(
+        "# HELP oneframe_llm_mock_active 1 = 本进程 LLM_MODE=mock，大纲/剧本/分镜为确定性假文案",
+      );
+      lines.push("# TYPE oneframe_llm_mock_active gauge");
+      lines.push(`oneframe_llm_mock_active ${llm.mock_active ? 1 : 0}`);
+    }
+
+    // ── 限流不可用（fail-open 的代价必须可见，Ops 的 P2 观察项）──
+    // 密码登录的失败限流是 fail-open：Redis 抖动时不限流、也绝不拒绝正确密码。
+    // 若没有这条指标，"Redis 挂着、防护静默消失"就只能靠读代码才知道。
+    {
+      lines.push(
+        "# HELP oneframe_rate_limit_unavailable_total 本进程启动以来" +
+          "限流计数读写失败的次数（>0 表示密码登录限流当前可能未生效）",
+      );
+      lines.push("# TYPE oneframe_rate_limit_unavailable_total counter");
+      lines.push(`oneframe_rate_limit_unavailable_total ${counterValue(COUNTER_RATE_LIMIT_UNAVAILABLE)}`);
+    }
 
     // ── 任务队列深度（按状态）──
     try {

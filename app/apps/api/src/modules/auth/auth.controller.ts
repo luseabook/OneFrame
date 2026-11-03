@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode, readEnvFlag } from "@app/shared";
 import { env } from "../../config/env";
+import { llmStatus } from "../../health/llm-status";
 import { CAPTCHA_ENFORCE_SPEC } from "../../config/env-values";
 import { Public } from "../../common/public.decorator";
 import { clientIp } from "../../common/client-ip";
@@ -49,8 +50,31 @@ const smsBody = smsCodeRequestSchema.extend({
 const loginBody = loginRequestSchema.extend({
   invite_code: z.string().min(1).optional(),
   age_confirmed: z.boolean().optional(),
+  /** `false` → refresh Cookie 不写 maxAge（浏览器关闭即失效）。缺省 true，与历史行为一致 */
+  keep_login: z.boolean().optional(),
   captcha_ticket: z.string().min(1).max(2048).optional(),
   captcha_answer: z.union([z.string().max(20), z.number()]).optional(),
+});
+/**
+ * 邮箱 + 密码注册（api-spec §33.6，第 130 批）。
+ * 长度上限按 RFC 5321（邮箱 254）与实际可用性取；密码上限 72 是 scrypt/BCrypt 系列
+ * 通行的"别拿超长串打 CPU"的护栏（不是截断，是拒绝）。
+ */
+const emailRegisterBody = z.object({
+  email: z.string().min(3).max(254),
+  password: z.string().min(8).max(72),
+  invite_code: z.string().min(1).max(32).optional(),
+  age_confirmed: z.boolean().optional(),
+  keep_login: z.boolean().optional(),
+});
+/**
+ * 密码登录：`identifier` 现在是**邮箱**（手机号密码登录未开放，服务里显式拒绝）。
+ * 字段名用 `identifier` 而不是 `email`，是为了将来开放手机号密码登录时前端零改动。
+ */
+const passwordLoginBody = z.object({
+  identifier: z.string().min(1).max(254),
+  password: z.string().min(1).max(72),
+  keep_login: z.boolean().optional(),
 });
 const waitlistBody = z.object({
   phone: z.string().regex(/^1\d{10}$/),
@@ -126,7 +150,45 @@ export class AuthController {
       input as { captcha_ticket?: string; captcha_answer?: unknown },
     );
     const result = await this.auth.login(input.phone, input.code, input.invite_code, input.age_confirmed);
-    this.setRefreshCookie(res, result.refresh_token);
+    this.setRefreshCookie(res, result.refresh_token, input.keep_login);
+    const { refresh_token: _ignored, ...payload } = result;
+    return payload;
+  }
+
+  @Public()
+  @Post("auth/email/register")
+  async registerEmail(@Body() body: unknown, @Res({ passthrough: true }) res: FastifyReply) {
+    const input = parseOrThrow(emailRegisterBody, body);
+    // 与短信注册保持同一条合规闸门：新账号必须有成年确认（建号即落 age_declared_at）
+    // 注意字段名映射：HTTP 契约是 snake_case，服务内部是 camelCase——漏映射的后果是
+    // `ageConfirmed` 永远是 undefined，于是"已勾选成年"也一律被判成未勾选。
+    const result = await this.auth.registerWithPassword({
+      email: input.email,
+      password: input.password,
+      inviteCode: input.invite_code,
+      ageConfirmed: input.age_confirmed,
+    });
+    this.setRefreshCookie(res, result.refresh_token, input.keep_login);
+    const { refresh_token: _ignored, ...payload } = result;
+    return payload;
+  }
+
+  /**
+   * 密码登录（api-spec §33.6）。返回体与 `POST /v1/auth/login` **完全一致**
+   * （`access_token/expires_in/user/space_id/master_token/...`，refresh 走 httpOnly Cookie），
+   * 前端两条路径可以共用同一段"登录成功后"的逻辑。
+   */
+  @Public()
+  @Post("auth/login/password")
+  async loginPassword(
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    const input = parseOrThrow(passwordLoginBody, body);
+    // 传真实来源 IP：失败限流按「账号哈希 + IP」计数（SEC-04），与 admin 登录同口径
+    const result = await this.auth.loginWithPassword({ ...input, ip: clientIp(req) });
+    this.setRefreshCookie(res, result.refresh_token, input.keep_login);
     const { refresh_token: _ignored, ...payload } = result;
     return payload;
   }
@@ -154,7 +216,16 @@ export class AuthController {
   async me(@Req() req: AuthedRequest) {
     const auth = req.auth;
     if (!auth) return null;
-    return this.auth.me(auth.userId, auth.spaceId);
+    const result = await this.auth.me(auth.userId, auth.spaceId);
+    /**
+     * `llm_mode`（api-spec §33.1，2026-11-03）：`"real" | "mock"`。
+     *
+     * 只对**已登录**用户暴露：`/v1/ping` 匿名可达，把部署形态广播给任何扫描器没有必要；
+     * 而 banner 只对登录后的用户有意义。`mock` 时前端顶栏必须常驻提示且不可关闭
+     * —— 假内容不可见等于没有声明（`PAGE-07`/`LOG-04` 同族教训）。
+     * 该字段**不参与任何计费/权限分支**。
+     */
+    return { ...result, llm_mode: llmStatus(env).mode };
   }
 
   /**
@@ -328,14 +399,24 @@ export class AuthController {
     return this.auth.renew(input.master_token, req.cookies?.refresh_token);
   }
 
-  private setRefreshCookie(res: FastifyReply, token: string): void {
+  /**
+   * 写 refresh Cookie。
+   *
+   * `keepLogin`（第 130 批补）：`false` → **不发 `maxAge`**，浏览器按"会话 Cookie"处理，
+   * 关掉浏览器即失效；`true`/缺省 → 发 `maxAge=REFRESH_TTL_S`（14 天），关浏览器仍保留。
+   *
+   * 为什么由服务端决定而不是前端：前端那个 `keepLogin` 复选框此前是**装饰性控件**
+   * （`login()` 从未把值传出去），用户勾不勾都一样 —— 这类"看起来有效的开关"比没有更坏。
+   * 现在语义落在唯一能生效的地方：Cookie 的存活期。
+   */
+  private setRefreshCookie(res: FastifyReply, token: string, keepLogin?: boolean): void {
     res.setCookie("refresh_token", token, {
       httpOnly: true,
       // 默认：production 走 Secure；可由 COOKIE_SECURE 显式覆盖（本地 HTTP 部署需为 false）
       secure: env.COOKIE_SECURE ?? env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/v1/auth",
-      maxAge: env.REFRESH_TTL_S,
+      ...(keepLogin === false ? {} : { maxAge: env.REFRESH_TTL_S }),
     });
   }
 }

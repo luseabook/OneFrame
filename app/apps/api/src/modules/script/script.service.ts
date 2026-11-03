@@ -110,6 +110,16 @@ function episodeDto(row: EpisodeRow) {
     synopsis: row.synopsis,
     script_text: row.scriptText,
     status: row.status,
+    /**
+     * 产物级「这份文本是不是 mock 假文案」（api-spec §33.1 新增，2026-11-03）。
+     *
+     * 与 `GET /v1/me` 的 `llm_mode` **不是同一个问题**：
+     * - `llm_mode` 是**进程级**：这台机器现在在跑什么；
+     * - `llm_mock` 是**产物级**：我手上这一集的大纲/正文是不是假的。
+     * 切到 real 之后 `llm_mode` 立刻变 `real`，而库里 mock 期生成的产物依然是假的 ——
+     * 只有产物级字段能标出这一点（这也是为什么导出 manifest 里要一并带上）。
+     */
+    llm_mock: row.llmMock,
   };
 }
 
@@ -600,6 +610,8 @@ export class ScriptService {
             epNo: ep.ep_no,
             title: ep.title,
             synopsis: ep.synopsis,
+            // N-12：把"这份大纲是不是假文案"落到行级，导出时随 manifest 走
+            llmMock: this.llm.isMock(),
             status: 1,
           })),
         )
@@ -880,7 +892,13 @@ export class ScriptService {
     });
     const [row] = await db
       .update(episodes)
-      .set({ scriptText: draft.script_text, updatedAt: new Date() })
+      .set({
+        scriptText: draft.script_text,
+        // N-12：正文同样要标"是否假文案"（大纲与正文可能在不同进程/不同时间生成，
+        // 所以两处都写，不靠"大纲是 mock 就推定正文也是"）
+        llmMock: this.llm.isMock(),
+        updatedAt: new Date(),
+      })
       .where(eq(episodes.id, episode.id))
       .returning();
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "episode not found");

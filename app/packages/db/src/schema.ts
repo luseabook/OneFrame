@@ -65,9 +65,18 @@ export const identities = pgTable(
     userId: bigint("user_id", { mode: "bigint" })
       .notNull()
       .references(() => users.id),
-    provider: text("provider").notNull(), // phone|wechat|apple
-    phoneHash: text("phone_hash"), // HMAC-SHA256(phone)，等值查询/唯一
-    phoneCipher: text("phone_cipher"), // AES-GCM(phone)，展示/发码
+    provider: text("provider").notNull(), // phone|email|wechat|qq|apple|douyin
+    /**
+     * 标识符的 HMAC（等值查询/唯一）。
+     *
+     * 第 130 批（2026-11-03，邮箱+密码登录）：列名是历史包袱，语义已是「**该 provider 的标识符哈希**」——
+     * `provider="phone"` 存手机号 HMAC，`provider="email"` 存邮箱（小写归一化后）HMAC。
+     * 复用而不是新增列，是为了让唯一性直接继承下面那条 `uq_identities_phone(provider, phone_hash)`，
+     * 避免再引入一套"双唯一索引"的维护面。改名要动全部读写点，收益只有命名——不做。
+     */
+    phoneHash: text("phone_hash"),
+    /** 标识符的 AES-GCM 密文（展示/回填用）；provider=email 时存邮箱小写明文密文 */
+    phoneCipher: text("phone_cipher"),
     externalId: text("external_id"), // 开放平台 unionid；provider=phone 时 NULL
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -77,6 +86,36 @@ export const identities = pgTable(
     uniqueIndex("uq_identities_external").on(t.provider, t.externalId),
     index("idx_identities_user").on(t.userId),
   ],
+);
+
+/**
+ * 登录凭据（密码类），与 `identities` 分表（第 130 批，2026-11-03）。
+ *
+ * 为什么不塞进 `identities`：`identities` 回答的是「**这个人是哪个外部身份**」
+ * （手机号/微信 unionid…），密码回答的是「**怎么证明他是这个人**」。两者生命周期不同：
+ * 改密码不动身份，换绑身份不动密码；且密码属敏感凭据，单独成表便于单独加密、审计与轮换。
+ *
+ * 与 `identities` 的关系：一条 `identities(provider='email', phone_hash=<email HMAC>)`
+ * 记录"这个邮箱属于谁"，`user_credentials` 记录"这个人的密码哈希"。
+ * **注册必须两者同事务写入**，否则会出现"能查到身份却永远登不进去"或反之。
+ */
+export const userCredentials = pgTable(
+  "user_credentials",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    /** 密码哈希：`scrypt$N$r$p$<saltB64>$<hashB64>`（含随机盐与参数，便于将来升级参数而不失效） */
+    passwordHash: text("password_hash").notNull(),
+    /** 算法标识（当前只有 `scrypt`；将来 argon2 可并存，靠这一列区分） */
+    algo: text("algo").notNull().default("scrypt"),
+    /** 最近一次改密时间：改密后旧 refresh token 应失效（由 token 层实现） */
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_user_credentials_user").on(t.userId)],
 );
 
 export const spaces = pgTable("spaces", {
@@ -747,6 +786,15 @@ export const episodes = pgTable(
     synopsis: text("synopsis"), // 大纲梗概（PRD F2②）
     scriptText: text("script_text"),
     status: smallint("status").notNull().default(1), // 1草稿 2确认
+    /**
+     * 该集的 synopsis / scriptText 是否由 **mock LLM** 生成（N-12，2026-11-03）。
+     *
+     * 为什么必须在**行级**记录，而不是读进程 env：gauge 只能证明"这个进程在 mock"，
+     * 证明不了"这份大纲是假的"。文本一旦被导出、贴给客户，就脱离了系统，
+     * 而 `llm_mock` 会随产物 manifest 一起走。与 AI 双标识（视频/图片）同源。
+     * 默认 false：老数据（真模型或人工录入）不被打标。
+     */
+    llmMock: boolean("llm_mock").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

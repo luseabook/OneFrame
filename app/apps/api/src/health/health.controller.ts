@@ -3,6 +3,8 @@ import type { FastifyReply } from "fastify";
 import { Public } from "../common/public.decorator";
 import { pingDb } from "../db/database";
 import { pingRedis } from "../redis/redis";
+import { env } from "../config/env";
+import { llmStatus } from "./llm-status";
 
 /**
  * 健康检查三端点（deployment.md §3）。
@@ -33,9 +35,14 @@ export class HealthController {
     const [db, redis] = await Promise.all([pingDb(), pingRedis()]);
     const ok = db && redis;
     res.code(ok ? 200 : 503);
+    const llm = llmStatus(env);
     return {
       status: ok ? "ok" : "unavailable",
       checks: { db: db ? "up" : "down", redis: redis ? "up" : "down" },
+      // 字段名与 api-spec §33.1 一致（`llmMode` / `mockAllowed`）。
+      // **刻意不参与 ok 判定**：mock 是配置状态而非依赖故障，不该让 LB 摘掉可用实例。
+      llmMode: llm.mode,
+      mockAllowed: llm.mock_allowed,
     };
   }
 
@@ -45,11 +52,14 @@ export class HealthController {
     const [db, redis] = await Promise.all([pingDb(), pingRedis()]);
     const ok = db && redis;
     res.code(ok ? 200 : 503);
+    const llm = llmStatus(env);
     return {
       status: ok ? "ok" : "degraded",
       checks: { db: db ? "up" : "down", redis: redis ? "up" : "down" },
       uptime_s: Math.round(process.uptime()),
       version: process.env.APP_VERSION ?? "dev",
+      llmMode: llm.mode,
+      mockAllowed: llm.mock_allowed,
     };
   }
 }

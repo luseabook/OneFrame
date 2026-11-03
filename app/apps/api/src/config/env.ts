@@ -30,6 +30,18 @@ export function smsIpHourlyLimitDefault(nodeEnv: string | undefined): number {
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  /**
+   * 监听地址。默认 `127.0.0.1`（**loopback**）。
+   *
+   * 为什么不是 `0.0.0.0`：此前 `main.ts` 把监听地址硬编码成字面量 `"0.0.0.0"`，
+   * 于是"只让本机 nginx 反代"这件事只能靠防火墙兜着 —— 验收环境实测就是
+   * `api` 听 `0.0.0.0:3000`、外部可达性完全依赖 ufw（N-09）。API 的正确暴露面是
+   * 反代，不是网卡：默认 loopback，“要暴露”必须是部署者的显式决定。
+   *
+   * 容器形态需要显式覆盖：`docker-compose.prod.yml` 的 `x-app-env` 已写 `HOST: 0.0.0.0`
+   * （容器内 nginx 经服务名访问 api，走的是容器网络而非宿主网卡）。
+   */
+  HOST: z.string().min(1).default("127.0.0.1"),
   DATABASE_URL: z.string().default("postgres://app:app@localhost:5432/app"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   WORKER_ID: z.coerce.number().int().min(0).max(1023).optional(),
@@ -55,6 +67,18 @@ const envSchema = z.object({
   AUTH_REQUIRE_INVITE: z
     .enum(["true", "false"])
     .default("false")
+    .transform((v) => v === "true"),
+  /**
+   * **邮箱自助注册**是否强制邀请码（第 131 批，2026-11-03）。默认 **true**。
+   *
+   * 为什么默认开：注册端点公开、每个新账号发 80 分新人礼包，公网开放等于给刷分留口子；
+   * 前端"必填"只能防误操作，脚本一条 curl 就绕过。默认值必须站在安全一侧。
+   * 为什么做成开关而不是硬编码：等真实支付、风控与额度策略就绪后要放开注册，
+   * 那时应当只改 env，不必再动代码与发版。
+   */
+  AUTH_EMAIL_REQUIRE_INVITE: z
+    .enum(["true", "false"])
+    .default("true")
     .transform((v) => v === "true"),
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
   // 短信 IP 频控阈值（条/小时）：测试环境默认放宽，否则多测试文件共用
@@ -123,6 +147,11 @@ const envSchema = z.object({
 
   // LLM 步骤（大纲/角色/剧本/分镜）：mock 用于本地/CI；real 需 DEEPSEEK_API_KEY
   LLM_MODE: z.enum(["mock", "real"]).default("mock"),
+  /**
+   * 验收环境逃生舱：只认字面 `"1"`（占位登记，真正的判定在 `collectLlmProblems` 里，
+   * 因为 `true`/`yes`/`on` 必须**响亮失败**而不是按布尔接受表放宽）。
+   */
+  ONEFRAME_ALLOW_MOCK_LLM: z.string().optional(),
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default("deepseek-chat"),
@@ -505,6 +534,22 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
 }
 
 /**
+ * 验收逃生舱的唯一合法取值。**刻意不用 `1/true/yes/on` 接受表**：
+ * 这个键代表"允许生产输出假文案"，放宽拼写只会让"悄悄开着"更容易。
+ */
+export const MOCK_LLM_ESCAPE_ON = "1";
+
+/** 原始（未校验）取值：空白视作未设置 */
+export function mockLlmEscapeRaw(raw: RawEnv): string {
+  return rawValue(raw, "ONEFRAME_ALLOW_MOCK_LLM") ?? "";
+}
+
+/** 是否允许生产用 mock 文案（**只认字面 "1"**，其它拼写由 `collectLlmProblems` 拒绝） */
+export function mockLlmAllowed(raw: RawEnv): boolean {
+  return mockLlmEscapeRaw(raw) === MOCK_LLM_ESCAPE_ON;
+}
+
+/**
  * LLM 步骤配置一致性（F0.2 / 2026-10-26）。
  *
  * 背景：`LlmService` 在 `LLM_MODE=real` 但缺 `DEEPSEEK_API_KEY` 时会**静默回落**
@@ -512,13 +557,71 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
  * 生产会"看起来在跑、实际输出假内容"，且与 worker 侧"缺 Key 硬失败"的策略不一致。
  * 这里把该组合变为**启动即失败**，让配置错误暴露在部署阶段而不是用户内容里。
  *
- * 注意：未显式设置 `LLM_MODE` 时默认 mock（本地/CI 正常可用），不算问题。
+ * ## 2026-11-03 收紧：生产禁止 `LLM_MODE=mock`（与 worker 的 ADAPTER_MODE 同口径）
+ *
+ * 原实现只在 `real` 且缺 Key 时报错，于是 **`LLM_MODE=mock`（或不设置，schema 默认 mock）
+ * 在生产一路静默通过**：大纲/角色/剧本/分镜全输出确定性假文案，启动成功、日志干净。
+ * worker 侧同类敞口（`ADAPTER_MODE=mock`）早已硬拦（`apps/worker/src/env-guard.ts`），
+ * api 侧漏了。现在三条判据：
+ * - 生产**未显式设置** `LLM_MODE` → 拒绝（默认值 mock 不能替部署者决定）；
+ * - 生产显式写 `mock` → 拒绝（除非开了下面的验收逃生舱）；
+ * - `real` 但缺/空 `DEEPSEEK_API_KEY` → 拒绝。
+ * 非生产不受影响（本地/CI 不设仍是 mock）。
+ *
+ * ## 2026-11-03（同日）加验收逃生舱 `ONEFRAME_ALLOW_MOCK_LLM`（决策记录见 launch-gap §8）
+ *
+ * 为什么必须有：验收机上 `ADAPTER_MODE=real` 但没有任何供应商 Key、`LLM_MODE=mock`，
+ * 硬拦的结果是**新构建一部署 api 就起不来**，连带把 N-09（`HOST=127.0.0.1`）也压住发不出去。
+ * 但"假文案"比"少一行备案号"更隐蔽 —— 接口结构完全正确、只有内容是假的，
+ * 所以它比 ICP 逃生舱多四道限制：
+ * 1. **只认字面 `1`**：写 `true`/`yes`/`on` 一律**响亮失败并回显实际值**，
+ *    绝不按接受表放宽（放宽等于让"悄悄开着"更容易）；
+ * 2. **可被机器判定**：`/v1/healthz/ready` 回 `llm.mode` / `llm.mock_allowed`，
+ *    `/v1/metrics` 出 `oneframe_llm_mock_allowed` / `oneframe_llm_mock_active` 两个 gauge；
+ * 3. 对外门禁 `STRICT=1` 下该变量存在即判红（Ops 的门禁项）；
+ * 4. 时间盒：真实 Key 到位即删除本变量。
+ *
+ * 它只解掉"`mock` 被拒"这一条，`LLM_MODE` 仍须**显式**写（不写照样拒绝）。
  */
 export function collectLlmProblems(raw: RawEnv): string[] {
-  const llmMode = rawValue(raw, "LLM_MODE") ?? "mock";
-  if (llmMode !== "real") return [];
-  if (rawValue(raw, "DEEPSEEK_API_KEY") !== undefined) return [];
-  return ["LLM_MODE=real 但缺少 DEEPSEEK_API_KEY：会静默回落到 mock 文案，必须显式配置或改回 LLM_MODE=mock"];
+  const problems: string[] = [];
+  const escapeRaw = mockLlmEscapeRaw(raw);
+  const escapeOk = escapeRaw === "" || escapeRaw === MOCK_LLM_ESCAPE_ON;
+  if (!escapeOk) {
+    problems.push(
+      `ONEFRAME_ALLOW_MOCK_LLM 只认字符串 "1"（当前：${JSON.stringify(escapeRaw)}）` +
+        "；`true`/`yes`/`on` 都不算，这是刻意收紧的：逃生舱宁可失败得很吵，也不能悄悄开着",
+    );
+  }
+  const mockAllowed = escapeRaw === MOCK_LLM_ESCAPE_ON;
+
+  const llmMode = rawValue(raw, "LLM_MODE");
+  if (llmMode === undefined) {
+    problems.push(
+      "LLM_MODE 必须显式设置为 real（未设置时默认 mock：大纲/角色/剧本/分镜会输出假文案，且启动不报错）",
+    );
+    return problems;
+  }
+  if (llmMode === "mock") {
+    if (!mockAllowed) {
+      problems.push(
+        "LLM_MODE=mock 在生产被拒绝（大纲/角色/剧本/分镜会输出确定性假文案）；" +
+          "真实验收环境若确实需要，请显式设置 ONEFRAME_ALLOW_MOCK_LLM=1",
+      );
+    }
+    return problems;
+  }
+  if (llmMode !== "real") {
+    problems.push(`LLM_MODE 只能是 real 或 mock（当前：${llmMode}），与 worker 的 ADAPTER_MODE 同口径`);
+    return problems;
+  }
+  if (rawValue(raw, "DEEPSEEK_API_KEY") === undefined) {
+    problems.push(
+      "LLM_MODE=real 但缺少 DEEPSEEK_API_KEY：会静默回落到 mock 文案，生产必须补真实 Key" +
+        "（确需假文案的验收环境请显式设 LLM_MODE=mock + ONEFRAME_ALLOW_MOCK_LLM=1）",
+    );
+  }
+  return problems;
 }
 
 /**
@@ -537,9 +640,15 @@ export function buildEnv(raw: RawEnv = process.env): Env {
   return {
     ...parsed,
     SMS_IP_HOURLY_LIMIT: parsed.SMS_IP_HOURLY_LIMIT ?? smsIpHourlyLimitDefault(parsed.NODE_ENV),
+    // 运行期可判定的「本进程是否允许 mock 文案」：/healthz/ready 与 /metrics 都读它，
+    // 让「假文案在跑」这件事**不用翻日志就能被机器判定**（Architect 的 B 方案约束 2）。
+    LLM_MOCK_ALLOWED: mockLlmAllowed(raw),
   };
 }
 
-export type Env = z.infer<typeof envSchema> & { SMS_IP_HOURLY_LIMIT: number };
+export type Env = z.infer<typeof envSchema> & {
+  SMS_IP_HOURLY_LIMIT: number;
+  LLM_MOCK_ALLOWED: boolean;
+};
 
 export const env = buildEnv();

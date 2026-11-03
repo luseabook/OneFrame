@@ -13,6 +13,7 @@ import {
   spaceMembers,
   spaces,
   tasks,
+  userCredentials,
   users,
   waitlistEntries,
 } from "@app/db";
@@ -20,8 +21,31 @@ import { AppError, ErrorCode, newId } from "@app/shared";
 import { MAX_TAG_ITEMS, parseListParam } from "../../common/list-param";
 import { env } from "../../config/env";
 import { db } from "../../db/database";
-import { decryptPhone, encryptPhone, hashPhone, maskPhone } from "./crypto";
+import {
+  EMAIL_SHAPE,
+  decryptPhone,
+  encryptPhone,
+  encryptSecret,
+  hashIdentifier,
+  hashPassword,
+  hashPhone,
+  maskPhone,
+  normalizeEmail,
+  passwordProblem,
+  verifyPassword,
+} from "./crypto";
 import { SmsService } from "./sms.service";
+import { RedisService } from "../../redis/redis.service";
+import { COUNTER_RATE_LIMIT_UNAVAILABLE, bumpCounter } from "../../health/runtime-counters";
+
+/**
+ * 密码登录失败限流（SEC-04）：10 次 / 300 秒，口径与 `admin-auth` 的
+ * `ADMIN_LOGIN_MAX_FAILURES` / `ADMIN_LOGIN_FAIL_TTL_S` 完全一致。
+ * 这两个数是"人手误输不会触发、脚本撞库很快触发"的交点：正常用户 5 分钟内连错 10 次
+ * 已经不正常；而 300s 窗口让攻击者的有效速率掉到 2 次/分钟级。
+ */
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_FAIL_TTL_S = 300;
 import { TokenService } from "./token.service";
 
 /**
@@ -56,6 +80,7 @@ export class AuthService {
   constructor(
     @Inject(SmsService) private readonly sms: SmsService,
     @Inject(TokenService) private readonly tokens: TokenService,
+    @Inject(RedisService) private readonly redis: RedisService,
   ) {}
 
   sendCode(phone: string, ip?: string): Promise<{ debug_code?: string }> {
@@ -137,74 +162,12 @@ export class AuthService {
       if (ageConfirmed !== true) {
         throw new AppError(ErrorCode.INVALID_PARAM, "请确认已满 18 周岁", { field: "age_confirmed" });
       }
-      const created = await db.transaction(async (tx) => {
-        const uid = newId();
-        const sid = newId();
-        // 合规留痕（compliance launch-checklist B3/C3）：建号即记录成年确认时间，
-        // 用于举证「已确认年满 18 周岁」，而不只是靠请求参数临时校验。
-        await tx.insert(users).values({
-          id: uid,
-          nickname: `用户${phone.slice(-4)}`,
-          ageDeclaredAt: new Date(),
-        });
-        await tx.insert(spaces).values({ id: sid, ownerUserId: uid });
-        await tx.insert(spaceMembers).values({ spaceId: sid, userId: uid, role: 1 });
-        await tx.insert(creditAccounts).values({ spaceId: sid });
-        await tx.insert(identities).values({
-          id: newId(),
-          userId: uid,
-          provider: "phone",
-          phoneHash: hash,
-          phoneCipher: encryptPhone(phone),
-        });
-
-        if (env.GIFT_CREDITS > 0) {
-          await creditIn(tx, {
-            spaceId: sid,
-            amount: env.GIFT_CREDITS,
-            kind: "gift",
-            memo: "signup gift",
-          });
-        }
-
-        if (inviteCode) {
-          const [invite] = await tx
-            .select()
-            .from(inviteCodes)
-            .where(eq(inviteCodes.code, inviteCode))
-            .for("update");
-          const valid =
-            invite &&
-            invite.status === 1 &&
-            invite.usedCount < invite.maxUses &&
-            (!invite.expiresAt || invite.expiresAt.getTime() > Date.now());
-          if (!valid) {
-            throw new AppError(ErrorCode.INVALID_PARAM, "邀请码无效或已用尽", { field: "invite_code" });
-          }
-          const usedCount = invite.usedCount + 1;
-          await tx
-            .update(inviteCodes)
-            .set({ usedCount, status: usedCount >= invite.maxUses ? 3 : 1 })
-            .where(eq(inviteCodes.id, invite.id));
-          await tx.insert(inviteRedemptions).values({
-            id: newId(),
-            codeId: invite.id,
-            spaceId: sid,
-          });
-          if (invite.credits > 0) {
-            await creditIn(tx, {
-              spaceId: sid,
-              amount: invite.credits,
-              kind: "gift",
-              codeId: invite.id,
-              memo: "invite gift",
-            });
-          }
-        } else if (env.AUTH_REQUIRE_INVITE) {
-          throw new AppError(ErrorCode.INVALID_PARAM, "Alpha 期需要邀请码", { field: "invite_code" });
-        }
-
-        return { uid, sid };
+      const created = await this.provisionAccount({
+        provider: "phone",
+        identifierHash: hash,
+        identifierCipher: encryptPhone(phone),
+        nickname: `用户${phone.slice(-4)}`,
+        inviteCode,
       });
       userId = created.uid;
       spaceId = created.sid;
@@ -215,8 +178,124 @@ export class AuthService {
       }
     }
 
+    return this.issueSession(userId, spaceId);
+  }
+
+  /**
+   * 建号骨架（**唯一一处**）：users → spaces → space_members → credit_accounts → identities
+   * （+ 可选 user_credentials）→ 新人礼包 → 邀请码核销。
+   *
+   * 为什么抽出来（第 130 批）：手机号登录与邮箱注册都必须走这同一串副作用。
+   * 复制一份的后果不是"代码丑"，而是**三样东西迟早分叉**：邀请码核销、新人礼包、
+   * `age_declared_at` 合规留痕。任何一样在新路径上漏掉，类型检查与 e2e 都不会报错，
+   * 只会在上线后表现为"邮箱注册的用户没有年龄留痕"这类合规缺口。
+   */
+  private async provisionAccount(input: {
+    provider: string;
+    identifierHash: string;
+    identifierCipher: string;
+    nickname: string;
+    inviteCode?: string;
+    /** 有值则同事务写 `user_credentials`（密码类登录用） */
+    passwordHash?: string;
+  }): Promise<{ uid: bigint; sid: bigint }> {
+    return db.transaction(async (tx) => {
+      const uid = newId();
+      const sid = newId();
+
+      /**
+       * 邀请码**先校验、再落任何数据**（第 131 批，2026-11-03）。
+       *
+       * 为什么顺序要这么严：
+       * 1. 回滚只能保证"失败不落库"，表达不了「礼包只在核销成功后发放」这条**业务顺序**。
+       *    一旦将来把发礼包挪出事务（异步发券、消息队列），回滚就不存在了，顺序是唯一保障。
+       * 2. `for("update")` 同时是并发闸：两个请求用同一枚邀请码时，后者会等前者提交后
+       *    重读 `used_count`，从而看到"已用尽"——否则 `maxUses=1` 的码能被同时用两次。
+       */
+      let invite: typeof inviteCodes.$inferSelect | undefined;
+      if (input.inviteCode) {
+        const [row] = await tx
+          .select()
+          .from(inviteCodes)
+          .where(eq(inviteCodes.code, input.inviteCode))
+          .for("update");
+        const valid =
+          row &&
+          row.status === 1 &&
+          row.usedCount < row.maxUses &&
+          (!row.expiresAt || row.expiresAt.getTime() > Date.now());
+        if (!valid) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "邀请码无效或已用尽", { field: "invite_code" });
+        }
+        invite = row;
+      } else if (env.AUTH_REQUIRE_INVITE) {
+        throw new AppError(ErrorCode.INVALID_PARAM, "Alpha 期需要邀请码", { field: "invite_code" });
+      }
+      // 合规留痕（compliance launch-checklist B3/C3）：建号即记录成年确认时间，
+      // 用于举证「已确认年满 18 周岁」，而不只是靠请求参数临时校验。
+      await tx.insert(users).values({
+        id: uid,
+        nickname: input.nickname,
+        ageDeclaredAt: new Date(),
+      });
+      await tx.insert(spaces).values({ id: sid, ownerUserId: uid });
+      await tx.insert(spaceMembers).values({ spaceId: sid, userId: uid, role: 1 });
+      await tx.insert(creditAccounts).values({ spaceId: sid });
+      await tx.insert(identities).values({
+        id: newId(),
+        userId: uid,
+        provider: input.provider,
+        phoneHash: input.identifierHash,
+        phoneCipher: input.identifierCipher,
+      });
+      if (input.passwordHash) {
+        await tx.insert(userCredentials).values({
+          id: newId(),
+          userId: uid,
+          passwordHash: input.passwordHash,
+        });
+      }
+
+      if (env.GIFT_CREDITS > 0) {
+        await creditIn(tx, {
+          spaceId: sid,
+          amount: env.GIFT_CREDITS,
+          kind: "gift",
+          memo: "signup gift",
+        });
+      }
+
+      if (invite) {
+        const usedCount = invite.usedCount + 1;
+        await tx
+          .update(inviteCodes)
+          .set({ usedCount, status: usedCount >= invite.maxUses ? 3 : 1 })
+          .where(eq(inviteCodes.id, invite.id));
+        await tx.insert(inviteRedemptions).values({
+          id: newId(),
+          codeId: invite.id,
+          spaceId: sid,
+        });
+        if (invite.credits > 0) {
+          await creditIn(tx, {
+            spaceId: sid,
+            amount: invite.credits,
+            kind: "gift",
+            codeId: invite.id,
+            memo: "invite gift",
+          });
+        }
+      }
+
+      return { uid, sid };
+    });
+  }
+
+  /** 签发会话（access + refresh + master）。所有登录方式共用，保证返回形状一致 */
+  private async issueSession(userId: bigint, spaceId: bigint): Promise<LoginResult> {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (!user) throw new AppError(ErrorCode.INTERNAL, "user missing");
+    if (user.status !== 1) throw new AppError(ErrorCode.FORBIDDEN, "账号已被停用");
 
     const access = this.tokens.issueAccess(String(userId), String(spaceId));
     const refreshToken = await this.tokens.issueRefresh(String(userId), String(spaceId));
@@ -230,6 +309,160 @@ export class AuthService {
       master_token: master.masterToken,
       master_expires_in: master.expiresIn,
     };
+  }
+
+  /**
+   * 邮箱 + 密码注册（api-spec §33.6，第 130 批）：注册即登录。
+   *
+   * 为什么"注册即登录"而不是先发验证邮件：邮件通道同样依赖外部服务（且未接），
+   * 若把首登卡在验证上，等于又造一条"上线即无人能登"的路。先落 `identities(provider=email)`
+   * + `user_credentials`，邮件验证作为**后补**（AAL 提升时再做），不阻塞可用性。
+   */
+  async registerWithPassword(input: {
+    email: string;
+    password: string;
+    inviteCode?: string;
+    ageConfirmed?: boolean;
+  }): Promise<LoginResult> {
+    const email = normalizeEmail(input.email);
+    if (!EMAIL_SHAPE.test(email)) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "邮箱格式不正确", { field: "email" });
+    }
+    const weak = passwordProblem(input.password, email);
+    if (weak) throw new AppError(ErrorCode.INVALID_PARAM, weak, { field: "password" });
+
+    /**
+     * 服务端强制邀请码（第 131 批，2026-11-03）。
+     *
+     * 为什么是**服务端**而不是"前端必填"：注册端点是公开的，脚本一条 curl 就能绕过任何 UI 校验；
+     * 而每个新账号会发 80 分新人礼包 —— 公网开放等于给刷分留了个免费口子。
+     * 两种错误必须是**不同 msg**：用户要能分清"我没填"和"我填错了"，
+     * 混成一句话会让"邀请码输错"看起来像"系统没让我填"。
+     *
+     * 开关：`AUTH_EMAIL_REQUIRE_INVITE`（默认 true）。等风控/额度策略就绪后可以只改 env 放开，
+     * 不需要再动代码——这是刻意留的，避免"临时收紧"变成"永久硬编码"。
+     */
+    const inviteCode = (input.inviteCode ?? "").trim();
+    if (env.AUTH_EMAIL_REQUIRE_INVITE && inviteCode === "") {
+      throw new AppError(ErrorCode.INVALID_PARAM, "请填写邀请码", { field: "invite_code" });
+    }
+
+    if (input.ageConfirmed !== true) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "请确认已满 18 周岁", { field: "age_confirmed" });
+    }
+
+    const hash = hashIdentifier(email);
+    const [existing] = await db
+      .select()
+      .from(identities)
+      .where(and(eq(identities.provider, "email"), eq(identities.phoneHash, hash)));
+    if (existing) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "该邮箱已注册，请直接登录", { field: "email" });
+    }
+
+    const created = await this.provisionAccount({
+      provider: "email",
+      identifierHash: hash,
+      // 邮箱密文走**域分离**的通用密文：不复用 `encryptPhone` 的派生 key，
+      // 否则"这份密文一定是手机号"这条不变量就不成立了。
+      identifierCipher: encryptSecret(email),
+      nickname: email.split("@")[0]!.slice(0, 20) || "用户",
+      inviteCode: input.inviteCode,
+      passwordHash: hashPassword(input.password),
+    });
+
+    if (env.SEED_SAMPLE_PROJECT) {
+      await this.createSampleProject(created.sid).catch(() => undefined);
+    }
+
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, created.uid));
+    return this.issueSession(created.uid, created.sid);
+  }
+
+  /**
+   * 密码登录（api-spec §33.6）：`identifier` 现在接受**邮箱**；手机号密码登录需先在
+   * `user_credentials` 上有行（本期未开放，见 §9 排期），传入手机号会得到"账号或密码不正确"
+   * ——**失败信息统一**是刻意的：区分"没这个账号"和"密码错"等于把注册过的邮箱交给攻击者枚举。
+   */
+  async loginWithPassword(input: { identifier: string; password: string; ip?: string }): Promise<LoginResult> {
+    const raw = input.identifier.trim();
+    if (raw === "") {
+      throw new AppError(ErrorCode.INVALID_PARAM, "请输入邮箱", { field: "identifier" });
+    }
+    if (!raw.includes("@")) {
+      // 手机号密码登录尚未开放：明确拒绝而不是静默落到短信路径（那会让前端以为密码登录成功）
+      throw new AppError(ErrorCode.INVALID_PARAM, "手机号密码登录暂未开放，请用邮箱或验证码登录", {
+        field: "identifier",
+      });
+    }
+    const email = normalizeEmail(raw);
+    const hash = hashIdentifier(email);
+
+    /**
+     * 失败限流（SEC-04，2026-11-03）：`<namespace>:login:fail:<identifier 哈希>:<ip>`。
+     *
+     * 为什么必须有：`POST /v1/auth/login/password` 是**唯一无验证码、无短信成本**的凭据入口，
+     * 露天放着等于给撞库留一个"随便试"的口子；短信路径有 Redis 计数，这条此前没有。
+     * 两个维度拼（账号哈希 + IP）与 admin 登录同口径：只按账号能被用来锁死他人，
+     * 只按 IP 能被僵尸网络绕过。
+     * key 里用**标识符哈希**而不是邮箱明文：Redis 常被 dump/排查，不该顺手带走账号清单。
+     *
+     * 计数是旁路：Redis 抖动时退化为不限流，**绝不**因为计数失败而拒绝一次正确的密码。
+     */
+    const failKey = `auth:login:fail:${hashIdentifier(email)}:${input.ip && input.ip !== "" ? input.ip : "unknown"}`;
+    let failures = 0;
+    try {
+      failures = Number(await this.redis.get(failKey)) || 0;
+    } catch {
+      // fail-open：计数读不到就不限流（可用性优先），但**必须留下可观测痕迹**——
+      // 否则"Redis 挂着、防护静默消失"这件事没有任何指标能看出来（Ops 的 P2）。
+      bumpCounter(COUNTER_RATE_LIMIT_UNAVAILABLE);
+      failures = 0;
+    }
+    if (failures >= LOGIN_MAX_FAILURES) {
+      throw new AppError(ErrorCode.RATE_LIMITED, "登录失败次数过多，请稍后再试");
+    }
+    const recordFailure = async (): Promise<void> => {
+      try {
+        await this.redis.incrWithTtl(failKey, LOGIN_FAIL_TTL_S);
+      } catch {
+        // 同上：写不进计数也要让"防护没生效"可见
+        bumpCounter(COUNTER_RATE_LIMIT_UNAVAILABLE);
+        // 计数写失败不影响"这次登录失败"的判定
+      }
+    };
+
+    const [identity] = await db
+      .select()
+      .from(identities)
+      .where(and(eq(identities.provider, "email"), eq(identities.phoneHash, hash)));
+
+    const badCredentials = new AppError(ErrorCode.UNAUTHORIZED, "账号或密码不正确");
+    if (!identity) {
+      // 与"密码错"同一条错误、同一条路径：不做提前返回，避免时序差异被用来枚举账号
+      verifyPassword(input.password, hashPassword("timing-equalizer"));
+      await recordFailure();
+      throw badCredentials;
+    }
+    const [credential] = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.userId, identity.userId));
+    if (!credential || !verifyPassword(input.password, credential.passwordHash)) {
+      await recordFailure();
+      throw badCredentials;
+    }
+
+    const [space] = await db.select().from(spaces).where(eq(spaces.ownerUserId, identity.userId));
+    if (!space) throw new AppError(ErrorCode.INTERNAL, "user space missing");
+    // 成功即清零：避免"输错几次后正确登录，计数仍挂在那里"把账号拖进冷却
+    try {
+      await this.redis.del(failKey);
+    } catch {
+      // 忽略：清计数失败只会多保留一次失败窗口
+    }
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, identity.userId));
+    return this.issueSession(identity.userId, space.id);
   }
 
   /**

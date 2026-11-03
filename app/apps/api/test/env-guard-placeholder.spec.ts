@@ -37,6 +37,9 @@ const prodEnv = (overrides: Record<string, string | undefined> = {}): Record<str
   COOKIE_SECURE: "true",
   METRICS_TOKEN: strong("Metrics-Token"),
   PAYMENT_LIVE: "false",
+  // 2026-11-03：生产必须显式 LLM_MODE=real 且配真实 Key（默认 mock 会静默输出假文案）
+  LLM_MODE: "real",
+  DEEPSEEK_API_KEY: strong("Deepseek-Key"),
   ...overrides,
 });
 

@@ -74,8 +74,19 @@ export class LlmService {
         })
       : null;
 
-  async outline(sourceText: string): Promise<OutlineResult> {
-    if (!this.deepseek) {
+  /**
+   * 本进程是否在输出**确定性假文案**（N-12）。
+   *
+   * 判据与各方法内的分支同源：`deepseek === null` 就是走 mock 分支。
+   * 由产物写入路径调用，把"假"这个事实落到**行级元数据**（`episodes.llm_mock`），
+   * 这样导出包 manifest 能自证来源 —— 进程级 gauge 只能证明"这台机器在 mock"，
+   * 证明不了"这份大纲是假的"。
+   */
+  isMock(): boolean {
+    return this.deepseek === null;
+  }
+
+  async outline(sourceText: string): Promise<OutlineResult> {    if (!this.deepseek) {
       const excerpt = sourceText.slice(0, 80).replace(/\s+/g, " ");
       return outlineSchema.parse({
         episodes: [1, 2, 3].map((ep) => ({

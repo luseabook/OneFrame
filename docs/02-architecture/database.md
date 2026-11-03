@@ -128,6 +128,22 @@ CREATE TABLE identities (
 );
 -- 手机号等值查询与唯一索引一律走 phone_hash；phone_cipher 仅在展示、重发短信等需要明文处解密。
 CREATE INDEX idx_identities_user ON identities(user_id);
+
+-- 登录凭据（密码类），与 identities 分表（第 130 批，2026-11-03）
+-- 为什么不塞进 identities：identities 回答「这个人是哪个外部身份」，本表回答「怎么证明他是这个人」。
+-- 改密码不动身份、换绑身份不动密码；密码属敏感凭据，单独成表便于单独加密/审计/轮换。
+-- 关系：identities(provider='email', phone_hash=<email HMAC>) 记录邮箱归属，本表记录密码哈希。
+-- 注册必须**同事务**写这两处，否则会出现「查得到身份却永远登不进去」或反之。
+CREATE TABLE user_credentials (
+  id                  BIGINT PRIMARY KEY,
+  user_id             BIGINT NOT NULL REFERENCES users(id),
+  password_hash       TEXT   NOT NULL,             -- scrypt$N$r$p$<saltB64>$<hashB64>（参数随串存储，支持换参不失效）
+  algo                TEXT   NOT NULL DEFAULT 'scrypt',
+  password_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_user_credentials_user ON user_credentials(user_id);
 CREATE TABLE spaces (
   id            BIGINT PRIMARY KEY,
   owner_user_id BIGINT NOT NULL REFERENCES users(id),

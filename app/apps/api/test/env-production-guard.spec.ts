@@ -28,6 +28,9 @@ const secureProd = (overrides: Record<string, string | undefined> = {}) => ({
   COOKIE_SECURE: "true",
   METRICS_TOKEN: "Prod-Metrics-Token-0123456789",
   PAYMENT_LIVE: "false",
+  // 2026-11-03：生产必须显式 LLM_MODE=real 且配真实 Key（默认 mock 会静默输出假文案）
+  LLM_MODE: "real",
+  DEEPSEEK_API_KEY: "Prod-Deepseek-Key-0123456789",
   ...overrides,
 });
 
@@ -81,9 +84,9 @@ describe("production env guard (api)", () => {
 
   describe("LLM 步骤不得静默回落 mock（F0.2）", () => {
     it("rejects LLM_MODE=real without DEEPSEEK_API_KEY in production", () => {
-      const problems = collectProductionProblems(secureProd({ LLM_MODE: "real" }));
+      const problems = collectProductionProblems(secureProd({ LLM_MODE: "real", DEEPSEEK_API_KEY: undefined }));
       expect(problems.join("\n")).toContain("DEEPSEEK_API_KEY");
-      expect(() => buildEnv(secureProd({ LLM_MODE: "real" }))).toThrow(/LLM_MODE=real/);
+      expect(() => buildEnv(secureProd({ LLM_MODE: "real", DEEPSEEK_API_KEY: undefined }))).toThrow(/LLM_MODE=real/);
     });
 
     it("rejects LLM_MODE=real when the key is present but empty/blank", () => {
@@ -91,16 +94,32 @@ describe("production env guard (api)", () => {
       expect(problems.join("\n")).toContain("DEEPSEEK_API_KEY");
     });
 
-    it("accepts LLM_MODE=real with a key, and LLM_MODE=mock without one", () => {
+    it("生产显式 LLM_MODE=mock 也算问题（2026-11-03 收紧，与 worker ADAPTER_MODE 同口径）", () => {
+      const joined = collectProductionProblems(secureProd({ LLM_MODE: "mock" })).join("\n");
+      // 2026-11-03 同日加了验收逃生舱后，文案变成"被拒绝 + 指出该设哪个变量"，
+      // 断言跟着改口径（原来锚定的是旧措辞"必须为 real"）。
+      expect(joined).toContain("LLM_MODE=mock 在生产被拒绝");
+      expect(joined).toContain("ONEFRAME_ALLOW_MOCK_LLM=1");
+      expect(() => buildEnv(secureProd({ LLM_MODE: "mock" }))).toThrow(/LLM_MODE=mock 在生产被拒绝/);
+    });
+
+    it("生产未显式设置 LLM_MODE 也拒绝（默认 mock 不得替部署者决定）", () => {
+      const joined = collectProductionProblems(secureProd({ LLM_MODE: undefined })).join("\n");
+      expect(joined).toContain("LLM_MODE 必须显式设置为 real");
+    });
+
+    it("accepts LLM_MODE=real with a non-blank key", () => {
       expect(collectProductionProblems(secureProd({ LLM_MODE: "real", DEEPSEEK_API_KEY: "sk-test" }))).toEqual([]);
-      expect(collectProductionProblems(secureProd({ LLM_MODE: "mock" }))).toEqual([]);
-      // 未显式设置时默认 mock，不应误报（本地/CI 正常可用）
+      // 基线（real + 真实 Key）本身必须干净
       expect(collectProductionProblems(secureProd())).toEqual([]);
     });
 
     it("does not enforce the LLM rule outside production", () => {
       expect(collectProductionProblems({ NODE_ENV: "test", LLM_MODE: "real" })).toEqual([]);
       expect(collectProductionProblems({ NODE_ENV: "development", LLM_MODE: "real" })).toEqual([]);
+      // 非生产不设或设 mock 都不该报
+      expect(collectProductionProblems({ NODE_ENV: "test" })).toEqual([]);
+      expect(collectProductionProblems({ NODE_ENV: "development", LLM_MODE: "mock" })).toEqual([]);
     });
   });
 

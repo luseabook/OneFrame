@@ -26,6 +26,8 @@ export class MetaController {
     sampled_at: string;
   }> {
     const ffmpeg = await probeFfmpeg(process.env.FFMPEG_PATH);
+    // 刻意不暴露 llm 状态：本端点匿名可达 —— 与 `GET /v1/me` 的 llm_mode 分工不同
+    // （api-spec §33.1：部署形态只对已登录用户与 /healthz/ready 暴露）。
     return { media: { ffmpeg }, sampled_at: new Date().toISOString() };
   }
 }

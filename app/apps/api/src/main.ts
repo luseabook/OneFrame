@@ -40,8 +40,9 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(new IdempotencyInterceptor(), new EnvelopeInterceptor());
   app.enableShutdownHooks();
 
-  await app.listen(env.PORT, "0.0.0.0");
-  console.log(`[api] listening on :${env.PORT} (${env.NODE_ENV})`);
+  // 监听地址：默认 loopback（env.HOST），只有部署者显式写 HOST=0.0.0.0 才对外监听。
+  await app.listen(env.PORT, env.HOST);
+  console.log(`[api] listening on ${env.HOST}:${env.PORT} (${env.NODE_ENV})`);
 
   // ── 优雅停机 ──
   // 收到 SIGTERM/SIGINT：先标记 not-ready（readiness 开始返回 503，让 LB 摘流），

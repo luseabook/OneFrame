@@ -1447,6 +1447,24 @@ LLM 复用 `script` 域的 `LlmService`（`LLM_MODE=mock|real` 单一开关，mo
 
 1. **路径前缀按域切分**（ADR-009）：竞品 `df/novel/*` → 我方 `/v1/novel/*`；竞品 film 域 → `/v1/film/*`；resource/subject 域 → `/v1/subjects/*`、`/v1/extraction/*`，项目级动作留在 `/v1/projects/:id/...`。
 2. **信封不手写**：业务数据裸返回，`EnvelopeInterceptor` 包 `{code:0,data}`；业务错误抛 `AppError` → HTTP 200 + `code≠0`。
+
+**2.1 该规则对 blob / 文件流端点同样成立（2026-11-03 明确，因两个客户端反例）**
+
+`@Res()` 直写（`sendFile`/`stream`）**不改变**错误路径的行为：全局 `AllExceptionsFilter` 仍把 `AppError` 写成
+`HTTP 200 + {code,msg,data}`（`common/http/exception.filter.ts:19-22`）。因此：
+
+| 场景 | 响应 |
+|---|---|
+| 未登录（`requireAuth` 抛 `AppError`） | **200 + `{code:401101}`** JSON |
+| 无权限/未购买（`assertEntitled` 抛 `AppError`） | **200 + `{code:403001}`** JSON |
+| 成功 | 200 + `content-type: text/markdown`（或 `text/csv` 等）+ `content-disposition` |
+
+**客户端分流判据：用 `content-type`，不要用 HTTP 状态码，也不要用“先当文本取回再 JSON.parse 试探”**——
+后者会把“正文恰好是合法 JSON”的剧本（真实存在的 Markdown/JSON 内容）误判成业务错误。
+
+反面例子（2026-11-03 现存两处，见 `launch-gap` N-13）：
+`market.controller.ts:209` 的剧本下载与 `/v1/ops/**` 的 CSV 导出，客户端都曾在“HTTP 200”路径上直接落盘，
+把错误信封写成 `.md`/`.csv` 并提示成功。
 3. **写操作幂等**：登录态写操作支持 `Idempotency-Key` 头（见 §15.9）；工具/批量类写操作另有各自的确定性去重键（见各节）。
 
 ### 15.1 小说改编链（第 2 批 · 64 路由 · `/v1/novel/*`）
@@ -3516,7 +3534,30 @@ DTO 多给一个 `cover_is_fallback: boolean`（= 没人工封面但兜底出了
 
 | 端点 | 用途 | 备注 |
 |---|---|---|
-| `GET /v1/me` | 取当前 `user` / `space` / `credits` | **没有 `auth/` 前缀**（`AuthController` 为 `@Controller()`）；无 token 时返回 `null` 而非 401 |
+| `GET /v1/me` | 取当前 `user` / `space` / `credits` / **`llm_mode`** | **没有 `auth/` 前缀**（`AuthController` 为 `@Controller()`）；无 token 时返回 `null` 而非 401 |
+
+**`llm_mode`（2026-11-03 新增，属性字）**：取值 `"real" | "mock"`，表示**当前进程**的 LLM 链路形态。
+
+- 为什么进契约：`ONEFRAME_ALLOW_MOCK_LLM=1` 允许验收机在生产构建下跑 mock 文案（见 `launch-gap` §8 决策记录），
+  但“假内容”此前只在小说详情页有角标、其它页面看不出来 —— **不可见的声明等于没有声明**。
+- 为什么放 `/v1/me` 而不是 `/v1/ping`：`/v1/ping` 匿名可达，把部署形态广播给任何扫描器没有必要；
+  banner 只对已登录用户有意义。机器侧另有 `/v1/healthz/ready` 的 `llmMode` / `mockAllowed` 供运维与门禁读取。
+- 前端判据：`llm_mode === "mock"` → 顶栏常驻提示「演示环境 · 内容为模拟生成」，**不可关闭、移动端不得隐藏**。
+- 该字段**不参与任何计费/权限分支**，仅用于展示与门禁判定。
+
+**`llm_mock`（2026-11-03 新增，产物级 —— 与上面的进程级字段是两件事，不可互相替代）**
+
+| 字段 | 位置 | 语义 | 回答的问题 |
+|---|---|---|---|
+| `llm_mode` | `GET /v1/me` 根部 | **进程级**：本进程的 LLM 链路是 `real` 还是 `mock` | 「这台机器现在在跑什么」 |
+| `llm_mock` | **episode DTO**（`episodeDto`，即 `GET /v1/projects/{id}` 系列的集对象） | **产物级**：**这一集的文本**是否由 mock 生成（落库列 `episodes.llm_mock`） | 「**我手上这份大纲是不是假的**」 |
+
+- 为什么必须两个都有：进程级字段只能证明“当前在 mock”，但历史数据是在**切换之前**生成的。
+  切到 `real` 之后，`llm_mode` 变 `real`，而库里那些 mock 期产物依然是假的 —— 只有产物级字段能标出来。
+- 取值：`boolean`，非空，默认 `false`（迁移 `0054` 纯 additive）。
+- 写入点（后端）：大纲 insert 与正文 update **两处分别打标**，不得用“大纲是 mock 就推定正文也是”。
+- 导出：`exports` 的 `manifest.json` 同时含 `llm_mock`（产物级）与 `ai_label.ai_generated`（AI 标识），两者语义不同、并存。
+- 前端判据：`episode.llm_mock === true` → 该集角标「模拟生成」；**不要再读 `user.llm_mode` 或 `summary.llm_mode` 来判断单集产物**。
 | `POST /v1/auth/refresh` | 用 httpOnly cookie 换新的 `access_token` | 登录后取 token 的推荐方式（脚本/客户端均适用） |
 
 `access_token` 里烤着登录时的空间 id；要访问**别人的空间的资源**，必须让请求带
@@ -5752,3 +5793,73 @@ I = 0      （当前未发现 —— 见 61.4）
 新增配置 `PROVIDER_DB_RESOLVE=off|fallback|on`。提交任务时按 `model_routes.priority` 升序、
 同优先级按 `weight` 选择并写入 `tasks.route_id/route_snapshot`；worker 轮询只认快照的
 `base_url/remote_model_id`，Key 按 provider 最新凭据版本解密。`off` 完全沿用环境变量，可回滚。
+
+## 17.35 邮箱 + 密码登录（第 130 批，2026-11-03）
+
+> 背景：本仓库上线前唯一登录入口是「手机号 + 短信码」，而短信网关至今**没有实现**
+> （`apps/api/src/modules/auth/sms.service.ts` 只写 Redis，没有任何网关调用）。
+> 供应商一断、或没接供应商，**一个人都进不来**。邮箱+密码是唯一不依赖第三方、
+> 也不依赖 ICP 备案的兜底通道，因此与「接真实短信」并列为 P0。
+
+### 35.1 `POST /v1/auth/email/register`（公开）
+
+```jsonc
+{ "email": "a@b.com", "password": "至少8位", "invite_code": "必填（见下）", "age_confirmed": true }
+```
+
+- **`invite_code` 服务端强制必填**（第 131 批，2026-11-03；开关 `AUTH_EMAIL_REQUIRE_INVITE`，默认 `true`）。
+  为什么不是"前端必填"就够了：注册端点**公开**、每个新账号发 80 分新人礼包，公网开放等于给刷分留口子，
+  脚本一条 `curl` 就绕过任何 UI 校验。默认值站在安全一侧；等真实支付、风控与额度策略就绪后，
+  **只改 env 即可放开**，不必改代码与发版。
+  两条错误必须是**不同 msg**（用户要能分清"没填"和"填错"）：
+  | 情形 | 业务码 | `msg` |
+  |---|---|---|
+  | 缺省 / 空串 / 全空白 | `400101` | 请填写邀请码 |
+  | 有值但不存在 / 已用尽 / 已过期 / 已停用 | `400101` | 邀请码无效或已用尽 |
+- **校验顺序**：邀请码校验在 `provisionAccount()` 事务的**最前面**，早于任何积分入账。
+  这不是"靠回滚兜底"就够的——回滚只能保证失败不落库，表达不了「礼包只在核销成功后发放」这条
+  **业务顺序**；一旦将来把发礼包挪出事务（异步发券/消息队列），顺序才是唯一保障。
+  `for("update")` 同时是并发闸：两请求用同一枚 `max_uses=1` 的码，后者会等前者提交后重读 `used_count`。
+- **注册即登录**：返回体与 `POST /v1/auth/login` **完全同形**
+  （`access_token / expires_in / user{id,nickname,avatar} / space_id / master_token / master_expires_in`），
+  refresh token 只走 `httpOnly` Cookie（`refresh_token`，path `/v1/auth`），**绝不出现在响应体**。
+- 邮箱**归一化**：裁首尾空白 + 转小写；`A@B.com` 与 `a@b.com` 是同一个账号。
+- 密码策略（仅注册/改密时校验，登录只验对错）：≥8 且 ≤72 字符；不得命中弱口令黑名单
+  （含 `admin12345` 等仓库历史默认值）；不得等于邮箱前缀。
+- `age_confirmed` 必须为 `true`：建号即写 `users.age_declared_at`（合规留痕，不是只靠请求参数）。
+- 失败：邮箱已注册 → `400101`；弱口令/未成年确认缺失 → `400101`，`msg` 为可直接展示的中文原因。
+
+### 35.2 `POST /v1/auth/login/password`（公开）
+
+```jsonc
+{ "identifier": "a@b.com", "password": "..." }
+```
+
+- 字段名用 `identifier` 而非 `email`：手机号密码登录将来开放时**前端零改动**。
+  当前传入手机号形态（不含 `@`）会得到 `400101`「手机号密码登录暂未开放，请用邮箱或验证码登录」
+  ——刻意显式拒绝，避免静默回落到短信路径让前端误以为密码登录成功。
+- **不泄露账号是否存在**：密码错与账号不存在返回**相同**的 `401101`「账号或密码不正确」，
+  且都走一次等价的密码计算（避免时序侧信道被用来枚举已注册邮箱）。
+- 成功返回体同 §35.1；同时刷新 `users.last_login_at`。
+
+### 35.3 建号副作用（两条登录方式共用，不可复制粘贴）
+
+`AuthService.provisionAccount()` 是**唯一**建号入口，同事务完成：
+`users`（含 `age_declared_at`）→ `spaces` → `space_members` → `credit_accounts`
+→ `identities`（`provider=phone|email`，标识符 HMAC 落 `phone_hash`）
+→ `user_credentials`（仅密码类）→ 新人礼包 `creditIn` → 邀请码核销（含邀请礼包）。
+
+复制一份的后果不是代码丑，而是**邀请码核销、新人礼包、成年留痕三样迟早分叉**，
+且类型检查与 e2e 都不会报错。
+
+### 35.4 已知边界
+
+- **未做邮件验证**：注册即用。真实性验证（发信 + 点击）是后补项，不阻塞可用性——
+  把首登卡在一条同样依赖外部服务的通道上，等于再造一个"上线即无人能登"。
+- **未做密码找回**：依赖同一套邮件通道，一并与验证邮件排期。
+- **登录限流（SEC-04，已实现）**：`POST /v1/auth/login/password` 按「标识符哈希 + IP」计数，
+  10 次 / 300 秒；超限返回 `429100`。key 用**标识符哈希**而非邮箱明文（Redis 常被 dump，
+  不该顺手带走账号清单），计数是**旁路 fail-open**：Redis 抖动退化为不限流，但绝不因为
+  计数失败拒绝一次正确密码；登录成功即清零。实测：连错 10 次均 `401101`，第 11 次 `429100`。
+- **仍未做**：邮件验证、密码找回（`SEC-05`）。
+- 手机号密码登录、Passkey、TOTP 均未做。
