@@ -60,6 +60,8 @@ export default defineNuxtConfig({
     "/home": { ssr: false },
     "/projects": { ssr: false },
     "/projects/**": { ssr: false },
+    // 第 132 批：竞品 /project-members（项目×成员绑定页），首帧来自登录态与 cam 接口
+    "/project-members": { ssr: false },
     "/works": { ssr: false },
     "/tasks": { ssr: false },
     "/assets": { ssr: false },
@@ -106,6 +108,9 @@ export default defineNuxtConfig({
     // 时间线/分镜数据全部来自登录态接口，服务端首帧必然与客户端不一致。
     // 剧本创作（2026-11-02 U9）：竞品 /script-manage 的对应页，首屏全来自登录态接口
     "/script": { ssr: false },
+    // 第 132 批：竞品 /script-view/:id 的只读正文页（正文/分集来自 /projects/:id）
+    "/script-view": { ssr: false },
+    "/script-view/**": { ssr: false },
     "/reelflow": { ssr: false },
     "/reelflow/**": { ssr: false },
     // 新增三个"登录后才可用"的整页应用（第 2/4/5 批）：小说改编链、创作 Agent、影视版。
@@ -113,6 +118,9 @@ export default defineNuxtConfig({
     // 生"服务端未登录 / 客户端已登录"的 hydration mismatch。按既有约定三处齐关。
     "/novel": { ssr: false },
     "/novel/**": { ssr: false },
+    // 第 132 批：竞品 /novel-to-script-agent/workbench 的承接别名（跳 /novel）
+    "/novel-to-script-agent": { ssr: false },
+    "/novel-to-script-agent/**": { ssr: false },
     "/agent": { ssr: false },
     // Agent 子页（editor / bigscreen）：与 /admin/**、/team/** 同理，子路径必须单独列
     "/agent/**": { ssr: false },
