@@ -3,7 +3,9 @@
 > 基线：2026-11-02 · HEAD `a150ff3` · 竞品证据截至 2026-10-25/26 的只读取证
 > 配套：[ui-ux-parity-execution-plan.md](../../07-plan/ui-ux-parity-execution-plan.md) · [competitor-ui-comparison.md](../competitor-ui-comparison.md)
 > 口径：竞品 102 条页面路由 − 9 条不可比路由 = **93 条**。不可比：`/:path(.*)*`、`/redirect/:action()`、`/redirect-callback/:action()`、`/route-permission-map`、`/api/user/logout`、`/en`、`/ja`、`/br`、`/es`。
-> 我方当前 **72 个页面文件**（2026-11-02 实测）；一个页面可承载竞品多个路由，项目工作台、资产确认、资产提取、时间线编辑是 `projects/[id].vue` 的内嵌视图，不另建路由。
+> 我方当前 **77 个页面文件**（2026-11-04 实测；含本批 4 条路由承接）；一个页面可承载竞品多个路由，项目工作台、资产确认、资产提取、时间线编辑是 `projects/[id].vue` 的内嵌视图，不另建路由。
+
+> **2026-11-04 复核（重要口径修正）**：u8 报告的 26 条 ❌ 中 **6 条已闭合**（37/47/48/67/69 已建页、68 为等价视图），真 ❌ 曾为 **20 条**。本批补 38/44/63 入口与 68 别名后 → 真 ❌ **16 条**；创作路线只剩 **39 `/short-film`**（语义未取证）与 **55 `/cli`**（既有“先不做”决策），两条都不硬造。
 
 ## 0. 标记与判定
 
@@ -79,8 +81,8 @@
 | 35 | `/series-manage/asset-extract` | A | 🔶 `projects/[id].vue` AI 提取视图 | 🟡 04-project-assets | 🟡 代码初审 | 🟡 端点测试 | 🟡 静态截图 | 🟢 截图 + 代码 | 大卡点击无反馈 | U2 |
 | 36 | `/episode-list` | C | 🔶 项目页剧集栏 | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 无独立剧集列表页 | U8 |
 | 37 | `/script-manage` | C | 🟢 `pages/script/index.vue`（U9 新建） | 🟡 首屏结构对齐（用户提供的竞品截图） | 🟡 代码初审 | 🟡 端点测试 | 🟡 仅 1 张用户提供截图 | 🟢 `evidence/ui-audit/u9/u9-script-1424.png` | 竞品该页动态态（生成中/我的剧本有数据）仍未取证 | U9 |
-| 38 | `/script-view/:id()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 39 | `/short-film/:id()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
+| 38 | `/script-view/:id()` | C | 🟢 `pages/script-view/[id].vue` | ⏳ 竞品无截图 | 🟡 代码初审 | 🟡 端点（`GET /projects/:id` 一次给全） | ⏳ 未取证 | 🟢 代码 | 竞品同状态截图/录屏缺失；只读页，编辑回项目工作台 | 132 |
+| 39 | `/short-film/:id()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证（13 个路由 chunk 均未捕获） | ❌ | **取证结论（2026-11-04）：现有证据无法判定它与 `/series-manage/:id` 的语义差异**（只有 router 引用，无页面/响应体）；按“不猜”原则暂不实现，解锁条件=竞品录屏或响应体 | 待证据 |
 
 ## 6. 小说改编 / 创作 Agent（9）
 
@@ -90,7 +92,7 @@
 | 41 | `/novel-to-script/:id()` | B | 🔶 `novel/[id].vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 形态差异 | U6 |
 | 42 | `/novel-to-script-agent/:id()` | B | 🔶 `novel/[id].vue` + Agent | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 未按竞品工作台拆分 | U6 |
 | 43 | `/novel-to-script-agent/create` | C | 🔶 `novel/index.vue` | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 无独立创建页 | U8 |
-| 44 | `/novel-to-script-agent/workbench` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
+| 44 | `/novel-to-script-agent/workbench` | C | 🟢 `pages/novel-to-script-agent/workbench.vue` → `/novel` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟢 代码 | 别名承接；工作台本体是 `/novel`（本子列表 + 改编入口） | 132 |
 | 45 | `/creation-agent` | B | 🔶 `pages/agent/index.vue`（同一对话页） | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 对话式创作与 Agent 分工待定 | U6 |
 | 46 | `/agent` | B | 🟢 `pages/agent/index.vue`（U20 迁移，修子路由嵌套） | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 竞品零截图 | U6 |
 | 47 | `/agent/bigscreen` | C | 🟢 `pages/agent/bigscreen.vue`（U20 新建） | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟢 裸壳大屏截图 | 推荐场景/技能墙/会话三块，Esc 退出；L1 无竞品证据 | U20 |
@@ -106,7 +108,7 @@
 | 52 | `/workflow-canvas` | B | 🔶 `canvas/[id].vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 与无限画布是否同形态待确认 | U6 |
 | 53 | `/director` | A | 🔶 `Director3D.vue` 覆盖层 | 🟡 09-3d-director | 🟡 代码初审 | 🟡 端点测试 | 🟢 同状态截图 | 🟢 截图 + 组件 | 默认值已复测（359/704/359、300%/50°/0,1.2,0）；**直链 `/director` 仍 404**（仅覆盖层），深链不可用 | U4 |
 | 54 | `/director/:projectId()` | B | 🔶 同上 | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 无独立路由 | U4 |
-| 55 | `/cli` | C | ❌ | ⏳ | ⏳ | ⏳ | 🟡 有截图，未入册 | ❌ | CLI 33 条骨架无后端形状 | U8 |
+| 55 | `/cli` | C | ❌ | ⏳ | ⏳ | ⏳ | 🟡 有截图 `cli.png`/`x4.png`，未入册 | ❌ | **登记范围外（2026-11-04）**：CLI/Agent 工具页，不属创作主线的界面/功能；既有 menu-map 决策“先不做”，且 33 条命令骨架缺后端形状。恢复条件=CLI 后端端点落地 | 范围外 |
 | 56 | `/implement` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
 | 57 | `/tools` | A | 🟢 `pages/tools.vue` | 🟡 静态截图 | 🟡 代码初审 | 🟡 端点测试 | 🟡 静态截图 | 🟢 截图 + 代码 | 8 卡仅 2 卡可跳；禁用卡无反馈 | U6 |
 
@@ -119,7 +121,7 @@
 | 60 | `/team` | B | 🟢 `pages/team/index.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 竞品零截图 | U6 |
 | 61 | `/team/dashboard` | B | 🟢 `pages/team/dashboard.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
 | 62 | `/team/knowledge-base` | B | 🔶 `pages/knowledge/index.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 团队知识库与全局知识库关系待定 | U6 |
-| 63 | `/project-members` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 项目成员无独立页 | U8 |
+| 63 | `/project-members` | C | 🟢 `pages/project-members.vue` | ⏳ | 🟡 代码初审 | 🟡 端点（members / bind / delete） | ⏳ 未取证 | 🟢 代码 | 竞品截图缺；绑定写入未做真机验证 | 132 |
 
 ## 9. 影视版（6）
 
@@ -129,7 +131,7 @@
 | 65 | `/film-creation` | B | 🟢 `pages/film-creation.vue`（U19 新建） | ⏳ | 🟡 代码初审 | 🟡 端点测试 | 🟡 仅开通弹窗 | 🟡 代码 | U19 已补独立创建页（名称+预置表+团队前置）；L1 无竞品证据（无内测权限） | U19 |
 | 66 | `/film/:id()` | A | 🟢 `pages/film/[id].vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 竞品零截图 | U6 |
 | 67 | `/film/assets` | B | 🟢 `pages/film/assets.vue`（U19 新建） | ⏳ | ⏳ | ⏳ | ⏳ 零截图 | 🟢 资产需求汇总表 | 修复动态路由吞吃（原先报 500）；L1 无竞品证据 | U19 |
-| 68 | `/film/projects/:id()/tasks` | C | 🔶 `/film/[id]` 内嵌任务表 | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 任务表在影视工作台内嵌，未做独立路由 | U8 |
+| 68 | `/film/projects/:id()/tasks` | C | 🟢 `pages/film/projects/[id]/tasks.vue`（别名→`/film/:id`） | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 独立路由为别名，任务表本体仍内嵌 `/film/:id` | 132 |
 | 69 | `/film/team` | C | 🟢 `pages/film/team.vue`（U19 新建） | ⏳ | ⏳ | ⏳ | ⏳ 零截图 | 🟢 资产需求汇总表 | 修复动态路由吞吃（原先报 500）；L1 无竞品证据 | U19 |
 
 ## 10. 创作者中心与伙伴（7）

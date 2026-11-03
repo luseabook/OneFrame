@@ -1,5 +1,7 @@
 # UI 对齐报告（U8 · 93 条可比路由全量）
 
+> **2026-11-04 复核**：本报告「26 条 ❌」已过时——其中 6 条已闭合（37/47/48/67/69 已建页、68 为等价视图），真 ❌ 为 20 条；本批补 38/44/63 入口与 68 别名后剩 16 条。**以 `ui-parity-ledger.md` 为准**，本文保留为 2026-11-02 的采集快照。
+
 > 基线 HEAD `a150ff3` · 采集日期 2026-11-02 · 分支 `main`（未 commit / 未 push）
 > 口径来源：`docs/07-plan/ui-ux-parity-execution-plan.md` §1.1 / §4.3
 > 逐单元证据：[U1](reports/U1.md) · [U2](reports/U2.md) · [U3](reports/U3.md) · [U4](reports/U4.md) · [U5](reports/U5.md) · [U6](reports/U6.md) · [U7](reports/U7.md)
