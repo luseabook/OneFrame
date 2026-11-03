@@ -1747,9 +1747,15 @@ const DEVIATED = new Set(Object.keys(DEVIATIONS));
 const WAIVED_SHAPES = new Set(Object.keys(WAIVED));
 
 function missing(shapes: string[]): string[] {
+  /**
+   * 2026-11-04 D6：本项目只做创作功能，营销/运营域（创作者社区 crc、活动 campaign、
+   * 剧本集市 market）的后端模块已删除。这些竞品形状不再计入缺口（也不虚报为覆盖）。
+   */
+  const OUT_OF_SCOPE = ["/crc/", "/campaigns", "/ops/market", "/market/"];
   const gaps: string[] = [];
   for (const raw of shapes) {
     const shape = shapeOf(raw);
+    if (OUT_OF_SCOPE.some((prefix) => shape.includes(prefix))) continue;
     if (ROUTES.has(shape)) continue;
     const deviation = DEVIATIONS[shape];
     if (deviation) {
@@ -1775,10 +1781,8 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     // 四个被审计域的关键锚点必须在表里，否则说明 controller 被改名/挪走了
     expect(ROUTES.has("GET /film/projects/{}/task-tables/{}/tasks/query")).toBe(true);
     expect(ROUTES.has("POST /film/projects/{}/task-tables/{}/tasks/query")).toBe(true);
-    expect(ROUTES.has("GET /crc/user/info")).toBe(true);
-    expect(ROUTES.has("POST /crc/user/info")).toBe(true);
+    // 2026-11-04 D6：crc / campaigns / ops_market / market 已随营销运营域移除，不再做锚点断言
     expect(ROUTES.has("GET /op/beta-questionnaire")).toBe(true);
-    expect(ROUTES.has("GET /campaigns/{}/signup")).toBe(true);
     // 第 81 批：数据看板的同名 GET/POST 双形状（竞品 POST，我方补别名后两者都在）
     expect(ROUTES.has("GET /kds/da/team/{}/query")).toBe(true);
     expect(ROUTES.has("POST /kds/da/team/{}/query")).toBe(true);
@@ -1786,12 +1790,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(ROUTES.has("POST /tasks/{}/download")).toBe(true);
     expect(ROUTES.has("POST /tasks/batch-download")).toBe(true);
     // 第 83 批：运营后台标签改名（竞品 PUT → 我方 PATCH）、首页长轮询、分享页 SSE
-    expect(ROUTES.has("PATCH /ops/market/tags/{}")).toBe(true);
     expect(ROUTES.has("GET /home/unread")).toBe(true);
     expect(ROUTES.has("GET /share/{}/stream")).toBe(true);
-    // 第 84 批：剧本广场消费侧（`/market/*`）与 agent 任务流的两条形状（GET 保留 + POST 别名）
-    expect(ROUTES.has("GET /market/scripts/config")).toBe(true);
-    expect(ROUTES.has("GET /market/creator/works/{}")).toBe(true);
+    // 第 84 批：agent 任务流的两条形状（GET 保留 + POST 别名）；market 已按 D6 移除
     expect(ROUTES.has("GET /agent/task/stream")).toBe(true);
     expect(ROUTES.has("POST /agent/task/stream")).toBe(true);
     // 第 85 批：账号/鉴权本批新补的 9 条客户端形状
@@ -1934,23 +1935,9 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(FILM_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)))).toEqual([]);
   });
 
-  it("#10 创作者中心：竞品 30 条全部覆盖（0 缺口、0 偏离）", () => {
-    expect(missing(CRC_SHAPES)).toEqual([]);
-    expect(CRC_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)))).toEqual([]);
-  });
-
   it("#10 运营：竞品 35 条全部覆盖（0 缺口、0 偏离）", () => {
     expect(missing(OP_SHAPES)).toEqual([]);
     expect(OP_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)))).toEqual([]);
-  });
-
-  it("#10 激励活动：7 条全部覆盖，且每条偏离都显式登记过（ADR-009 单复数）", () => {
-    expect(missing(CAMPAIGN_SHAPES)).toEqual([]);
-    const recorded = CAMPAIGN_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
-    expect(recorded.length).toBe(7);
-    for (const raw of recorded) {
-      expect(DEVIATIONS[shapeOf(raw)]!.reason.length).toBeGreaterThan(10);
-    }
   });
 
   it("#21 数据看板：13 条全部覆盖（5 GET + 8 POST 别名，0 缺口、0 偏离）", () => {
@@ -1984,112 +1971,6 @@ describe("竞品路由逐条对照（第 80 批：「100%」必须有守卫）",
     expect(deviated).toEqual(["GET /web/v1/msg/exist-unread"]);
     // 偏离必须写清「等价调用长什么样」，否则下一批又会当成缺口重查一遍
     expect(DEVIATIONS["GET /msg/exist-unread"]!.reason).toContain("timeout_ms=1");
-  });
-
-  it("#26 分享：5 条里 1 条同形 + 4 条偏离（token 而非 share_id），0 缺口", () => {
-    expect(SHARE_SHAPES.length).toBe(5);
-    expect(missing(SHARE_SHAPES)).toEqual([]);
-    const exact = SHARE_SHAPES.filter((raw) => ROUTES.has(shapeOf(raw)));
-    const deviated = SHARE_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
-    expect(exact).toEqual(["POST /web/v1/crc/assets/share"]);
-    expect(deviated.length).toBe(4);
-    // 其中 3 条是 #24 已经登记过的任务分享形状，这里只是复用；第 4 条是分享页 SSE
-    expect(DEVIATIONS["GET /agent/task/share/{}/sse"]!.ours).toBe("GET /share/{}/stream");
-  });
-
-  it("#27 运营后台：18 条全部登记等价物（12 条同方法 + 6 条方法偏离），0 缺口", () => {
-    expect(OPS_MARKET_SHAPES.length).toBe(18);
-    expect(missing(OPS_MARKET_SHAPES)).toEqual([]);
-    // 前缀不同（/v1/rmadminsrv vs /ops/market），所以 18 条全走 DEVIATIONS；
-    // 其中 12 条方法与竞品一致，6 条是「读改 GET / 全量改局部」的方法偏离
-    const deviated = OPS_MARKET_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
-    expect(deviated.length).toBe(18);
-    const sameMethod = OPS_MARKET_SHAPES.filter((raw) => {
-      const shape = shapeOf(raw);
-      return DEVIATIONS[shape]!.ours.startsWith(`${shape.split(" ")[0]} `);
-    });
-    expect(sameMethod.length).toBe(12);
-    expect(OPS_MARKET_SHAPES.length - sameMethod.length).toBe(6);
-  });
-  it("#12 剧本广场（消费侧）：29 条全部有等价物（前缀 df/novel_market → 我方 /market，0 缺口）", () => {
-    expect(NOVEL_MARKET_SHAPES.length).toBe(29);
-    expect(missing(NOVEL_MARKET_SHAPES)).toEqual([]);
-    // 前缀不同，29 条全走 DEVIATIONS；但方法必须与竞品一致（这一组没有方法偏离）
-    const deviated = NOVEL_MARKET_SHAPES.filter((raw) => DEVIATED.has(shapeOf(raw)));
-    expect(deviated.length).toBe(29);
-    const sameMethod = NOVEL_MARKET_SHAPES.filter((raw) => {
-      const shape = shapeOf(raw);
-      return DEVIATIONS[shape]!.ours.startsWith(`${shape.split(" ")[0]} `);
-    });
-    expect(sameMethod.length).toBe(29);
-  });
-
-  /**
-   * 第 94 批：**字段级**（query）对账。
-   *
-   * 为什么单列一例：本文件此前只比 METHOD + path，所以「端点全在、参数被静默丢弃」
-   * 这一类故障它一个字都看不见。真实证据是 `_r94_query_all.py` 把竞品
-   * `competitor_endpoints.tsv` 的 QUERY 列逐条对到我方 zod schema：
-   * 消费侧 29 条里只有 **4 条带 query**，其中 `creator/works` 的 `keyword`
-   * 竞品有、我方 zod 没声明 → zod 默认 strip → 返回 200 + code 0 + **未过滤全集**。
-   * 管理侧同病两处（`categories`/`tags` 的 `keyword`、`promotions` 的 `enabled`）。
-   *
-   * 这里用**源码断言**钉住 schema 声明（守卫是纯读源码的，不起服务），
-   * 行为侧由 `market.spec.ts` 的 2 例功能用例兜底 —— 两边都缺才会漏。
-   */
-  it("#12 剧本广场：竞品 4 条带 query 的端点，参数必须被 schema 真接住（防静默丢弃）", () => {
-    const marketCtrl = readFileSync(join(API_SRC, "modules", "market", "market.controller.ts"), "utf8");
-    const adminCtrl = readFileSync(join(API_SRC, "modules", "market", "market-admin.controller.ts"), "utf8");
-
-    // ── 消费侧：`GET /creator/works` 的 keyword（第 94 批补的那一条）──
-    // 注意要**限定在 works 处理器内**断言：`listScriptsQuery` 里也有一个 `keyword`，
-    // 全局正则会误判通过（集市列表的 keyword 一直是对的，坏的只有创作者侧这条）。
-    expect(marketCtrl).toContain("creatorWorks");
-    const worksHandler = marketCtrl.slice(
-      marketCtrl.indexOf("@Get(\"creator/works\")"),
-      marketCtrl.indexOf("@Post(\"creator/works\")"),
-    );
-    expect(worksHandler.length).toBeGreaterThan(0);
-    expect(worksHandler).toMatch(/keyword:\s*z\.string\(\)/);
-    // 服务层必须真的把它变成 SQL 条件，而不是收了不用
-    const marketSvc = readFileSync(join(API_SRC, "modules", "market", "market.service.ts"), "utf8");
-    const creatorWorksBlock = marketSvc.slice(
-      marketSvc.indexOf("async creatorWorks"),
-      marketSvc.indexOf("async creatorWorkDetail"),
-    );
-    expect(creatorWorksBlock.length).toBeGreaterThan(0);
-    expect(creatorWorksBlock).toContain("query.keyword");
-    expect(creatorWorksBlock).toContain("ilike");
-
-    // ── 管理侧：categories / tags 的 keyword、promotions 的 enabled ──
-    expect(adminCtrl).toMatch(/categories\(@Query\(\) query: unknown\)/);
-    expect(adminCtrl).toMatch(/tags\(@Query\(\) query: unknown\)/);
-    expect(adminCtrl).toMatch(/promotions\(@Query\(\) query: unknown\)/);
-    expect(adminCtrl).toMatch(/enabled:\s*z\.coerce\.number\(\)/);
-
-    // `slot` 缺省时**不许**再隐式选 "market"（旧实现 `?? "market"` 让别的位查不到）
-    const promotionsBlock = adminCtrl.slice(
-      adminCtrl.indexOf("promotions(@Query()"),
-      adminCtrl.indexOf("createPromotion("),
-    );
-    expect(promotionsBlock).not.toContain('"market"');
-
-    // 推广位服务层：两个过滤条件都得变成 SQL
-    const promotionsSvc = marketSvc.slice(
-      marketSvc.indexOf("async adminPromotions"),
-      marketSvc.indexOf("async adminCreatePromotion"),
-    );
-    expect(promotionsSvc).toContain("promoSlots.slot");
-    expect(promotionsSvc).toContain("promoSlots.status");
-    expect(promotionsSvc).toContain("query.enabled");
-
-    /**
-     * 有意**不接**的两个竞品参数，必须留在明面上（防止下一批误以为是漏接又删掉注释）：
-     * - `categories` 的 `parent_id`：`market_categories` 是平表，没有该列；
-     * - `tags` 的 `status`：`market_tags` 只有 name，`listTags()` 的 status 是常量投影。
-     */
-    expect(marketSvc).toContain("parent_id");
-    expect(marketSvc).toContain("没有 `status` 列");
   });
 
   it("#4 创作 Agent：12 条里 8 条同形 + 1 条偏离 + 3 条豁免", () => {

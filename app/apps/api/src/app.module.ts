@@ -28,12 +28,10 @@ import { NovelModule } from "./modules/novel/novel.module";
 import { FilmModule } from "./modules/film/film.module";
 import { WorkflowModule } from "./modules/workflow/workflow.module";
 import { DirectorModule } from "./modules/director/director.module";
-// 第 6 批「生态」：创作者中心 + 运营增长 + 激励活动
-import { CreatorModule } from "./modules/creator/creator.module";
+// 第 6 批「生态」：运营增长（公告位/邀请码/等待名单）。2026-11-04 D6：
+// 创作者中心（creator）与激励活动（campaign）属营销运营，模块已移除。
 import { OpModule } from "./modules/op/op.module";
-import { CampaignModule } from "./modules/campaign/campaign.module";
-// 第 6 批「生态」B 组：剧本集市（market，含 ops/admin）+ 团队知识库（knowledge）
-import { MarketModule } from "./modules/market/market.module";
+// 团队知识库（knowledge）；剧本集市（market）属交易域，2026-11-04 D6 已移除
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 // 第 8 批「补充」：视频转绘（复用 script_project 骨架，project_mode=3）
 import { RedrawModule } from "./modules/redraw/redraw.module";
@@ -77,12 +75,8 @@ import { StorageModule } from "./storage/storage.module";
     WorkflowModule,
     ReportsModule,
     DirectorModule,
-    // 第 6 批「生态」：crc 30 + op 31 + campaign 6（迁移 0019/0024 已建表）
+    // 第 6 批「生态」：op（运营位/邀请码/等待名单）保留；creator/campaign/market 已按 D6 移除
     OpModule,
-    CampaignModule,
-    CreatorModule,
-    // 第 6 批「生态」B 组：集市 29+admin + 知识库 29
-    MarketModule,
     KnowledgeModule,
     // 视频转绘（模块 #14）：8 端点 + 我方补充 1 条列表
     RedrawModule,

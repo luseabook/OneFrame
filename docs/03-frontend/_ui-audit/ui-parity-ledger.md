@@ -5,7 +5,9 @@
 > 口径：竞品 102 条页面路由 − 9 条不可比路由 = **93 条**。不可比：`/:path(.*)*`、`/redirect/:action()`、`/redirect-callback/:action()`、`/route-permission-map`、`/api/user/logout`、`/en`、`/ja`、`/br`、`/es`。
 > 我方当前 **77 个页面文件**（2026-11-04 实测；含本批 4 条路由承接）；一个页面可承载竞品多个路由，项目工作台、资产确认、资产提取、时间线编辑是 `projects/[id].vue` 的内嵌视图，不另建路由。
 
-> **2026-11-04 复核（重要口径修正）**：u8 报告的 26 条 ❌ 中 **6 条已闭合**（37/47/48/67/69 已建页、68 为等价视图），真 ❌ 曾为 **20 条**。本批补 38/44/63/68 入口、68 别名、39 短剧承接与 55 CLI 页后 → 真 ❌ **14 条**（全部为非创作：活动/渠道/合作/账户基础页）。
+> **2026-11-04 复核（重要口径修正）**：u8 报告的 26 条 ❌ 中 **6 条已闭合**（37/47/48/67/69 已建页、68 为等价视图），真 ❌ 曾为 **20 条**。补 38/44/63/68、39 短剧、55 CLI 后，创作类已无“无入口”项。
+>
+> **2026-11-04 范围裁定（D6）**：本项目只做**创作功能**，不做营销/运营。活动、渠道、合作、推荐裂变、创作者社区等 **9 条**统一标 `范围外（D6）`，不计入创作台账分母；`D1 的 93 条 1:1` 在营销域上作废。剩余真 ❌ 只有创作/基础页（`/tutorial`、`/user-language`、`/user-update`、`/adjust`、`/implement`、`/refer-video`，共 6 条）。
 
 ## 0. 标记与判定
 
@@ -143,7 +145,7 @@
 | 72 | `/creator-center/earnings` | B | 🟢 `creator-center/earnings.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 真实打款仍需商户资质 | U6 |
 | 73 | `/creator-center/preview/:id()` | C | 🟢 `creator-center/preview/[id].vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
 | 74 | `/creator-center/publish` | C | 🟢 `creator-center/publish.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
-| 75 | `/partner-center` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
+| 75 | `/partner-center` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
 | 76 | `/partner/invite` | B | 🔶 `pages/invite.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 分销/邀请形态待确认 | U6 |
 
 ## 11. 广告剧 / 视频转绘 / 后处理（6）
@@ -163,19 +165,19 @@
 |---:|---|:--:|:--:|:--:|:--:|:--:|---|---|---|---|
 | 83 | `/activities` | B | 🟢 `pages/activities.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 活动内容与竞品未对照 | U6 |
 | 84 | `/activities/:activityKey()` | C | 🔶 活动页动态视图 | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 无独立动态路由 | U8 |
-| 85 | `/activities/wanju-vc/submission` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 86 | `/activity/jushuoyuelu/jushuoyuelu-contest-apply` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 87 | `/activity/jushuoyuelu/jushuoyuelu-contest-apply.:html()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现（HTML 后缀变体） | U8 |
-| 88 | `/activity/jushuoyuelu/jushuoyuelu-contest-mvp-creator-apply` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 89 | `/activity/jushuoyuelu/jushuoyuelu-contest-mvp-creator-apply.:html()` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现（HTML 后缀变体） | U8 |
+| 85 | `/activities/wanju-vc/submission` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 86 | `/activity/jushuoyuelu/jushuoyuelu-contest-apply` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 87 | `/activity/jushuoyuelu/jushuoyuelu-contest-apply.:html()` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 88 | `/activity/jushuoyuelu/jushuoyuelu-contest-mvp-creator-apply` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 89 | `/activity/jushuoyuelu/jushuoyuelu-contest-mvp-creator-apply.:html()` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
 
 ## 13. 教育与渠道（3）
 
 | # | 竞品路由 | 层 | L0 | L1 | L2 | L3 | 竞品证据 | 我方证据 | 未闭缺陷 | 批次 |
 |---:|---|:--:|:--:|:--:|:--:|:--:|---|---|---|---|
-| 90 | `/channel/education` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 91 | `/channel/education/buy` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
-| 92 | `/channel/education/invite` | C | ❌ | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | ❌ | 未实现 | U8 |
+| 90 | `/channel/education` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 91 | `/channel/education/buy` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
+| 92 | `/channel/education/invite` | C | ❌ 范围外（D6） | — | — | — | — | — | 营销/运营路由，按 2026-11-04 D6 不排期、不计分 | 范围外 |
 
 ## 14. 任务中心（1）
 

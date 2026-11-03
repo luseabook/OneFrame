@@ -137,14 +137,9 @@ export default defineNuxtConfig({
     "/film-creation": { ssr: false },
     "/film/**": { ssr: false },
     // 第 2 轮新增（第 6 批生态 + 收尾批次）：同样是"登录后整页应用"。
-    // /activities 与 /novel-market 允许游客浏览列表（但下单/报名要登录），
-    // 仍统一关 SSR：列表首屏依赖分页与登录态，服务端首帧与客户端必然不一致。
-    "/creator-center": { ssr: false },
-    "/creator-center/**": { ssr: false },
-    "/activities": { ssr: false },
+    // 2026-11-04 D6：活动中心/创作者中心/剧本集市属于营销运营与交易域，页面与模块已移除，
+    // 这里不再保留它们的 routeRules；/invite 仍属注册准入，保留。
     "/invite": { ssr: false },
-    "/novel-market": { ssr: false },
-    "/novel-market/**": { ssr: false },
     "/knowledge": { ssr: false },
     "/knowledge/**": { ssr: false },
     // 第 3 轮新增：广告剧 / 视频转绘（登录后整页应用）与公开播放页（首屏数据来自接口）。

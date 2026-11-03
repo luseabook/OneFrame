@@ -29,12 +29,8 @@ const workspacePaths = [
   "/novel",
   "/agent",
   "/film",
-  // 2026-10-27（第 2 轮）：第 6 批生态页
-  "/novel-market",
   "/knowledge",
-  // 第 6 批 A：创作者中心 / 活动 / 邀请返利（都是登录后工作台类页面）
-  "/creator-center",
-  "/activities",
+  // 第 6 批 A：邀请返利（登录后工作台类页面；2026-11-04 D6 移除活动/创作者中心）
   "/invite",
   // 第 3 轮：广告剧 / 视频转绘（登录后整页工作台）
   "/ad-drama",

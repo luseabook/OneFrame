@@ -42,8 +42,6 @@ const ROUTES = [
   ["cli", "/cli"],
   ["film-creation", "/film-creation"],
   ["film", "/film"],
-  ["novel-market", "/novel-market/1"],
-  ["creator-center", "/creator-center"],
   ["creation-agent", "/creation-agent"],
   ["assets", "/asset"],
   ["reelflow-list", "/reelflow/list"],

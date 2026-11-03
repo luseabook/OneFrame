@@ -11,9 +11,7 @@ export type AdminTab =
   | "orders"
   | "shares"
   | "reports"
-  | "creatorAudits"
   | "exports"
-  | "market"
   | "skills"
   | "audit"
   | "admins"
@@ -45,8 +43,6 @@ export const ADMIN_MENU: AdminMenuEntry[] = [
   { key: "orders", label: "订单 / 退款", hint: "支付、全额退款与对账导出", group: "交易" },
 
   { key: "reports", label: "举报处置", hint: "内容举报处理", group: "内容治理" },
-  { key: "creatorAudits", label: "创作者审核", hint: "平台侧审核创作者作品", group: "内容治理" },
-  { key: "market", label: "剧本广场", hint: "剧本审核 / 分类标签 / 推广 / 提现", group: "内容治理" },
   { key: "shares", label: "分享管理", hint: "公开分享下线", group: "内容治理" },
   { key: "skills", label: "Skill 推荐位", hint: "平台 Skill 首页推荐编排", group: "内容治理" },
 

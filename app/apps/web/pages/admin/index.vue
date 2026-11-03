@@ -160,19 +160,6 @@ interface PageResp<Row> {
  * 「内容安全」最该有人管的环节反而没人管。审核人写 `reviewed_by_admin`（与空间管理员的
  * `reviewed_by` 分开留痕），两个身份域不混用。
  */
-interface CreatorAuditRow {
-  id: string;
-  title: string;
-  summary: string;
-  kind: number;
-  category: string;
-  effect: string | null;
-  status: number;
-  cover_uri: string | null;
-  creator_user_id: string;
-  space_id: string;
-  created_at: string;
-}
 
 const tab = useAdminTab();
 const route = useRoute();
@@ -749,68 +736,6 @@ async function resolveReport(report: ReportRow, action: "takedown" | "dismiss"):
   }
 }
 
-// ── 创作者审核（平台运营） ─────────────────────────────────
-const CREATOR_PAGE_SIZE = 20;
-const creatorAudits = ref<CreatorAuditRow[]>([]);
-const creatorState = newListState();
-const creatorTotal = ref(0);
-const creatorPage = ref(1);
-const creatorAuditBusy = ref("");
-const creatorAuditStatus = ref(2);
-const creatorAuditNote = ref("");
-const creatorAuditQuery = ref("");
-const creatorPages = computed(() => pagesOf(creatorTotal.value, CREATOR_PAGE_SIZE));
-
-async function loadCreatorAudits(): Promise<void> {
-  creatorState.loading = true;
-  creatorState.error = "";
-  try {
-    const keyword = creatorAuditQuery.value.trim();
-    const data = await adminApi<PageResp<CreatorAuditRow> & { status: number }>(
-      `/ops/admin/creator-audits${qs({
-        status: creatorAuditStatus.value,
-        page: creatorPage.value,
-        page_size: CREATOR_PAGE_SIZE,
-        q: keyword || undefined,
-      })}`,
-    );
-    creatorAudits.value = data.list;
-    creatorTotal.value = data.total;
-  } catch (e) {
-    await fail(e, t("adminUi.creatorLoadFailed"), creatorState);
-  } finally {
-    creatorState.loading = false;
-  }
-}
-
-function applyCreatorFilter(): void {
-  creatorPage.value = 1;
-  void loadCreatorAudits();
-}
-
-function gotoCreatorPage(delta: number): void {
-  const next = stepPage(creatorPage.value, creatorTotal.value, CREATOR_PAGE_SIZE, delta);
-  if (next === creatorPage.value) return;
-  creatorPage.value = next;
-  void loadCreatorAudits();
-}
-
-async function reviewCreatorAudit(row: CreatorAuditRow, action: "approve" | "reject" | "offline"): Promise<void> {
-  creatorAuditBusy.value = row.id;
-  error.value = "";
-  try {
-    await adminApi<unknown>(`/ops/admin/creator-audits/${row.id}/review`, {
-      method: "POST",
-      body: { action, ...(action === "reject" ? { note: creatorAuditNote.value.trim() || undefined } : {}) },
-    });
-    await Promise.all([loadCreatorAudits(), loadDashboard()]);
-  } catch (e) {
-    await fail(e, t("adminUi.auditFailed"));
-  } finally {
-    creatorAuditBusy.value = "";
-  }
-}
-
 // ── 导出审计（契约 §4.4.7） ────────────────────────────────
 const EXPORT_PAGE_SIZE = 20;
 const exportRows = ref<ExportRow[]>([]);
@@ -1106,14 +1031,11 @@ async function loadTab(next: AdminTab): Promise<void> {
     case "reports":
       await loadReports();
       break;
-    case "creatorAudits":
-      await loadCreatorAudits();
-      break;
     case "exports":
       await loadExports();
       break;
     default:
-      // prices/market/skills/audit/admins/config 由独立面板组件自己拉数据（契约 §4.3）
+      // prices/skills/audit/admins/config 由独立面板组件自己拉数据（契约 §4.3）
       break;
   }
 }
@@ -1576,74 +1498,6 @@ watch(
       </template>
     </section>
 
-    <!-- ── 创作者审核 ───────────────────────────────────── -->
-    <section v-if="tab === 'creatorAudits'" class="card">
-      <h2>{{ t("adminUi.creatorAuditTitle") }}</h2>
-      <p class="muted small">
-        {{ t("adminUi.creatorAuditHint") }}
-      </p>
-      <p class="muted small">
-        {{ t("adminUi.currentStatus") }}
-        <select v-model.number="creatorAuditStatus" class="mini" @change="applyCreatorFilter()">
-          <option :value="2">{{ t("adminUi.statusPendingReview") }}</option>
-          <option :value="3">{{ t("adminUi.statusApproved") }}</option>
-          <option :value="4">{{ t("adminUi.statusRejected") }}</option>
-          <option :value="5">{{ t("adminUi.statusTakenDown") }}</option>
-        </select>
-        <input v-model="creatorAuditNote" class="mini note" :placeholder="t('adminUi.rejectReasonPlaceholder')" maxlength="120" />
-        <!-- 队列按 FIFO 翻页；运营常"只找某个作品"，给搜索框免得一页页翻 -->
-        <input
-          v-model="creatorAuditQuery"
-          class="mini note"
-          :placeholder="t('adminUi.searchByTitle')"
-          maxlength="80"
-          @keyup.enter="applyCreatorFilter()"
-        />
-      </p>
-      <p v-if="creatorState.loading" class="muted small">{{ t("adminUi.loading") }}</p>
-      <p v-else-if="creatorState.error" class="error small">{{ creatorState.error }}</p>
-      <template v-else>
-        <p v-if="creatorAudits.length === 0" class="muted">{{ t("adminUi.creatorEmpty") }}</p>
-        <div v-for="row in creatorAudits" :key="row.id" class="report-row">
-          <span class="badge" :data-status="row.status">
-            {{
-              row.status === 2
-                ? t("adminUi.statusPendingReview")
-                : row.status === 3
-                  ? t("adminUi.statusApproved")
-                  : row.status === 4
-                    ? t("adminUi.statusRejected")
-                    : t("adminUi.statusTakenDown")
-            }}
-          </span>
-          <span class="report-detail">{{ row.title }}</span>
-          <span class="muted">{{ row.category }}<template v-if="row.effect"> · {{ row.effect }}</template></span>
-          <span class="muted">user {{ shortId(row.creator_user_id) }}</span>
-          <template v-if="row.status === 2">
-            <button class="mini" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'approve')">
-              {{ t("adminUi.approve") }}
-            </button>
-            <button class="mini danger" :disabled="creatorAuditBusy === row.id" @click="reviewCreatorAudit(row, 'reject')">
-              {{ t("adminUi.reject") }}
-            </button>
-          </template>
-          <button
-            v-else-if="row.status === 3"
-            class="mini danger"
-            :disabled="creatorAuditBusy === row.id"
-            @click="reviewCreatorAudit(row, 'offline')"
-          >
-            {{ t("adminUi.takeDown") }}
-          </button>
-        </div>
-        <div class="pager">
-          <button class="mini" :disabled="creatorPage <= 1" @click="gotoCreatorPage(-1)">{{ t("adminUi.prevPage") }}</button>
-          <span class="muted">{{ t("adminUi.pageInfo", { page: creatorPage, pages: creatorPages, total: creatorTotal }) }}</span>
-          <button class="mini" :disabled="creatorPage >= creatorPages" @click="gotoCreatorPage(1)">{{ t("adminUi.nextPage") }}</button>
-        </div>
-      </template>
-    </section>
-
     <!-- ── 订单 / 全额退款 / 对账导出 ───────────────────── -->
     <section v-if="tab === 'orders'" class="card">
       <h2>{{ t("adminUi.ordersTitle") }}</h2>
@@ -1724,7 +1578,6 @@ watch(
     -->
     <AdminPricePanel v-if="tab === 'prices'" />
     <AdminProvidersPanel v-if="tab === 'providers'" />
-    <AdminMarketPanel v-if="tab === 'market'" />
     <AdminSkillsPanel v-if="tab === 'skills'" />
     <AdminAuditPanel v-if="tab === 'audit'" />
     <AdminAdminsPanel v-if="tab === 'admins'" />

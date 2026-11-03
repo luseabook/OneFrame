@@ -148,40 +148,6 @@ describe("ops admin promo slots e2e", () => {
     expect(row.createdBy).not.toBeNull();
   });
 
-  it("配置驱动闭环：新建的 banner 立即出现在公开读接口 crc/banner_list，停用后消失", async () => {
-    const dto = await create({
-      slot: "banner",
-      title: "闭环验证 banner",
-      image_uri: "promo/loop.png",
-      sort: 1,
-    });
-
-    const userToken = await loginUserToken();
-    const listed = await app.inject({
-      method: "GET",
-      url: "/v1/crc/banner_list?type=banner",
-      headers: { authorization: `Bearer ${userToken}` },
-    });
-    const listedBody = JSON.parse(listed.body) as {
-      code: number;
-      data?: { list?: Array<{ id: string; title: string }> };
-    };
-    expect(listedBody.code).toBe(0);
-    const ids = (listedBody.data?.list ?? []).map((item) => String(item.id));
-    expect(ids).toContain(dto.id);
-
-    // 停用 → 公开读接口立即不再返回（这就是"运营位生效"的验收点）
-    await adminInject("PUT", `/ops/admin/promo-slots/${dto.id}`, { status: 2 });
-    const after = await app.inject({
-      method: "GET",
-      url: "/v1/crc/banner_list?type=banner",
-      headers: { authorization: `Bearer ${userToken}` },
-    });
-    const afterBody = JSON.parse(after.body) as { data?: { list?: Array<{ id: string }> } };
-    const afterIds = (afterBody.data?.list ?? []).map((item) => String(item.id));
-    expect(afterIds).not.toContain(dto.id);
-  });
-
   it("创建未开始 / 已结束 / 停用三种：active_now 全为 false", async () => {
     const now = Date.now();
     const future = await create({

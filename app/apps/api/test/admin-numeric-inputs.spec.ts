@@ -83,10 +83,4 @@ describe("全目录扫描：裸 v-model 的数字输入必须配套校验收口"
     expect(offenders).toEqual([]);
   });
 
-  it("显式 v-model.number 的面板（市场）不需要收口也不会踩到", () => {
-    const market = readPanel("AdminMarketPanel.vue");
-    const tags = numericInputs(market);
-    expect(tags.length).toBeGreaterThan(0);
-    expect(tags.every((tag) => tag.includes("v-model.number"))).toBe(true);
-  });
 });

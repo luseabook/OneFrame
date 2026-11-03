@@ -10,8 +10,6 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { AuthGuard } from "../src/common/auth.guard";
 import { AuthModule } from "../src/modules/auth/auth.module";
-import { CampaignModule } from "../src/modules/campaign/campaign.module";
-import { CreatorModule } from "../src/modules/creator/creator.module";
 import { OpModule } from "../src/modules/op/op.module";
 import { TeamModule } from "../src/modules/team/team.module";
 import { QueueModule } from "../src/queue/queue.module";
@@ -27,7 +25,7 @@ import { StorageModule } from "../src/storage/storage.module";
  *   OF_SCOPED_E2E=1 npx vitest run test/op.spec.ts
  */
 @Module({
-  imports: [RedisModule, QueueModule, StorageModule, AuthModule, TeamModule, OpModule, CampaignModule, CreatorModule],
+  imports: [RedisModule, QueueModule, StorageModule, AuthModule, TeamModule, OpModule],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
 class ScopedE2eModule {}
@@ -560,43 +558,6 @@ describe("op e2e", () => {
   });
 
   // ── 运营位 ──────────────────────────────────────────────
-  it("运营位：运营账号创建后出现在后台与前台投放位；停用后前台不再返回", async () => {
-    const owner = await loginNewUser("25");
-    const { teamSpaceId } = await createTeam(owner.userId, "运营位团队");
-    const adminToken = await loginAdmin();
-    const title = `双十一活动${Date.now()}`;
-    const created = await inject(
-      "POST",
-      "/ops/admin/promo-slots",
-      { slot: "banner", title, link_uri: "/activities", sort: 1 },
-      adminToken,
-    );
-    expect(created.code).toBe(0);
-    const id = (created.data as { id: string }).id;
-    // 运营位是平台级内容，`created_by` 必须落在 admin_users（不是 users，否则撞 FK）
-    expect((created.data as { created_by: string | null }).created_by).toBeTruthy();
-
-    // `promo_slots` 是**平台级**表（无 space 列，schema 注释即"首页横幅"），
-    // 所以不能断言"全表只有 1 条"——只断言"我建的这条在里面"。
-    const list = await inject("GET", "/ops/admin/promo-slots?slot=banner", undefined, adminToken);
-    expect(list.code).toBe(0);
-    expect((list.data as { list: Array<{ id: string }> }).list.some((s) => s.id === id)).toBe(true);
-
-    // 空间管理员也能读到后台列表（客服/调试场景），但**不能写**
-    const spaceList = await inject("GET", "/op/promo-slots?slot=banner", undefined, owner.token, teamSpaceId);
-    expect(spaceList.code).toBe(0);
-    expect((spaceList.data as { list: Array<{ id: string }> }).list.some((s) => s.id === id)).toBe(true);
-
-    // 前台读取（creator 域 `crc/banner_list` 与运营位共用同一张 promo_slots）
-    const publicList = await inject("GET", "/crc/banner_list", undefined, owner.token, teamSpaceId);
-    expect((publicList.data as { list: Array<{ id: string }> }).list.some((s) => s.id === id)).toBe(true);
-
-    const off = await inject("DELETE", `/ops/admin/promo-slots/${id}`, undefined, adminToken);
-    expect(off.code).toBe(0);
-    const publicAfter = await inject("GET", "/crc/banner_list", undefined, owner.token, teamSpaceId);
-    expect((publicAfter.data as { list: Array<{ id: string }> }).list.some((s) => s.id === id)).toBe(false);
-  });
-
   it("运营位：空间管理员不能写（写入口必须运营账号鉴权，否则会撞 admin_users 外键）", async () => {
     const ownerA = await loginNewUser("27");
     const ownerB = await loginNewUser("28");

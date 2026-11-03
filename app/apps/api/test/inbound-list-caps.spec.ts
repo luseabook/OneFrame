@@ -148,12 +148,6 @@ describe("inbound list caps (e2e)", () => {
       expect(res.msg).toBe("too many tags: at most 20");
     });
 
-    it("market ?tag_ids=21 → 400101", async () => {
-      const res = await inject("GET", `/market/scripts?tag_ids=${csv(21, "t")}`, undefined, token);
-      expect(res.code).toBe(400101);
-      expect(res.msg).toBe("too many tag_ids: at most 20");
-    });
-
     it("op ?experiment_keys=21 → 400101", async () => {
       const res = await inject("GET", `/op/abtest/hit?experiment_keys=${csv(21, "e")}`, undefined, token);
       expect(res.code).toBe(400101);

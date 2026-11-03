@@ -37,7 +37,6 @@ const extraNav: NavItem[] = [
   { key: "video-redraw", to: "/video-redraw/create", labelKey: "sidebar.videoRedraw", icon: "film" },
   // D5（2026-11-02）：本项目只要竞品的创作能力，剧本集市属于交易域 → 入口移除（页面保留，不删代码）
   { key: "knowledge", to: "/knowledge", labelKey: "sidebar.knowledge", icon: "folder" },
-  { key: "creator", to: "/creator-center", labelKey: "sidebar.creator", icon: "wand" },
 ];
 const teamNav: NavItem[] = [
   { key: "assets", to: "/assets", labelKey: "sidebar.assets", icon: "folder" },
@@ -230,16 +229,16 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
           <span v-if="!collapsed" class="foot-label">{{ t("sidebar.film") }}</span>
           <span v-if="!collapsed" class="tag-beta">{{ t("sidebar.beta") }}</span>
         </NuxtLink>
-        <!-- MCP & CLI 入口（2026-11-02 决策）：竞品是可点按钮，我们还没有 /cli 页。
-             与其留一个置灰的"看起来能点"的位置，先移除入口；等做 /cli 时整块恢复。 -->
-        <NuxtLink to="/activities" class="item" :title="t('sidebar.activities')">
+        <!-- 2026-11-04（D6）：活动/渠道/创作者社区等营销运营入口移除；
+             CLI 是创作工具链的一部分，入口保留。 -->
+        <NuxtLink to="/cli" class="item" :title="t('sidebar.cli')">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 4v2.5M12 17.5V20M4.5 12H7M17 12h2.5M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8M8.8 15.2 7 17" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </span>
-          <span v-if="!collapsed">{{ t("sidebar.activities") }}</span>
+          <span v-if="!collapsed">{{ t("sidebar.cli") }}</span>
         </NuxtLink>
         <NuxtLink to="/report" class="item assist">
           <span class="ico" aria-hidden="true">
