@@ -339,7 +339,10 @@
     "confirmDelete": "Confirmar eliminación",
     "deleting": "Eliminando…",
     "deleted": "Cuenta eliminada",
-    "deleteFailed": "No se pudo eliminar"
+    "deleteFailed": "No se pudo eliminar",
+    "editProfile": "Editar perfil",
+    "language": "Idioma",
+    "guide": "Guía de creación"
   },
   "errors": {
     "network": "Error de red",
@@ -4583,5 +4586,70 @@
     "skeleton": "Esqueleto",
     "more": "{n} más…",
     "navLabel": "Herramientas CLI"
+  },
+  "tutorial": {
+    "metaTitle": "Guía de creación · OneFrame",
+    "eyebrow": "Guía de creación",
+    "title": "De una idea a un episodio terminado",
+    "sub": "Tres pasos: escribir el guion → dividir episodios y storyboard → envío por lotes. Cada paso enlaza a la página real.",
+    "step1Title": "Crear proyecto · escribir guion",
+    "step1Desc": "Parte de una idea o importa una novela; genera esquema, personajes y guiones por episodio y entra al espacio de trabajo.",
+    "step1Cta": "Ir al estudio de guion",
+    "step2Title": "Dividir episodios · storyboard",
+    "step2Desc": "Confirma el esquema, divide episodios, genera el storyboard y vincula personajes/escenarios/objetos; finaliza los retratos antes de enviar.",
+    "step2Cta": "Ir al proyecto",
+    "step3Title": "Envío por lotes · render",
+    "step3Desc": "Elige modelos y presupuesto, envía en lote, sigue el progreso y edita/exporta en la línea de tiempo.",
+    "step3Cta": "Ir a tareas",
+    "faqTitle": "Preguntas frecuentes",
+    "faq1Q": "¿Por qué hay cola de generación?",
+    "faq1A": "La generación es asíncrona y corre por colas y concurrencia del proveedor. Las tomas fallidas se reintentan con clave de idempotencia sin cobrar dos veces.",
+    "faq2Q": "¿Cómo se calculan los créditos?",
+    "faq2A": "Precio unitario del catálogo × duración/cantidad. Se cotiza y congela antes de enviar; se liquida al éxito y se libera al fallar.",
+    "faq3Q": "¿Puedo usar solo herramientas sueltas?",
+    "faq3A": "Sí. Cada tarjeta del toolbox es una entrada independiente; la pipeline rinde en producción de varios episodios y tomas.",
+    "startNow": "Empezar a crear",
+    "cliLink": "Automatizar con CLI / Agent"
+  },
+  "userLanguage": {
+    "metaTitle": "Idioma · OneFrame",
+    "title": "Idioma",
+    "sub": "Elige el idioma de la interfaz; se aplica al instante y se recuerda en este dispositivo.",
+    "current": "Actual",
+    "saved": "Cambiado a {name}",
+    "note": "La preferencia se guarda en este dispositivo (cookie). La sincronización con la cuenta aún no está conectada."
+  },
+  "userUpdate": {
+    "metaTitle": "Perfil · OneFrame",
+    "title": "Perfil",
+    "sub": "Edita el apodo y la URL del avatar; el avatar solo acepta URL de imagen (sin subida).",
+    "nickname": "Apodo",
+    "nicknamePlaceholder": "1–40 caracteres",
+    "nicknameInvalid": "El apodo debe tener 1–40 caracteres",
+    "avatar": "URL del avatar",
+    "avatarPlaceholder": "https://… o ruta relativa",
+    "avatarHint": "Déjalo vacío para borrar el avatar; solo URL de imagen.",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "saved": "Guardado",
+    "saveFailed": "Error al guardar",
+    "loadFailed": "Error al cargar",
+    "loading": "Cargando…",
+    "back": "Volver a ajustes"
+  },
+  "referVideo": {
+    "metaTitle": "Vídeos de referencia · OneFrame",
+    "title": "Vídeos de referencia",
+    "sub": "Elige un vídeo de tus recursos como referencia y abre referencia-a-vídeo o redibujo de vídeo.",
+    "openRefer": "Referencia a vídeo",
+    "openRedraw": "Redibujo de vídeo",
+    "loading": "Cargando…",
+    "loadFailed": "Error al cargar",
+    "empty": "Aún no hay vídeos",
+    "emptyDesc": "Sube un vídeo en la biblioteca de recursos o usa el material dentro de la herramienta.",
+    "goAssets": "Ir a recursos",
+    "untitled": "Vídeo sin título",
+    "noPreview": "Sin vista previa",
+    "useAsReference": "Usar como referencia"
   }
 }

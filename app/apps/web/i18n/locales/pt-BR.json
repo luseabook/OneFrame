@@ -339,7 +339,10 @@
     "confirmDelete": "Confirmar exclusão",
     "deleting": "Excluindo…",
     "deleted": "Conta excluída",
-    "deleteFailed": "Falha ao excluir"
+    "deleteFailed": "Falha ao excluir",
+    "editProfile": "Editar perfil",
+    "language": "Idioma",
+    "guide": "Guia de criação"
   },
   "errors": {
     "network": "Erro de rede",
@@ -4583,5 +4586,70 @@
     "skeleton": "Esqueleto",
     "more": "mais {n}…",
     "navLabel": "Ferramentas CLI"
+  },
+  "tutorial": {
+    "metaTitle": "Guia de criação · OneFrame",
+    "eyebrow": "Guia de criação",
+    "title": "De uma ideia a um episódio finalizado",
+    "sub": "Três passos: escrever o roteiro → dividir episódios e storyboard → envio em lote. Cada passo leva à página real.",
+    "step1Title": "Criar projeto · escrever roteiro",
+    "step1Desc": "Parta de uma ideia ou importe um romance; gere outline, personagens e roteiros por episódio e entre no workspace.",
+    "step1Cta": "Abrir estúdio de roteiro",
+    "step2Title": "Dividir episódios · storyboard",
+    "step2Desc": "Confirme o outline, divida episódios, gere o storyboard e vincule personagens/cenários/objetos; finalize os retratos antes de enviar.",
+    "step2Cta": "Abrir projeto",
+    "step3Title": "Envio em lote · render",
+    "step3Desc": "Escolha modelos e orçamento, envie em lote, acompanhe no centro de tarefas e edite/exporte na timeline.",
+    "step3Cta": "Abrir tarefas",
+    "faqTitle": "Perguntas frequentes",
+    "faq1Q": "Por que a geração entra em fila?",
+    "faq1A": "A geração é assíncrona e roda em filas e concorrência do fornecedor. Tomadas com falha podem ser reenviadas com chave de idempotência sem cobrar duas vezes.",
+    "faq2Q": "Como os créditos são calculados?",
+    "faq2A": "Preço unitário do catálogo × duração/quantidade. A cotação é exibida e congelada antes do envio; liquida no sucesso e libera na falha.",
+    "faq3Q": "Posso usar só ferramentas avulsas?",
+    "faq3A": "Sim. Cada card da caixa de ferramentas é uma entrada independente; o pipeline compensa em produção de vários episódios e tomadas.",
+    "startNow": "Começar a criar",
+    "cliLink": "Automatizar com CLI / Agent"
+  },
+  "userLanguage": {
+    "metaTitle": "Idioma · OneFrame",
+    "title": "Idioma",
+    "sub": "Escolha o idioma da interface; aplica na hora e fica lembrado neste dispositivo.",
+    "current": "Atual",
+    "saved": "Alterado para {name}",
+    "note": "A preferência fica neste dispositivo (cookie). A sincronização com a conta ainda não está conectada."
+  },
+  "userUpdate": {
+    "metaTitle": "Perfil · OneFrame",
+    "title": "Perfil",
+    "sub": "Edite apelido e URL do avatar; o avatar aceita apenas URL de imagem (sem upload).",
+    "nickname": "Apelido",
+    "nicknamePlaceholder": "1–40 caracteres",
+    "nicknameInvalid": "O apelido deve ter 1–40 caracteres",
+    "avatar": "URL do avatar",
+    "avatarPlaceholder": "https://… ou caminho relativo",
+    "avatarHint": "Deixe vazio para remover o avatar; apenas URL de imagem.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Salvo",
+    "saveFailed": "Falha ao salvar",
+    "loadFailed": "Falha ao carregar",
+    "loading": "Carregando…",
+    "back": "Voltar às configurações"
+  },
+  "referVideo": {
+    "metaTitle": "Vídeos de referência · OneFrame",
+    "title": "Vídeos de referência",
+    "sub": "Escolha um vídeo dos seus recursos como referência e abra referência-para-vídeo ou redesenho de vídeo.",
+    "openRefer": "Referência para vídeo",
+    "openRedraw": "Redesenho de vídeo",
+    "loading": "Carregando…",
+    "loadFailed": "Falha ao carregar",
+    "empty": "Ainda sem vídeos",
+    "emptyDesc": "Envie um vídeo na biblioteca de recursos ou use o material dentro da ferramenta.",
+    "goAssets": "Ir aos recursos",
+    "untitled": "Vídeo sem título",
+    "noPreview": "Sem prévia",
+    "useAsReference": "Usar como referência"
   }
 }

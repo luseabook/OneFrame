@@ -148,6 +148,11 @@ async function deleteAccount(): Promise<void> {
       <p class="muted">
         {{ t("settings.creditsLine", { balance: credits?.balance ?? "-", frozen: credits?.frozen ?? "-" }) }}
       </p>
+      <div class="account-links">
+        <NuxtLink to="/user-update">{{ t("settings.editProfile") }}</NuxtLink>
+        <NuxtLink to="/user-language">{{ t("settings.language") }}</NuxtLink>
+        <NuxtLink to="/tutorial">{{ t("settings.guide") }}</NuxtLink>
+      </div>
     </section>
 
     <section class="card">
@@ -353,5 +358,16 @@ h2 {
   .bind-form {
     grid-template-columns: 1fr;
   }
+}
+.account-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+}
+.account-links a {
+  color: var(--brand, #9b46ff);
+  font-size: 13px;
+  text-decoration: none;
 }
 </style>

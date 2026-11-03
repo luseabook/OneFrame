@@ -116,6 +116,13 @@ export default defineNuxtConfig({
     "/script-view/**": { ssr: false },
     // 第 133 批：CLI 公测页（竞品 /cli），页面数据全部客户端拉取/静态快照
     "/cli": { ssr: false },
+    // 第 134 批：账号基础页与承接别名（登录后可用，首帧来自客户端）
+    "/tutorial": { ssr: false },
+    "/user-language": { ssr: false },
+    "/user-update": { ssr: false },
+    "/adjust": { ssr: false },
+    "/implement": { ssr: false },
+    "/refer-video": { ssr: false },
     // 第 132 批：竞品 /short-film/:id 的别名承接（短剧=脚本项目工作台）
     "/short-film": { ssr: false },
     "/short-film/**": { ssr: false },

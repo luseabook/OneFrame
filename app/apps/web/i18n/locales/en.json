@@ -339,7 +339,10 @@
     "confirmDelete": "Confirm deletion",
     "deleting": "Deleting…",
     "deleted": "Account deleted",
-    "deleteFailed": "Deletion failed"
+    "deleteFailed": "Deletion failed",
+    "editProfile": "Edit profile",
+    "language": "Language",
+    "guide": "Creation guide"
   },
   "errors": {
     "network": "Network error",
@@ -4583,5 +4586,70 @@
     "skeleton": "Skeleton",
     "more": "{n} more…",
     "navLabel": "CLI tools"
+  },
+  "tutorial": {
+    "metaTitle": "Creation guide · OneFrame",
+    "eyebrow": "Creation guide",
+    "title": "From one idea to a finished episode",
+    "sub": "Three steps: write the script → split episodes and storyboard → batch submit. Every step links to the real page.",
+    "step1Title": "Create a project · write the script",
+    "step1Desc": "Start from an idea or import a novel; generate outline, characters and episode scripts, then enter the workspace.",
+    "step1Cta": "Open script studio",
+    "step2Title": "Split episodes · storyboard",
+    "step2Desc": "Confirm the outline, split episodes, generate the storyboard and bind character/scene/prop assets; finalize portraits before submitting.",
+    "step2Cta": "Open project workspace",
+    "step3Title": "Batch submit · render",
+    "step3Desc": "Pick models and budget, submit in bulk, track progress in the task center, then edit and export in the timeline.",
+    "step3Cta": "Open task center",
+    "faqTitle": "FAQ",
+    "faq1Q": "Why do generations queue?",
+    "faq1A": "Generation is asynchronous and runs through queues and vendor concurrency. The task center shows queued/running/failed states; failed shots can be retried with an idempotency key without double charging.",
+    "faq2Q": "How are credits calculated?",
+    "faq2A": "Model catalog unit price × duration/count. The quote is shown and frozen before submit; settlement happens on success and the freeze is released on failure.",
+    "faq3Q": "Can I use only single tools?",
+    "faq3A": "Yes. Every toolbox card is a standalone entry; the pipeline only pays off for multi-episode, multi-shot production.",
+    "startNow": "Start creating",
+    "cliLink": "Automate with CLI / Agent"
+  },
+  "userLanguage": {
+    "metaTitle": "Language settings · OneFrame",
+    "title": "Language settings",
+    "sub": "Choose the interface language; it applies immediately and is remembered on this device.",
+    "current": "Current",
+    "saved": "Switched to {name}",
+    "note": "The preference is stored on this device (cookie). Account-level sync is not connected yet, so other devices need to choose again."
+  },
+  "userUpdate": {
+    "metaTitle": "Account profile · OneFrame",
+    "title": "Account profile",
+    "sub": "Edit nickname and avatar URL; avatars accept image URLs only (no upload yet).",
+    "nickname": "Nickname",
+    "nicknamePlaceholder": "1–40 characters",
+    "nicknameInvalid": "Nickname must be 1–40 characters",
+    "avatar": "Avatar URL",
+    "avatarPlaceholder": "https://… or a site-relative path",
+    "avatarHint": "Leave empty to clear the avatar; image URLs only.",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveFailed": "Save failed",
+    "loadFailed": "Failed to load",
+    "loading": "Loading…",
+    "back": "Back to settings"
+  },
+  "referVideo": {
+    "metaTitle": "Reference videos · OneFrame",
+    "title": "Reference videos",
+    "sub": "Pick a video from your assets as reference material and open reference-to-video or video redraw.",
+    "openRefer": "Reference to video",
+    "openRedraw": "Video redraw",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load",
+    "empty": "No video assets yet",
+    "emptyDesc": "Upload a video in the asset library, or upload reference material inside the tool.",
+    "goAssets": "Open asset library",
+    "untitled": "Untitled video",
+    "noPreview": "No preview",
+    "useAsReference": "Use as reference"
   }
 }
