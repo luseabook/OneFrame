@@ -42,7 +42,7 @@
 | EXT-09 | 供应商 DPA/委托处理协议 | 外部 | 签署版合同/在线条款留存 | 覆盖输入素材与输出结果的委托处理、留存期限 | ⏳ | P1 |
 | EXT-10 | 微信支付商户号 + APIv3 密钥 + 平台公钥证书（**含轮换期双证书**） | 外部 | 商户号、证书序列号、平台公钥 PEM（单证书）或 `{"serial":"PEM"}` 映射 | 配到 `WECHAT_MCH_ID / WECHAT_API_V3_KEY / WECHAT_PLATFORM_PUBLIC_KEY`（或 `WECHAT_PLATFORM_PUBLIC_KEYS` 轮换映射）；未配时回调按设计 401 拒绝（PAY-01/PAY-13~16，运维步骤见 deployment §7.3） | ⏳ | P1 |
 | EXT-11 | 支付宝应用 + 支付宝公钥 | 外部 | APPID、支付宝公钥 PEM | 配到 `ALIPAY_APP_ID / ALIPAY_PUBLIC_KEY`（PAY-02） | ⏳ | P1 |
-| EXT-12 | 短信签名与模板报备 | 外部 | 签名、模板 ID | 配到 `SMS_SIGN_NAME / SMS_TEMPLATE_CODE`，通过运营商审核 | ⏳ | P1 |
+| EXT-12 | 短信签名与模板报备 | 外部 | 签名、模板 ID | 配到 `SMS_SIGN_NAME / SMS_TEMPLATE_CODE`，通过运营商审核 | N/A | — |
 | EXT-13 | 内容安全词库订阅/采购（≥5000 词，含政治/暴恐/色情/侵权 IP） | 外部 | 词库许可、更新记录 | 注入 `MODERATION_WORDS` 并抽验拦截（当前仅内置 8 词，见 GAP-02） | ⏳ | P1 |
 | EXT-14 | 发票能力（诺诺/百望等）或人工月度开票流程 | 外部 | 服务合同、开票账号 | 订单页可采集开票信息 + 首张发票开出 | ⏳ | P1 |
 | EXT-15 | 用户协议/隐私政策律师审阅（含虚拟商品不退、未成年人、AI 声明） | 外部 | 审阅意见书 | 意见回改到 `/terms`、`/privacy` 后发布 | ⏳ | P0 |

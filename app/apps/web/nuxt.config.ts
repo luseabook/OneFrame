@@ -38,6 +38,10 @@ export default defineNuxtConfig({
       // 空串 = 未下发，页脚不渲染该段（上线前必须由 env 注入，见 docs/06 上线清单）。
       icpBeian: process.env.NUXT_PUBLIC_ICP_BEIAN ?? "",
       icpPolice: process.env.NUXT_PUBLIC_ICP_POLICE ?? "",
+      // 短信登录开关（2026-11-04 决策：不接短信网关）。空串 = 跟随构建环境：
+      // dev/验收构建显示验证码 tab，生产构建默认隐藏，只剩邮箱+密码与微信占位。
+      // 与后端 AUTH_SMS_ENABLED 同口径（后端关闭时两个入口都回 400101）。
+      smsEnabled: process.env.NUXT_PUBLIC_SMS_ENABLED ?? "",
     },
   },
   routeRules: {

@@ -17,8 +17,13 @@
 |---|---|---|---|
 | A 外部行政 | EXT- 共 20 项，其中 12 项 P0（主体/域名/ICP/公安/AI 双备案/协议审阅） | 周期 2–6 周，**不可压缩**，只能人工 | 创始人 / 法务 / 财务 |
 | A′ 代码 P0（本轮新增） | 短信网关（用户收不到码 = 无人能登录）、`LLM_MODE` 生产守卫、备案号空值守卫 | 都能马上写，**不依赖任何外部材料** | Backend ×2 / Frontend ×1 |
-| B 真实密钥 | 火山·百炼·DeepSeek Key、微信商户号、短信签名、审核 Key | 代码已 fail fast（OPS-06/08），**配置即通，零改码** | 创始人 + Ops 注入 |
+| B 真实密钥 | 火山·百炼·DeepSeek Key、微信商户号、审核 Key | 代码已 fail fast（OPS-06/08），**配置即通，零改码** | 创始人 + Ops 注入 |
 | C 部署规格 | `deployment.md` §2 要 4C8G + 2C4G 两台 + 托管 PG/Redis/OSS；现机 2C/1.7G 一台全塞 | **唯一需要花钱或改方案**的缺口 | 创始人决策 + Ops 落地 |
+
+> **2026-11-04 状态更新**：`N-07`（LLM_MODE 生产守卫）与 `N-05`（备案号空值守卫）已实现并随本批提交；
+> `N-06` 经决策**关闭**——不接短信网关，生产唯一登录通道为邮箱 + 密码，`AUTH_SMS_ENABLED`
+> 生产显式开启会被启动守卫拒绝，关闭时两个短信入口回 400101，前端生产不渲染验证码 tab。
+> 因此 §2 A 表的三条 P0 代码缺口当前为 **0**；剩余代码项为 `GAP-07`（P1，部分退款）与 `GAP-08`（P2，退款异步回收）。
 
 一句话：**代码不是瓶颈，行政周期和机器规格是瓶颈。**
 
@@ -76,7 +81,7 @@
 
 | 编号 | 事项 | 现状证据 | 级别 | 负责人 |
 |---|---|---|---|---|
-| **N-06 短信网关未接** | `sms.service.ts` 只把 6 位码写进 Redis，生产分支直接 `return {}`，无任何网关调用；`SMS_PROVIDER/SMS_AK/SMS_SK/SMS_SIGN_NAME/SMS_TEMPLATE_CODE` 在代码 0 命中。登录唯一入口就是短信码 | `apps/api/src/modules/auth/sms.service.ts:11-28`、`auth.controller.ts:113,121` | **P0** | Backend（接阿里云/腾讯云）或 Chief 定「邀请制+人工发码」过渡 |
+| **N-06 短信网关未接** | ~~`sms.service.ts` 只把 6 位码写进 Redis，生产分支直接 `return {}`，无任何网关调用~~ **2026-11-04 决策关闭：不接短信网关**，生产唯一通道 = 邮箱 + 密码（api-spec §17.35/§17.36）；`AUTH_SMS_ENABLED` 生产显式 true 会被启动守卫拒绝，关闭时两个入口回 400101 并指引邮箱密码；前端生产不渲染验证码 tab | `apps/api/src/config/env.ts`（`collectProductionProblems`）、`auth.controller.ts`（`ensureSmsLoginEnabled`）、`apps/web/pages/login.vue` | **已关闭（决策）** | Chief 决策 ✅ |
 | **N-07 `LLM_MODE` 生产无守卫** | `env.ts:518` 默认 `mock`；`collectLlmProblems` 只在 `real` 缺 Key 时报错 → **生产写 mock 或不写 = 大纲/角色/剧本/分镜全走 mock 文案，启动成功、日志无异常** | `apps/api/src/config/env.ts:517-522` | **P0** | Backend（补守卫+测试） |
 | **N-05 备案号空值无守卫** | `SiteLegal.vue` 空串整段不渲染且不报错 → 忘配 `NUXT_PUBLIC_ICP_BEIAN` = 上线后全站无备案号，与 EXT-03 未办完等价但无痕迹 | `apps/web/components/SiteLegal.vue:21-23`；判据已加 `PAGE-07`（当前 FAIL） | **P0** | Frontend |
 | GAP-07 | 部分退款 API（积分已部分消耗场景） | `apps/api/src/modules/billing/billing.service.ts:885` 显式拒绝 `partial refund is not supported` | P1 | Backend |
@@ -363,12 +368,12 @@ Tests 8 passed | 2 skipped（跳过的是需要真 ffmpeg 的两条）
 
 | 项 | 状态 | 证据 |
 |---|---|---|
-| 现有登录方式 | **仅手机号 + 短信码** | `auth.controller.ts:114` `sms-code`、`:122` `login` |
-| 短信网关 | **未实现**（只写 Redis，无任何网关调用） | `modules/auth/sms.service.ts:11-28`；`SMS_PROVIDER/SMS_AK/SK/SIGN/TEMPLATE` 全仓 0 命中 |
+| 现有登录方式 | **手机号+短信码（生产默认关闭）＋邮箱+密码（生产唯一通道）** | `auth.controller.ts` `sms-code`/`login`/`email/register`/`login/password`；§17.35 |
+| 短信网关 | **决策关闭（2026-11-04）**：不接网关；生产显式开启被启动守卫拒绝 | `config/env.ts` `collectProductionProblems`；`auth.controller.ts` `ensureSmsLoginEnabled` |
 | Provider 抽象 | **已有**：`identities` 表是通用绑定表（`provider` = phone\|wechat\|apple，`phoneHash` / `phoneCipher` / `externalId`，唯一索引 `(provider, externalId)`） | `packages/db/src/schema.ts:61-83` |
 | OAuth 实现 | **已有 4 个 provider**：`wechat` / `qq` / `apple` / `douyin`，含授权 URL、token 交换、userinfo、回调、绑定 | `modules/auth/oauth.service.ts:34`；端点 `auth.controller.ts:283/290/296/311` |
 | OAuth 凭据 | **未配置**（`OAUTH_WECHAT_*` / `OAUTH_QQ_*` / `OAUTH_APPLE_*` 均为 optional 且未注入） | `config/env.ts:160-170` |
-| 邮箱/密码 | **不存在**：`users` 表无 email、无 password_hash；唯一的 `passwordHash` 属于 `admin_users`（后台独立账号） | `schema.ts:25-45`（users）/ `:131-134`（admin_users） |
+| 邮箱/密码 | ✅ **已完成**（2026-11-03，§17.35）：`user_credentials`（迁移 0055）+ `/auth/email/register` + `/auth/login/password` | `auth.service.ts` `provisionAccount`；`auth-email-password.spec.ts` |
 
 > 结论先行：**「微信扫码」的代码成本远低于预期（已在仓里），真正要新写的是「邮箱+密码」。**
 > 但能不能上线不只看代码量，还要看**外部依赖**——这决定了下面的优先级。
@@ -418,9 +423,9 @@ Tests 8 passed | 2 skipped（跳过的是需要真 ffmpeg 的两条）
 | 邮箱 + 密码 | ✅ 代码侧完成 | `POST /v1/auth/email/register`、`POST /v1/auth/login/password`；`user_credentials`（迁移 `0055`，纯 additive）；用例 `auth-email-password.spec.ts` **7 例**（含 `balance == Σdelta`、不泄露账号存在性、`keep_login` 两态）；全量 **2122 passed / 1 skipped** |
 | 建号副作用唯一入口 | ✅ | `provisionAccount()`：users→spaces→space_members→credit_accounts→identities→user_credentials→礼包→邀请码，**任一登录方式共用**（正是 §9.4 那条红线的实现） |
 | `identities` 列复用裁定 | ✅ 采纳 Backend 方案 | 邮箱 HMAC 存 **`phone_hash`**（既有唯一索引 `uq_identities_phone(provider, phone_hash)` 形状正好是「provider + 标识符哈希」），**不用 `external_id`**（那列语义是开放平台 unionid）。代价是列名成为历史包袱，故追加两条约束 ↓ |
-| 密码登录失败限流 | ❌ **未做** → `SEC-04`（P0，对外开放前） | 短信路径有 Redis 计数，密码路径没有 |
+| 密码登录失败限流 | ✅ **已实现**（SEC-04）：10 次 / 300 秒，旁路 fail-open（Redis 抖动不拒绝正确密码） | `auth.service.ts` 登录失败计数 |
 | 邮件验证 / 密码找回 | ❌ 未做 → `SEC-05`（P1） | 无找回通道 = 忘密码即失去账号 |
-| 真实短信网关 | ❌ 未接 | `sms.service.ts` 仍无网关调用 |
+| 真实短信网关 | ⛔ **决策关闭**（2026-11-04）：不接网关；生产唯一通道 = 邮箱+密码，恢复时实现网关 + `AUTH_SMS_ENABLED=true` | `config/env.ts` 守卫；§17.36 |
 | 微信扫码 | ⏳ 等备案 | 代码已在，缺 `OAUTH_WECHAT_*` 与已备案回调域 |
 
 **`phone_hash` 复用的两条约束（采纳的前提）**：

@@ -11,17 +11,32 @@ useHead({ title: () => t('auth.title') });
 
 type LoginTab = "wechat" | "code" | "password";
 
-const TAB_LIST = computed<{ key: LoginTab; label: string }[]>(() => [
-  { key: "wechat", label: t("auth.tabWechat") },
-  { key: "code", label: t("auth.tabCode") },
-  { key: "password", label: t("auth.tabPassword") },
-]);
+/**
+ * 短信登录开关（2026-11-04 产品决策：**不接短信网关**）。
+ *
+ * 为什么在登录页判而不是只判后端：后端判的是"请求被拒"，但用户看到的是三个 tab；
+ * 保留一个点了必然失败的 tab，等于让用户在死路上花一分钟等验证码。
+ * `NUXT_PUBLIC_SMS_ENABLED` 空串时跟随构建环境：dev/验收显示（debug_code 可用），
+ * 生产隐藏（`import.meta.dev` 为 false）。
+ */
+const runtimeConfig = useRuntimeConfig();
+const smsEnabled = computed(() => {
+  const raw = String(runtimeConfig.public.smsEnabled ?? "");
+  return raw === "true" || (raw === "" && import.meta.dev);
+});
+
+const TAB_LIST = computed<{ key: LoginTab; label: string }[]>(() => {
+  const tabs: { key: LoginTab; label: string }[] = [{ key: "wechat", label: t("auth.tabWechat") }];
+  if (smsEnabled.value) tabs.push({ key: "code", label: t("auth.tabCode") });
+  tabs.push({ key: "password", label: t("auth.tabPassword") });
+  return tabs;
+});
 
 const auth = useAuth();
 const route = useRoute();
 const router = useRouter();
 
-const activeTab = ref<LoginTab>("code");
+const activeTab = ref<LoginTab>(smsEnabled.value ? "code" : "password");
 const phone = ref("");
 const code = ref("");
 // 密码登录（identifier = 手机号或邮箱；端点由 Backend 定为 /auth/login/password）
@@ -416,6 +431,7 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="activeTab === 'password'" class="panel">
+        <p v-if="!smsEnabled" class="field-hint">{{ t("auth.smsOffNote") }}</p>
         <div class="field">
           <input
             v-model="identifier"
@@ -473,8 +489,8 @@ onUnmounted(() => {
 
       <div v-else class="tab-notice">
         <p class="notice-text">{{ noticeText }}</p>
-        <button class="notice-switch" type="button" @click="setTab('code')">
-          {{ t("auth.useCode") }}
+        <button class="notice-switch" type="button" @click="setTab(smsEnabled ? 'code' : 'password')">
+          {{ smsEnabled ? t("auth.useCode") : t("auth.tabPassword") }}
         </button>
       </div>
 

@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Put, Query, Req, Res , Inject} from
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginRequestSchema, smsCodeRequestSchema, AppError, ErrorCode, readEnvFlag } from "@app/shared";
-import { env } from "../../config/env";
+import { env, smsLoginEnabled } from "../../config/env";
 import { llmStatus } from "../../health/llm-status";
 import { CAPTCHA_ENFORCE_SPEC } from "../../config/env-values";
 import { Public } from "../../common/public.decorator";
@@ -133,9 +133,24 @@ export class AuthController {
     }
   }
 
+  /**
+   * 短信登录闸门（2026-11-04 产品决策：**不接短信网关**）。
+   *
+   * 关闭时两个入口都回 400101 并明确指引邮箱 + 密码。为什么不是「继续回 200、只是不发送」：
+   * 那样前端会显示"验证码已发送"，用户等一分钟再点重发，最后发现整条路是死的 ——
+   * 沉默失败比报错更难定位，也让客服无法判断到底哪一步坏了。
+   */
+  private ensureSmsLoginEnabled(): void {
+    if (smsLoginEnabled(env)) return;
+    throw new AppError(ErrorCode.INVALID_PARAM, "短信登录暂未开放，请使用邮箱 + 密码登录", {
+      field: "phone",
+    });
+  }
+
   @Public()
   @Post("auth/sms-code")
   async sms(@Body() body: unknown, @Req() req: FastifyRequest): Promise<{ debug_code?: string }> {
+    this.ensureSmsLoginEnabled();
     const input = parseOrThrow(smsBody, body);
     await this.enforceCaptcha(input);
     return this.auth.sendCode(input.phone, clientIp(req));
@@ -144,6 +159,7 @@ export class AuthController {
   @Public()
   @Post("auth/login")
   async login(@Body() body: unknown, @Res({ passthrough: true }) res: FastifyReply) {
+    this.ensureSmsLoginEnabled();
     const input = parseOrThrow(loginBody, body);
     // 登录入口同样走可选验证码闸门（同一开关，避免"发码防住了、登录没防"的半吊子状态）
     await this.enforceCaptcha(

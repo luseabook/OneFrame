@@ -64,6 +64,7 @@
     "noticeWechat": "WeChat sign-in is coming soon. Please use the SMS code instead.",
     "noticePassword": "Password sign-in is coming soon. Please use the SMS code instead.",
     "useCode": "Use SMS code",
+    "smsOffNote": "SMS sign-in is not available yet. Use email + password; it returns once the SMS gateway is connected.",
     "otherWays": "Or continue with",
     "agreePrefix": "I have read and agree to the",
     "agreeTerms": "OneFrame Terms of Service",

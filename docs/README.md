@@ -145,9 +145,11 @@ api-spec / database / system-design / adr / conventions / dev-workflow / testing
 | 6 | **`05-ops/deployment.md` §4 重写**：原文列了 **22 个代码 0 命中**的幽灵变量（`SMS_*×5 / SENTRY_DSN / CAPTCHA_SID·SECRET / VOLC_*×3 / KLING_*×2 / VIDU_KEY / DEEPSEEK_KEY / ALIYUN_DASHSCOPE_KEY / APP_DOMAIN / REFRESH_SECRET / ADMIN_BOOTSTRAP_PASSWORD / PAY_WECHAT_*×3`），照它配会以为短信/监控/供应商都通了。改为按「A fail-fast / B 能起但坏 / C 静默假成功」三组，逐条给守卫函数位置；幽灵变量单列并给真实对应关系 |
 | 7 | **前端 SSR 口径裁定**（`03-frontend/conventions.md` §8）：旧守卫「所有顶层路由一律 `ssr:false`」改为**两类显式清单 + 全集闭合**——合规页 `/terms` `/privacy` `/report` 必须服务端渲染（可抓取可审计），其余含 `/share` `/canvas` 必须 `ssr:false`，新增路由未分类即红 |
 
-**当前门禁状态（诚实口径）**：`node _acceptance/compliance-check.cjs` → **PASS 66 / FAIL 1 / SKIP 1**（共 67 项）。
-FAIL = `PAGE-07`（备案号空值守卫，Frontend P0）；SKIP = `LOG-04`（本机 3000 被他人进程占用）。
-**代码侧不再是「零缺口」**：本轮暴露 3 条 P0 —— 短信网关未接（用户收不到码）、`LLM_MODE` 生产可静默走 mock、备案号空值无守卫，均已进 `launch-gap` §2 A 表。
+**当前门禁状态（诚实口径）**：`node _acceptance/compliance-check.cjs` → **PASS 68 / FAIL 0 / SKIP 1**（共 69 项；2026-11-04 实跑）。
+SKIP = `LOG-04`（本机 3000 被他人进程占用，判据已收紧为 200 + `pong:true` + 头）。
+**本轮 3 条 P0 代码缺口的处置**：`N-07`（`LLM_MODE` 生产守卫）与 `N-05`（备案号空值守卫）已实现并随 2026-11-04 提交；
+`N-06` 经决策**关闭**——不接短信网关，生产唯一登录通道为邮箱 + 密码（api-spec §17.35/§17.36），
+`AUTH_SMS_ENABLED` 生产显式开启即拒绝启动，前端生产不渲染验证码 tab。剩余代码项：`GAP-07`（P1，部分退款）、`GAP-08`（P2，退款异步回收）。
 
 ---
 

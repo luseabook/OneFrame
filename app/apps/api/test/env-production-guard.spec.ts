@@ -4,6 +4,7 @@ import {
   buildEnv,
   collectPaymentProblems,
   collectProductionProblems,
+  smsLoginEnabled,
 } from "../src/config/env";
 
 /**
@@ -214,5 +215,30 @@ describe("production env guard (api)", () => {
     it("does not enforce payment credentials outside production", () => {
       expect(collectProductionProblems({ NODE_ENV: "test", PAYMENT_LIVE: "true" })).toEqual([]);
     });
+  });
+});
+
+/**
+ * 短信登录开关（2026-11-04 产品决策：**不接短信网关**）。
+ *
+ * 三条判据分别锁住三种部署形态：生产默认关、生产显式开被拒、非生产默认开。
+ * 为什么"生产显式开"必须拒绝：`sms.service.ts` 只把码写 Redis，没有任何网关调用，
+ * 开启后接口回 200、用户永远收不到 —— 沉默失败比报错更难定位。
+ */
+describe("SMS login switch (2026-11-04 decision: no SMS gateway)", () => {
+  it("defaults to OFF in production and adds no problem", () => {
+    const problems = collectProductionProblems(secureProd());
+    expect(problems.join("\n")).not.toContain("AUTH_SMS_ENABLED");
+    expect(smsLoginEnabled(buildEnv(secureProd()))).toBe(false);
+  });
+
+  it("rejects AUTH_SMS_ENABLED=true in production", () => {
+    const problems = collectProductionProblems(secureProd({ AUTH_SMS_ENABLED: "true" }));
+    expect(problems.join("\n")).toContain("AUTH_SMS_ENABLED");
+  });
+
+  it("defaults to ON outside production and honors explicit false", () => {
+    expect(smsLoginEnabled(buildEnv({ NODE_ENV: "test" }))).toBe(true);
+    expect(smsLoginEnabled(buildEnv({ NODE_ENV: "test", AUTH_SMS_ENABLED: "false" }))).toBe(false);
   });
 });

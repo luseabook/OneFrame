@@ -93,8 +93,8 @@ node ../_acceptance/compliance-check.cjs               # 仅代码侧合规清�
 - [x] **可运维性**：`/healthz/live`、`/healthz/ready`（依赖不可用 503）、`/metrics`（Prometheus 文本）、request_id 单行 JSON 请求日志（敏感字段脱敏/慢请求告警）、优雅停机、备份/恢复/回滚脚本（`deploy/`）
 - [x] **合规上线清单可执行化**：`docs/06-security-compliance/launch-checklist.md`（外部资质 EXT-01~20 与代码侧 47 项分离）+ `node _acceptance/compliance-check.cjs` 自动核查（PASS/FAIL/SKIP + 证据文件:行 + 非零退出码）
 - [x] **B 型「能真实收钱跑业务」可复跑验收**：`pwsh _acceptance/b-type-acceptance.ps1`（前置服务检查 → 迁移/seed → 全量测试 → typecheck/lint/build → 生产守卫正反例 → 运行态支付+退款闭环 → 回调默认拒绝 → 合规检查）；脚本基线 **299 passed / 1 skipped**（2026-10-26 时点），验收 25/25；当前 API 全量测试为 **119 文件 / 1399 用例**
-- [ ] 剩余外部依赖：真实 Ark/DeepSeek Key、微信商户号+APIv3 证书、支付宝应用、ICP 经营许可与 AI 双备案、短信签名、内容安全词库（详见 `docs/06-security-compliance/launch-checklist.md` 的外部区）
-- [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 短信签名 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
+- [ ] 剩余外部依赖：真实 Ark/DeepSeek Key、微信商户号+APIv3 证书、支付宝应用、ICP 经营许可与 AI 双备案、内容安全词库（详见 `docs/06-security-compliance/launch-checklist.md` 的外部区）。**短信登录已按决策关闭（2026-11-04）：生产唯一通道为邮箱 + 密码，短信签名/模板报备不再阻塞上线**
+- [ ] P0.5 主体注册 / 域名 / ICP 与 AI 双备案提交 / 火山+DeepSeek 开通（行政，阻塞 Alpha）
 - [x] git init + 首次提交（remote: <https://github.com/luseabook/OneFrame>，branch `main`）
 
 P1 起的任务与验收见 [`../docs/07-plan/wbs.md`](../docs/07-plan/wbs.md)。

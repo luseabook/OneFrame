@@ -64,6 +64,7 @@
     "noticeWechat": "El acceso con WeChat estará disponible pronto. Usa el código por SMS.",
     "noticePassword": "El acceso con contraseña estará disponible pronto. Usa el código por SMS.",
     "useCode": "Usar código por SMS",
+    "smsOffNote": "El inicio de sesión por SMS aún no está disponible. Usa correo + contraseña; volverá cuando se conecte la pasarela de SMS.",
     "otherWays": "O continúa con",
     "agreePrefix": "He leído y acepto los",
     "agreeTerms": "Términos del Servicio de OneFrame",

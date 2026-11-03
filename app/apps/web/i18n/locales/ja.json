@@ -64,6 +64,7 @@
     "noticeWechat": "WeChat ログインは準備中です。認証コードをご利用ください。",
     "noticePassword": "パスワードログインは準備中です。認証コードをご利用ください。",
     "useCode": "認証コードでログイン",
+    "smsOffNote": "SMS ログインは現在ご利用いただけません。メールアドレス＋パスワードをご利用ください（SMS ゲートウェイ接続後に再開します）。",
     "otherWays": "その他のログイン方法",
     "agreePrefix": "以下に同意します：",
     "agreeTerms": "OneFrame 利用規約",

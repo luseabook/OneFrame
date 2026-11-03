@@ -80,6 +80,21 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
+  /**
+   * 短信登录开关（2026-11-04 产品决策：**不接短信网关**）。
+   *
+   * 语义：
+   * - **未设置**：非生产 = 开（本地/测试沿用 `debug_code` 跑通登录流程），生产 = 关；
+   * - 显式 `true`：生产启动守卫**拒绝**（`sms.service.ts` 只把码写 Redis，没有任何网关调用，
+   *   开了等于用户永远收不到验证码，且接口还回 200 成功——比报错更坏）；
+   * - 显式 `false`：任何环境都关，`/auth/sms-code` 与手机号登录回 400101 并指引邮箱密码。
+   *
+   * 生产唯一登录通道 = 邮箱 + 密码（api-spec §17.35），短信签名/模板报备随之不再是上线前置。
+   */
+  AUTH_SMS_ENABLED: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
   GIFT_CREDITS: z.coerce.number().int().min(0).default(80),
   // 短信 IP 频控阈值（条/小时）：测试环境默认放宽，否则多测试文件共用
   // 127.0.0.1 会互相挤占（`sms:ip:*` 计数 TTL 1h，跨复跑保留）
@@ -528,6 +543,14 @@ export function collectProductionProblems(raw: RawEnv = process.env): string[] {
     problems.push("METRICS_TOKEN 必须显式设置（/v1/metrics 含任务与资金指标，不能匿名抓取）");
   }
 
+  // 短信登录（2026-11-04 决策）：本版本没有实现任何短信网关，生产开启只会在
+  // 「接口 200 成功」与「用户永远收不到码」之间制造沉默故障 → 显式拒绝；默认（未设置）= 关。
+  if (rawValue(raw, "AUTH_SMS_ENABLED") === "true") {
+    problems.push(
+      "AUTH_SMS_ENABLED=true 在生产被拒绝：本版本未实现短信网关（sms.service.ts 只写 Redis、不发送），" +
+        "开启会让用户永远收不到验证码；请使用邮箱+密码登录，或先实现网关再放开",
+    );
+  }
   problems.push(...collectLlmProblems(raw));
   problems.push(...collectPaymentProblems(raw));
   return problems;
@@ -650,5 +673,14 @@ export type Env = z.infer<typeof envSchema> & {
   SMS_IP_HOURLY_LIMIT: number;
   LLM_MOCK_ALLOWED: boolean;
 };
+
+/**
+ * 短信登录是否可用（唯一判定入口）。
+ * - 显式 `AUTH_SMS_ENABLED` 优先；
+ * - 未设置：非生产开（测试依赖 `debug_code`），生产关（网关未实现，见 collectProductionProblems）。
+ */
+export function smsLoginEnabled(parsed: Pick<Env, "AUTH_SMS_ENABLED" | "NODE_ENV">): boolean {
+  return parsed.AUTH_SMS_ENABLED ?? parsed.NODE_ENV !== "production";
+}
 
 export const env = buildEnv();

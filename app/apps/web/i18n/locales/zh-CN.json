@@ -64,6 +64,7 @@
     "noticeWechat": "微信登录即将开放，请使用验证码登录",
     "noticePassword": "密码登录即将开放，请使用验证码登录",
     "useCode": "使用验证码登录",
+    "smsOffNote": "短信登录暂未开放，请使用邮箱 + 密码登录；验证码通道接通后会恢复。",
     "otherWays": "使用其他方式登录",
     "agreePrefix": "我已阅读并同意",
     "agreeTerms": "一帧 用户服务协议",
