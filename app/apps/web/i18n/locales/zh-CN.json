@@ -4511,7 +4511,15 @@
     "emptyScript": "这一集还没有正文",
     "emptyScriptDesc": "正文可在项目工作台的剧本编辑里生成或粘贴。",
     "projectMeta": "{genre} · 共 {count} 集",
-    "genreUnknown": "未设题材"
+    "genreUnknown": "未设题材",
+    "backNovel": "返回小说库",
+    "chapters": "章节",
+    "chapterNo": "第 {n} 章",
+    "emptyChapters": "还没有章节",
+    "emptyChaptersDesc": "上传或粘贴小说后会自动分章。",
+    "emptyChapter": "这一章还没有正文",
+    "emptyChapterDesc": "正文可在小说工作台生成或编辑。",
+    "novelMeta": "{chapters} 章 · 已解析 {episodes} 集"
   },
   "projectMembers": {
     "metaTitle": "项目成员 · 一帧",

@@ -4511,7 +4511,15 @@
     "emptyScript": "No script for this episode",
     "emptyScriptDesc": "Generate or paste the script in the project workspace.",
     "projectMeta": "{genre} · {count} episodes",
-    "genreUnknown": "No genre"
+    "genreUnknown": "No genre",
+    "backNovel": "Back to novels",
+    "chapters": "Chapters",
+    "chapterNo": "Chapter {n}",
+    "emptyChapters": "No chapters yet",
+    "emptyChaptersDesc": "Upload or paste a novel to split chapters automatically.",
+    "emptyChapter": "No content for this chapter",
+    "emptyChapterDesc": "Generate or edit it in the novel workspace.",
+    "novelMeta": "{chapters} chapters · {episodes} episodes"
   },
   "projectMembers": {
     "metaTitle": "Project members · OneFrame",

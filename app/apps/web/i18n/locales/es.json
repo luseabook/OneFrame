@@ -4511,7 +4511,15 @@
     "emptyScript": "Este episodio no tiene guion",
     "emptyScriptDesc": "Genera o pega el guion en el espacio de trabajo del proyecto.",
     "projectMeta": "{genre} · {count} episodios",
-    "genreUnknown": "Sin género"
+    "genreUnknown": "Sin género",
+    "backNovel": "Volver a novelas",
+    "chapters": "Capítulos",
+    "chapterNo": "Capítulo {n}",
+    "emptyChapters": "Sin capítulos",
+    "emptyChaptersDesc": "Sube o pega una novela para dividir capítulos automáticamente.",
+    "emptyChapter": "Este capítulo no tiene texto",
+    "emptyChapterDesc": "Genéralo o edítalo en el espacio de la novela.",
+    "novelMeta": "{chapters} capítulos · {episodes} episodios"
   },
   "projectMembers": {
     "metaTitle": "Miembros del proyecto · OneFrame",

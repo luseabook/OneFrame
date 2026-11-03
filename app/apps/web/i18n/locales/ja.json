@@ -4511,7 +4511,15 @@
     "emptyScript": "この話の本文はまだありません",
     "emptyScriptDesc": "プロジェクトワークスペースで生成または貼り付けてください。",
     "projectMeta": "{genre} · 全 {count} 話",
-    "genreUnknown": "ジャンル未設定"
+    "genreUnknown": "ジャンル未設定",
+    "backNovel": "小説一覧へ戻る",
+    "chapters": "章",
+    "chapterNo": "第 {n} 章",
+    "emptyChapters": "章がありません",
+    "emptyChaptersDesc": "小説をアップロードまたは貼り付けると自動で分割されます。",
+    "emptyChapter": "この章の本文はまだありません",
+    "emptyChapterDesc": "小説ワークスペースで生成・編集できます。",
+    "novelMeta": "{chapters} 章 · {episodes} 話"
   },
   "projectMembers": {
     "metaTitle": "プロジェクトメンバー · OneFrame",

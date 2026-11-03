@@ -4511,7 +4511,15 @@
     "emptyScript": "Este episódio ainda não tem roteiro",
     "emptyScriptDesc": "Gere ou cole o roteiro no espaço do projeto.",
     "projectMeta": "{genre} · {count} episódios",
-    "genreUnknown": "Sem gênero"
+    "genreUnknown": "Sem gênero",
+    "backNovel": "Voltar aos romances",
+    "chapters": "Capítulos",
+    "chapterNo": "Capítulo {n}",
+    "emptyChapters": "Ainda sem capítulos",
+    "emptyChaptersDesc": "Envie ou cole um romance para dividir capítulos automaticamente.",
+    "emptyChapter": "Este capítulo ainda não tem texto",
+    "emptyChapterDesc": "Gere ou edite no espaço do romance.",
+    "novelMeta": "{chapters} capítulos · {episodes} episódios"
   },
   "projectMembers": {
     "metaTitle": "Membros do projeto · OneFrame",

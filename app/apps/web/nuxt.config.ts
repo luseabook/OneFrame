@@ -111,6 +111,9 @@ export default defineNuxtConfig({
     // 第 132 批：竞品 /script-view/:id 的只读正文页（正文/分集来自 /projects/:id）
     "/script-view": { ssr: false },
     "/script-view/**": { ssr: false },
+    // 第 132 批：竞品 /short-film/:id 的别名承接（短剧=脚本项目工作台）
+    "/short-film": { ssr: false },
+    "/short-film/**": { ssr: false },
     "/reelflow": { ssr: false },
     "/reelflow/**": { ssr: false },
     // 新增三个"登录后才可用"的整页应用（第 2/4/5 批）：小说改编链、创作 Agent、影视版。
