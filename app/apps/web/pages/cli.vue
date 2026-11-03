@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import catalog from "~/data/cli-catalog.json";
+import { CLI_CATALOG as catalog } from "~/utils/cli-catalog";
 
 /**
  * CLI 公测页（对齐竞品 `/cli`，第 133 批）。

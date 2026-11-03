@@ -13,6 +13,9 @@ import { COMMANDS, GROUP_ORDER } from "../src/registry";
  * cd app/apps/cli && npx tsx scripts/export-catalog.ts
  * ```
  *
+ * 输出是 **TS 模块**而不是 `apps/web/data/*.json`：`app/.gitignore:19` 有全局 `data/`
+ * 规则（运行时数据目录），JSON 放进去会被静默忽略，CI/新机器上 import 直接失败。
+ *
  * 只导出展示字段，不导出 `method`/`path`（避免把接口形状当公开文档，且页面不需要）。
  */
 const groups = GROUP_ORDER.map((group) => {
@@ -37,7 +40,12 @@ const payload = {
   groupList: groups,
 };
 
-const out = path.resolve(__dirname, "../../web/data/cli-catalog.json");
+const out = path.resolve(__dirname, "../../web/utils/cli-catalog.ts");
 fs.mkdirSync(path.dirname(out), { recursive: true });
-fs.writeFileSync(out, `${JSON.stringify(payload, null, 2)}\n`);
+fs.writeFileSync(
+  out,
+  "// 本文件由 apps/cli/scripts/export-catalog.ts 生成，请勿手改。\n" +
+    "// 重新生成：cd app/apps/cli && npx tsx scripts/export-catalog.ts\n" +
+    `export const CLI_CATALOG = ${JSON.stringify(payload, null, 2)} as const;\n`,
+);
 console.log(`wrote ${out}: ${payload.groups} groups / ${payload.commands} commands (${payload.ready} ready)`);
