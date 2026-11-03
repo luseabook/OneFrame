@@ -46,6 +46,11 @@
     "tabWechat": "微信登录",
     "tabCode": "验证码登录",
     "tabPassword": "密码登录",
+    "identifierPlaceholder": "手机号或邮箱",
+    "passwordPlaceholder": "密码",
+    "passwordSubmit": "登录",
+    "identifierRequired": "请输入手机号或邮箱",
+    "passwordRequired": "请输入密码",
     "phonePlaceholder": "请输入手机号码",
     "codePlaceholder": "请输入验证码",
     "invitePlaceholder": "请输入邀请码（选填）",
@@ -79,7 +84,16 @@
     "oauthUse": "使用{label}登录",
     "oauthNotConfigured": "{label}登录未配置（联系管理员开通）",
     "oauthNoUrl": "渠道未返回授权地址",
-    "oauthUnavailable": "{label}登录暂不可用"
+    "oauthUnavailable": "{label}登录暂不可用",
+    "emailPlaceholder": "邮箱地址",
+    "registerLink": "没有账号？用邮箱注册",
+    "loginLink": "已有账号？返回登录",
+    "registerSubmit": "注册并登录",
+    "emailRequired": "请输入邮箱地址",
+    "emailInvalid": "邮箱格式不正确",
+    "invitePlaceholderRequired": "邀请码（必填）",
+    "inviteRequired": "请输入邀请码",
+    "inviteHint": "邀请码由已注册用户或运营发放；注册后可在「邀请与兑换」页查看自己的邀请码。"
   },
   "landing": {
     "metaTitle": "一帧 · AI 漫剧工作台 — 30 分钟产出一集短剧",
@@ -129,7 +143,7 @@
     "finalDesc": "Alpha 期邀请制，注册即赠 80 积分，够跑通一整集。",
     "finalCta": "免费开始创作",
     "footerBrand": "一帧 · AI 漫剧工作台",
-    "footerNote": "内容由 AI 生成，请仔细甄别 · 京 ICP 备 00000000 号（上线前替换）",
+    "footerNote": "内容由 AI 生成，请仔细甄别",
     "metaDescription": "粘贴小说，一键生成分镜与视频：剧本流水线、角色一致性、价格透明。AI 漫剧/短剧生产工作台。"
   },
   "pricing": {
@@ -3593,7 +3607,7 @@
     "loginPasswordPlaceholder": "密码",
     "loggingIn": "登录中…",
     "loginBtn": "登录运营后台",
-    "loginFootnote": "非生产环境默认 admin / admin12345；生产必须通过 ADMIN_USERNAME / ADMIN_PASSWORD 配置。",
+    "loginFootnote": "账号由运维分配；生产环境必须通过 ADMIN_USERNAME / ADMIN_PASSWORD 配置。",
     "homeConfigTitle": "首页板块",
     "homeConfigHint": "决定首页各板块的显示与顺序；未配置时用内置默认（source=default）。保存后立即对该空间内的用户生效，走版本校验（并发编辑会报冲突）。",
     "homeConfigSourceDefault": "内置默认（尚未配置）",
@@ -3741,6 +3755,10 @@
     "logout": "退出登录",
     "loginNow": "立即登录",
     "aiDisclaimer": "内容由 AI 生成，请仔细甄别 · © 2026 一帧 OneFrame",
+    "icpLabel": "ICP 备案",
+    "mockBanner": "演示环境 · 当前内容由模拟模型生成，不是真实 AI 输出",
+    "icpPoliceLabel": "公安备案",
+    "zhOnlyNotice": "本页法律文本以中文版为准。",
     "back": "返回",
     "titleSuffix": "{title} · 一帧",
     "toolTitles": {

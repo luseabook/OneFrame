@@ -1,9 +1,15 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false });
+// 合规页标题：此前整页没有 useHead，标签页显示的是落地页口号，分享出去的标题也是错的。
+// 用全站统一的 `shell.titleSuffix`，随语言切换（原来这里是零文案、纯默认值）。
+// 本页**不设 ssr:false**：法律义务展示页必须服务端渲染（conventions.md §8），
+// 因此标题会随首帧 HTML 一起下发，爬虫与不执行 JS 的抓取器都能看到。
+const { t } = useI18n();
+useHead({ title: () => t("shell.titleSuffix", { title: t("nav.terms") }) });
 </script>
 
 <template>
   <main class="page">
+    <LegalZhNotice />
     <header class="head">
       <h1>用户协议</h1>
       <p class="date">版本 1.0 · 生效日期 2026-10-24（上线前需经法务确认并替换正式主体信息）</p>

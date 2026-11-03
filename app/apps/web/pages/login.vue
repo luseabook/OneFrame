@@ -24,17 +24,60 @@ const router = useRouter();
 const activeTab = ref<LoginTab>("code");
 const phone = ref("");
 const code = ref("");
+// 密码登录（identifier = 手机号或邮箱；端点由 Backend 定为 /auth/login/password）
+const identifier = ref("");
+const password = ref("");
+/**
+ * 密码面板的两个态：登录 / 注册。复用同一张卡片与同一组输入框 ——
+ * 注册用的是「邮箱 + 密码」，与密码登录只差一次提交目标，
+ * 单独做一个页面只会让两处表单各漂一半。
+ */
+const authMode = ref<"login" | "register">("login");
 const inviteCode = ref("");
+
+/**
+ * 邀请链接落地：`/login?invite=CODE` 或 `/login?code=CODE`，并做**会话级持久化**。
+ *
+ * 为什么需要：邀请码现在是注册必填，而后端生成的分享链接是 `/invite?code=…`
+ * （`op.service.ts:158`）。被邀请人点进来既没账号也拿不到码，注册流程对新用户直接断掉。
+ *
+ * 为什么用 `sessionStorage` 而不是 `localStorage`：
+ * - 邀请码是**一次性的**，注册成功后立刻清掉；用 localStorage 会长期留在设备上，
+ *   下次换个人在同一台机器注册时会被自动填上一个已用尽的旧码，报错还莫名其妙；
+ * - sessionStorage 随标签页关闭而失效，天然符合"这次邀请、这次用完"的语义；
+ * - 跨标签页/分享场景由 URL 上的 `?invite=` 保证，不依赖存储。
+ * 存储只是"URL 丢了也别丢码"的兜底（比如用户从 /invite 被跳到 /login 后手动改了地址）。
+ */
+const INVITE_STORAGE_KEY = "of_invite_code";
+const queryCode = String((route.query.invite ?? route.query.code ?? "") as string).trim();
+const storedCode = (() => {
+  try {
+    return String(sessionStorage.getItem(INVITE_STORAGE_KEY) ?? "").trim();
+  } catch {
+    return "";
+  }
+})();
+const invitedCode = queryCode !== "" ? queryCode : storedCode;
+if (invitedCode !== "") {
+  authMode.value = "register";
+  inviteCode.value = invitedCode;
+  try {
+    sessionStorage.setItem(INVITE_STORAGE_KEY, invitedCode);
+  } catch {
+    /* 隐私模式下写入失败：URL 里还有码，不影响本次注册 */
+  }
+}
 // 协议勾选框同时承担年龄确认语义（对应 useAuth().login 的第 4 个参数 ageConfirmed）
 const agreement = ref(false);
 const keepLogin = ref(true);
 // error + errorSlot：把错误渲染到对应字段下方（接口错误落到按钮下方），不吞掉 raw 错误
 const error = ref("");
-const errorSlot = ref<"phone" | "code" | "form" | "">("");
+const errorSlot = ref<"phone" | "code" | "identifier" | "password" | "invite" | "form" | "">("");
 const hint = ref("");
 const countdown = ref(0);
 const sending = ref(false);
 const submitting = ref(false);
+const pwSubmitting = ref(false);
 // 未勾选协议时点击「立即登录」→ 深色气泡提示（§8.2 / L9）
 const showAgreeBubble = ref(false);
 
@@ -42,9 +85,9 @@ const canSend = computed(
   () => /^1\d{10}$/.test(phone.value) && countdown.value === 0 && !sending.value,
 );
 
-const noticeText = computed(() =>
-  activeTab.value === "wechat" ? t("auth.noticeWechat") : t("auth.noticePassword"),
-);
+// 现在只有「微信」tab 还是占位提示（密码 tab 已接真实表单），
+// 所以这里不再做 tab 分支 —— 留着 `noticePassword` 分支就是死代码。
+const noticeText = computed(() => t("auth.noticeWechat"));
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let bodyOverflow = "";
@@ -117,7 +160,7 @@ async function login(): Promise<void> {
   }
   submitting.value = true;
   try {
-    await auth.login(phone.value, code.value, inviteCode.value || undefined, true);
+    await auth.login(phone.value, code.value, inviteCode.value || undefined, true, keepLogin.value);
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
     await navigateTo(redirect);
   } catch (e) {
@@ -131,6 +174,70 @@ async function login(): Promise<void> {
 watch(agreement, (checked) => {
   if (checked) showAgreeBubble.value = false;
 });
+
+/**
+ * 密码登录提交（契约：`POST /v1/auth/login/password {identifier, password}`）。
+ *
+ * 与短信码登录共用 `error` / `errorSlot` 渲染，避免两套错误提示走两条样式路径。
+ * 本地只做"非空"校验，其余交给服务端 —— 客户端猜密码规则只会和服务端分叉。
+ */
+async function submitPassword(): Promise<void> {
+  error.value = "";
+  errorSlot.value = "";
+  if (!agreement.value) {
+    showAgreeBubble.value = true;
+    return;
+  }
+  showAgreeBubble.value = false;
+
+  const isRegister = authMode.value === "register";
+  // 注册只能填邮箱；登录接受手机号或邮箱（手机号形态会被后端显式 400101 拒绝，
+  // 那是刻意设计：不静默回落到短信路径）。
+  if (identifier.value.trim() === "") {
+    error.value = isRegister ? t("auth.emailRequired") : t("auth.identifierRequired");
+    errorSlot.value = "identifier";
+    return;
+  }
+  if (isRegister && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier.value.trim())) {
+    error.value = t("auth.emailInvalid");
+    errorSlot.value = "identifier";
+    return;
+  }
+  if (password.value === "") {
+    error.value = t("auth.passwordRequired");
+    errorSlot.value = "password";
+    return;
+  }
+  // 注册必须带邀请码（Chief 决定：公网可批量注册 + 每人 80 分，等于免费发分口子）。
+  // 本地只挡"没填"，码的有效性由服务端判（无效码回 400101，页面直接显示 msg）。
+  if (isRegister && inviteCode.value.trim() === "") {
+    error.value = t("auth.inviteRequired");
+    errorSlot.value = "invite";
+    return;
+  }
+  pwSubmitting.value = true;
+  try {
+    if (isRegister) {
+      // 勾选协议即年龄确认（与短信登录同一口径），透传 keep_login，避免又一个装饰控件
+      await auth.registerWithEmail(
+        identifier.value.trim(),
+        password.value,
+        keepLogin.value,
+        true,
+        inviteCode.value.trim(),
+      );
+    } else {
+      await auth.loginWithPassword(identifier.value.trim(), password.value, keepLogin.value);
+    }
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
+    await navigateTo(redirect);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("auth.loginFailed");
+    errorSlot.value = "form";
+  } finally {
+    pwSubmitting.value = false;
+  }
+}
 
 // ── 第三方登录（SSO）──────────────────────────────────────
 // 竞品登录页有微信/QQ/Apple/抖音四个入口（reference-alignment-spec §8 实测）。
@@ -306,6 +413,62 @@ onUnmounted(() => {
           {{ submitting ? t("auth.submitting") : t("auth.submit") }}
         </button>
         <p v-if="errorSlot === 'form'" class="form-error">{{ error }}</p>
+      </div>
+
+      <div v-else-if="activeTab === 'password'" class="panel">
+        <div class="field">
+          <input
+            v-model="identifier"
+            class="input"
+            :type="authMode === 'register' ? 'email' : 'text'"
+            :autocomplete="authMode === 'register' ? 'email' : 'username'"
+            :placeholder="authMode === 'register' ? t('auth.emailPlaceholder') : t('auth.identifierPlaceholder')"
+          />
+        </div>
+        <p v-if="errorSlot === 'identifier'" class="field-error">{{ error }}</p>
+
+        <div class="field">
+          <input
+            v-model="password"
+            class="input"
+            type="password"
+            :autocomplete="authMode === 'register' ? 'new-password' : 'current-password'"
+            :placeholder="t('auth.passwordPlaceholder')"
+            @keyup.enter="submitPassword"
+          />
+        </div>
+        <p v-if="errorSlot === 'password'" class="field-error">{{ error }}</p>
+
+        <!-- 注册必填邀请码：公网可批量注册 + 每人 80 分 = 免费发分口子，
+             Chief 要求先收紧。码的有效性由服务端判，前端只挡"没填"。 -->
+        <template v-if="authMode === 'register'">
+          <div class="field">
+            <input
+              v-model="inviteCode"
+              class="input"
+              type="text"
+              maxlength="32"
+              autocomplete="off"
+              :placeholder="t('auth.invitePlaceholderRequired')"
+            />
+          </div>
+          <p v-if="errorSlot === 'invite'" class="field-error">{{ error }}</p>
+          <p class="field-hint">{{ t("auth.inviteHint") }}</p>
+        </template>
+
+        <label class="keep">
+          <input v-model="keepLogin" class="cb" type="checkbox" />
+          <span>{{ t("auth.keepLogin") }}</span>
+        </label>
+
+        <button class="submit" type="button" :disabled="pwSubmitting" @click="submitPassword">
+          {{ pwSubmitting ? t("auth.submitting") : authMode === "register" ? t("auth.registerSubmit") : t("auth.passwordSubmit") }}
+        </button>
+        <p v-if="errorSlot === 'form'" class="form-error">{{ error }}</p>
+
+        <button class="mode-switch" type="button" @click="authMode = authMode === 'register' ? 'login' : 'register'">
+          {{ authMode === "register" ? t("auth.loginLink") : t("auth.registerLink") }}
+        </button>
       </div>
 
       <div v-else class="tab-notice">
@@ -555,6 +718,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   margin-top: 22px;
+  /* 三个 tab 的内容高度不同（验证码最高 237px、密码 196px、微信占位更矮），
+     不钉住就会在切换 tab 时整块抖动。数值取实测最高者，三者同高。 */
+  min-height: 237px;
 }
 .field {
   display: flex;
@@ -604,6 +770,13 @@ onUnmounted(() => {
   color: var(--lm-danger);
   font-size: 12px;
   line-height: 1.4;
+}
+/* 邀请码来源说明：比错误文案弱一档，紧跟在输入框下方 */
+.field-hint {
+  margin: 6px 0 0;
+  color: var(--lm-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .hint {
   margin: 6px 0 0;
@@ -706,9 +879,13 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  margin-top: 32px;
+  margin-top: 22px;
   padding: 44px 0;
   text-align: center;
+  /* 与 .panel 同高、同 margin，避免切 tab 时卡片高度跳动 */
+  min-height: 237px;
+  box-sizing: border-box;
+  justify-content: center;
 }
 .notice-text {
   margin: 0;
@@ -716,6 +893,23 @@ onUnmounted(() => {
   font-size: 14px;
   line-height: 1.6;
 }
+/* 登录 ⇄ 注册 的切换：用文字按钮而不是 tab，避免把「注册」也变成一个 tab
+   （它不是一个并列的登录方式，而是同一个表单的另一种提交目标）。 */
+.mode-switch {
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--lm-brand);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+  align-self: center;
+}
+.mode-switch:hover {
+  text-decoration: underline;
+}
+
 .notice-switch {
   padding: 0;
   border: 0;

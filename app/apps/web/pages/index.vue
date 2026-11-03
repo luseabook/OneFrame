@@ -171,6 +171,7 @@ const pipeline = computed(() => [
       <p class="foot-note">
         {{ t("landing.footerNote") }}
       </p>
+      <SiteLegal />
     </footer>
   </div>
 </template>

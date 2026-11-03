@@ -75,6 +75,8 @@ const avatarChar = computed(() => (user.value?.nickname || "?").slice(0, 1).toUp
         <NuxtLink v-else to="/login" class="login-btn">{{ t("shell.loginNow") }}</NuxtLink>
       </div>
     </header>
+    <!-- 同上：工具页也要有演示声明（这些页的出图/出片在 mock 下同样是模拟结果） -->
+    <EnvironmentBanner />
     <main class="body">
       <slot />
     </main>

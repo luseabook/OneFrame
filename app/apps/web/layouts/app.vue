@@ -339,6 +339,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
         </div>
       </header>
 
+      <!-- 演示环境声明：LLM_MODE=mock 时常驻顶栏下方，不可关闭（OPS-12/OPS-14）。
+           放在壳层而不是页面里，换页不消失；`real` 时自动不渲染，自清理。 -->
+      <EnvironmentBanner />
+
       <main class="content">
         <slot />
       </main>

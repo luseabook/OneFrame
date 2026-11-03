@@ -3,6 +3,7 @@ import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE,
   buildAlternates,
+  isZhOnlyPath,
   normalizeLocale,
   pickFromAcceptLanguage,
   stripLocalePrefix,
@@ -100,8 +101,16 @@ export default defineNuxtPlugin(() => {
     );
   }
 
+  /**
+   * `html lang`：普通页跟随协商语言；**仅中文合规页固定 zh-CN**（conventions.md §8.1）。
+   *
+   * 为什么不能让它跟着 `Accept-Language` 漂：`/terms` `/privacy` `/report` 的正文是中文写死的
+   * 法律文本，若声明成 `lang="en"`，搜索引擎会判定语言与内容不符，读屏软件会按英文音素念中文。
+   * 这三页的"实际语言"是中文，声明就必须是中文 —— 语言声明描述内容，不描述用户偏好。
+   */
+  const isZhOnlyPage = computed(() => isZhOnlyPath(route.path));
   useHead({
-    htmlAttrs: { lang: computed(() => state.value.locale) },
+    htmlAttrs: { lang: computed(() => (isZhOnlyPage.value ? "zh-CN" : state.value.locale)) },
   });
 
   /**

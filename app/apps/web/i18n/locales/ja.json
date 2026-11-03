@@ -46,6 +46,11 @@
     "tabWechat": "WeChat",
     "tabCode": "認証コード",
     "tabPassword": "パスワード",
+    "identifierPlaceholder": "電話番号またはメールアドレス",
+    "passwordPlaceholder": "パスワード",
+    "passwordSubmit": "ログイン",
+    "identifierRequired": "電話番号またはメールアドレスを入力してください",
+    "passwordRequired": "パスワードを入力してください",
     "phonePlaceholder": "電話番号を入力",
     "codePlaceholder": "認証コードを入力",
     "invitePlaceholder": "招待コード（任意）",
@@ -79,7 +84,16 @@
     "oauthUse": "{label} でログイン",
     "oauthNotConfigured": "{label} ログインは未設定です（管理者にお問い合わせください）",
     "oauthNoUrl": "認可 URL が返されませんでした",
-    "oauthUnavailable": "{label} ログインは現在ご利用いただけません"
+    "oauthUnavailable": "{label} ログインは現在ご利用いただけません",
+    "emailPlaceholder": "メールアドレス",
+    "registerLink": "アカウントをお持ちでない方は新規登録",
+    "loginLink": "すでにアカウントをお持ちの方はログイン",
+    "registerSubmit": "登録してログイン",
+    "emailRequired": "メールアドレスを入力してください",
+    "emailInvalid": "メールアドレスの形式が正しくありません",
+    "invitePlaceholderRequired": "招待コード（必須）",
+    "inviteRequired": "招待コードを入力してください",
+    "inviteHint": "招待コードは既存ユーザーまたは運営が発行します。登録後は「招待と交換」ページで自分のコードを確認できます。"
   },
   "landing": {
     "metaTitle": "OneFrame · AI アニメドラマスタジオ — 30 分で 1 話",
@@ -129,7 +143,7 @@
     "finalDesc": "Alpha は招待制。登録で 80 クレジット進呈、1 話を通しで作れる量です。",
     "finalCta": "無料で制作を始める",
     "footerBrand": "OneFrame · AI アニメドラマスタジオ",
-    "footerNote": "コンテンツは AI が生成しています。内容をよくご確認ください · ICP 備 00000000 号（公開前に差し替え）",
+    "footerNote": "コンテンツは AI が生成しています。内容をよくご確認ください",
     "metaDescription": "小説を貼り付けるだけで絵コンテと映像を生成。脚本パイプライン、キャラクターの一貫性、明朗な料金。AI アニメ・ショートドラマ制作スタジオ。"
   },
   "pricing": {
@@ -3593,7 +3607,7 @@
     "loginPasswordPlaceholder": "パスワード",
     "loggingIn": "ログイン中…",
     "loginBtn": "運営コンソールにログイン",
-    "loginFootnote": "非本番は既定 admin / admin12345。本番では ADMIN_USERNAME / ADMIN_PASSWORD の設定が必須です。",
+    "loginFootnote": "アカウントは運用担当が発行します。本番では ADMIN_USERNAME / ADMIN_PASSWORD の設定が必須です。",
     "homeConfigTitle": "ホームのセクション",
     "homeConfigHint": "ホームの表示セクションと順序を決めます。未設定なら内蔵の既定値（source=default）を使います。保存はこのスペースのユーザーに即時反映され、バージョン検証付きです（同時編集は競合として通知）。",
     "homeConfigSourceDefault": "内蔵の既定値（未設定）",
@@ -3741,6 +3755,10 @@
     "logout": "ログアウト",
     "loginNow": "今すぐログイン",
     "aiDisclaimer": "AI 生成コンテンツです。利用前にご確認ください · © 2026 OneFrame",
+    "icpLabel": "ICP 登録",
+    "mockBanner": "デモ環境 · 現在の内容はモックモデルによる生成で、実際の AI 出力ではありません",
+    "icpPoliceLabel": "公安届出",
+    "zhOnlyNotice": "本ページの法的文書は中国語版が正文です。",
     "back": "戻る",
     "titleSuffix": "{title} · OneFrame",
     "toolTitles": {

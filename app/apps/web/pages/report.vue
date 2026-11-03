@@ -1,6 +1,6 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false });
-
+// 举报/投诉：法律义务展示页，不设 ssr:false（conventions.md §8）。
+// 表单字段都是 ref，token 从 query 读，无客户端独占 API。
 const { t } = useI18n();
 useHead({ title: () => t("report.metaTitle") });
 

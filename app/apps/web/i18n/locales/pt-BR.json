@@ -46,6 +46,11 @@
     "tabWechat": "WeChat",
     "tabCode": "Código por SMS",
     "tabPassword": "Senha",
+    "identifierPlaceholder": "Telefone ou e-mail",
+    "passwordPlaceholder": "Senha",
+    "passwordSubmit": "Entrar",
+    "identifierRequired": "Informe seu telefone ou e-mail",
+    "passwordRequired": "Informe sua senha",
     "phonePlaceholder": "Digite o número de telefone",
     "codePlaceholder": "Digite o código de verificação",
     "invitePlaceholder": "Código de convite (opcional)",
@@ -79,7 +84,16 @@
     "oauthUse": "Entrar com {label}",
     "oauthNotConfigured": "Entrada com {label} não configurada (fale com o administrador)",
     "oauthNoUrl": "O canal não retornou a URL de autorização",
-    "oauthUnavailable": "Entrada com {label} indisponível no momento"
+    "oauthUnavailable": "Entrada com {label} indisponível no momento",
+    "emailPlaceholder": "Endereço de e-mail",
+    "registerLink": "Sem conta? Cadastre-se com e-mail",
+    "loginLink": "Já tem conta? Entrar",
+    "registerSubmit": "Cadastrar e entrar",
+    "emailRequired": "Informe seu e-mail",
+    "emailInvalid": "O e-mail não parece válido",
+    "invitePlaceholderRequired": "Código de convite (obrigatório)",
+    "inviteRequired": "Informe seu código de convite",
+    "inviteHint": "Os códigos são emitidos por usuários existentes ou pela equipe. Após o cadastro você encontra o seu na página de convites."
   },
   "landing": {
     "metaTitle": "OneFrame · Estúdio de dramas em anime com IA — um episódio em 30 minutos",
@@ -129,7 +143,7 @@
     "finalDesc": "O Alpha é por convite. Ao se cadastrar você ganha 80 créditos, o suficiente para um episódio completo.",
     "finalCta": "Começar a criar grátis",
     "footerBrand": "OneFrame · Estúdio de dramas em anime com IA",
-    "footerNote": "Conteúdo gerado por IA, avalie com atenção · Registro ICP 00000000 (substituir antes do lançamento)",
+    "footerNote": "Conteúdo gerado por IA, avalie com atenção",
     "metaDescription": "Cole um romance e receba storyboard e vídeo de uma vez: pipeline de roteiro, consistência de personagem e preços transparentes. Um estúdio de anime e short drama com IA."
   },
   "pricing": {
@@ -3593,7 +3607,7 @@
     "loginPasswordPlaceholder": "Senha",
     "loggingIn": "Entrando…",
     "loginBtn": "Entrar no console de operação",
-    "loginFootnote": "Fora de produção o padrão é admin / admin12345; em produção é obrigatório configurar ADMIN_USERNAME / ADMIN_PASSWORD.",
+    "loginFootnote": "As contas são fornecidas pela operação; em produção é obrigatório configurar ADMIN_USERNAME / ADMIN_PASSWORD.",
     "homeConfigTitle": "Seções da home",
     "homeConfigHint": "Define quais seções aparecem na home e em que ordem. Sem configuração valem os padrões internos (source=default). Salvar vale imediatamente para os usuários deste espaço e é validado por versão, então edições concorrentes reportam conflito.",
     "homeConfigSourceDefault": "Padrões internos (não configurado)",
@@ -3741,6 +3755,10 @@
     "logout": "Sair",
     "loginNow": "Entrar agora",
     "aiDisclaimer": "Conteúdo gerado por IA — revise antes de usar · © 2026 OneFrame",
+    "icpLabel": "Registro ICP",
+    "mockBanner": "Ambiente de demonstração — o conteúdo é gerado por um modelo simulado, não é saída real de IA",
+    "icpPoliceLabel": "Registro de segurança pública",
+    "zhOnlyNotice": "A versão em chinês desta página é o texto legal oficial.",
     "back": "Voltar",
     "titleSuffix": "{title} · OneFrame",
     "toolTitles": {

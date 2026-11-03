@@ -9,6 +9,8 @@
  * 只在客户端调用（后台页全部 `ssr:false`），所以这里直接用 localStorage。
  */
 
+import { filenameFromDisposition, isEnvelopeContentType, readEnvelopeError } from "~/utils/download-response";
+
 export interface AdminEnvelope<T> {
   code: number;
   msg: string;
@@ -87,27 +89,27 @@ export async function adminApi<T>(path: string, options: AdminRequestOptions = {
 /**
  * 下载 CSV（后台导出）。不用 `$fetch`：要拿原始响应体与 `content-disposition` 文件名。
  * 401/403 同样走 AdminApiError，调用方可决定是否回登录。
+ *
+ * **分流判据是 `content-type`，不是 `response.ok`**（N-13）：后端全局异常过滤器把
+ * `AppError` 一律输出成 **HTTP 200 + `{code,msg}`**（`exception.filter.ts:19-22`），
+ * 所以「未登录/无权限」在 HTTP 层也是 200。旧实现只在 `!response.ok` 里判 code，
+ * 结果把错误 JSON 当 CSV 返回给用户下载。判据抽在 `~/utils/download-response`。
  */
 export async function adminApiBlob(path: string): Promise<{ blob: Blob; filename: string }> {
   const token = adminToken();
   const response = await fetch(`/v1${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
-  if (!response.ok) {
-    const message = `下载失败(${response.status})`;
-    try {
-      const data = (await response.json()) as { code?: number; msg?: string };
-      if (typeof data.code === "number" && data.code !== 0) {
-        throw new AdminApiError(data.code, data.msg || message);
-      }
-    } catch (error) {
-      if (error instanceof AdminApiError) throw error;
-    }
-    throw new AdminApiError(response.status, message);
+
+  if (isEnvelopeContentType(response.headers.get("content-type"))) {
+    const envelope = await response.json().catch(() => null);
+    const { code, message } = readEnvelopeError(envelope, response.status);
+    throw new AdminApiError(code, message);
   }
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const matched = /filename="?([^";]+)"?/i.exec(disposition);
-  return { blob: await response.blob(), filename: matched?.[1] ?? "download.csv" };
+  if (!response.ok) throw new AdminApiError(response.status, `下载失败(${response.status})`);
+
+  const filename = filenameFromDisposition(response.headers.get("content-disposition"));
+  return { blob: await response.blob(), filename: filename || "download.csv" };
 }
 
 /** 下载并触发浏览器保存（页面只调这一个函数即可） */

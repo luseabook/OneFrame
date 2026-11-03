@@ -12,6 +12,18 @@ interface Envelope<T> {
 }
 
 const router = useRouter();
+
+/**
+ * 底部提示只在非生产构建中出现（`SEC-03`）。
+ *
+ * 原先那行写着「非生产默认账号 / 默认口令」。问题不在页面是否渲染它，而在
+ * **语言包是整包打进客户端的**：字符串留在 `i18n/locales/*.json` 里，
+ * 生产产物的 JS 就能被 grep 到，等于公开告诉攻击者「这台后台有这么个账号」。
+ * 所以做了两件事：① 五个语言包的文案改成不提任何默认凭据的中性版本（根治）；
+ * ② 页面这一层只在 dev 显示（`import.meta.dev` 在生产构建里是静态 `false`，
+ * 整段可被摇掉）。验收只认产物 grep，不认源码里的 if。
+ */
+const showFootnote = import.meta.dev;
 const username = ref("");
 const password = ref("");
 const error = ref("");
@@ -74,7 +86,7 @@ async function submit(): Promise<void> {
       {{ loading ? t("adminUi.loggingIn") : t("adminUi.loginBtn") }}
     </button>
 
-    <p class="hint">
+    <p v-if="showFootnote" class="hint">
        {{ t("adminUi.loginFootnote") }}
     </p>
   </section>

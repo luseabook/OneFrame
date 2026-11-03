@@ -30,6 +30,14 @@ export default defineNuxtConfig({
     public: {
       // 空 = 同源 /v1（本地由 NUXT_API_PROXY 代理，生产由 nginx 反代）
       apiBase: process.env.NUXT_PUBLIC_API_BASE ?? "",
+      // 备案信息（合规必需）。**刻意走 runtimeConfig 而不是写进语言包**：
+      // 备案号是行政批件，下发时间晚于代码冻结，且换主体/换号必须全站一致。
+      // 写进 5 个语言包的话，每次换号都要改 5 个 JSON 再重新构建，且极易漏改某个语种
+      // （N-01 就是这么来的：号写在 landing.footerNote 里，一个句子混了免责声明和后缀）。
+      // 放这里则只有一处：前端统一从 runtimeConfig 读，语言包只留"标签"文案。
+      // 空串 = 未下发，页脚不渲染该段（上线前必须由 env 注入，见 docs/06 上线清单）。
+      icpBeian: process.env.NUXT_PUBLIC_ICP_BEIAN ?? "",
+      icpPolice: process.env.NUXT_PUBLIC_ICP_POLICE ?? "",
     },
   },
   routeRules: {
@@ -76,9 +84,13 @@ export default defineNuxtConfig({
     "/auth": { ssr: false },
     "/auth/**": { ssr: false },
     "/pricing": { ssr: false },
-    "/report": { ssr: false },
-    "/privacy": { ssr: false },
-    "/terms": { ssr: false },
+    // 法律义务展示页（docs/03-frontend/conventions.md §8 的「必须服务端渲染」清单）：
+    // 用户协议、隐私政策、举报/投诉必须能被爬虫与审计直接抓到正文与标题，
+    // 关掉 SSR 时 sitemap 列着它们、实际抓到的却是 SPA 骨架，声明与内容不一致。
+    // 这三页已确认无 `window`/`localStorage`/`onMounted`/鉴权依赖，服务端渲染无风险。
+    "/report": { ssr: true },
+    "/privacy": { ssr: true },
+    "/terms": { ssr: true },
     // 单点工具页（/create/*）同理：这些页面此前只在 `definePageMeta` 里写了 ssr:false，
     // 而直接打开/刷新 URL 时仍会走服务端渲染 → 与服务端未登录首帧不一致 →
     // hydration 失败后整页空白（本轮 E2E 实测：直接访问 /create/text-to-video 时

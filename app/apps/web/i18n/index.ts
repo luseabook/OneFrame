@@ -193,6 +193,32 @@ export const PREFIX_TO_LOCALE: Record<string, Locale> = {
  */
 export const PUBLIC_PATHS = ["/", "/pricing", "/login", "/terms", "/privacy", "/report"] as const;
 
+/**
+ * **仅中文版具有法律效力**的页面（`docs/03-frontend/conventions.md` §8.1）。
+ *
+ * 背景：这三页已改为服务端渲染（§8），首帧就要下发给爬虫。但它们的正文是中文写死的历史文案，
+ * 没有进入语言包 —— 一旦随 `Accept-Language` 漂成 `lang="en"`，就变成「声明英文、内容是中文」，
+ * 对搜索引擎是错误声明，对读屏软件是错误发音。
+ *
+ * 裁定口径（不是技术妥协，是法律事实）：法律文本只有中文版经法务审定，
+ * 因此这三页 **语言固定 zh-CN、hreflang 只列 zh-CN**，非中文界面进入时页首给一行提示。
+ *
+ * 与 `PUBLIC_PATHS` 的关系：仍在 sitemap 里（它们必须可抓取），只是不再宣称有 5 个语言版本。
+ *
+ * **为什么不含 `/report`**（裁定 §8.1 原写的是三页，实测后按证据收窄）：
+ * `pages/report.vue` 模板里 `t()` 调用 20 处、硬编码中文 0 行 —— 它是**已完整 i18n 化的表单**，
+ * 英文界面下正文确实是英文。把它也钉成 `lang="zh-CN"` 会制造一个新的错误声明，
+ * 并从 sitemap 里删掉 4 个真实存在的语言版本。只有 `terms` / `privacy` 是中文写死的法律正文
+ * （模板里各 29 / 31 行硬编码中文，`t()` 只用于标题）。
+ */
+export const ZH_ONLY_PATHS = ["/terms", "/privacy"] as const;
+
+/** 该路径是否属于"仅中文版"的合规页（内部先剥语言前缀，`/en/terms` 也算命中） */
+export function isZhOnlyPath(path: string): boolean {
+  const canonical = stripLocalePrefix(path);
+  return (ZH_ONLY_PATHS as readonly string[]).includes(canonical);
+}
+
 /** 去掉路径上的语言前缀；不认识的段原样保留 */
 export function stripLocalePrefix(path: string): string {
   const clean = path.startsWith("/") ? path : `/${path}`;
@@ -223,10 +249,16 @@ export function localizedPath(path: string, locale: Locale): string {
   return canonical === "/" ? `/${prefix}` : `/${prefix}${canonical}`;
 }
 
-/** hreflang 用的 5 条 alternate（含 x-default，指向无前缀中文） */
+/** hreflang 用的 alternate 列表（默认 5 语 + x-default，指向无前缀中文） */
 export function buildAlternates(path: string, origin: string): Array<{ hreflang: string; href: string }> {
   const canonical = stripLocalePrefix(path);
   const base = origin.replace(/\/+$/, "");
+  // 仅中文合规页：只声明 zh-CN 一条，且**不加 x-default**。
+  // 加 x-default 等于告诉搜索引擎"还有一个默认语言版本"，对这三页是多余的；
+  // 其余 4 语的 URL 根本不存在对应内容（进去也是中文正文），声明它们就是虚假 hreflang。
+  if (isZhOnlyPath(canonical)) {
+    return [{ hreflang: "zh-CN", href: `${base}${canonical}` }];
+  }
   // 显式标注为 `string`：下面要 push `x-default`，而 `Locale` 联合里没有它
   // （x-default 是 Google 的"默认语言"约定，不是我们的 Locale 之一）。
   const alternates: Array<{ hreflang: string; href: string }> = SUPPORTED_LOCALES.map((locale) => ({

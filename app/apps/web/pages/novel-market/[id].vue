@@ -7,6 +7,7 @@ import type {
   MarketScriptDetailDto,
 } from "~/types/api";
 import { ApiError } from "~/composables/useApi";
+import { isEnvelopeContentType, readEnvelopeError } from "~/utils/download-response";
 
 /**
  * 集市作品详情（`/novel-market/:id`）—— 对照竞品 `/novel-market/:id`（`routes.txt:62`）
@@ -144,10 +145,23 @@ async function download() {
       Authorization: `Bearer ${auth.state.value.accessToken ?? ""}`,
     };
     if (activeSpaceId.value) headers["X-Space-Id"] = activeSpaceId.value;
-    const text = await $fetch<string>(`${runtimeConfig.public.apiBase}/v1/market/scripts/${workId.value}/download`, {
-      headers,
-      responseType: "text",
-    });
+    const text = await (async () => {
+      // 判据是 content-type，不是 HTTP 状态码（N-13）：后端把 AppError 输出成
+      // **HTTP 200 + `{code,msg}`**（`exception.filter.ts:19-22`），所以「未购买」也是 200。
+      // 旧写法 `$fetch<string>({responseType:"text"})` 会把 `{"code":403001,...}`
+      // 当 markdown 写成 .md，还提示"下载已开始"。
+      const res = await fetch(
+        `${runtimeConfig.public.apiBase}/v1/market/scripts/${workId.value}/download`,
+        { headers },
+      );
+      if (isEnvelopeContentType(res.headers.get("content-type"))) {
+        const envelope = await res.json().catch(() => null);
+        const { message } = readEnvelopeError(envelope, res.status);
+        throw new Error(message);
+      }
+      if (!res.ok) throw new Error(t("marketDetail.downloadFailed"));
+      return res.text();
+    })();
     const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

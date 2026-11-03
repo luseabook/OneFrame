@@ -29,6 +29,12 @@ export interface MeResponse {
   onboarded?: boolean;
   /** 账号已绑定的登录方式（手机号只回打码结果） */
   bindings?: { phone: string | null; providers: string[] };
+  /**
+   * LLM 运行形态（`api-spec.md` §me，OPS-12 / OPS-14）。
+   * **注意位置：在响应根部，不在 `user` 里** —— 部署实测 `/v1/me` 返回
+   * `{ user, space, credits, vip, bindings, llm_mode }`。只有已登录才返回。
+   */
+  llm_mode?: "real" | "mock";
 }
 
 export interface ResolutionOption {

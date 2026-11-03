@@ -46,6 +46,11 @@
     "tabWechat": "WeChat",
     "tabCode": "Código por SMS",
     "tabPassword": "Contraseña",
+    "identifierPlaceholder": "Teléfono o correo",
+    "passwordPlaceholder": "Contraseña",
+    "passwordSubmit": "Iniciar sesión",
+    "identifierRequired": "Introduce tu teléfono o correo",
+    "passwordRequired": "Introduce tu contraseña",
     "phonePlaceholder": "Introduce el número de teléfono",
     "codePlaceholder": "Introduce el código de verificación",
     "invitePlaceholder": "Código de invitación (opcional)",
@@ -79,7 +84,16 @@
     "oauthUse": "Continuar con {label}",
     "oauthNotConfigured": "El acceso con {label} no está configurado (contacta con el administrador)",
     "oauthNoUrl": "El canal no devolvió la URL de autorización",
-    "oauthUnavailable": "El acceso con {label} no está disponible ahora"
+    "oauthUnavailable": "El acceso con {label} no está disponible ahora",
+    "emailPlaceholder": "Correo electrónico",
+    "registerLink": "¿Sin cuenta? Regístrate con correo",
+    "loginLink": "¿Ya tienes cuenta? Inicia sesión",
+    "registerSubmit": "Registrarme y entrar",
+    "emailRequired": "Introduce tu correo",
+    "emailInvalid": "El correo no tiene un formato válido",
+    "invitePlaceholderRequired": "Código de invitación (obligatorio)",
+    "inviteRequired": "Introduce tu código de invitación",
+    "inviteHint": "Los códigos los emiten usuarios existentes o el equipo. Tras registrarte verás el tuyo en la página de invitaciones."
   },
   "landing": {
     "metaTitle": "OneFrame · Estudio de dramas anime con IA — un episodio en 30 minutos",
@@ -129,7 +143,7 @@
     "finalDesc": "El Alpha es por invitación. Al registrarte recibes 80 créditos, suficientes para un episodio completo.",
     "finalCta": "Empezar a crear gratis",
     "footerBrand": "OneFrame · Estudio de dramas anime con IA",
-    "footerNote": "Contenido generado por IA, revísalo con atención · Registro ICP 00000000 (sustituir antes del lanzamiento)",
+    "footerNote": "Contenido generado por IA, revísalo con atención",
     "metaDescription": "Pega una novela y obtén storyboard y vídeo de una vez: pipeline de guion, coherencia de personajes y precios transparentes. Un estudio de anime y short drama con IA."
   },
   "pricing": {
@@ -3593,7 +3607,7 @@
     "loginPasswordPlaceholder": "Contraseña",
     "loggingIn": "Accediendo…",
     "loginBtn": "Entrar al panel de operación",
-    "loginFootnote": "Fuera de producción el valor por defecto es admin / admin12345; en producción es obligatorio configurar ADMIN_USERNAME / ADMIN_PASSWORD.",
+    "loginFootnote": "Las cuentas las asigna operaciones; en producción es obligatorio configurar ADMIN_USERNAME / ADMIN_PASSWORD.",
     "homeConfigTitle": "Secciones de inicio",
     "homeConfigHint": "Define qué secciones se muestran en el inicio y en qué orden. Sin configuración se usan los valores internos (source=default). Guardar aplica de inmediato a los usuarios de este espacio y se valida por versión, así que las ediciones concurrentes reportan conflicto.",
     "homeConfigSourceDefault": "Valores internos (sin configurar)",
@@ -3741,6 +3755,10 @@
     "logout": "Cerrar sesión",
     "loginNow": "Iniciar sesión ahora",
     "aiDisclaimer": "Contenido generado por IA: revísalo antes de usarlo · © 2026 OneFrame",
+    "icpLabel": "Registro ICP",
+    "mockBanner": "Entorno de demostración: el contenido lo genera un modelo simulado, no es salida real de IA",
+    "icpPoliceLabel": "Registro de seguridad pública",
+    "zhOnlyNotice": "La versión en chino de esta página es el texto legal oficial.",
     "back": "Volver",
     "titleSuffix": "{title} · OneFrame",
     "toolTitles": {

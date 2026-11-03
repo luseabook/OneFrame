@@ -29,6 +29,8 @@ useHead({ title: () => t("invite.metaTitle") });
 
 const api = useApi();
 const toast = useToast();
+const route = useRoute();
+const auth = useAuth();
 
 const loading = ref(true);
 const errorMsg = ref("");
@@ -170,7 +172,27 @@ async function doRedeem() {
   }
 }
 
-onMounted(loadAll);
+/**
+ * 被邀请人点分享链接（`/invite?code=…`，由 `op.service.ts:158` 生成）时：
+ * 未登录 → 直接带去注册页并预填邀请码（`/login?invite=…`）；已登录 → 保持原行为，
+ * 这页对已登录用户是「我的邀请 / 兑换」工作台。
+ *
+ * 为什么必须有这段：邀请码改成注册必填之后，分享链接若停在 `/invite`，
+ * 被邀请人既没有账号也拿不到码，注册流程对新用户直接断掉。
+ * 先尝试一次 bootstrap：刷新页面时 accessToken 还在内存之外，只有 refresh Cookie，
+ * 不先续期就把已登录用户也当成未登录，会把他踢到登录页。
+ */
+onMounted(async () => {
+  const code = String(route.query.code ?? "").trim();
+  if (code !== "") {
+    if (!auth.state.value.accessToken) await auth.bootstrap().catch(() => {});
+    if (!auth.state.value.accessToken) {
+      await navigateTo(`/login?invite=${encodeURIComponent(code)}`, { replace: true });
+      return;
+    }
+  }
+  await loadAll();
+});
 </script>
 
 <template>

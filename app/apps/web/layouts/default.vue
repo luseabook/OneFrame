@@ -45,6 +45,7 @@ onMounted(() => {
         <NuxtLink to="/report">{{ t("nav.report") }}</NuxtLink>
       </div>
       <p class="copy">{{ t("shell.aiDisclaimer") }}</p>
+      <SiteLegal />
     </footer>
   </div>
 </template>

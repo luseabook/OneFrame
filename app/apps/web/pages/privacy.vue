@@ -1,9 +1,13 @@
 <script setup lang="ts">
-definePageMeta({ ssr: false });
+// 同 terms.vue：补上缺失的页面标题，随语言切换。
+// 本页不设 ssr:false——隐私政策属法律义务展示，必须可抓取（conventions.md §8）。
+const { t } = useI18n();
+useHead({ title: () => t("shell.titleSuffix", { title: t("nav.privacy") }) });
 </script>
 
 <template>
   <main class="page">
+    <LegalZhNotice />
     <header class="head">
       <h1>隐私政策</h1>
       <p class="date">版本 1.0 · 生效日期 2026-10-24（上线前需经法务确认并替换正式主体信息）</p>

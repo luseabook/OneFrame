@@ -1,4 +1,4 @@
-import { PUBLIC_PATHS, SUPPORTED_LOCALES, buildAlternates, localizedPath } from "~/i18n";
+import { PUBLIC_PATHS, SUPPORTED_LOCALES, buildAlternates, isZhOnlyPath, localizedPath, type Locale } from "~/i18n";
 
 /**
  * `/sitemap.xml` —— 5 语言 × 公开页（`i18n/PUBLIC_PATHS`）。
@@ -21,7 +21,10 @@ export default defineEventHandler((event) => {
 
   const entries: string[] = [];
   for (const path of PUBLIC_PATHS) {
-    for (const locale of SUPPORTED_LOCALES) {
+    // 仅中文合规页（§8.1）：只出 1 条 zh-CN，不再按 5 语各列一遍。
+    // 列 5 语等于对外声明"这页有 5 个语言版本"，而实际进去只有中文正文 —— 虚假 hreflang。
+    const locales: readonly Locale[] = isZhOnlyPath(path) ? ["zh-CN"] : SUPPORTED_LOCALES;
+    for (const locale of locales) {
       const loc = `${origin}${localizedPath(path, locale)}`;
       const alternates = buildAlternates(path, origin)
         .map((item) => `    <xhtml:link rel="alternate" hreflang="${item.hreflang}" href="${escapeXml(item.href)}"/>`)
