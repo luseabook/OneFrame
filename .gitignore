@@ -37,6 +37,8 @@ _acceptance/*
 !_acceptance/compliance-check.cjs
 !_acceptance/b-type-acceptance.ps1
 !_acceptance/ledger-repair.cjs
+!_acceptance/e2e-new-pages.cjs
+!_acceptance/e2e-new-pages/
 # 本轮（第 1 轮六批次）起：一键门禁与分批交付报告入库。
 # 前者是 docs/07-plan/implement-progress-vs-reelmate.md §8.2 的复跑入口，
 # 后者是各批次"竞品证据行号"与"已知偏离/未完成"清单的落点（不进 docs 是因为
