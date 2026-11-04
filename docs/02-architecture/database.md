@@ -5,6 +5,9 @@
 > **2026-11-04（资源库对齐，迁移 0056）**：`project_assets` 新增
 > `resource_type smallint GENERATED ALWAYS AS (kind → 1/2/3/4/5/8) STORED`（竞品 `role/setting/implement/referenceVideo/referenceImage/filmNonRole`）、
 > `file_uri text`、`content_type text`；`resource_type` 由 `kind` 自动派生，既有插入点无需改写。
+>
+> **2026-11-04（资源目录，迁移 0057）**：新增 `project_resource_dirs`（id/project_id/parent_id/name/时间戳）
+> 与 `project_assets.dir_id`（FK `ON DELETE set null`）；目录删除时子目录上移、资源回未归档。
 > v1.2 · PostgreSQL 16 · 主键统一雪花 ID (bigint, 应用层生成)；均含 created_at/updated_at（下略）
 > 命名：表/字段 snake_case 复数；枚举用 smallint+应用层常量（避免 PG enum 迁移痛）
 > v1.1 · 2026-10-24 · 按启动前审查报告修订（P0-02/03/04/05/07/09、P1-11/22、P2-01/02/14/19）

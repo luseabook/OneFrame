@@ -4696,5 +4696,16 @@
     "confirmed": "已更新",
     "deleted": "已删除",
     "actionFailed": "操作失败"
+  },
+  "resourceDir": {
+    "all": "全部",
+    "unfiled": "未归档",
+    "newDir": "新建目录",
+    "namePlaceholder": "目录名称",
+    "create": "创建",
+    "cancel": "取消",
+    "loading": "加载目录…",
+    "loadFailed": "目录加载失败",
+    "createFailed": "创建目录失败"
   }
 }

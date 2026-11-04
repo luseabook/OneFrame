@@ -4696,5 +4696,16 @@
     "confirmed": "Updated",
     "deleted": "Deleted",
     "actionFailed": "Action failed"
+  },
+  "resourceDir": {
+    "all": "All",
+    "unfiled": "Unfiled",
+    "newDir": "New folder",
+    "namePlaceholder": "Folder name",
+    "create": "Create",
+    "cancel": "Cancel",
+    "loading": "Loading folders…",
+    "loadFailed": "Failed to load folders",
+    "createFailed": "Failed to create folder"
   }
 }

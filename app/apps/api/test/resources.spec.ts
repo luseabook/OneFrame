@@ -207,6 +207,70 @@ describe("df resources list/add e2e", () => {
     expect(res.code).not.toBe(0);
   });
 
+  it("目录：创建 → 资源移入 → 按 dir_id 过滤 → 删除目录后资源回未归档", async () => {
+    const dir = await inject(
+      "POST",
+      "/df/resources/dir",
+      { sp_id: projectId, name: "参考视频目录" },
+      token,
+    );
+    expect(dir.code).toBe(0);
+    const dirId = String((dir.data as { id?: string } | undefined)?.id ?? "");
+    expect(dirId).toBeTruthy();
+
+    const created = await inject(
+      "POST",
+      "/df/resources/add",
+      {
+        sp_id: projectId,
+        resource_type: 4,
+        name: "dir-ref.mp4",
+        file_uri: "u/mock/dir-ref.mp4",
+        content_type: "video/mp4",
+      },
+      token,
+    );
+    const resourceId = String((created.data as { id?: string } | undefined)?.id ?? "");
+
+    const moved = await inject(
+      "POST",
+      "/df/resources/dir/asset/batch-move",
+      { sp_id: projectId, resource_ids: [resourceId], dir_id: dirId },
+      token,
+    );
+    expect(moved.code).toBe(0);
+
+    const inDir = await inject(
+      "GET",
+      `/df/resources/list?sp_id=${projectId}&resource_type=4&dir_id=${dirId}`,
+      undefined,
+      token,
+    );
+    const rows = (inDir.data as { list: Array<Record<string, unknown>> }).list;
+    expect(rows.some((row) => String(row.id) === resourceId && String(row.dir_id) === dirId)).toBe(true);
+
+    const dirs = await inject("GET", `/df/resources/dir/list?sp_id=${projectId}`, undefined, token);
+    const dirRows = (dirs.data as { list: Array<Record<string, unknown>> }).list;
+    expect(dirRows.some((d) => String(d.id) === dirId && Number(d.resource_count) === 1)).toBe(true);
+
+    const removed = await inject(
+      "POST",
+      `/df/resources/dir/${dirId}/delete`,
+      { sp_id: projectId },
+      token,
+    );
+    expect(removed.code).toBe(0);
+
+    const unfiled = await inject(
+      "GET",
+      `/df/resources/list?sp_id=${projectId}&resource_type=4&dir_id=none`,
+      undefined,
+      token,
+    );
+    const unfiledRows = (unfiled.data as { list: Array<Record<string, unknown>> }).list;
+    expect(unfiledRows.some((row) => String(row.id) === resourceId)).toBe(true);
+  });
+
   it("缺 sp_id / 非法 resource_type 均 400101", async () => {
     const noSp = await inject("GET", "/df/resources/list?resource_type=4", undefined, token);
     expect(noSp.code).toBe(400101);

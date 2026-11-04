@@ -4696,5 +4696,16 @@
     "confirmed": "Atualizado",
     "deleted": "Excluído",
     "actionFailed": "Falha na operação"
+  },
+  "resourceDir": {
+    "all": "Todos",
+    "unfiled": "Sem pasta",
+    "newDir": "Nova pasta",
+    "namePlaceholder": "Nome da pasta",
+    "create": "Criar",
+    "cancel": "Cancelar",
+    "loading": "Carregando pastas…",
+    "loadFailed": "Falha ao carregar pastas",
+    "createFailed": "Falha ao criar a pasta"
   }
 }

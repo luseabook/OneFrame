@@ -122,15 +122,31 @@ async function main() {
     record("创建参考视频资源", resource?.code === 0, resource?.msg ?? String(resource?.data?.id ?? ""));
 
     // ── /refer-video ─────────────────────────────────────
-    await page.goto(`${WEB}/refer-video`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${WEB}/refer-video?project=${projectId}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".rv", { timeout: 30_000 });
+    await page.waitForSelector(".rv-card", { timeout: 15_000 }).catch(() => {});
     await page
       .waitForFunction(() => document.body.innerText.includes("e2e-ref.mp4"), { timeout: 15_000 })
       .catch(() => {});
+    await page.waitForTimeout(300);
     const refText = await page.locator(".rv").innerText();
     record("参考视频页渲染", /参考视频|Reference videos|参考動画/.test(refText), refText.split("\n")[0]);
-    record("参考视频页出现上传的视频", refText.includes("e2e-ref.mp4"), refText.slice(0, 120));
+    const cardCount = await page.locator(".rv-card").count();
+    const cardText = cardCount > 0 ? await page.locator(".rv-card").first().innerText() : "";
+    record(
+      "参考视频页出现上传的视频",
+      cardText.includes("e2e-ref.mp4") || refText.includes("e2e-ref.mp4"),
+      `cards=${cardCount} text=${cardText.slice(0, 80)}`,
+    );
     await page.screenshot({ path: path.join(SHOT_DIR, "01-refer-video.png") });
+
+    // 目录：新建 → 出现在筛选条（组件 + /df/resources/dir 闭环）
+    await page.locator(".rdb__chip--add").click().catch(() => {});
+    await page.locator(".rdb__input").fill("E2E目录");
+    await page.locator(".rdb__new .rdb__chip").first().click().catch(() => {});
+    await page.waitForFunction(() => document.body.innerText.includes("E2E目录"), { timeout: 10_000 }).catch(() => {});
+    const dirText = await page.locator(".rdb").innerText().catch(() => "");
+    record("新建资源目录", dirText.includes("E2E目录"), dirText.slice(0, 100));
 
     // 删除动作（页面 confirm → batch-delete → 列表刷新）
     page.once("dialog", (dialog) => dialog.accept());

@@ -76,6 +76,7 @@ const P2_DTO_FIELDS = [
   "file_uri",
   "file_url",
   "content_type",
+  "dir_id",
 ];
 
 beforeAll(async () => {

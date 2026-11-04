@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import {
   assets,
   directorScenes,
@@ -10,6 +10,7 @@ import {
   freezeCredits,
   models,
   projectAssets,
+  projectResourceDirs,
   projectTimelines,
   scriptProjects,
   storyboardAssets,
@@ -171,6 +172,7 @@ function projectAssetDto(
     ...assetDto(row, portraitUrl),
     // 竞品 `/df/resources/list` 的 resource_type（生成列，见 schema 注释）
     resource_type: row.resourceType,
+    dir_id: row.dirId ? String(row.dirId) : null,
     file_uri: row.fileUri ?? null,
     /** file_uri 的签名 URL（仅 storage key 可签；外链保持 null，前端回退 file_uri） */
     file_url: fileUrl,
@@ -1533,6 +1535,8 @@ export class ScriptService {
       resourceType?: number;
       status?: number;
       name?: string;
+      /** 目录过滤：id / "none"（未归档）/ 省略（全部） */
+      dirId?: string;
     } = {},
   ) {
     const project = await this.findProject(spaceId, projectId);
@@ -1541,6 +1545,13 @@ export class ScriptService {
     const conds = [eq(projectAssets.projectId, project.id)];
     if (opts.resourceType !== undefined) conds.push(eq(projectAssets.resourceType, opts.resourceType));
     if (opts.status !== undefined) conds.push(eq(projectAssets.status, opts.status));
+    if (opts.dirId !== undefined) {
+      if (opts.dirId === "none" || opts.dirId === "root" || opts.dirId === "") {
+        conds.push(isNull(projectAssets.dirId));
+      } else {
+        conds.push(eq(projectAssets.dirId, await this.resolveDirId(project.id, opts.dirId)));
+      }
+    }
     const name = normalizeOptionalText(opts.name);
     if (name) conds.push(ilike(projectAssets.name, `%${name}%`));
     const rows = await db
@@ -1558,6 +1569,128 @@ export class ScriptService {
     const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(spaceId, row, counts)));
     const total = Number(agg?.n ?? 0);
     return { list, total, user_total: total, page, page_size: pageSize };
+  }
+
+  /** ── 资源目录（df/resources/dir）──────────────────────────────── */
+  async listResourceDirs(spaceId: string, projectId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const dirs = await db
+      .select()
+      .from(projectResourceDirs)
+      .where(eq(projectResourceDirs.projectId, project.id))
+      .orderBy(desc(projectResourceDirs.createdAt));
+    const counts = await db
+      .select({ dirId: projectAssets.dirId, n: sql<number>`count(*)::int` })
+      .from(projectAssets)
+      .where(eq(projectAssets.projectId, project.id))
+      .groupBy(projectAssets.dirId);
+    const countMap = new Map(counts.map((row) => [row.dirId ? String(row.dirId) : "", Number(row.n)]));
+    return {
+      list: dirs.map((dir) => ({
+        id: String(dir.id),
+        name: dir.name,
+        parent_id: dir.parentId ? String(dir.parentId) : null,
+        resource_count: countMap.get(String(dir.id)) ?? 0,
+      })),
+    };
+  }
+
+  async createResourceDir(spaceId: string, projectId: string, input: { name: string; parent_id?: string }) {
+    const project = await this.findProject(spaceId, projectId);
+    const parent = input.parent_id ? await this.resolveDirId(project.id, input.parent_id) : null;
+    const [row] = await db
+      .insert(projectResourceDirs)
+      .values({ id: newId(), projectId: project.id, parentId: parent, name: input.name })
+      .returning();
+    return { id: String(row!.id), name: row!.name, parent_id: row!.parentId ? String(row!.parentId) : null };
+  }
+
+  async renameResourceDir(spaceId: string, projectId: string, dirId: string, name: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const id = await this.resolveDirId(project.id, dirId);
+    const [row] = await db
+      .update(projectResourceDirs)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(projectResourceDirs.id, id))
+      .returning();
+    return { id: String(row!.id), name: row!.name };
+  }
+
+  async moveResourceDir(spaceId: string, projectId: string, dirId: string, parentId?: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const id = await this.resolveDirId(project.id, dirId);
+    const parent = parentId ? await this.resolveDirId(project.id, parentId) : null;
+    if (parent !== null) {
+      // 禁止把目录移动到自身或其后代下（否则形成环）
+      let cursor: bigint | null = parent;
+      const seen = new Set<string>();
+      while (cursor !== null) {
+        if (String(cursor) === String(id)) {
+          throw new AppError(ErrorCode.INVALID_PARAM, "cannot move a directory into itself", {
+            field: "parent_id",
+          });
+        }
+        if (seen.has(String(cursor))) break;
+        seen.add(String(cursor));
+        const [row] = await db
+          .select({ parentId: projectResourceDirs.parentId })
+          .from(projectResourceDirs)
+          .where(eq(projectResourceDirs.id, cursor));
+        cursor = row?.parentId ?? null;
+      }
+    }
+    await db
+      .update(projectResourceDirs)
+      .set({ parentId: parent, updatedAt: new Date() })
+      .where(eq(projectResourceDirs.id, id));
+    return { ok: true };
+  }
+
+  async deleteResourceDir(spaceId: string, projectId: string, dirId: string) {
+    const project = await this.findProject(spaceId, projectId);
+    const id = await this.resolveDirId(project.id, dirId);
+    const [dir] = await db.select().from(projectResourceDirs).where(eq(projectResourceDirs.id, id));
+    await db.transaction(async (tx) => {
+      // 子目录上移到被删目录的父级；资源回到未归档（不级联删素材）
+      await tx
+        .update(projectResourceDirs)
+        .set({ parentId: dir?.parentId ?? null, updatedAt: new Date() })
+        .where(eq(projectResourceDirs.parentId, id));
+      await tx.update(projectAssets).set({ dirId: null, updatedAt: new Date() }).where(eq(projectAssets.dirId, id));
+      await tx.delete(projectResourceDirs).where(eq(projectResourceDirs.id, id));
+    });
+    return { ok: true };
+  }
+
+  async batchMoveProjectResources(
+    spaceId: string,
+    projectId: string,
+    resourceIds: string[],
+    dirId?: string,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = await this.resolveResourceIds(project.id, resourceIds);
+    const target = dirId ? await this.resolveDirId(project.id, dirId) : null;
+    await db
+      .update(projectAssets)
+      .set({ dirId: target, updatedAt: new Date() })
+      .where(inArray(projectAssets.id, ids));
+    return { moved: ids.length };
+  }
+
+  private async resolveDirId(projectId: bigint, raw: string): Promise<bigint> {
+    let id: bigint;
+    try {
+      id = BigInt(raw);
+    } catch {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid dir id", { field: "dir_id" });
+    }
+    const [row] = await db
+      .select({ id: projectResourceDirs.id })
+      .from(projectResourceDirs)
+      .where(and(eq(projectResourceDirs.id, id), eq(projectResourceDirs.projectId, projectId)));
+    if (!row) throw new AppError(ErrorCode.NOT_FOUND, "dir not found", { field: "dir_id" });
+    return row.id;
   }
 
   /** POST /projects/{id}/assets：新建场景/道具/其他（角色必须走 characters/generate） */

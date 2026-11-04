@@ -24,6 +24,7 @@ const toast = useToast();
 
 const projects = ref<ProjectDto[]>([]);
 const selectedProjectId = ref(String(route.query.project ?? ""));
+const activeDir = ref("all");
 const assets = ref<ProjectAssetDto[]>([]);
 const loading = ref(true);
 const loadingAssets = ref(false);
@@ -58,8 +59,9 @@ async function loadAssets(): Promise<void> {
   }
   loadingAssets.value = true;
   try {
+    const dirQuery = activeDir.value === "all" ? "" : `&dir_id=${activeDir.value}`;
     const res = await api.get<{ list: ProjectAssetDto[]; total: number }>(
-      `/df/resources/list?sp_id=${selectedProjectId.value}&resource_type=4&page=1&page_size=100`,
+      `/df/resources/list?sp_id=${selectedProjectId.value}&resource_type=4&page=1&page_size=100${dirQuery}`,
     );
     assets.value = res.list;
   } catch (e) {
@@ -71,6 +73,10 @@ async function loadAssets(): Promise<void> {
 }
 
 watch(selectedProjectId, () => {
+  activeDir.value = "all";
+  void loadAssets();
+});
+watch(activeDir, () => {
   void loadAssets();
 });
 
@@ -172,6 +178,12 @@ onMounted(() => void loadProjects());
       <NuxtLink class="rv-btn rv-btn--ghost" to="/video-redraw/create">{{ t("referVideo.openRedraw") }}</NuxtLink>
     </div>
 
+    <ResourceDirBar
+      v-if="selectedProjectId"
+      v-model="activeDir"
+      :project-id="selectedProjectId"
+      @changed="loadAssets"
+    />
     <p v-if="error" class="rv-err" role="alert">{{ error }}</p>
     <p v-else-if="loading || loadingAssets" class="rv-muted">{{ t("referVideo.loading") }}</p>
 

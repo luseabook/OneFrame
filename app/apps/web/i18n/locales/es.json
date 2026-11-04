@@ -4696,5 +4696,16 @@
     "confirmed": "Actualizado",
     "deleted": "Eliminado",
     "actionFailed": "La operación falló"
+  },
+  "resourceDir": {
+    "all": "Todo",
+    "unfiled": "Sin carpeta",
+    "newDir": "Nueva carpeta",
+    "namePlaceholder": "Nombre de la carpeta",
+    "create": "Crear",
+    "cancel": "Cancelar",
+    "loading": "Cargando carpetas…",
+    "loadFailed": "Error al cargar carpetas",
+    "createFailed": "Error al crear la carpeta"
   }
 }

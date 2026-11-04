@@ -801,6 +801,25 @@ export const episodes = pgTable(
   (t) => [uniqueIndex("uq_episodes_project_no").on(t.projectId, t.epNo)],
 );
 
+/**
+ * 项目资源目录（对齐竞品 `df/resources/dir/*`，第 137 批）。
+ * 只做**一层父子**（parent_id 可空），树形由前端按 parent_id 组装；删除/移动在服务层校验。
+ */
+export const projectResourceDirs = pgTable(
+  "project_resource_dirs",
+  {
+    id: pk(),
+    projectId: bigint("project_id", { mode: "bigint" })
+      .notNull()
+      .references(() => scriptProjects.id),
+    parentId: bigint("parent_id", { mode: "bigint" }),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_project_resource_dirs_project").on(t.projectId)],
+);
+
 export const projectAssets = pgTable(
   "project_assets",
   {
@@ -808,6 +827,10 @@ export const projectAssets = pgTable(
     projectId: bigint("project_id", { mode: "bigint" })
       .notNull()
       .references(() => scriptProjects.id),
+    /** 资源目录（可选）；删除目录时资源回到未归档 */
+    dirId: bigint("dir_id", { mode: "bigint" }).references(() => projectResourceDirs.id, {
+      onDelete: "set null",
+    }),
     kind: text("kind").notNull(), // character|scene|prop|reference_video|reference_image|other
     /**
      * 通用资源类型（2026-11-04 对齐竞品 `/df/resources`）：
@@ -850,6 +873,7 @@ export const projectAssets = pgTable(
     index("idx_project_assets_project").on(t.projectId, t.kind, t.status),
     // 资源库列表（竞品 `/df/resources/list?sp_id&resource_type`）的查询形状
     index("idx_project_assets_resource").on(t.projectId, t.resourceType, t.status),
+    index("idx_project_assets_dir").on(t.projectId, t.dirId),
   ],
 );
 

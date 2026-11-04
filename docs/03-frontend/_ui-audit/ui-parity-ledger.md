@@ -113,7 +113,7 @@
 | 53 | `/director` | A | 🔶 `Director3D.vue` 覆盖层 | 🟡 09-3d-director | 🟡 代码初审 | 🟡 端点测试 | 🟢 同状态截图 | 🟢 截图 + 组件 | 默认值已复测（359/704/359、300%/50°/0,1.2,0）；**直链 `/director` 仍 404**（仅覆盖层），深链不可用 | U4 |
 | 54 | `/director/:projectId()` | B | 🔶 同上 | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 无独立路由 | U4 |
 | 55 | `/cli` | C | 🟢 `pages/cli.vue` | 🟡 按 `x4.png` 结构复刻，未逐项测量 | 🟡 代码初审 | 🟡 静态目录快照（38 组 / 204 条 / 171 已落地，来自 `registry.ts`） | 🟢 `cli.png` + `x4.png` + CLI Skill 包 | 🟢 `cli-catalog.json` | Agent 分发 URL 需部署期注入 `NUXT_PUBLIC_CLI_SKILL_URL`；未做像素级测量 | 133 |
-| 56 | `/implement` | C | 🟢 `pages/implement.vue` | ⏳ | 🟡 代码初审 | 🟢 `/df/resources/list?resource_type=3` + rename/confirm/unconfirm/batch-delete | 🟢 逆向：`ciINcGzs.js` + `Duf00Fwb.js` + 线上 api-log | 🟢 代码 + e2e | 竞品 `implement=3`；道具资源库支持改名/定稿/删除 | 137 |
+| 56 | `/implement` | C | 🟢 `pages/implement.vue` | ⏳ | 🟡 代码初审 | 🟢 `/df/resources/list?resource_type=3` + 目录筛选 + rename/confirm/batch-delete | 🟢 逆向：`ciINcGzs.js` + `Duf00Fwb.js` + 线上 api-log | 🟢 代码 + e2e | 竞品 `implement=3`；道具资源库支持目录/改名/定稿/删除 | 137 |
 | 57 | `/tools` | A | 🟢 `pages/tools.vue` | 🟡 静态截图 | 🟡 代码初审 | 🟡 端点测试 | 🟡 静态截图 | 🟢 截图 + 代码 | 8 卡仅 2 卡可跳；禁用卡无反馈 | U6 |
 
 ## 8. 资产与团队（6）
@@ -158,7 +158,7 @@
 | 78 | `/ad-drama/workspace` | B | 🟢 `ad-drama/workspace.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 同上 | U6 |
 | 79 | `/video-redraw/create` | B | 🟢 `video-redraw/create.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | mock 下强度无可见差异 | U6 |
 | 80 | `/video-redraw/workspace` | B | 🟢 `video-redraw/workspace.vue` | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 同上 | U6 |
-| 81 | `/refer-video` | C | 🟢 `pages/refer-video.vue` | ⏳ | 🟡 代码初审 | 🟢 `/df/resources/list?resource_type=4` + 上传 + 删除（`batch-delete`） | 🟢 逆向：`D9pEsh7G.js` + 线上 api-log | 🟢 代码 + e2e 14/14 | 竞品 `referenceVideo=4`；真实上传/删除闭环 | 137 |
+| 81 | `/refer-video` | C | 🟢 `pages/refer-video.vue` | ⏳ | 🟡 代码初审 | 🟢 `/df/resources/list?resource_type=4` + 目录筛选 + 上传/删除 | 🟢 逆向：`D9pEsh7G.js` + 线上 api-log | 🟢 代码 + e2e 14/14 | 竞品 `referenceVideo=4`；真实上传/删除 + 目录隔离 | 137 |
 | 82 | `/video-effects` | C | 🔶 `create/video-effects.vue` | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 与 `/create/video-effects/effect` 重复 | U8 |
 
 ## 12. 活动（7）

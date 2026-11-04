@@ -5914,6 +5914,13 @@ I = 0      （当前未发现 —— 见 61.4）
 | POST | `/v1/df/resources/batch-delete` | `{sp_id,resource_ids[]}`（≤100，必须全属本项目） |
 | POST | `/v1/df/resources/batch-confirm` | `{sp_id,resource_ids[]}` |
 | POST | `/v1/df/resources/batch-update` | `{sp_id,items[{resource_id,name?,description?}]}` |
+| GET | `/v1/df/resources/dir/list` | `?sp_id`；返回 `{list:[{id,name,parent_id,resource_count}]}` |
+| POST | `/v1/df/resources/dir` | `{sp_id,name,parent_id?}` |
+| POST | `/v1/df/resources/dir/:id/name` | `{sp_id,name}` |
+| POST | `/v1/df/resources/dir/:id/move` | `{sp_id,parent_id?}`（禁止移入自身/后代） |
+| POST | `/v1/df/resources/dir/:id/delete` | `{sp_id}`；子目录上移、资源回未归档 |
+| POST | `/v1/df/resources/dir/asset/batch-move` | `{sp_id,resource_ids,dir_id?}` |
+| GET | `/v1/df/resources/list?...&dir_id=` | `dir_id` 可为目录 id 或 `none`（未归档） |
 
 `project_assets.resource_type` 是**生成列**（kind → 类型），既有角色/场景/道具写入自动归位；
 参考类新增 `kind=reference_video|reference_image` + `file_uri/content_type`，DTO 额外返回

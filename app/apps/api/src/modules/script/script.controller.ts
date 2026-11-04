@@ -99,6 +99,18 @@ const dfResourceBatchUpdateSchema = dfResourceRefSchema.extend({
     .max(100),
 });
 
+const dfDirCreateSchema = z.object({
+  sp_id: z.string().min(1),
+  name: z.string().trim().min(1).max(50),
+  parent_id: z.string().min(1).optional(),
+});
+const dfDirRefSchema = z.object({ sp_id: z.string().min(1) });
+const dfDirRenameSchema = dfDirRefSchema.extend({ name: z.string().trim().min(1).max(50) });
+const dfDirMoveSchema = dfDirRefSchema.extend({ parent_id: z.string().min(1).optional() });
+const dfDirBatchMoveSchema = dfResourceBatchIdsSchema.extend({
+  dir_id: z.string().min(1).optional(),
+});
+
 /**
  * 批量资产操作的 id 列表（batch-info / batch-confirm 共用）。
  * 上限 100 与竞品批量接口的常见分片一致；空数组无意义（zod 报 400101）而不是当「全部」。
@@ -850,6 +862,7 @@ export class ScriptController {
     @Query("resource_type") resourceType?: string,
     @Query("status") status?: string,
     @Query("name") name?: string,
+    @Query("dir_id") dirId?: string,
   ) {
     if (!spId) throw new AppError(ErrorCode.INVALID_PARAM, "sp_id required", { field: "sp_id" });
     const resource = resourceType === undefined || resourceType === "" ? undefined : Number(resourceType);
@@ -862,6 +875,7 @@ export class ScriptController {
       resourceType: resource,
       status: status === undefined || status === "" ? undefined : Number(status),
       name,
+      dirId,
     });
   }
 
@@ -950,6 +964,63 @@ export class ScriptController {
   async batchUpdateDfResources(@Req() req: AuthedRequest, @Body() body: unknown) {
     const input = parseOrThrow(dfResourceBatchUpdateSchema, body);
     return this.script.batchUpdateProjectResources(req.auth?.spaceId ?? "", input.sp_id, input.items);
+  }
+
+  /** ── 资源目录（竞品 `/df/resources/dir/*`）──────────────────── */
+  @Get("df/resources/dir/list")
+  async listDfDirs(@Req() req: AuthedRequest, @Query("sp_id") spId?: string) {
+    if (!spId) throw new AppError(ErrorCode.INVALID_PARAM, "sp_id required", { field: "sp_id" });
+    return this.script.listResourceDirs(req.auth?.spaceId ?? "", spId);
+  }
+
+  @Post("df/resources/dir")
+  async createDfDir(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfDirCreateSchema, body);
+    return this.script.createResourceDir(req.auth?.spaceId ?? "", input.sp_id, {
+      name: input.name,
+      parent_id: input.parent_id,
+    });
+  }
+
+  @Post("df/resources/dir/:dirId/name")
+  async renameDfDir(
+    @Req() req: AuthedRequest,
+    @Param("dirId") dirId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfDirRenameSchema, body);
+    return this.script.renameResourceDir(req.auth?.spaceId ?? "", input.sp_id, dirId, input.name);
+  }
+
+  @Post("df/resources/dir/:dirId/move")
+  async moveDfDir(
+    @Req() req: AuthedRequest,
+    @Param("dirId") dirId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfDirMoveSchema, body);
+    return this.script.moveResourceDir(req.auth?.spaceId ?? "", input.sp_id, dirId, input.parent_id);
+  }
+
+  @Post("df/resources/dir/:dirId/delete")
+  async deleteDfDir(
+    @Req() req: AuthedRequest,
+    @Param("dirId") dirId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfDirRefSchema, body);
+    return this.script.deleteResourceDir(req.auth?.spaceId ?? "", input.sp_id, dirId);
+  }
+
+  @Post("df/resources/dir/asset/batch-move")
+  async batchMoveDfResources(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfDirBatchMoveSchema, body);
+    return this.script.batchMoveProjectResources(
+      req.auth?.spaceId ?? "",
+      input.sp_id,
+      input.resource_ids,
+      input.dir_id,
+    );
   }
 
   /** 新建场景/道具/其他资产（角色走 /characters/generate，kind=character → 400101） */
