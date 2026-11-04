@@ -1,41 +1,130 @@
 <script setup lang="ts">
-import type { AssetDto } from "~/types/api";
+import type { AssetDto, ProjectAssetDto, ProjectDto } from "~/types/api";
 
 /**
- * 参考视频（竞品 `/refer-video`，第 134 批）。
+ * 参考视频资源库（竞品 `/refer-video`，第 136 批，按逆向证据对齐）。
  *
- * 竞品证据（2026-11-04 实时逆向）：
- * - `/refer-video` 与 `/implement` 复用**同一个列表组件** `mRxBn2Ja.js`，仅 `resource-type` 不同：
+ * 逆向事实（2026-11-04 实时抓取）：
+ * - `/refer-video` 与 `/implement` 复用同一列表组件 `mRxBn2Ja.js`，仅 `resource-type` 不同：
  *   `referenceVideo = 4` / `implement = 3`（`Duf00Fwb.js` 枚举）；
  * - 列表接口 `GET /web/v1/df/resources/list`，参数
- *   `sp_id / page / page_size / resource_type / status / sort_field / sort_direction / is_subject / name`；
- * - 即竞品把「参考视频」做成**系列资源库的一个类型**，不是独立工具页。
+ *   `sp_id / page / page_size / resource_type / status / sort_field / sort_direction / is_subject / name`。
  *
- * 我方没有 `/df/resources/*`，对应能力是资产库（`GET /assets`，kind=video），
- * 以及参考生视频/视频转绘工具；本页按资产库视频落地，台标注“不等价”。
- *
- * 数据来自 `GET /assets`（资产列表），客户端按 `kind==="video"` 过滤——后端没有 kind 过滤参数，
- * 这是现有契约的边界，不为此新增端点。
+ * 本页因此按“项目 + resource_type=4”取资源：后端 `project_assets.resource_type` 为生成列
+ * （kind → 1/2/3/4/5/8），新端点 `/df/resources/list` 与 `/df/resources/add` 与竞品同形状。
+ * 上传流程：文件 → `POST /assets/upload` 落到存储 → `POST /df/resources/add` 建参考视频资源。
  */
 definePageMeta({ ssr: false, requiresAuth: true, layout: "app" });
 const { t } = useI18n();
 useHead({ title: () => t("referVideo.metaTitle") });
 
 const api = useApi();
-const loading = ref(true);
-const error = ref("");
-const assets = ref<AssetDto[]>([]);
+const route = useRoute();
+const toast = useToast();
 
-onMounted(async () => {
+const projects = ref<ProjectDto[]>([]);
+const selectedProjectId = ref(String(route.query.project ?? ""));
+const assets = ref<ProjectAssetDto[]>([]);
+const loading = ref(true);
+const loadingAssets = ref(false);
+const uploading = ref(false);
+const error = ref("");
+const fileInput = ref<HTMLInputElement | null>(null);
+
+const MAX_VIDEO_BYTES = 32 * 1024 * 1024;
+
+async function loadProjects(): Promise<void> {
+  loading.value = true;
+  error.value = "";
   try {
-    const res = await api.get<{ list: AssetDto[]; total: number }>("/assets?page=1&page_size=100");
-    assets.value = res.list.filter((a) => String(a.kind).toLowerCase() === "video");
+    const res = await api.get<{ list: ProjectDto[]; total: number }>("/projects?page=1&page_size=100");
+    projects.value = res.list;
+    if (!selectedProjectId.value || !projects.value.some((p) => p.id === selectedProjectId.value)) {
+      selectedProjectId.value = projects.value[0]?.id ?? "";
+    }
+    await loadAssets();
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("referVideo.loadFailed");
   } finally {
     loading.value = false;
   }
+}
+
+async function loadAssets(): Promise<void> {
+  if (!selectedProjectId.value) {
+    assets.value = [];
+    return;
+  }
+  loadingAssets.value = true;
+  try {
+    const res = await api.get<{ list: ProjectAssetDto[]; total: number }>(
+      `/df/resources/list?sp_id=${selectedProjectId.value}&resource_type=4&page=1&page_size=100`,
+    );
+    assets.value = res.list;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("referVideo.loadFailed");
+    assets.value = [];
+  } finally {
+    loadingAssets.value = false;
+  }
+}
+
+watch(selectedProjectId, () => {
+  void loadAssets();
 });
+
+function pickFile(): void {
+  fileInput.value?.click();
+}
+
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function onFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (!file.type.startsWith("video/")) {
+    toast.error(t("referVideo.invalidType"));
+    return;
+  }
+  if (file.size > MAX_VIDEO_BYTES) {
+    toast.error(t("referVideo.tooLarge"));
+    return;
+  }
+  uploading.value = true;
+  error.value = "";
+  try {
+    const dataBase64 = await readBase64(file);
+    const asset = await api.post<AssetDto>("/assets/upload", {
+      filename: file.name,
+      content_type: file.type,
+      data_base64: dataBase64,
+    });
+    await api.post("/df/resources/add", {
+      sp_id: selectedProjectId.value,
+      resource_type: 4,
+      name: file.name.slice(0, 50),
+      file_uri: asset.uri,
+      content_type: file.type,
+    });
+    toast.success(t("referVideo.uploaded"));
+    await loadAssets();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t("referVideo.uploadFailed");
+  } finally {
+    uploading.value = false;
+  }
+}
+
+onMounted(() => void loadProjects());
 </script>
 
 <template>
@@ -46,26 +135,53 @@ onMounted(async () => {
         <p class="rv-sub">{{ t("referVideo.sub") }}</p>
       </div>
       <div class="rv-actions">
-        <NuxtLink class="rv-btn" to="/create/video-refer">{{ t("referVideo.openRefer") }}</NuxtLink>
-        <NuxtLink class="rv-btn rv-btn--ghost" to="/video-redraw/create">{{ t("referVideo.openRedraw") }}</NuxtLink>
+        <SelectField
+          class="rv-project"
+          label=""
+          :options="projects.map((p) => ({ value: p.id, label: p.title }))"
+          :model-value="selectedProjectId"
+          @update:model-value="selectedProjectId = String($event)"
+        />
+        <Button size="sm" :disabled="uploading || !selectedProjectId" @click="pickFile">
+          {{ uploading ? t("referVideo.uploading") : t("referVideo.upload") }}
+        </Button>
+        <input ref="fileInput" class="rv-file" type="file" accept="video/*" @change="onFileChange" />
       </div>
     </header>
 
+    <div class="rv-tools">
+      <NuxtLink class="rv-btn rv-btn--ghost" to="/create/video-refer">{{ t("referVideo.openRefer") }}</NuxtLink>
+      <NuxtLink class="rv-btn rv-btn--ghost" to="/video-redraw/create">{{ t("referVideo.openRedraw") }}</NuxtLink>
+    </div>
+
     <p v-if="error" class="rv-err" role="alert">{{ error }}</p>
-    <p v-else-if="loading" class="rv-muted">{{ t("referVideo.loading") }}</p>
+    <p v-else-if="loading || loadingAssets" class="rv-muted">{{ t("referVideo.loading") }}</p>
+
+    <EmptyState
+      v-else-if="projects.length === 0"
+      :title="t('referVideo.noProject')"
+      :description="t('referVideo.noProjectDesc')"
+    >
+      <NuxtLink class="rv-btn" to="/script">{{ t("referVideo.goCreate") }}</NuxtLink>
+    </EmptyState>
 
     <EmptyState
       v-else-if="assets.length === 0"
       :title="t('referVideo.empty')"
       :description="t('referVideo.emptyDesc')"
     >
-      <NuxtLink class="rv-btn" to="/assets">{{ t("referVideo.goAssets") }}</NuxtLink>
+      <Button size="sm" :disabled="uploading" @click="pickFile">{{ t("referVideo.upload") }}</Button>
     </EmptyState>
 
     <section v-else class="rv-grid">
       <article v-for="asset in assets" :key="asset.id" class="rv-card">
         <div class="rv-card__thumb">
-          <video v-if="asset.url" :src="asset.url" controls preload="metadata" />
+          <video
+            v-if="asset.file_url || asset.file_uri"
+            :src="asset.file_url || asset.file_uri || ''"
+            controls
+            preload="metadata"
+          />
           <span v-else class="rv-card__ph">{{ t("referVideo.noPreview") }}</span>
         </div>
         <div class="rv-card__body">
@@ -92,7 +208,7 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 .rv-title {
   margin: 0 0 6px;
@@ -107,8 +223,20 @@ onMounted(async () => {
 }
 .rv-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+.rv-project {
+  min-width: 220px;
+}
+.rv-file {
+  display: none;
+}
+.rv-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 .rv-btn {
   display: inline-flex;

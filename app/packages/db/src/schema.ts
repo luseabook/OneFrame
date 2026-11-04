@@ -808,7 +808,27 @@ export const projectAssets = pgTable(
     projectId: bigint("project_id", { mode: "bigint" })
       .notNull()
       .references(() => scriptProjects.id),
-    kind: text("kind").notNull(), // character|scene|prop
+    kind: text("kind").notNull(), // character|scene|prop|reference_video|reference_image|other
+    /**
+     * 通用资源类型（2026-11-04 对齐竞品 `/df/resources`）：
+     * 1 role / 2 setting / 3 implement / 4 referenceVideo / 5 referenceImage / 8 filmNonRole。
+     *
+     * **生成列**：由 `kind` 自动派生，所有既有插入点（角色生成、资产提取、广告剧/转绘/匹配）
+     * 不需要逐处改写，也不会出现"kind 改了、类型没改"的漂移。查询/筛选直接用它。
+     */
+    resourceType: smallint("resource_type").generatedAlwaysAs(
+      sql`case "kind"
+        when 'character' then 1
+        when 'scene' then 2
+        when 'prop' then 3
+        when 'reference_video' then 4
+        when 'reference_image' then 5
+        else 8 end`,
+    ),
+    /** 参考视频/参考图的文件 URI（storage key 或外链）；角色/场景/道具通常为 null */
+    fileUri: text("file_uri"),
+    /** 参考素材的 MIME（如 video/mp4、image/png） */
+    contentType: text("content_type"),
     name: text("name").notNull(),
     description: text("description"),
     prompt: text("prompt"),
@@ -826,7 +846,11 @@ export const projectAssets = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("idx_project_assets_project").on(t.projectId, t.kind, t.status)],
+  (t) => [
+    index("idx_project_assets_project").on(t.projectId, t.kind, t.status),
+    // 资源库列表（竞品 `/df/resources/list?sp_id&resource_type`）的查询形状
+    index("idx_project_assets_resource").on(t.projectId, t.resourceType, t.status),
+  ],
 );
 
 export const storyboards = pgTable(

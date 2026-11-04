@@ -5896,3 +5896,19 @@ I = 0      （当前未发现 —— 见 61.4）
 
 保留：`/v1/op/*`（运营位/邀请码/等待名单）——邀请码是注册准入、运营位是产品配置，不属营销活动；
 `/v1/ops/admin/promo-slots*` 仍可用，但前台消费侧（原 `crc/banner_list`）已随 crc 移除。
+
+## 17.38 通用资源库（第 136 批，对齐竞品 `/df/resources`）
+
+竞品证据：`mRxBn2Ja.js`（列表组件）+ `Duf00Fwb.js`（类型枚举）+ 线上 `api-log`
+（`GET /web/v1/df/resources/list`，参数 `sp_id / page / page_size / resource_type / status / sort_field / sort_direction / is_subject / name`）。
+
+我方新增两条同形状端点，底层复用 `project_assets`：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/df/resources/list` | `sp_id`=项目 id；`resource_type` 1 role / 2 setting / 3 implement / 4 referenceVideo / 5 referenceImage / 8 filmNonRole；返回 `{list,total,user_total,page,page_size}` |
+| POST | `/v1/df/resources/add` | `{sp_id,resource_type,name,description?,prompt?,file_uri?,content_type?}`；`reference_video`/`reference_image` 必须带 `file_uri` |
+
+`project_assets.resource_type` 是**生成列**（kind → 类型），既有角色/场景/道具写入自动归位；
+参考类新增 `kind=reference_video|reference_image` + `file_uri/content_type`，DTO 额外返回
+`resource_type / file_uri / file_url / content_type`（`file_url` 为 storage key 的签名 URL）。

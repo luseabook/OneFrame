@@ -401,7 +401,8 @@
     "invite": "Invite & Earn",
     "adDrama": "Ad Drama",
     "videoRedraw": "Video Redraw",
-    "more": "More creation"
+    "more": "More creation",
+    "cli": "CLI tools"
   },
   "works": {
     "metaTitle": "My works · OneFrame",
@@ -4650,7 +4651,16 @@
     "goAssets": "Open asset library",
     "untitled": "Untitled video",
     "noPreview": "No preview",
-    "useAsReference": "Use as reference"
+    "useAsReference": "Use as reference",
+    "upload": "Upload reference video",
+    "uploading": "Uploading…",
+    "uploaded": "Uploaded",
+    "uploadFailed": "Upload failed",
+    "invalidType": "Video files only",
+    "tooLarge": "Video must be under 32MB",
+    "noProject": "No projects yet",
+    "noProjectDesc": "Create a project first, then upload reference videos.",
+    "goCreate": "Open script studio"
   },
   "implementPage": {
     "metaTitle": "Prop library · OneFrame",

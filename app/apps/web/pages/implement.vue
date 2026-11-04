@@ -56,8 +56,8 @@ async function loadAssets(): Promise<void> {
   }
   loadingAssets.value = true;
   try {
-    const res = await api.get<{ list: ProjectAssetDto[] }>(
-      `/projects/${selectedProjectId.value}/assets?kind=prop`,
+    const res = await api.get<{ list: ProjectAssetDto[]; total: number }>(
+      `/df/resources/list?sp_id=${selectedProjectId.value}&resource_type=3&page=1&page_size=100`,
     );
     assets.value = res.list;
   } catch (e) {
@@ -83,6 +83,8 @@ const visibleAssets = computed(() => {
 function statusLabel(status: number): string {
   return status === 2 ? t("implementPage.statusFinalized") : t("implementPage.statusDraft");
 }
+
+onMounted(() => void loadProjects());
 </script>
 
 <template>

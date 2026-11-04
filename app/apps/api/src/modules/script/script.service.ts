@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import {
   assets,
   directorScenes,
@@ -161,9 +161,20 @@ function assetDto(row: ProjectAssetRow, portraitUrl: string | null = null) {
  * P2 项目资产 DTO：在 assetDto 基础上补 finalized_at / bound_shot_count。
  * kind=character 时与 GET /projects/{id} 的 characters 字段同构（仅多这两个字段）。
  */
-function projectAssetDto(row: ProjectAssetRow, portraitUrl: string | null, boundShotCount: number) {
+function projectAssetDto(
+  row: ProjectAssetRow,
+  portraitUrl: string | null,
+  boundShotCount: number,
+  fileUrl: string | null,
+) {
   return {
     ...assetDto(row, portraitUrl),
+    // 竞品 `/df/resources/list` 的 resource_type（生成列，见 schema 注释）
+    resource_type: row.resourceType,
+    file_uri: row.fileUri ?? null,
+    /** file_uri 的签名 URL（仅 storage key 可签；外链保持 null，前端回退 file_uri） */
+    file_url: fileUrl,
+    content_type: row.contentType ?? null,
     finalized_at: row.finalizedAt ? row.finalizedAt.toISOString() : null,
     bound_shot_count: boundShotCount,
   };
@@ -1506,6 +1517,49 @@ export class ScriptService {
     return { list };
   }
 
+  /**
+   * 通用资源列表（对齐竞品 `GET /web/v1/df/resources/list`，第 136 批）。
+   *
+   * 竞品参数：`sp_id / page / page_size / resource_type / status / sort_field / sort_direction / name`。
+   * 我方用 `project_assets.resource_type`（生成列，由 kind 派生）承载，项目 id 即 `sp_id`；
+   * 返回 `{list,total,user_total}`（user_total 与 total 同值，保留竞品字段名）。
+   */
+  async listProjectResources(
+    spaceId: string,
+    projectId: string,
+    opts: {
+      page?: number;
+      pageSize?: number;
+      resourceType?: number;
+      status?: number;
+      name?: string;
+    } = {},
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const page = Math.max(1, opts.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 20));
+    const conds = [eq(projectAssets.projectId, project.id)];
+    if (opts.resourceType !== undefined) conds.push(eq(projectAssets.resourceType, opts.resourceType));
+    if (opts.status !== undefined) conds.push(eq(projectAssets.status, opts.status));
+    const name = normalizeOptionalText(opts.name);
+    if (name) conds.push(ilike(projectAssets.name, `%${name}%`));
+    const rows = await db
+      .select()
+      .from(projectAssets)
+      .where(and(...conds))
+      .orderBy(desc(projectAssets.createdAt), desc(projectAssets.id))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+    const [agg] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(projectAssets)
+      .where(and(...conds));
+    const counts = await this.boundShotCounts(rows.map((row) => row.id));
+    const list = await Promise.all(rows.map((row) => this.projectAssetDtoOf(spaceId, row, counts)));
+    const total = Number(agg?.n ?? 0);
+    return { list, total, user_total: total, page, page_size: pageSize };
+  }
+
   /** POST /projects/{id}/assets：新建场景/道具/其他（角色必须走 characters/generate） */
   async createProjectAsset(spaceId: string, projectId: string, input: ProjectAssetCreateRequest) {
     const project = await this.findProject(spaceId, projectId);
@@ -1518,6 +1572,11 @@ export class ScriptService {
     }
     const refImageUri = normalizeOptionalText(input.ref_image_uri);
     if (refImageUri) this.storage.assertOwnedKey(spaceId, refImageUri, "ref_image_uri");
+    const fileUri = normalizeOptionalText(input.file_uri);
+    const isReference = input.kind === "reference_video" || input.kind === "reference_image";
+    if (isReference && !fileUri) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "reference assets require file_uri", { field: "file_uri" });
+    }
     const [row] = await db
       .insert(projectAssets)
       .values({
@@ -1528,6 +1587,8 @@ export class ScriptService {
         description: normalizeOptionalText(input.description),
         prompt: normalizeOptionalText(input.prompt),
         refImageUri,
+        fileUri,
+        contentType: normalizeOptionalText(input.content_type),
         status: ProjectAssetStatus.DRAFT,
       })
       .returning();
@@ -3278,7 +3339,10 @@ export class ScriptService {
     const portraitUrl = row.refImageUri
       ? await this.storage.signDownload(spaceId, row.refImageUri, 3600).catch(() => null)
       : null;
-    return projectAssetDto(row, portraitUrl, boundCounts.get(String(row.id)) ?? 0);
+    const fileUrl = row.fileUri
+      ? await this.storage.signDownload(spaceId, row.fileUri, 3600).catch(() => null)
+      : null;
+    return projectAssetDto(row, portraitUrl, boundCounts.get(String(row.id)) ?? 0, fileUrl);
   }
 
   /** 聚合每个资产被多少分镜引用（storyboard_assets 计数；绑定表无 created_at，无需排序） */

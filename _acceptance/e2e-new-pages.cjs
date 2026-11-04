@@ -86,7 +86,16 @@ async function main() {
     });
     if (!token) throw new Error("refresh token flow failed");
 
-    // ── 上传一段视频素材（供 /refer-video 列表） ─────────
+    // ── 造项目 + 上传参考视频资源（/refer-video 现在按项目 resource_type=4 取） ──
+    const project = await api("/projects", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ title: "E2E 资源项目", drama_type: 1, ratio: "9:16", source_type: 2, source_text: "" }),
+    });
+    const projectId = project?.data?.id;
+    if (!projectId) throw new Error(`create project failed: ${JSON.stringify(project).slice(0, 200)}`);
+    record("创建测试项目", true, String(projectId));
+
     const base64 = fs.readFileSync(VIDEO).toString("base64");
     const uploaded = await api("/assets/upload", {
       method: "POST",
@@ -99,10 +108,25 @@ async function main() {
     });
     record("上传视频资产", uploaded?.code === 0, uploaded?.msg ?? String(uploaded?.data?.id ?? ""));
 
+    const resource = await api("/df/resources/add", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        sp_id: String(projectId),
+        resource_type: 4,
+        name: "e2e-ref.mp4",
+        file_uri: uploaded?.data?.uri,
+        content_type: "video/mp4",
+      }),
+    });
+    record("创建参考视频资源", resource?.code === 0, resource?.msg ?? String(resource?.data?.id ?? ""));
+
     // ── /refer-video ─────────────────────────────────────
     await page.goto(`${WEB}/refer-video`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".rv", { timeout: 30_000 });
-    await page.waitForTimeout(1200);
+    await page
+      .waitForFunction(() => document.body.innerText.includes("e2e-ref.mp4"), { timeout: 15_000 })
+      .catch(() => {});
     const refText = await page.locator(".rv").innerText();
     record("参考视频页渲染", /参考视频|Reference videos|参考動画/.test(refText), refText.split("\n")[0]);
     record("参考视频页出现上传的视频", refText.includes("e2e-ref.mp4"), refText.slice(0, 120));

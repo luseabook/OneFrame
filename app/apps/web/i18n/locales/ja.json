@@ -401,7 +401,8 @@
     "invite": "招待特典",
     "adDrama": "広告ドラマ",
     "videoRedraw": "動画リドロー",
-    "more": "その他の制作"
+    "more": "その他の制作",
+    "cli": "CLI ツール"
   },
   "works": {
     "metaTitle": "マイ作品 · OneFrame",
@@ -4650,7 +4651,16 @@
     "goAssets": "素材庫へ",
     "untitled": "無題の動画",
     "noPreview": "プレビューなし",
-    "useAsReference": "参考動画として使う"
+    "useAsReference": "参考動画として使う",
+    "upload": "参考動画をアップロード",
+    "uploading": "アップロード中…",
+    "uploaded": "アップロードしました",
+    "uploadFailed": "アップロードに失敗しました",
+    "invalidType": "動画ファイルのみ対応",
+    "tooLarge": "動画は 32MB 以下にしてください",
+    "noProject": "プロジェクトがありません",
+    "noProjectDesc": "先にプロジェクトを作成してください。",
+    "goCreate": "脚本スタジオへ"
   },
   "implementPage": {
     "metaTitle": "小道具ライブラリ · OneFrame",

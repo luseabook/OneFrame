@@ -46,7 +46,14 @@ export type Character = z.infer<typeof characterSchema>;
 // ── P2：项目资产（场景/道具/其他）与分镜资产绑定 ───────────────────────
 // project_assets.kind 支持 character|scene|prop|other；本组接口只写非角色资产，
 // 角色走 POST /projects/{id}/characters/generate（同一张表，kind=character）。
-export const PROJECT_ASSET_KINDS = ["character", "scene", "prop", "other"] as const;
+export const PROJECT_ASSET_KINDS = [
+  "character",
+  "scene",
+  "prop",
+  "other",
+  "reference_video",
+  "reference_image",
+] as const;
 export type ProjectAssetKind = (typeof PROJECT_ASSET_KINDS)[number];
 
 /** 单个分镜可绑定的项目资产上限（0..20） */
@@ -61,6 +68,9 @@ export const projectAssetCreateSchema = z.object({
   description: z.string().max(500).optional(),
   prompt: z.string().max(1000).optional(),
   ref_image_uri: z.string().max(500).optional(),
+  /** 参考视频/参考图的文件 URI（storage key 或外链） */
+  file_uri: z.string().max(500).optional(),
+  content_type: z.string().max(100).optional(),
 });
 export type ProjectAssetCreateRequest = z.infer<typeof projectAssetCreateSchema>;
 

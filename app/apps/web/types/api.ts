@@ -225,6 +225,14 @@ export interface ProjectAssetDto {
   status: number;
   finalized_at?: string | null;
   bound_shot_count?: number;
+  /** 通用资源类型（1 role / 2 setting / 3 implement / 4 referenceVideo / 5 referenceImage / 8 other） */
+  resource_type?: number;
+  /** 参考素材 URI（storage key 或外链） */
+  file_uri?: string | null;
+  /** file_uri 的签名 URL（可签时） */
+  file_url?: string | null;
+  content_type?: string | null;
+  created_at?: string;
 }
 
 export interface AssetDto {

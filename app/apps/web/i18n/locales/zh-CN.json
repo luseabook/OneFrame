@@ -401,7 +401,8 @@
     "invite": "邀请返利",
     "adDrama": "广告剧",
     "videoRedraw": "视频转绘",
-    "more": "更多创作"
+    "more": "更多创作",
+    "cli": "CLI 工具"
   },
   "works": {
     "metaTitle": "我的作品 · 一帧",
@@ -4650,7 +4651,16 @@
     "goAssets": "去资产库",
     "untitled": "未命名视频",
     "noPreview": "无预览",
-    "useAsReference": "用作参考视频"
+    "useAsReference": "用作参考视频",
+    "upload": "上传参考视频",
+    "uploading": "上传中…",
+    "uploaded": "已上传",
+    "uploadFailed": "上传失败",
+    "invalidType": "只支持视频文件",
+    "tooLarge": "视频不能超过 32MB",
+    "noProject": "还没有项目",
+    "noProjectDesc": "先创建项目，再上传参考视频。",
+    "goCreate": "去剧本创作"
   },
   "implementPage": {
     "metaTitle": "道具资源库 · 一帧",

@@ -14,6 +14,7 @@ import {
   projectAssetImageGenerateSchema,
   projectAssetImageSelectSchema,
   projectAssetKindSchema,
+  type ProjectAssetKind,
   projectAssetPatchSchema,
   projectAssetsExtractSchema,
   projectPatchSchema,
@@ -49,6 +50,29 @@ const parseScriptSchema = z.object({
 
 /** P2 项目资产列表过滤：kind 省略时返回该项目全部资产（含角色） */
 const projectAssetsQuerySchema = z.object({ kind: projectAssetKindSchema.optional() });
+
+/**
+ * 通用资源（竞品 `/df/resources/*`，第 136 批）：
+ * resource_type 1 role / 2 setting / 3 implement / 4 referenceVideo / 5 referenceImage / 8 filmNonRole。
+ */
+const DF_RESOURCE_KIND: Record<number, ProjectAssetKind> = {
+  1: "character",
+  2: "scene",
+  3: "prop",
+  4: "reference_video",
+  5: "reference_image",
+  8: "other",
+};
+
+const dfResourceAddSchema = z.object({
+  sp_id: z.string().min(1),
+  resource_type: z.number().int().min(1).max(8),
+  name: z.string().trim().min(1).max(50),
+  description: z.string().max(500).optional(),
+  prompt: z.string().max(1000).optional(),
+  file_uri: z.string().max(500).optional(),
+  content_type: z.string().max(100).optional(),
+});
 
 /**
  * 批量资产操作的 id 列表（batch-info / batch-confirm 共用）。
@@ -786,6 +810,50 @@ export class ScriptController {
   ) {
     const query = parseOrThrow(projectAssetsQuerySchema, { kind });
     return this.script.listProjectAssets(req.auth?.spaceId ?? "", id, query.kind);
+  }
+
+  /**
+   * 通用资源列表（对齐竞品 `GET /web/v1/df/resources/list`）。
+   * 参数名保持竞品形状：`sp_id` 即项目 id，`resource_type` 为 1..8。
+   */
+  @Get("df/resources/list")
+  async listDfResources(
+    @Req() req: AuthedRequest,
+    @Query("sp_id") spId?: string,
+    @Query("page") page?: string,
+    @Query("page_size") pageSize?: string,
+    @Query("resource_type") resourceType?: string,
+    @Query("status") status?: string,
+    @Query("name") name?: string,
+  ) {
+    if (!spId) throw new AppError(ErrorCode.INVALID_PARAM, "sp_id required", { field: "sp_id" });
+    const resource = resourceType === undefined || resourceType === "" ? undefined : Number(resourceType);
+    if (resource !== undefined && !DF_RESOURCE_KIND[resource]) {
+      throw new AppError(ErrorCode.INVALID_PARAM, "invalid resource_type", { field: "resource_type" });
+    }
+    return this.script.listProjectResources(req.auth?.spaceId ?? "", spId, {
+      page: page === undefined ? undefined : Number(page),
+      pageSize: pageSize === undefined ? undefined : Number(pageSize),
+      resourceType: resource,
+      status: status === undefined || status === "" ? undefined : Number(status),
+      name,
+    });
+  }
+
+  /** 新增通用资源（对齐竞品 `POST /df/resources/add`）；reference 类型必须带 file_uri。 */
+  @Post("df/resources/add")
+  async addDfResource(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfResourceAddSchema, body);
+    const kind = DF_RESOURCE_KIND[input.resource_type];
+    if (!kind) throw new AppError(ErrorCode.INVALID_PARAM, "invalid resource_type", { field: "resource_type" });
+    return this.script.createProjectAsset(req.auth?.spaceId ?? "", input.sp_id, {
+      kind,
+      name: input.name,
+      description: input.description,
+      prompt: input.prompt,
+      file_uri: input.file_uri,
+      content_type: input.content_type,
+    });
   }
 
   /** 新建场景/道具/其他资产（角色走 /characters/generate，kind=character → 400101） */

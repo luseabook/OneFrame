@@ -401,7 +401,8 @@
     "invite": "Invita y gana",
     "adDrama": "Drama publicitario",
     "videoRedraw": "Redibujo de video",
-    "more": "Más creación"
+    "more": "Más creación",
+    "cli": "Herramientas CLI"
   },
   "works": {
     "metaTitle": "Mis obras · OneFrame",
@@ -4650,7 +4651,16 @@
     "goAssets": "Ir a recursos",
     "untitled": "Vídeo sin título",
     "noPreview": "Sin vista previa",
-    "useAsReference": "Usar como referencia"
+    "useAsReference": "Usar como referencia",
+    "upload": "Subir vídeo de referencia",
+    "uploading": "Subiendo…",
+    "uploaded": "Subido",
+    "uploadFailed": "Error al subir",
+    "invalidType": "Solo archivos de vídeo",
+    "tooLarge": "El vídeo debe ser menor de 32MB",
+    "noProject": "Sin proyectos",
+    "noProjectDesc": "Crea un proyecto primero y luego sube vídeos de referencia.",
+    "goCreate": "Ir al estudio de guion"
   },
   "implementPage": {
     "metaTitle": "Biblioteca de objetos · OneFrame",

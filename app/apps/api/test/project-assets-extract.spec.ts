@@ -71,6 +71,11 @@ const P2_DTO_FIELDS = [
   "status",
   "finalized_at",
   "bound_shot_count",
+  // 2026-11-04 资源库对齐（第 136 批）：resource_type 生成列 + 参考素材字段
+  "resource_type",
+  "file_uri",
+  "file_url",
+  "content_type",
 ];
 
 beforeAll(async () => {
