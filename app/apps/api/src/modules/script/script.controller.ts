@@ -74,6 +74,31 @@ const dfResourceAddSchema = z.object({
   content_type: z.string().max(100).optional(),
 });
 
+/** 单资源操作（rename/confirm/unconfirm/update）共用：sp_id 必填，id 在路径 */
+const dfResourceRefSchema = z.object({ sp_id: z.string().min(1) });
+const dfResourceRenameSchema = dfResourceRefSchema.extend({
+  name: z.string().trim().min(1).max(50),
+});
+const dfResourceUpdateSchema = dfResourceRefSchema.extend({
+  description: z.string().max(500).nullish(),
+  prompt: z.string().max(1000).nullish(),
+});
+const dfResourceBatchIdsSchema = dfResourceRefSchema.extend({
+  resource_ids: z.array(z.string().min(1)).min(1).max(100),
+});
+const dfResourceBatchUpdateSchema = dfResourceRefSchema.extend({
+  items: z
+    .array(
+      z.object({
+        resource_id: z.string().min(1),
+        name: z.string().trim().min(1).max(50).optional(),
+        description: z.string().max(500).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
 /**
  * 批量资产操作的 id 列表（batch-info / batch-confirm 共用）。
  * 上限 100 与竞品批量接口的常见分片一致；空数组无意义（zod 报 400101）而不是当「全部」。
@@ -854,6 +879,77 @@ export class ScriptController {
       file_uri: input.file_uri,
       content_type: input.content_type,
     });
+  }
+
+  /** 单资源改名（竞品 `POST /df/resources/:id/rename`） */
+  @Post("df/resources/:resourceId/rename")
+  async renameDfResource(
+    @Req() req: AuthedRequest,
+    @Param("resourceId") resourceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfResourceRenameSchema, body);
+    return this.script.patchProjectAsset(req.auth?.spaceId ?? "", input.sp_id, resourceId, {
+      name: input.name,
+    });
+  }
+
+  /** 单资源描述/提示词更新（竞品 `POST /df/resources/:id/update`） */
+  @Post("df/resources/:resourceId/update")
+  async updateDfResource(
+    @Req() req: AuthedRequest,
+    @Param("resourceId") resourceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfResourceUpdateSchema, body);
+    return this.script.patchProjectAsset(req.auth?.spaceId ?? "", input.sp_id, resourceId, {
+      description: input.description ?? undefined,
+      prompt: input.prompt ?? undefined,
+    });
+  }
+
+  /** 定稿 / 取消定稿（竞品 `/df/resources/:id/confirm|unconfirm`） */
+  @Post("df/resources/:resourceId/confirm")
+  async confirmDfResource(
+    @Req() req: AuthedRequest,
+    @Param("resourceId") resourceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfResourceRefSchema, body);
+    return this.script.patchProjectAsset(req.auth?.spaceId ?? "", input.sp_id, resourceId, {
+      status: 2,
+    });
+  }
+
+  @Post("df/resources/:resourceId/unconfirm")
+  async unconfirmDfResource(
+    @Req() req: AuthedRequest,
+    @Param("resourceId") resourceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseOrThrow(dfResourceRefSchema, body);
+    return this.script.patchProjectAsset(req.auth?.spaceId ?? "", input.sp_id, resourceId, {
+      status: 1,
+    });
+  }
+
+  /** 批量删除 / 批量定稿 / 批量更新（竞品 `/df/resources/batch-*`） */
+  @Post("df/resources/batch-delete")
+  async batchDeleteDfResources(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfResourceBatchIdsSchema, body);
+    return this.script.batchDeleteProjectResources(req.auth?.spaceId ?? "", input.sp_id, input.resource_ids);
+  }
+
+  @Post("df/resources/batch-confirm")
+  async batchConfirmDfResources(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfResourceBatchIdsSchema, body);
+    return this.script.batchConfirmProjectResources(req.auth?.spaceId ?? "", input.sp_id, input.resource_ids);
+  }
+
+  @Post("df/resources/batch-update")
+  async batchUpdateDfResources(@Req() req: AuthedRequest, @Body() body: unknown) {
+    const input = parseOrThrow(dfResourceBatchUpdateSchema, body);
+    return this.script.batchUpdateProjectResources(req.auth?.spaceId ?? "", input.sp_id, input.items);
   }
 
   /** 新建场景/道具/其他资产（角色走 /characters/generate，kind=character → 400101） */

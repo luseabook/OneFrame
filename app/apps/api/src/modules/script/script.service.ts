@@ -1641,6 +1641,75 @@ export class ScriptService {
   }
 
   /**
+   * 通用资源批量操作（竞品 `/df/resources/batch-*`，第 137 批）。
+   * 仅接受**本项目内**的 id；任一 id 不属于本项目即整批 400102（不静默跳过）。
+   */
+  async batchDeleteProjectResources(spaceId: string, projectId: string, resourceIds: string[]) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = await this.resolveResourceIds(project.id, resourceIds);
+    await db.transaction(async (tx) => {
+      await tx.delete(storyboardAssets).where(inArray(storyboardAssets.projectAssetId, ids));
+      await tx.delete(projectAssets).where(inArray(projectAssets.id, ids));
+    });
+    return { deleted: ids.length };
+  }
+
+  async batchConfirmProjectResources(spaceId: string, projectId: string, resourceIds: string[]) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = await this.resolveResourceIds(project.id, resourceIds);
+    await db
+      .update(projectAssets)
+      .set({ status: ProjectAssetStatus.FINALIZED, finalizedAt: new Date(), updatedAt: new Date() })
+      .where(inArray(projectAssets.id, ids));
+    return { confirmed: ids.length };
+  }
+
+  async batchUpdateProjectResources(
+    spaceId: string,
+    projectId: string,
+    items: Array<{ resource_id: string; name?: string; description?: string }>,
+  ) {
+    const project = await this.findProject(spaceId, projectId);
+    const ids = await this.resolveResourceIds(
+      project.id,
+      items.map((item) => item.resource_id),
+    );
+    const byId = new Map(ids.map((id) => [String(id), id]));
+    await db.transaction(async (tx) => {
+      for (const item of items) {
+        const id = byId.get(item.resource_id);
+        if (!id) continue;
+        const patch: Partial<typeof projectAssets.$inferInsert> = { updatedAt: new Date() };
+        if (item.name !== undefined) patch.name = item.name;
+        if (item.description !== undefined) patch.description = normalizeOptionalText(item.description);
+        await tx.update(projectAssets).set(patch).where(eq(projectAssets.id, id));
+      }
+    });
+    return { updated: items.length };
+  }
+
+  /** 批量 id 解析：全部必须是本项目资源，否则整批 400102（与 batch-confirm/delete 的严格口径一致） */
+  private async resolveResourceIds(projectId: bigint, resourceIds: string[]): Promise<bigint[]> {
+    const ids: bigint[] = [];
+    for (const raw of resourceIds) {
+      try {
+        ids.push(BigInt(raw));
+      } catch {
+        throw new AppError(ErrorCode.INVALID_PARAM, `invalid resource id: ${raw}`, { field: "resource_ids" });
+      }
+    }
+    if (ids.length === 0) return [];
+    const found = await db
+      .select({ id: projectAssets.id })
+      .from(projectAssets)
+      .where(and(eq(projectAssets.projectId, projectId), inArray(projectAssets.id, ids)));
+    if (found.length !== new Set(ids.map(String)).size) {
+      throw new AppError(ErrorCode.NOT_FOUND, "resource not found in this project", { field: "resource_ids" });
+    }
+    return ids;
+  }
+
+  /**
    * GET /projects/{id}/assets/{assetId}：单个资产详情。
    * 竞品是 GET /web/v1/df/resources/{sp_id}/{resource_id}/info；我方沿用集合风格把 id 放路径尾，
    * 与 PATCH/DELETE projects/:id/assets/:assetId 同形。

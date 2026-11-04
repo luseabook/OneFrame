@@ -135,6 +135,78 @@ describe("df resources list/add e2e", () => {
     expect(refData.list.every((r) => Number(r.resource_type) === 4)).toBe(true);
   });
 
+  it("单资源改名/定稿/取消定稿，批量删除生效", async () => {
+    const created = await inject(
+      "POST",
+      "/df/resources/add",
+      {
+        sp_id: projectId,
+        resource_type: 4,
+        name: "ref-rename.mp4",
+        file_uri: "u/mock/ref-rename.mp4",
+        content_type: "video/mp4",
+      },
+      token,
+    );
+    const resourceId = String((created.data as { id?: string } | undefined)?.id ?? "");
+    expect(created.code).toBe(0);
+    expect(resourceId).toBeTruthy();
+
+    const rename = await inject(
+      "POST",
+      `/df/resources/${resourceId}/rename`,
+      { sp_id: projectId, name: "ref-renamed.mp4" },
+      token,
+    );
+    expect(rename.code).toBe(0);
+    expect((rename.data as { name?: string }).name).toBe("ref-renamed.mp4");
+
+    const confirm = await inject(
+      "POST",
+      `/df/resources/${resourceId}/confirm`,
+      { sp_id: projectId },
+      token,
+    );
+    expect(confirm.code).toBe(0);
+    expect((confirm.data as { status?: number }).status).toBe(2);
+
+    const unconfirm = await inject(
+      "POST",
+      `/df/resources/${resourceId}/unconfirm`,
+      { sp_id: projectId },
+      token,
+    );
+    expect((unconfirm.data as { status?: number }).status).toBe(1);
+
+    const deleted = await inject(
+      "POST",
+      "/df/resources/batch-delete",
+      { sp_id: projectId, resource_ids: [resourceId] },
+      token,
+    );
+    expect(deleted.code).toBe(0);
+    expect((deleted.data as { deleted?: number }).deleted).toBe(1);
+
+    const list = await inject(
+      "GET",
+      `/df/resources/list?sp_id=${projectId}&resource_type=4`,
+      undefined,
+      token,
+    );
+    const rows = (list.data as { list: Array<Record<string, unknown>> }).list;
+    expect(rows.some((row) => String(row.id) === resourceId)).toBe(false);
+  });
+
+  it("批量 id 含非本项目资源 → 整批 400102", async () => {
+    const res = await inject(
+      "POST",
+      "/df/resources/batch-delete",
+      { sp_id: projectId, resource_ids: ["999999999"] },
+      token,
+    );
+    expect(res.code).not.toBe(0);
+  });
+
   it("缺 sp_id / 非法 resource_type 均 400101", async () => {
     const noSp = await inject("GET", "/df/resources/list?resource_type=4", undefined, token);
     expect(noSp.code).toBe(400101);

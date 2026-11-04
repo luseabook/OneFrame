@@ -28,6 +28,7 @@ const assets = ref<ProjectAssetDto[]>([]);
 const loading = ref(true);
 const loadingAssets = ref(false);
 const uploading = ref(false);
+const busyId = ref("");
 const error = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -124,6 +125,23 @@ async function onFileChange(event: Event): Promise<void> {
   }
 }
 
+async function removeAsset(asset: ProjectAssetDto): Promise<void> {
+  if (busyId.value || !window.confirm(t("referVideo.deleteConfirm", { name: asset.name }))) return;
+  busyId.value = asset.id;
+  try {
+    await api.post("/df/resources/batch-delete", {
+      sp_id: selectedProjectId.value,
+      resource_ids: [asset.id],
+    });
+    await loadAssets();
+    toast.success(t("referVideo.deleted"));
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("referVideo.actionFailed"));
+  } finally {
+    busyId.value = "";
+  }
+}
+
 onMounted(() => void loadProjects());
 </script>
 
@@ -187,9 +205,14 @@ onMounted(() => void loadProjects());
         <div class="rv-card__body">
           <h2 class="rv-card__name">{{ asset.name || t("referVideo.untitled") }}</h2>
           <p class="rv-card__meta">{{ asset.created_at }}</p>
-          <NuxtLink class="rv-card__link" :to="`/create/video-refer?asset=${asset.id}`">
-            {{ t("referVideo.useAsReference") }} →
-          </NuxtLink>
+          <div class="rv-card__actions">
+            <NuxtLink class="rv-card__link" :to="`/create/video-refer?asset=${asset.id}`">
+              {{ t("referVideo.useAsReference") }} →
+            </NuxtLink>
+            <button type="button" class="rv-card__del" :disabled="busyId === asset.id" @click="removeAsset(asset)">
+              {{ t("referVideo.delete") }}
+            </button>
+          </div>
         </div>
       </article>
     </section>
@@ -312,6 +335,19 @@ onMounted(() => void loadProjects());
   color: var(--brand, #9b46ff);
   font-size: 12.5px;
   text-decoration: none;
+}
+.rv-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.rv-card__del {
+  border: 0;
+  background: transparent;
+  color: var(--danger, #f56c6c);
+  font-size: 12px;
+  cursor: pointer;
 }
 @media (max-width: 900px) {
   .rv-grid {

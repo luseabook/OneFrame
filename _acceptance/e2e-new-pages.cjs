@@ -132,6 +132,15 @@ async function main() {
     record("参考视频页出现上传的视频", refText.includes("e2e-ref.mp4"), refText.slice(0, 120));
     await page.screenshot({ path: path.join(SHOT_DIR, "01-refer-video.png") });
 
+    // 删除动作（页面 confirm → batch-delete → 列表刷新）
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator(".rv-card__del").first().click().catch(() => {});
+    await page
+      .waitForFunction(() => !document.body.innerText.includes("e2e-ref.mp4"), { timeout: 10_000 })
+      .catch(() => {});
+    const afterDelete = await page.locator(".rv").innerText().catch(() => "");
+    record("删除参考视频资源", !afterDelete.includes("e2e-ref.mp4"), afterDelete.slice(0, 80));
+
     // ── /user-update：保存 + 刷新后仍生效 ─────────────────
     await page.goto(`${WEB}/user-update`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".uu-card", { timeout: 30_000 });

@@ -4660,7 +4660,11 @@
     "tooLarge": "Video must be under 32MB",
     "noProject": "No projects yet",
     "noProjectDesc": "Create a project first, then upload reference videos.",
-    "goCreate": "Open script studio"
+    "goCreate": "Open script studio",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "deleted": "Deleted",
+    "actionFailed": "Action failed"
   },
   "implementPage": {
     "metaTitle": "Prop library · OneFrame",
@@ -4681,6 +4685,16 @@
     "noDesc": "No description",
     "statusDraft": "Draft",
     "statusFinalized": "Finalized",
-    "bound": "Bound to {n} shots"
+    "bound": "Bound to {n} shots",
+    "rename": "Rename",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Finalize",
+    "unconfirm": "Unfinalize",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "confirmed": "Updated",
+    "deleted": "Deleted",
+    "actionFailed": "Action failed"
   }
 }

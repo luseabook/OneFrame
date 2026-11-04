@@ -5908,6 +5908,12 @@ I = 0      （当前未发现 —— 见 61.4）
 |---|---|---|
 | GET | `/v1/df/resources/list` | `sp_id`=项目 id；`resource_type` 1 role / 2 setting / 3 implement / 4 referenceVideo / 5 referenceImage / 8 filmNonRole；返回 `{list,total,user_total,page,page_size}` |
 | POST | `/v1/df/resources/add` | `{sp_id,resource_type,name,description?,prompt?,file_uri?,content_type?}`；`reference_video`/`reference_image` 必须带 `file_uri` |
+| POST | `/v1/df/resources/:id/rename` | `{sp_id,name}` |
+| POST | `/v1/df/resources/:id/update` | `{sp_id,description?,prompt?}` |
+| POST | `/v1/df/resources/:id/confirm` / `unconfirm` | `{sp_id}`；状态 2 / 1 |
+| POST | `/v1/df/resources/batch-delete` | `{sp_id,resource_ids[]}`（≤100，必须全属本项目） |
+| POST | `/v1/df/resources/batch-confirm` | `{sp_id,resource_ids[]}` |
+| POST | `/v1/df/resources/batch-update` | `{sp_id,items[{resource_id,name?,description?}]}` |
 
 `project_assets.resource_type` 是**生成列**（kind → 类型），既有角色/场景/道具写入自动归位；
 参考类新增 `kind=reference_video|reference_image` + `file_uri/content_type`，DTO 额外返回

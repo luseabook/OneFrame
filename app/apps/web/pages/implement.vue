@@ -80,6 +80,68 @@ const visibleAssets = computed(() => {
   );
 });
 
+const busyId = ref("");
+const editingId = ref("");
+const editName = ref("");
+
+async function toggleConfirm(asset: ProjectAssetDto): Promise<void> {
+  if (busyId.value) return;
+  busyId.value = asset.id;
+  try {
+    if (asset.status === 2) {
+      await api.post(`/df/resources/${asset.id}/unconfirm`, { sp_id: selectedProjectId.value });
+    } else {
+      await api.post(`/df/resources/${asset.id}/confirm`, { sp_id: selectedProjectId.value });
+    }
+    await loadAssets();
+    toast.success(t("implementPage.confirmed"));
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("implementPage.actionFailed"));
+  } finally {
+    busyId.value = "";
+  }
+}
+
+function startRename(asset: ProjectAssetDto): void {
+  editingId.value = asset.id;
+  editName.value = asset.name;
+}
+
+async function saveRename(asset: ProjectAssetDto): Promise<void> {
+  const name = editName.value.trim();
+  if (!name || busyId.value) return;
+  busyId.value = asset.id;
+  try {
+    await api.post(`/df/resources/${asset.id}/rename`, {
+      sp_id: selectedProjectId.value,
+      name,
+    });
+    editingId.value = "";
+    await loadAssets();
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("implementPage.actionFailed"));
+  } finally {
+    busyId.value = "";
+  }
+}
+
+async function removeAsset(asset: ProjectAssetDto): Promise<void> {
+  if (busyId.value || !window.confirm(t("implementPage.deleteConfirm", { name: asset.name }))) return;
+  busyId.value = asset.id;
+  try {
+    await api.post("/df/resources/batch-delete", {
+      sp_id: selectedProjectId.value,
+      resource_ids: [asset.id],
+    });
+    await loadAssets();
+    toast.success(t("implementPage.deleted"));
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("implementPage.actionFailed"));
+  } finally {
+    busyId.value = "";
+  }
+}
+
 function statusLabel(status: number): string {
   return status === 2 ? t("implementPage.statusFinalized") : t("implementPage.statusDraft");
 }
@@ -141,12 +203,32 @@ onMounted(() => void loadProjects());
             <span v-else class="im-card__ph">{{ t("implementPage.noImage") }}</span>
           </div>
           <div class="im-card__body">
-            <h2 class="im-card__name">{{ asset.name }}</h2>
-            <p class="im-card__desc">{{ asset.description || asset.prompt || t("implementPage.noDesc") }}</p>
+            <template v-if="editingId === asset.id">
+              <input v-model="editName" class="im-rename" maxlength="50" @keyup.enter="saveRename(asset)" />
+              <div class="im-actions-row">
+                <button type="button" class="im-mini" @click="saveRename(asset)">{{ t("implementPage.save") }}</button>
+                <button type="button" class="im-mini" @click="editingId = ''">{{ t("implementPage.cancel") }}</button>
+              </div>
+            </template>
+            <template v-else>
+              <h2 class="im-card__name">{{ asset.name }}</h2>
+              <p class="im-card__desc">{{ asset.description || asset.prompt || t("implementPage.noDesc") }}</p>
+            </template>
             <p class="im-card__meta">
               <span class="im-badge" :class="{ 'im-badge--ok': asset.status === 2 }">{{ statusLabel(asset.status) }}</span>
               <span v-if="asset.bound_shot_count">{{ t("implementPage.bound", { n: asset.bound_shot_count }) }}</span>
             </p>
+            <div class="im-actions-row">
+              <button type="button" class="im-mini" :disabled="busyId === asset.id" @click="startRename(asset)">
+                {{ t("implementPage.rename") }}
+              </button>
+              <button type="button" class="im-mini" :disabled="busyId === asset.id" @click="toggleConfirm(asset)">
+                {{ asset.status === 2 ? t("implementPage.unconfirm") : t("implementPage.confirm") }}
+              </button>
+              <button type="button" class="im-mini im-mini--danger" :disabled="busyId === asset.id" @click="removeAsset(asset)">
+                {{ t("implementPage.delete") }}
+              </button>
+            </div>
           </div>
         </article>
       </section>
@@ -287,6 +369,42 @@ onMounted(() => void loadProjects());
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.im-rename {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--brand, #9b46ff);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  outline: none;
+}
+.im-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.im-mini {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.im-mini:hover {
+  color: var(--text-1);
+  border-color: var(--brand, #9b46ff);
+}
+.im-mini--danger {
+  color: var(--danger, #f56c6c);
+  border-color: rgb(245 108 108 / 40%);
 }
 .im-card__meta {
   display: flex;

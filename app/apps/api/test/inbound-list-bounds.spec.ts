@@ -77,7 +77,7 @@ const ARRAY_SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/novel/novel.schemas.ts": 2,
   "apps/api/src/modules/op/op.controller.ts": 3,
   "apps/api/src/modules/redraw/redraw.controller.ts": 3,
-  "apps/api/src/modules/script/script.controller.ts": 9,
+  "apps/api/src/modules/script/script.controller.ts": 11,
   "apps/api/src/modules/script/timeline.schema.ts": 1,
   "apps/api/src/modules/subjects/subjects.controller.ts": 10,
   "apps/api/src/modules/tasks/tasks.controller.ts": 3,
@@ -385,7 +385,7 @@ describe("入站列表上限门禁（第 120 批）", () => {
         if (scan.arrays.length > 0) actual[scan.file] = scan.arrays.length;
       }
       expect(actual).toEqual(ARRAY_SITES_BY_FILE);
-      expect(totalArrays).toBe(93);
+      expect(totalArrays).toBe(95);
     });
 
     it("z.union 内嵌 z.array 全局只剩 helper 一处（别处出现 = 绕过 helper 裸造列表）", () => {

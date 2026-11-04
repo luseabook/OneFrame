@@ -4660,7 +4660,11 @@
     "tooLarge": "動画は 32MB 以下にしてください",
     "noProject": "プロジェクトがありません",
     "noProjectDesc": "先にプロジェクトを作成してください。",
-    "goCreate": "脚本スタジオへ"
+    "goCreate": "脚本スタジオへ",
+    "delete": "削除",
+    "deleteConfirm": "「{name}」を削除しますか？元に戻せません。",
+    "deleted": "削除しました",
+    "actionFailed": "操作に失敗しました"
   },
   "implementPage": {
     "metaTitle": "小道具ライブラリ · OneFrame",
@@ -4681,6 +4685,16 @@
     "noDesc": "説明なし",
     "statusDraft": "下書き",
     "statusFinalized": "確定済み",
-    "bound": "{n} カットに紐付け"
+    "bound": "{n} カットに紐付け",
+    "rename": "名前変更",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "confirm": "確定",
+    "unconfirm": "確定解除",
+    "delete": "削除",
+    "deleteConfirm": "「{name}」を削除しますか？元に戻せません。",
+    "confirmed": "更新しました",
+    "deleted": "削除しました",
+    "actionFailed": "操作に失敗しました"
   }
 }

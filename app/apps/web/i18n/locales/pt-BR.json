@@ -4660,7 +4660,11 @@
     "tooLarge": "O vídeo deve ter menos de 32MB",
     "noProject": "Ainda sem projetos",
     "noProjectDesc": "Crie um projeto primeiro e depois envie vídeos de referência.",
-    "goCreate": "Abrir estúdio de roteiro"
+    "goCreate": "Abrir estúdio de roteiro",
+    "delete": "Excluir",
+    "deleteConfirm": "Excluir \"{name}\"? Não pode ser desfeito.",
+    "deleted": "Excluído",
+    "actionFailed": "Falha na operação"
   },
   "implementPage": {
     "metaTitle": "Biblioteca de objetos · OneFrame",
@@ -4681,6 +4685,16 @@
     "noDesc": "Sem descrição",
     "statusDraft": "Rascunho",
     "statusFinalized": "Finalizado",
-    "bound": "Vinculado a {n} planos"
+    "bound": "Vinculado a {n} planos",
+    "rename": "Renomear",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "confirm": "Finalizar",
+    "unconfirm": "Desfinalizar",
+    "delete": "Excluir",
+    "deleteConfirm": "Excluir \"{name}\"? Não pode ser desfeito.",
+    "confirmed": "Atualizado",
+    "deleted": "Excluído",
+    "actionFailed": "Falha na operação"
   }
 }
