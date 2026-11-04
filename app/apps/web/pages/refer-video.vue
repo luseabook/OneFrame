@@ -4,11 +4,15 @@ import type { AssetDto } from "~/types/api";
 /**
  * 参考视频（竞品 `/refer-video`，第 134 批）。
  *
- * 竞品该路由属于「视频拉片 / 翻译 / 音频后处理」模块（`fullsite-route-inventory.md:71`），
- * 组件名是 `ReferVideoList`；但“拉片/翻译”的具体映射未取证。我方不造一个假的分析器，
- * 而是把**已有的视频资产**列出来，作为参考素材入口，链到已有的参考视频/转绘工具：
- * - `/create/video-refer`：参考图/视频生视频；
- * - `/video-redraw/create`：视频转绘。
+ * 竞品证据（2026-11-04 实时逆向）：
+ * - `/refer-video` 与 `/implement` 复用**同一个列表组件** `mRxBn2Ja.js`，仅 `resource-type` 不同：
+ *   `referenceVideo = 4` / `implement = 3`（`Duf00Fwb.js` 枚举）；
+ * - 列表接口 `GET /web/v1/df/resources/list`，参数
+ *   `sp_id / page / page_size / resource_type / status / sort_field / sort_direction / is_subject / name`；
+ * - 即竞品把「参考视频」做成**系列资源库的一个类型**，不是独立工具页。
+ *
+ * 我方没有 `/df/resources/*`，对应能力是资产库（`GET /assets`，kind=video），
+ * 以及参考生视频/视频转绘工具；本页按资产库视频落地，台标注“不等价”。
  *
  * 数据来自 `GET /assets`（资产列表），客户端按 `kind==="video"` 过滤——后端没有 kind 过滤参数，
  * 这是现有契约的边界，不为此新增端点。

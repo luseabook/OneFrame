@@ -120,7 +120,6 @@ export default defineNuxtConfig({
     "/tutorial": { ssr: false },
     "/user-language": { ssr: false },
     "/user-update": { ssr: false },
-    "/adjust": { ssr: false },
     "/implement": { ssr: false },
     "/refer-video": { ssr: false },
     // 第 132 批：竞品 /short-film/:id 的别名承接（短剧=脚本项目工作台）

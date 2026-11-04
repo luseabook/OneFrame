@@ -7,9 +7,9 @@
 
 > **2026-11-04 复核（重要口径修正）**：u8 报告的 26 条 ❌ 中 **6 条已闭合**（37/47/48/67/69 已建页、68 为等价视图），真 ❌ 曾为 **20 条**。补 38/44/63/68、39 短剧、55 CLI 后，创作类已无“无入口”项。
 >
-> **2026-11-04 范围裁定（D6）**：本项目只做**创作功能**，不做营销/运营。活动、渠道、合作、推荐裂变、创作者社区等 **9 条**统一标 `范围外（D6）`，不计入创作台账分母；`D1 的 93 条 1:1` 在营销域上作废。
+> **2026-11-04 范围裁定（D6）**：本项目只做**创作功能**，不做营销/运营。活动、渠道、合作、推荐裂变、创作者社区、App 下载跳转（`/adjust`）等 **10 条**统一标 `范围外（D6）`，不计入创作台账分母；`D1 的 93 条 1:1` 在营销域上作废。
 >
-> **2026-11-04 收尾（第 134 批）**：创作/基础页最后 6 条（`/tutorial`、`/user-language`、`/user-update`、`/adjust`、`/implement`、`/refer-video`）已全部落地（3 个真实页 + 3 个有据承接），**真 ❌ = 0**。剩下的 9 条营销行是 `范围外（D6）`，不是缺口。
+> **2026-11-04 收尾（第 134/135 批）**：创作/基础页最后 6 条已核实：`/tutorial`、`/user-language`、`/user-update`、`/refer-video`、`/implement` 落地（后两条按实时逆向的 `resource_type` 语义修正），`/adjust` 经逆向确认是 **App 下载跳转**，按 D6 移出范围。**创作类真 ❌ = 0**。
 
 ## 0. 标记与判定
 
@@ -30,7 +30,7 @@
 |---:|---|:--:|:--:|:--:|:--:|:--:|---|---|---|---|
 | 1 | `/` | A | 🟢 `pages/index.vue` | 🟡 01-home | 🟡 核心链初审 | ⏳ | 🟢 同状态截图 | 🟢 截图 + 代码 | 首页功能卡与落地页分工仍需按竞品复核 | U6 |
 | 2 | `/register/public-beta-invite` | B | 🔶 `pages/login.vue` 内注册 | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 公测邀请注册无独立页 | U6 |
-| 3 | `/tutorial` | B | 🟢 `pages/tutorial.vue` | ⏳ 竞品无截图 | 🟡 代码初审 | 🟡 静态内容（三步 + FAQ，链真实页面） | ⏳ 未取证 | 🟢 代码 | 竞品无响应体证据；按我方主链路写，不造功能 | 134 |
+| 3 | `/tutorial` | B | 🟢 `pages/tutorial.vue` | ⏳ 竞品为截图引导，未逐项复刻 | 🟡 代码初审 | 🟡 静态手册（三步 + FAQ） | 🟢 逆向证据：`DWKW2Nak.js` + `guide_1/2.webp` | 🟢 代码 | 竞品是**产品内 8 步引导**（guide_N 截图 + 热点 + tooltip；1/8 完成设定、2/8 资产准备）；我方是静态手册，**不宣称等价** | 134 |
 | 4 | `/mobile-landing` | C | 🔶 `/` 响应式 | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 无移动端专用落地 | U7 |
 | 5 | `/share-land` | B | 🔶 `pages/share/[token].vue`、`watch/[token].vue` | ⏳ | ⏳ | ⏳ | ⏳ 未取证 | 🟡 代码 | 公开分享落地语义待竞品确认 | U3 |
 
@@ -42,9 +42,9 @@
 | 7 | `/setting` | B | 🔶 `pages/settings.vue` | ⏳ | ⏳ | ⏳ | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
 | 8 | `/user-center` | B | 🔶 `pages/settings.vue` | ⏳ | ⏳ | ⏳ | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
 | 9 | `/user-settings` | B | 🔶 `pages/settings.vue` | ⏳ | ⏳ | ⏳ | ⏳ 零截图 | 🟡 代码 | 同上 | U6 |
-| 10 | `/user-language` | C | 🟢 `pages/user-language.vue` | ⏳ | 🟢 真机切换实测（e2e-new-pages） | 🟡 cookie 即时切换（`of_lang`） | ⏳ 未取证 | 🟢 代码 | 账号级语言同步未接入；页面注明“本设备生效” | 134 |
-| 11 | `/user-update` | C | 🟢 `pages/user-update.vue` | ⏳ | 🟡 代码初审 | 🟢 真机保存+刷新实测（e2e-new-pages） | ⏳ 未取证 | 🟢 代码 | 头像仅 URL，无上传链路（不伪造上传按钮） | 134 |
-| 12 | `/adjust` | C | 🟢 `pages/adjust.vue`（别名→`/settings`） | ⏳ | 🟢 真机跳转实测（e2e-new-pages） | 🟡 账号设置页 | ⏳ 未取证 | 🟢 代码 | 竞品语义未取证；按账号调整承接，不复制设置逻辑 | 134 |
+| 10 | `/user-language` | C | 🟢 `pages/user-language.vue` | ⏳ | 🟢 真机切换实测（e2e-new-pages） | 🟡 cookie 即时切换（`of_lang`） | 🟢 逆向证据：`Bnyyx2yK.js`（UserLanguageMobile） | 🟢 代码 | 竞品是移动端语言页；我方桌面独立页属扩展，不宣称同形 | 134 |
+| 11 | `/user-update` | C | 🟢 `pages/user-update.vue` | ⏳ | 🟡 代码初审 | 🟢 真机保存+刷新实测（e2e-new-pages） | 🟢 逆向证据：`t0SaF5sa.js`（UserUpdateMobile→UserSettings） | 🟢 代码 | 竞品为移动端跳设置页；我方桌面资料编辑属扩展，不宣称同形 | 134 |
+| 12 | `/adjust` | C | ❌ 范围外（D6） | — | — | — | 🟢 逆向证据：`CaMDseTf.js` | — | **竞品是 App 下载跳转**：取 `iosDownloadUrl` 后 `location.href` 跳 App Store，1s 后 `back()`；属移动端分发/营销，按 D6 不做（原 `/settings` 别名已删除） | 范围外 |
 
 ## 3. 定价（1）
 
@@ -113,7 +113,7 @@
 | 53 | `/director` | A | 🔶 `Director3D.vue` 覆盖层 | 🟡 09-3d-director | 🟡 代码初审 | 🟡 端点测试 | 🟢 同状态截图 | 🟢 截图 + 组件 | 默认值已复测（359/704/359、300%/50°/0,1.2,0）；**直链 `/director` 仍 404**（仅覆盖层），深链不可用 | U4 |
 | 54 | `/director/:projectId()` | B | 🔶 同上 | ⏳ | 🟡 代码初审 | 🟡 端点测试 | ⏳ 未取证 | 🟡 代码 | 无独立路由 | U4 |
 | 55 | `/cli` | C | 🟢 `pages/cli.vue` | 🟡 按 `x4.png` 结构复刻，未逐项测量 | 🟡 代码初审 | 🟡 静态目录快照（38 组 / 204 条 / 171 已落地，来自 `registry.ts`） | 🟢 `cli.png` + `x4.png` + CLI Skill 包 | 🟢 `cli-catalog.json` | Agent 分发 URL 需部署期注入 `NUXT_PUBLIC_CLI_SKILL_URL`；未做像素级测量 | 133 |
-| 56 | `/implement` | C | 🟢 `pages/implement.vue`（别名→`/cli`） | ⏳ | 🟢 真机跳转实测（e2e-new-pages） | 🟡 CLI/Skill 页 | ⏳ 未取证 | 🟢 代码 | 竞品同属 MCP & CLI 模块（`ImplementList`，无后端端点）；承接 `/cli` | 134 |
+| 56 | `/implement` | C | 🟢 `pages/implement.vue` | ⏳ | 🟡 代码初审 | 🟡 项目道具资产（`/projects/:id/assets?kind=prop`） | 🟢 逆向证据：`ciINcGzs.js` + `Duf00Fwb.js` | 🟢 代码 | 竞品 `/implement` 与 `/refer-video` 复用同一列表组件，`resource-type=implement(3)`，接口 `GET /df/resources/list`；我方按项目道具资产落地，未造资源库 | 135 |
 | 57 | `/tools` | A | 🟢 `pages/tools.vue` | 🟡 静态截图 | 🟡 代码初审 | 🟡 端点测试 | 🟡 静态截图 | 🟢 截图 + 代码 | 8 卡仅 2 卡可跳；禁用卡无反馈 | U6 |
 
 ## 8. 资产与团队（6）

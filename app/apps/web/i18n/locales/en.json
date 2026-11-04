@@ -4651,5 +4651,26 @@
     "untitled": "Untitled video",
     "noPreview": "No preview",
     "useAsReference": "Use as reference"
+  },
+  "implementPage": {
+    "metaTitle": "Prop library · OneFrame",
+    "title": "Prop library",
+    "sub": "Browse prop assets by project; props are set dressing and key objects bound to storyboards.",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load",
+    "noProject": "No projects yet",
+    "noProjectDesc": "Create a project and generate prop assets first.",
+    "goCreate": "Open script studio",
+    "search": "Search props",
+    "count": "{n} props",
+    "goProject": "Open project assets",
+    "empty": "This project has no props",
+    "emptyDesc": "Extract or create prop assets in the project workspace.",
+    "noImage": "No image",
+    "noDesc": "No description",
+    "statusDraft": "Draft",
+    "statusFinalized": "Finalized",
+    "bound": "Bound to {n} shots"
   }
 }

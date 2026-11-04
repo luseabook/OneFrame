@@ -4651,5 +4651,26 @@
     "untitled": "未命名视频",
     "noPreview": "无预览",
     "useAsReference": "用作参考视频"
+  },
+  "implementPage": {
+    "metaTitle": "道具资源库 · 一帧",
+    "title": "道具资源库",
+    "sub": "按项目查看道具资产；道具用于分镜绑定的场景陈设与关键物件。",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "loadFailed": "加载失败",
+    "noProject": "还没有项目",
+    "noProjectDesc": "先创建项目并生成道具资产。",
+    "goCreate": "去剧本创作",
+    "search": "搜索道具",
+    "count": "共 {n} 个道具",
+    "goProject": "去项目资产",
+    "empty": "该项目还没有道具",
+    "emptyDesc": "在项目工作台里用 AI 提取或新建道具资产。",
+    "noImage": "无图",
+    "noDesc": "暂无描述",
+    "statusDraft": "草稿",
+    "statusFinalized": "已定稿",
+    "bound": "已绑定 {n} 镜"
   }
 }

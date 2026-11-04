@@ -2,9 +2,9 @@
 /**
  * 账号资料（竞品 `/user-update`，第 134 批）。
  *
- * 竞品该路由带 `middleware:"auth"`（`capture_page.json` 里可见），是登录后的资料编辑页；
- * 但没有字段证据。我方已有 `POST /user-info`（`nickname` / `avatar_uri`）与 `GET /me`，
- * 这页就是把这两个端点接成一个表单，不新增后端。
+ * 竞品证据（2026-11-04 实时逆向）：`/user-update` 组件 `t0SaF5sa.js` 是 `UserUpdateMobile`，
+ * 挂载即 `router.replace({ name: "UserSettings" })` —— 竞品该路由只是**移动端跳到设置页**，没有独立资料表单。
+ * 我方做成桌面可用的资料编辑页（`/me` + `/user-info`），属于**扩展**，不宣称与竞品同形。
  *
  * 边界：
  * - 头像只收 HTTPS/相对路径字符串（本仓库没有对象存储头像上传链路，不伪造上传按钮）；

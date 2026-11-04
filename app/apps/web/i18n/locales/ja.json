@@ -4651,5 +4651,26 @@
     "untitled": "無題の動画",
     "noPreview": "プレビューなし",
     "useAsReference": "参考動画として使う"
+  },
+  "implementPage": {
+    "metaTitle": "小道具ライブラリ · OneFrame",
+    "title": "小道具ライブラリ",
+    "sub": "プロジェクトごとに小道具素材を表示。絵コンテに紐付ける舞台装置・重要物品です。",
+    "refresh": "更新",
+    "loading": "読み込み中…",
+    "loadFailed": "読み込みに失敗しました",
+    "noProject": "プロジェクトがありません",
+    "noProjectDesc": "先にプロジェクトを作成し、小道具素材を生成してください。",
+    "goCreate": "脚本スタジオへ",
+    "search": "小道具を検索",
+    "count": "{n} 件の小道具",
+    "goProject": "プロジェクト素材へ",
+    "empty": "このプロジェクトに小道具がありません",
+    "emptyDesc": "プロジェクトワークスペースで抽出または作成してください。",
+    "noImage": "画像なし",
+    "noDesc": "説明なし",
+    "statusDraft": "下書き",
+    "statusFinalized": "確定済み",
+    "bound": "{n} カットに紐付け"
   }
 }

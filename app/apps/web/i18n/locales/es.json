@@ -4651,5 +4651,26 @@
     "untitled": "Vídeo sin título",
     "noPreview": "Sin vista previa",
     "useAsReference": "Usar como referencia"
+  },
+  "implementPage": {
+    "metaTitle": "Biblioteca de objetos · OneFrame",
+    "title": "Biblioteca de objetos",
+    "sub": "Consulta objetos por proyecto; son decorados y elementos clave vinculados al storyboard.",
+    "refresh": "Actualizar",
+    "loading": "Cargando…",
+    "loadFailed": "Error al cargar",
+    "noProject": "Sin proyectos",
+    "noProjectDesc": "Crea un proyecto y genera objetos primero.",
+    "goCreate": "Ir al estudio de guion",
+    "search": "Buscar objetos",
+    "count": "{n} objetos",
+    "goProject": "Ir a recursos del proyecto",
+    "empty": "Este proyecto no tiene objetos",
+    "emptyDesc": "Extrae o crea objetos en el espacio del proyecto.",
+    "noImage": "Sin imagen",
+    "noDesc": "Sin descripción",
+    "statusDraft": "Borrador",
+    "statusFinalized": "Finalizado",
+    "bound": "Vinculado a {n} planos"
   }
 }

@@ -138,16 +138,20 @@ async function main() {
     record("语言切换生效（English）", /Language settings/.test(langTitle), langTitle);
     await page.screenshot({ path: path.join(SHOT_DIR, "04-user-language.png") });
 
-    // ── 别名承接 ─────────────────────────────────────────
-    await page.goto(`${WEB}/adjust`, { waitUntil: "domcontentloaded" });
-    await page.waitForURL(/\/settings$/, { timeout: 20_000 }).catch(() => {});
-    record("/adjust → /settings", page.url().endsWith("/settings"), page.url());
-
+    // ── /implement（逆向修正：道具资源库，不是 CLI 别名） ──
     await page.goto(`${WEB}/implement`, { waitUntil: "domcontentloaded" });
-    await page.waitForURL(/\/cli$/, { timeout: 20_000 }).catch(() => {});
-    record("/implement → /cli", page.url().endsWith("/cli"), page.url());
+    await page.waitForSelector(".im", { timeout: 20_000 }).catch(() => {});
+    const imTitle = await page.locator(".im-title").innerText().catch(() => "");
+    record("/implement 道具资源库", /道具资源库|Prop library/.test(imTitle), imTitle);
+    await page.screenshot({ path: path.join(SHOT_DIR, "05-implement.png") });
 
-    const serious = consoleErrors.filter((text) => !/favicon|ResizeObserver/i.test(text));
+    // ── /adjust 经逆向确认为 App 下载跳转，D6 范围外 → 路由已移除 ──
+    const adjustResp = await page.goto(`${WEB}/adjust`, { waitUntil: "domcontentloaded" }).catch(() => null);
+    record("/adjust 已移出范围（404）", adjustResp?.status() === 404, String(adjustResp?.status()));
+
+    const serious = consoleErrors.filter(
+      (text) => !/favicon|ResizeObserver|Page not found: \/adjust/i.test(text),
+    );
     record("无控制台错误", serious.length === 0, serious.slice(0, 2).join(" | "));
   } finally {
     await browser.close();
