@@ -35,6 +35,14 @@ const toolOptionsSchema = generationOptionsSchema.extend({
   effect: z.string().optional(),
   intensity: z.number().optional(),
   with_transition: z.boolean().optional(),
+  /**
+   * 视频音轨的参考音频（音色/氛围条件，自建 H3 Ref2VA 最多 3 条）。
+   *
+   * 为什么必须在这里登记：zod 默认**剥掉未声明的键**，不登记就等于前端/流水线发上来
+   * 的音频参考在 API 层被静默丢弃——症状是「传了音频但模型没听」。
+   * 开关另走既有的 `enable_audio`。
+   */
+  audio_uris: z.array(z.string().min(1)).max(3).optional(),
   // 对口型 / 去字幕
   mode: z.string().optional(),
   sync_strength: z.number().optional(),

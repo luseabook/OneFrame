@@ -78,7 +78,8 @@ describe("registry：后处理 adapter_code 注册", () => {
     // 目录里新增了 minimax / happy-horse / midjourney / google / openai 的模型，
     // 它们的 adapter_code 目前没有真实实现：要报「尚未实现、请用 mock」，
     // 而不是「未知 code」——前者是可执行的运营指引，后者像是拼错了
-    for (const code of ["minimax:video", "happy-horse:video", "midjourney:image", "google:chat", "openai:chat"]) {
+    // `openai:chat` 已实现（通用 OpenAI Chat 通道），这里换成仍未实现的 openai 图像线
+    for (const code of ["minimax:video", "happy-horse:video", "midjourney:image", "google:chat", "openai:image"]) {
       expect(() => resolveAdapter(code, { mode: "real" })).toThrow(/vendor adapter not implemented yet/);
     }
   });
@@ -136,5 +137,24 @@ describe("registry：路由协议优先于 adapter_code 前缀（P0 修复）", 
     });
     expect(adapter).toBeInstanceOf(H3GatewayAdapter);
     expect(() => resolveAdapter("h3:video", { mode: "real" })).toThrow(/H3_GATEWAY_BASE_URL/);
+  });
+});
+
+/**
+ * `openai:chat`：通用 OpenAI Chat 兼容通道（OpenCode Zen / 百炼 / 方舟文本都落在它上面）。
+ * 目录里不写 `deepseek:chat` 是为了让 `adapter_code` 诚实——它是对外契约，换供应商时
+ * 运营只看 code，挂错名字会误判能力归属。
+ */
+describe("openai:chat 通用文本通道", () => {
+  it("有 provider key 时复用同一个 OpenAI Chat 适配器", () => {
+    const adapter = resolveAdapter("openai:chat", {
+      mode: "real",
+      deepseek: { apiKey: "k", baseUrl: "https://opencode.ai/inference/go/openai/v1", model: "glm-5.3-flash" },
+    });
+    expect(adapter.vendor).toBe("deepseek");
+  });
+
+  it("缺 key 显式失败（绝不静默 mock）", () => {
+    expect(() => resolveAdapter("openai:chat", { mode: "real" })).toThrow(/openai:chat adapter requires/);
   });
 });

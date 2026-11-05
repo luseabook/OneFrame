@@ -187,12 +187,14 @@ const scene = (spec: {
 });
 
 /**
- * 47 条模型目录（46 条对齐竞品 `cli-out/model-all.json`；第 47 条 `jianying-draw`
- * 是第三方网关接入，不对应竞品 SKU，见条目前注释）。
+ * 48 条模型目录（46 条对齐竞品 `cli-out/model-all.json`；其余 2 条是第三方通道，
+ * 不对应竞品 SKU，见各自条目前的注释）：
+ *   - `jianying-draw`（剪影生图网关，图像）
+ *   - `zen-deepseek-flash`（OpenCode Zen，文本）
  *
  * vendor 分布：tomoviee 13（自营）/ jimeng 8 / kling 7 / hailuo 5 / wan 3 /
  * happy-horse 3 / vidu 3 / deepseek 1 / google 1 / midjourney 1 / openai 1 /
- * jianying 1 = 47。
+ * jianying 1 / opencode 1 = 48。
  *
  * id 沿用既有 seed 的 1001..1010（存量测试与数据引用了这些 id），新增的用 1011+。
  * name 是**协议标识**（英文、稳定、对外契约），displayName 是中文展示名——
@@ -1325,6 +1327,45 @@ const MODEL_SEED: ModelSeed[] = [
     modes: {
       text2image: video({ ep: "/v1/images/generations", ratios: ["1:1", "4:3", "3:4"], res: [["1K", "1K"], ["2K", "2K"]], default_ratio: "1:1", default_resolution: "1K", counts: [1,2,3,4], max_prompt_length: 3000 }),
       image2image: video({ ep: "/v1/images/generations", ratios: ["1:1", "4:3", "3:4"], res: [["1K", "1K"], ["2K", "2K"]], default_ratio: "1:1", default_resolution: "1K", counts: [1,2,3,4], limits: { image: 1 }, max_prompt_length: 3000 }),
+    },
+    sceneModes: {},
+  },
+  /**
+   * 第三方**文本**通道：OpenCode Zen Go（`https://opencode.ai/inference/go/openai/v1`）。
+   *
+   * 为什么用 `openai:chat` 而不是 `deepseek:chat`：适配器实现是同一个通用 OpenAI Chat
+   * 客户端，但目录里的 `adapterCode` 是对外契约——模型 vendor 不是 DeepSeek 就不该背
+   * DeepSeek 的名字（换供应商时运营只看 adapterCode 会误判）。
+   *
+   * 三条与竞品目录不同的口径：
+   * 1. `types` 留空——`types:["file"]` 在竞品目录里是"支持文件输入"的语义，本通道不收文件；
+   * 2. 5 个文本 mode 全部 `perCall()`：文本按次计价（2 积分/次，见下方文本定价分支）；
+   * 3. 供应商要求 `x-opencode-session` 头，走 provider.options 的 `session_header` 注入
+   *    （见 docs/02-architecture/text-and-audio-channels.md §2），代码里不写死任何一家。
+   */
+  {
+    id: 1048n,
+    vendor: "opencode",
+    name: "zen-deepseek-flash",
+    displayName: "Zen · DeepSeek V4.1 Flash",
+    description: "OpenAI 兼容文本通道，拆集/分镜解析等同步步骤",
+    logo: "",
+    capability: "text",
+    types: [],
+    tags: [{ name: "文本" }, { name: "OpenAI 兼容" }],
+    promotions: [],
+    adapterCode: "openai:chat",
+    visible: true,
+    needVip: false,
+    audioVideoSupport: false,
+    sort: 250,
+    modeOrder: {},
+    modes: {
+      script_optimization: perCall(),
+      storyboard_parse: perCall(),
+      asset_extraction: perCall(),
+      storyboard_asset_match: perCall(),
+      video_parse: perCall(),
     },
     sceneModes: {},
   },

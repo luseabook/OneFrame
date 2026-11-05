@@ -45,6 +45,28 @@ function numberOption(
 }
 
 /**
+ * 供应商附加请求头（`provider_options.headers` / `route_options.headers`）。
+ *
+ * 只接受「非空字符串值」的字符串键：供应商 JSON 里塞数字/对象时宁可丢掉也不要断言失败
+ * —— 这类头是通道私有要求（如 `x-opencode-session`），坏值应该表现为供应商 4xx，而不是
+ * worker 启动崩。
+ */
+function headersOption(
+  route: Record<string, unknown>,
+  provider: Record<string, unknown>,
+): Record<string, string> | undefined {
+  const raw = route.headers ?? provider.headers;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    if (!key.trim() || !value.trim()) continue;
+    out[key.trim()] = value.trim();
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
  * 把数据库路由快照翻译成现有 AdapterRuntimeOptions。
  * 纯函数、不含 DB/解密，便于单测；unknown protocol 显式失败，不静默 mock。
  */
@@ -53,6 +75,11 @@ export function buildProviderAdapterOptions(
   snapshot: ProviderRouteSnapshot,
   secret: string,
   model: RuntimeModel,
+  /**
+   * 会话上下文（用于供应商要求的 `x-opencode-session` 之类）。
+   * 必须**跨请求稳定**：供应商用它做路由与 prompt cache，一次一换等于把 cache 全废。
+   */
+  sessionContext?: string,
 ): AdapterRuntimeOptions {
   const next: AdapterRuntimeOptions = { ...base };
   const providerOptions = snapshot.provider_options ?? {};
@@ -118,10 +145,20 @@ export function buildProviderAdapterOptions(
 
   if (snapshot.protocol === "openai-compatible") {
     if (model.capability === "text" || model.adapterCode === "deepseek:chat") {
+      // 通用 OpenAI Chat 兼容通道。供应商私有的头在这里注入，code 里不写死任何一家：
+      // - `headers`：静态头（含客户端自报 UA）；
+      // - `session_header`：需要「每会话稳定」的活值（OpenCode Zen Go 的 x-opencode-session），
+      //   值取任务的 space_id —— 同一空间内所有会话共用一个会话键，稳定且能吃到 prompt cache。
+      const headers = headersOption(routeOptions, providerOptions);
+      const sessionHeader = stringOption(routeOptions, providerOptions, "session_header");
+      if (sessionHeader && sessionContext) {
+        Object.assign(headers ?? {}, { [sessionHeader]: sessionContext });
+      }
       next.deepseek = {
         apiKey: secret,
         baseUrl: snapshot.base_url,
         model: snapshot.remote_model_id,
+        ...(headers ? { extraHeaders: headers } : {}),
       };
       next.adapterHint = "deepseek";
       return next;
@@ -231,5 +268,12 @@ export async function resolveTaskAdapterOptions(args: {
   } catch {
     throw new Error("invalid provider config: credential decrypt failed");
   }
-  return buildProviderAdapterOptions(args.base, snapshot, secret, args.model);
+  // 会话键取 space_id：同空间稳定（prompt cache 有效），不会因为一次一换而退化
+  return buildProviderAdapterOptions(
+    args.base,
+    snapshot,
+    secret,
+    args.model,
+    args.task.spaceId == null ? undefined : String(args.task.spaceId),
+  );
 }

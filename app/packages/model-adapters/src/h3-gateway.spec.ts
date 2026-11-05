@@ -82,6 +82,59 @@ describe("h3-gateway：提交与轮询", () => {
     expect(refs.images).toHaveLength(2); // first_frame + reference_uris
   });
 
+  it("音效开关真下发：enable_audio=false → audio:false（以前全仓没有适配器读这个字段）", async () => {
+    let sent: Record<string, unknown> | undefined;
+    const adapter = new H3GatewayAdapter({ baseUrl: "http://gw.test" }, async (_u, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({ job_id: "job-a" });
+    });
+
+    await adapter.submit({ ...request, request: { ...request.request, options: { ...request.request.options, enable_audio: false } } });
+    expect(sent!.audio).toBe(false);
+    // 不传时默认 true：H3-Base 是视频+音频联合生成，默认静音等于白扔能力
+    await adapter.submit(request);
+    expect(sent!.audio).toBe(true);
+  });
+
+  it("音频参考槽：最多 3 条、非字符串丢弃（Ref2VA 的音色条件，以前硬编码空数组）", async () => {
+    let sent: Record<string, unknown> | undefined;
+    const adapter = new H3GatewayAdapter({ baseUrl: "http://gw.test" }, async (_u, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({ job_id: "job-b" });
+    });
+
+    await adapter.submit({
+      ...request,
+      request: {
+        ...request.request,
+        options: { ...request.request.options, audio_uris: ["oss://a/1.wav", "oss://a/2.wav", "oss://a/3.wav", "oss://a/4.wav", 42] },
+      },
+    });
+    const refs = sent!.refs as { audios: string[] };
+    expect(refs.audios).toEqual(["oss://a/1.wav", "oss://a/2.wav", "oss://a/3.wav"]);
+
+    await adapter.submit(request);
+    expect((sent!.refs as { audios: string[] }).audios).toEqual([]);
+  });
+
+  it("超过本地能力的档位显式失败，不静默降级成 768p", async () => {
+    const adapter = new H3GatewayAdapter({ baseUrl: "http://gw.test" }, async () => jsonResponse({ job_id: "x" }));
+    for (const resolution of ["1080p", "2K", "4K", "1920x1080"]) {
+      const err = await adapter
+        .submit({ ...request, request: { ...request.request, options: { ...request.request.options, resolution } } })
+        .catch((e: unknown) => e);
+      expect((err as Error).message, `${resolution} 应该被拒`).toContain("caps at 768p");
+    }
+    // 运营显式声明"这条路由当草稿通道"时才放行
+    const lenient = new H3GatewayAdapter(
+      { baseUrl: "http://gw.test", allowResolutionDowngrade: true },
+      async () => jsonResponse({ job_id: "y" }),
+    );
+    await expect(
+      lenient.submit({ ...request, request: { ...request.request, options: { ...request.request.options, resolution: "2K" } } }),
+    ).resolves.toMatchObject({ vendor_task_id: "y" });
+  });
+
   it("queued 轮询返回 pending，成功时 results 用 key 透传", async () => {
     const replies = [
       jsonResponse({ data: { status: "queued", queue_position: 1 } }),

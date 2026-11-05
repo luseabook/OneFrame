@@ -91,6 +91,22 @@ describe("VendorHttpClient 传输层四道闸", () => {
     expect(calls[0]!.body).toEqual({ a: 1 });
   });
 
+  it("extraHeaders 原样合并，且不能顶掉鉴权头（供应商私有要求走配置，不进代码）", async () => {
+    const { impl, calls } = fakeFetch(jsonResponse({ ok: true }));
+    const api = client({
+      apiKey: "sk-1",
+      // 典型场景：OpenCode Zen Go 强制 x-opencode-session；配置里再塞一个 authorization 也不能生效
+      extraHeaders: { "x-opencode-session": "space-42", "user-agent": "oneframe-worker/1.0", authorization: "Bearer spoofed" },
+      fetchImpl: impl,
+    });
+
+    await api.request("GET", "/v1/models");
+
+    expect(calls[0]!.headers["x-opencode-session"]).toBe("space-42");
+    expect(calls[0]!.headers["user-agent"]).toBe("oneframe-worker/1.0");
+    expect(calls[0]!.headers.authorization).toBe("Bearer sk-1");
+  });
+
   it("无 apiKey 时不发 authorization", async () => {
     const { impl, calls } = fakeFetch(jsonResponse({ ok: true }));
     await client({ fetchImpl: impl }).request("GET", "/x");

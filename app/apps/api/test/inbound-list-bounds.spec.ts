@@ -51,8 +51,9 @@ const HELPER_FILE = "apps/api/src/common/list-param.ts";
  * `z.array` 站点分布（第 120 批定版）。数字变了就说明新增 / 挪动了数组字段，
  * 必须在这里显式登记 —— 与第 119 批的出站 fetch 登记表同一条纪律。
  *
- * 总计 95 处：94 处自带 `.max(...)`，唯一的例外是 helper 里的 `csvListRaw`
+ * 总计 96 处：95 处自带 `.max(...)`，唯一的例外是 helper 里的 `csvListRaw`
  * （它本身不封顶，封顶在 `csvListQuery` / 使用点的 transform 里补）。
+ * 第 126 批 +1：`generations.controller.ts` 的 `audio_uris`（视频音轨参考音频，`.max(3)`）。
  */
 const ARRAY_SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/ad/ad.constants.ts": 6,
@@ -71,7 +72,7 @@ const ARRAY_SITES_BY_FILE: Record<string, number> = {
   "apps/api/src/modules/credits/credits.controller.ts": 1,
   "apps/api/src/modules/extraction/extraction.controller.ts": 2,
   "apps/api/src/modules/film/film.controller.ts": 3,
-  "apps/api/src/modules/generations/generations.controller.ts": 1,
+  "apps/api/src/modules/generations/generations.controller.ts": 2,
   "apps/api/src/modules/knowledge/knowledge.controller.ts": 8,
   "apps/api/src/modules/novel/novel-llm.service.ts": 3,
   "apps/api/src/modules/novel/novel.schemas.ts": 2,
@@ -385,7 +386,7 @@ describe("入站列表上限门禁（第 120 批）", () => {
         if (scan.arrays.length > 0) actual[scan.file] = scan.arrays.length;
       }
       expect(actual).toEqual(ARRAY_SITES_BY_FILE);
-      expect(totalArrays).toBe(95);
+      expect(totalArrays).toBe(96);
     });
 
     it("z.union 内嵌 z.array 全局只剩 helper 一处（别处出现 = 绕过 helper 裸造列表）", () => {

@@ -77,3 +77,51 @@ describe("worker provider runtime options", () => {
     ).toThrow(/unsupported provider protocol/);
   });
 });
+
+/**
+ * 供应商附加头（第 126 批）：OpenCode Zen Go 这类网关在 OpenAI 协议之外要 `x-opencode-session`，
+ * 不带就 400 `MissingSessionID`。头从 `provider.options`/`route.options` 读，代码不写死任何一家。
+ */
+describe("worker provider runtime：供应商附加头", () => {
+  it("静态 headers + session_header 活值一起注入，session 取调用方给的稳定上下文", () => {
+    const base = snapshot("openai-compatible", "zen-ds");
+    const options = buildProviderAdapterOptions(
+      { mode: "real" },
+      {
+        ...base,
+        provider_options: { headers: { "user-agent": "oneframe-worker/1.0" }, session_header: "x-opencode-session" },
+      },
+      "sk-zen",
+      { name: "zen-deepseek-flash", capability: "text", adapterCode: "openai:chat" },
+      "space-7",
+    );
+
+    expect(options.deepseek).toMatchObject({
+      apiKey: "sk-zen",
+      baseUrl: "https://provider.example.com",
+      model: "zen-ds",
+      extraHeaders: { "user-agent": "oneframe-worker/1.0", "x-opencode-session": "space-7" },
+    });
+  });
+
+  it("没配 headers / session_header 时不产生空 extraHeaders（保持既有请求形态）", () => {
+    const options = buildProviderAdapterOptions(
+      { mode: "real" },
+      snapshot("openai-compatible", "chat-prod"),
+      "sk-secret",
+      { name: "local-chat", capability: "text", adapterCode: "deepseek:chat" },
+    );
+    expect(options.deepseek).not.toHaveProperty("extraHeaders");
+  });
+
+  it("headers 里的非字符串值被丢弃（坏配置不该让 worker 崩，应表现为供应商 4xx）", () => {
+    const base = snapshot("openai-compatible", "m");
+    const options = buildProviderAdapterOptions(
+      { mode: "real" },
+      { ...base, provider_options: { headers: { "x-num": 42, "x-ok": " v " } } },
+      "k",
+      { name: "n", capability: "text", adapterCode: "openai:chat" },
+    );
+    expect(options.deepseek?.extraHeaders).toEqual({ "x-ok": "v" });
+  });
+});

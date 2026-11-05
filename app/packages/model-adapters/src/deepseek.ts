@@ -10,6 +10,13 @@ export interface DeepSeekConfig {
   /** 网络/5xx/429 重试次数 */
   maxRetries?: number;
   retryBaseMs?: number;
+  /**
+   * 额外请求头。本适配器是**通用 OpenAI Chat 兼容**实现（`deepseek:chat` / `openai:chat` 共用），
+   * 所以网关的私有要求从配置注入，不在代码里写死：
+   * - OpenCode Zen Go 强制 `x-opencode-session`（缺失 400 `MissingSessionID`）；
+   * - 同一家还要求客户端自报 UA（不要用通用 SDK/HTTP 库 UA）。
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 export interface ChatMessage {
@@ -41,6 +48,7 @@ export class DeepSeekChatAdapter implements ModelAdapter {
       baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
       timeoutMs: config.timeoutMs ?? 30_000,
       apiKey: config.apiKey,
+      extraHeaders: config.extraHeaders,
       maxRetries: config.maxRetries ?? 2,
       retryBaseMs: config.retryBaseMs ?? 500,
       // 既有对外文案是 `deepseek http <status>: …`（日志/告警按它匹配），不走默认前缀

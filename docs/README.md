@@ -17,6 +17,7 @@
 | 4 | [02-architecture/system-design.md](02-architecture/system-design.md) | 总体架构、模块边界、关键时序、失败模式 | 全员技术 |
 | — | [02-architecture/provider-management.md](02-architecture/provider-management.md) | **供应商接入与模型发现**：协议/账号/商品/路由四层、三张新表、Key 加密与 SSRF 边界；P0 控制面已实施，运行时已接 4 个协议族（含 `jianying`） | 后端+前端 |
 | — | [02-architecture/jianying-gateway-integration.md](02-architecture/jianying-gateway-integration.md) | **第三方图像供应商接入（剪影生图网关）**：定位与断供风险、三条硬约束（不擦上游 AI 标识 / 预签名不外泄 / 同步时长）、`protocol=jianying` 三层接线、画幅诚实性、前端目录投影与效果目录 | 后端+前端+运维 |
+| — | [02-architecture/text-and-audio-channels.md](02-architecture/text-and-audio-channels.md) | **文本与视频音轨通道**：`openai:chat` 通用文本通道（供应商私有头走 provider.options、Zen 容量/条款边界）、H3 音轨真下发（`enable_audio`/`audio_uris`）、768p 天花板与"不许静默降级"、为什么 TTS/配乐属 v1.1 | 后端+产品+运维 |
 | — | [02-architecture/self-hosted-video-inference.md](02-architecture/self-hosted-video-inference.md) | **自建 GPU 推理（H3）**：开源边界（本地只能 768p）、网关+节点代理两层、调度与轮询改造、成本测算与盈亏平衡、平台尽调清单 | 后端+运维+产品 |
 | — | [02-architecture/byoc-user-gpu.md](02-architecture/byoc-user-gpu.md) | **BYOC 自带算力**：用户绑自己的云账号、我方编排出片；L1 引导 / L2 STS 托管、凭证不落库、联邦池调度、烧钱闸与账单报告 | 后端+产品+商务 |
 | — | [02-architecture/autodl-integration.md](02-architecture/autodl-integration.md) | **AutoDL 接入实施设计**：`fleet` 域、4 张表迁移、9 个端点、状态机与错误码 7462xx、`/compute` 页面与文案、11 人日拆分 | 后端+前端 |
@@ -60,6 +61,18 @@
    取证不到的**登记待取证、不臆造替代方案**；偏离必须在 `api-spec` 对应节写"偏离说明"并给理由，
    且只允许"与既有 ADR/不变式冲突"或"照做有安全/正确性风险"两类。
    每个新增端点/交互在 PR 描述里写一句参照证据（`文件:行` 或抓包 transaction）。
+
+## 变更登记（2026-11-05 · 文本与音轨通道）
+
+| 文档 | 版本 | 变更 |
+|---|---|---|
+| 02-architecture/text-and-audio-channels.md | v1.0（新增） | 三通道选型与边界：`openai:chat` + 供应商私有头注入、Zen 容量/条款、H3 音轨接线、768p 天花板与显式失败、TTS 属 v1.1 的依据 |
+| 02-architecture/provider-management.md | 未改 | 本批没有新增协议族：文本走既有 `openai-compatible`，只在 `options` 里加了 `headers`/`session_header` 两项 |
+
+代码侧对应：`model-adapters/vendor-http.ts`（`extraHeaders`）、`model-adapters/deepseek.ts`（透传）、
+`worker/provider-runtime.ts`（`headers`/`session_header` 注入 + 会话键 = space_id）、
+`model-adapters/h3-gateway.ts`（`audio` 真下发、`audio_uris` 音频参考、`assertH3LocalResolution`）、
+`api/generations.controller.ts`（`audio_uris` 登记）、`api/db/seed.ts`（`zen-deepseek-flash`，id 1048n）。
 
 ## 变更登记（2026-11-05）
 

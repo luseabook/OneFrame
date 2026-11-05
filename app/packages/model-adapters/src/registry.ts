@@ -207,9 +207,14 @@ export function resolveAdapter(code: string, options: AdapterRuntimeOptions): Mo
     return new JianyingImageAdapter(options.jianyingImage);
   }
 
-  if (code === "deepseek:chat") {
+  // 通用 OpenAI Chat 兼容通道（有 Key 就能调的任何网关：OpenCode Zen / 阿里百炼 / 方舟文本…）。
+  // 与 `deepseek:chat` 共用同一个适配器实现——它们只差 base_url 与个别请求头，
+  // 但**目录里写 `openai:chat` 才诚实**：模型 vendor 不是 DeepSeek 时不该背 deepseek 的名字。
+  if (code === "openai:chat" || code === "deepseek:chat") {
     if (!options.deepseek?.apiKey) {
-      throw new Error("deepseek adapter requires DEEPSEEK_API_KEY");
+      throw new Error(
+        `${code} adapter requires a provider API key (route protocol=openai-compatible, use ADAPTER_MODE=mock for local)`,
+      );
     }
     return new DeepSeekChatAdapter(options.deepseek);
   }

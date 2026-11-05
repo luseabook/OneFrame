@@ -5,9 +5,9 @@
  * 目录的消费方（`GET /models`、`credits.price`、画布节点派生、分镜出片）读的都是 DB 行。
  * seed 字面量对但没落库、或落库时被 upsert 弄丢字段，只有查库能发现。
  *
- * 另有**非竞品**的行不进这 46 条：`toolbox-*`（工具箱单点能力）与 `jianying-draw`
- * （剪影生图网关，第三方通道，见文末独立 describe）。它们的档位/价格同样要验，
- * 只是"对齐竞品目录"这个断言不能把它们算进去。
+ * 另有**非竞品**的行不进这 46 条：`toolbox-*`（工具箱单点能力）与第三方通道
+ * （`jianying-draw` 剪影生图、`zen-deepseek-flash` OpenCode Zen 文本，见文末独立 describe）。
+ * 它们的档位/价格同样要验，只是"对齐竞品目录"这个断言不能把它们算进去。
  *
  * 前置：`pnpm --filter @app/api db:seed` 已跑过（scripts/verify-model-catalog.mjs 会自动跑）。
  */
@@ -30,12 +30,16 @@ interface ModeRow {
 
 type ModelRow = typeof models.$inferSelect;
 
+/** 非竞品目录的 vendor（第三方通道）：不进"对齐竞品 46 条"的计数 */
+const NON_COMPETITOR_VENDORS = new Set(["jianying", "opencode"]);
+
 let rows: ModelRow[] = [];
 let byName: Map<string, ModelRow> = new Map();
 /** 全表（含 toolbox-* 与第三方通道），供非竞品行单独验收 */
 let allRows: ModelRow[] = [];
 let jianyingRow: ModelRow | undefined;
 let jianyingPrices: Array<typeof modelPrices.$inferSelect> = [];
+let zenPrices: Array<typeof modelPrices.$inferSelect> = [];
 
 beforeAll(async () => {
   const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
@@ -52,12 +56,15 @@ beforeAll(async () => {
      * 因此**在本 spec 的取数层面**限定到竞品目录；46 这个数字与它的全部断言不动。
      */
     allRows = all;
-    rows = all.filter((row) => !row.name.startsWith("toolbox-") && row.vendor !== "jianying");
+    /** 非竞品 vendor：第三方通道按供应商整族排除，新增一家只改这个集合 */
+    rows = all.filter((row) => !row.name.startsWith("toolbox-") && !NON_COMPETITOR_VENDORS.has(row.vendor));
     byName = new Map(rows.map((row) => [row.name, row]));
     jianyingRow = all.find((row) => row.name === "jianying-draw");
     if (jianyingRow) {
       jianyingPrices = await db.select().from(modelPrices).where(eq(modelPrices.modelId, jianyingRow.id));
     }
+    const zen = all.find((row) => row.name === "zen-deepseek-flash");
+    if (zen) zenPrices = await db.select().from(modelPrices).where(eq(modelPrices.modelId, zen.id));
   } finally {
     await pool.end();
   }
@@ -393,5 +400,46 @@ describe("第三方通道 jianying-draw（非竞品目录，单独验收）", ()
     // 竞品那 9 条仍然互斥且一条不少（见上方「场景隔离」describe）；多出的正是第三方通道
     expect(canvasCapable).toHaveLength(10);
     expect(canvasCapable).toContain("jianying-draw");
+  });
+});
+
+/**
+ * 第三方**文本**通道 `zen-deepseek-flash`（OpenCode Zen Go）。
+ *
+ * 三条必须锁住的口径：
+ * 1. `adapter_code` 是 `openai:chat`（通用 OpenAI Chat 客户端），不是 `deepseek:chat`
+ *    —— 目录 code 是对外契约，vendor 换家时不能还挂着 DeepSeek 的名字；
+ * 2. 5 个文本 mode 全 `per_call` 档（`resolution_options` 只有 per_call），
+ *    每个都有价（文本定价 = 2 积分/次，见 seed 的文本分支）；
+ * 3. `types` 留空：`types:["file"]` 在竞品目录里表示"支持文件输入"，本通道不收文件。
+ */
+describe("第三方文本通道 zen-deepseek-flash（非竞品目录，单独验收）", () => {
+  it("已落库、可见、文本能力、adapter_code=openai:chat", () => {
+    const row = allRows.find((item) => item.name === "zen-deepseek-flash");
+    expect(row, "seeded model zen-deepseek-flash not found（先跑 db:seed）").toBeDefined();
+    expect(row!.visible).toBe(true);
+    expect(row!.vendor).toBe("opencode");
+    expect(row!.capability).toBe("text");
+    expect(row!.adapterCode).toBe("openai:chat");
+    expect(row!.types).toEqual([]);
+  });
+
+  it("5 个文本 mode 全是按次计价档（per_call），且每档都有价 = 2 积分", () => {
+    const row = allRows.find((item) => item.name === "zen-deepseek-flash")!;
+    const modes = modesOf(row);
+    expect(Object.keys(modes).sort()).toEqual([
+      "asset_extraction",
+      "script_optimization",
+      "storyboard_asset_match",
+      "storyboard_parse",
+      "video_parse",
+    ]);
+    for (const [mode, cfg] of Object.entries(modes)) {
+      expect(cfg.resolution_options.map((option) => option.value), `${mode} 不是按次档`).toEqual(["per_call"]);
+      const price = zenPrices.find((item) => item.mode === mode && item.resolution === "per_call");
+      expect(price, `${mode} 无价（用户会撞 745701）`).toBeDefined();
+      // 文本按次价的唯一口径：2 积分/次（seed 文本分支写死，改动必须同步这条断言）
+      expect(price!.credits).toBe(2);
+    }
   });
 });

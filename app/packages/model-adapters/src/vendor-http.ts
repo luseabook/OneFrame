@@ -33,6 +33,15 @@ export interface VendorHttpClientConfig {
   timeoutMs: number;
   /** 有值才发 `authorization: Bearer <key>` */
   apiKey?: string;
+  /**
+   * 额外请求头（原样合并）。
+   *
+   * 为什么需要：有些 OpenAI 兼容网关在协议之外提**自己**的要求，典型是 OpenCode Zen Go 的
+   * `x-opencode-session`（不带就 400 `MissingSessionID`，见 providerOptions.headers 的用法）。
+   * 这类要求是**供应商局部**的，不该散落成各适配器里的 if——统一从配置注入。
+   * `authorization` 仍在最后写入，配置里塞同名头也覆盖不掉鉴权。
+   */
+  extraHeaders?: Record<string, string>;
   /** 429/5xx/超时/网络的重试次数（不含 4xx 业务错误） */
   maxRetries?: number;
   /** 指数退避基础毫秒 */
@@ -59,6 +68,7 @@ interface ResolvedConfig {
   baseUrl: string;
   timeoutMs: number;
   apiKey?: string;
+  extraHeaders?: Record<string, string>;
   maxRetries: number;
   retryBaseMs: number;
   messagePrefix?: string;
@@ -86,6 +96,7 @@ export class VendorHttpClient {
       baseUrl: config.baseUrl.replace(/\/$/, ""),
       timeoutMs: config.timeoutMs,
       apiKey: config.apiKey,
+      extraHeaders: config.extraHeaders,
       maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
       retryBaseMs: config.retryBaseMs ?? DEFAULT_RETRY_BASE_MS,
       messagePrefix: config.messagePrefix,
@@ -119,6 +130,8 @@ export class VendorHttpClient {
     const timer = setTimeout(() => controller.abort(), this.resolved.timeoutMs);
     try {
       const headers: Record<string, string> = { "content-type": "application/json" };
+      // 供应商要求的附加头先铺，鉴权头最后写（配置里塞同名头也不能顶掉鉴权）
+      if (this.resolved.extraHeaders) Object.assign(headers, this.resolved.extraHeaders);
       if (this.resolved.apiKey) headers.authorization = `Bearer ${this.resolved.apiKey}`;
       const url = `${this.resolved.baseUrl}${path}`;
       const init: RequestInit = {
