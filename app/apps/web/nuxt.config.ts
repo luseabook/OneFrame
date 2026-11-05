@@ -70,6 +70,8 @@ export default defineNuxtConfig({
     "/assets": { ssr: false },
     "/credits": { ssr: false },
     "/settings": { ssr: false },
+    // 「我的算力」（BYOC）：首帧依赖登录态与 AutoDL 绑定状态，纯客户端渲染
+    "/compute": { ssr: false },
     "/tools": { ssr: false },
     "/admin": { ssr: false },
     // 子路径（/admin/login）不在 "/admin" 规则内，实测会 hydration mismatch，必须补 **

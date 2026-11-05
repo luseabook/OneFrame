@@ -12,6 +12,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { CreditsModule } from "./modules/credits/credits.module";
 import { BillingModule } from "./modules/billing/billing.module";
 import { GenerationsModule } from "./modules/generations/generations.module";
+import { FleetModule } from "./modules/fleet/fleet.module";
 import { ModelsModule } from "./modules/models/models.module";
 import { ModerationModule } from "./modules/moderation/moderation.module";
 import { MetaModule } from "./modules/meta/meta.module";
@@ -60,6 +61,7 @@ import { StorageModule } from "./storage/storage.module";
     CreditsModule,
     BillingModule,
     GenerationsModule,
+    FleetModule,
     TasksModule,
     ScriptModule,
     TeamModule,

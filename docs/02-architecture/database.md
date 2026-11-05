@@ -1443,3 +1443,19 @@ CREATE TABLE film_recent_opens (
 **顺序理由**：canvas/agent 只依赖既有 `tasks/assets/spaces`；cam 依赖 spaces/billing；
 film 同时依赖 canvas（画布绑定）+ cam（成员权限）+ tasks。前向外键一律在本迁移末尾 `ALTER` 补加，
 **禁止按本文件从上到下直接执行**（同 §12 头与既有约定）。
+
+---
+
+## §17 机队 / 自带算力（迁移 `0058_fleet`）
+
+> v1.0 · 2026-11-04 · 设计：[autodl-integration.md](autodl-integration.md) §1；实现：`packages/db/src/schema.ts`
+
+| 表 | 作用 | 关键约束 |
+|---|---|---|
+| `gpu_accounts` | 用户云账号（AutoDL Token 密文） | `UNIQUE(user_id, provider)`；Token 只存 AES-GCM 密文 + 末 4 位 |
+| `gpu_pools` | 逻辑池：机型/生命周期/预算/镜像 | `UNIQUE(user_id)`（v1 一人一池） |
+| `gpu_nodes` | 实例与生命周期状态 | `UNIQUE(provider_instance_id)`；`instance_name` 供孤儿对账 |
+| `gpu_jobs` | 任务↔节点账（账单/预算来源） | FK `task_id`（CASCADE）、`pool_id`（CASCADE） |
+
+**既有表加列**：`models.compute_source`、`model_prices.compute_source`、`model_routes.compute_source`（均默认 `hosted`）。
+`uq_model_prices` / `uq_model_prices_per_call` 重建为含 `compute_source`，否则同模型双价会撞唯一约束。

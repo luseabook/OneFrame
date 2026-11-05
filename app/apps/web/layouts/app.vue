@@ -328,6 +328,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
                   </NuxtLink>
                   <NuxtLink to="/invite" class="menu-item" @click="menuOpen = false">{{ t("sidebar.invite") }}</NuxtLink>
                   <NuxtLink to="/tasks" class="menu-item" @click="menuOpen = false">{{ t("shell.tasks") }}</NuxtLink>
+                  <NuxtLink to="/compute" class="menu-item" @click="menuOpen = false">{{ t("shell.myCompute") }}</NuxtLink>
                   <NuxtLink to="/settings" class="menu-item" @click="menuOpen = false">{{ t("shell.personalSettings") }}</NuxtLink>
                   <button class="menu-item" @click="logout">{{ t("shell.logout") }}</button>
                 </div>

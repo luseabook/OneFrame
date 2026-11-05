@@ -18,6 +18,12 @@ export const generationOptionsSchema = z.object({
   enable_audio: z.boolean().default(true),
   mouth_drive: z.boolean().default(false),
   seed: z.number().int().nullish(),
+  /**
+   * 算力来源（docs/02-architecture/autodl-integration.md §2.7）：
+   * hosted=平台算力（默认，行为与今天一致）；byoc=用户自带 GPU 池。
+   * 同一模型可能只有其中一种价目；缺价时按 745701 语义报"该档位不可用"。
+   */
+  compute_source: z.enum(["hosted", "byoc"]).optional(),
 });
 
 export const generationRequestSchema = z.object({

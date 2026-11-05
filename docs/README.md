@@ -15,7 +15,11 @@
 | 3 | [01-product/metrics.md](01-product/metrics.md) | 北极星指标、埋点事件表 | 产品+数据 |
 | — | [01-product/reelmate-feature-map.md](01-product/reelmate-feature-map.md) | **竞品功能地图**（万兴剧厂 ReelMate 全站 7 域 / 三种编排皮 / 三份协议 / 商业闭环 / 攻击面）；分域深挖附录在 [_parts/](01-product/_parts/) | 产品+架构（对标依据） |
 | 4 | [02-architecture/system-design.md](02-architecture/system-design.md) | 总体架构、模块边界、关键时序、失败模式 | 全员技术 |
-| — | [02-architecture/provider-management.md](02-architecture/provider-management.md) | **供应商接入与模型发现**：协议/账号/商品/路由四层、三张新表、Key 加密与 SSRF 边界；P0 控制面已实施，运行时待接 | 后端+前端 |
+| — | [02-architecture/provider-management.md](02-architecture/provider-management.md) | **供应商接入与模型发现**：协议/账号/商品/路由四层、三张新表、Key 加密与 SSRF 边界；P0 控制面已实施，运行时已接 4 个协议族（含 `jianying`） | 后端+前端 |
+| — | [02-architecture/jianying-gateway-integration.md](02-architecture/jianying-gateway-integration.md) | **第三方图像供应商接入（剪影生图网关）**：定位与断供风险、三条硬约束（不擦上游 AI 标识 / 预签名不外泄 / 同步时长）、`protocol=jianying` 三层接线、画幅诚实性、前端目录投影与效果目录 | 后端+前端+运维 |
+| — | [02-architecture/self-hosted-video-inference.md](02-architecture/self-hosted-video-inference.md) | **自建 GPU 推理（H3）**：开源边界（本地只能 768p）、网关+节点代理两层、调度与轮询改造、成本测算与盈亏平衡、平台尽调清单 | 后端+运维+产品 |
+| — | [02-architecture/byoc-user-gpu.md](02-architecture/byoc-user-gpu.md) | **BYOC 自带算力**：用户绑自己的云账号、我方编排出片；L1 引导 / L2 STS 托管、凭证不落库、联邦池调度、烧钱闸与账单报告 | 后端+产品+商务 |
+| — | [02-architecture/autodl-integration.md](02-architecture/autodl-integration.md) | **AutoDL 接入实施设计**：`fleet` 域、4 张表迁移、9 个端点、状态机与错误码 7462xx、`/compute` 页面与文案、11 人日拆分 | 后端+前端 |
 | 5 | [02-architecture/adr.md](02-architecture/adr.md) | 架构决策记录 ADR-001~006（为什么这么做） | 全员技术 |
 | 6 | [02-architecture/database.md](02-architecture/database.md) | 完整 DDL、ER 图、索引与数据生命周期 | 后端 |
 | 7 | [02-architecture/api-spec.md](02-architecture/api-spec.md) | 全量 API 契约（v1） | 前后端 |
@@ -56,6 +60,22 @@
    取证不到的**登记待取证、不臆造替代方案**；偏离必须在 `api-spec` 对应节写"偏离说明"并给理由，
    且只允许"与既有 ADR/不变式冲突"或"照做有安全/正确性风险"两类。
    每个新增端点/交互在 PR 描述里写一句参照证据（`文件:行` 或抓包 transaction）。
+
+## 变更登记（2026-11-05）
+
+| 文档 | 版本 | 变更 |
+|---|---|---|
+| 02-architecture/jianying-gateway-integration.md | v1.0（新增） | 剪影生图网关接入：定位/硬约束/三层接线/参数映射/前端投影/部署与断供切换/未做边界 |
+| 02-architecture/provider-management.md | v0.2+ | 协议清单新增 `jianying`（同步出图、只有 image、私有效果词表；不复用 `openai-compatible`） |
+| 02-architecture/system-design.md | 未改 | 本次接入完全落在既有 §4.1 适配器契约内（新增适配器 + 一条 provider 协议），无新表、无新队列 |
+| 02-architecture/database.md | 未改 | `model_providers.protocol` 是 TEXT 无约束，新增协议值不需要迁移 |
+
+代码侧对应：`packages/model-adapters/src/jianying-image.ts`、
+`apps/worker/src/provider-runtime.ts`（`protocol=jianying` 分支）、
+`apps/api/src/modules/models/image-effects.ts` + `GET /v1/effects`、
+`apps/api/src/db/seed.ts`（`jianying-draw`，id 1047n）、
+`apps/web/components/EffectSelect.vue`、`app/services/jianying-gateway/`（sidecar）、
+`docker-compose.prod.yml`（`jianying-gateway`，不 publish 端口）。
 
 ## 变更登记（2026-10-24 修订）
 

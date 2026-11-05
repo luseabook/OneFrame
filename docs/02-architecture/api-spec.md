@@ -5925,3 +5925,27 @@ I = 0      （当前未发现 —— 见 61.4）
 `project_assets.resource_type` 是**生成列**（kind → 类型），既有角色/场景/道具写入自动归位；
 参考类新增 `kind=reference_video|reference_image` + `file_uri/content_type`，DTO 额外返回
 `resource_type / file_uri / file_url / content_type`（`file_url` 为 storage key 的签名 URL）。
+
+---
+
+## §16 机队 / 自带算力（`/v1/compute`，BYOC）
+
+> v1.0 · 2026-11-04 · 实现：`apps/api/src/modules/fleet`；设计：[autodl-integration.md](autodl-integration.md)
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/v1/compute/summary` | — | `{enabled,bound,token_hint?,pool?,nodes[],today_cents,month_cents}` |
+| POST | `/v1/compute/account` | `{token}` | `{token_hint}`；Token 不回显 |
+| POST | `/v1/compute/account/test` | — | `{ok,instances}` |
+| DELETE | `/v1/compute/account` | — | `{ok}`（只吊销授权，不代删实例） |
+| PATCH | `/v1/compute/pool` | `{lifecycle?,idle_minutes?,gpu_spec?,budget_daily_cents?,budget_month_cents?}` | `{ok}` |
+| POST | `/v1/compute/nodes` | — | `{node_id}`（幂等：同名实例复用） |
+| POST | `/v1/compute/nodes/:id/stop` | — | `{ok}` |
+| GET | `/v1/compute/bills?limit=20` | — | `{list:[{task_id,gpu_seconds,cost_cents,status,created_at}]}` |
+
+**错误码（7462xx）**：`746201` Token 失效 / `746202` 未绑定 / `746203` 配额 / `746204` 开机失败 /
+`746205` 节点超时 / `746206` 预算触顶 / `746207` 环境未构建 / `746208` 平台返回异常。
+
+**运营侧（`/v1/ops/admin/compute/*`，AdminGuard）**：`GET /pools`、`GET /nodes?state=`、`POST /nodes/:id/stop`（强制关机，不代删实例）、`GET /spend`（总量/条数/GPU 秒）。
+
+**生成请求新增可选字段**：`options.compute_source = hosted | byoc`（缺省 `hosted`，行为与既有完全一致）。

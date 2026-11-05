@@ -407,6 +407,27 @@
       "when": 1793761505238,
       "tag": "0057_bitter_thunderbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793799857934,
+      "tag": "0058_fleet",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793835909852,
+      "tag": "0059_fleet_image_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793845793227,
+      "tag": "0060_fleet_app_instance",
+      "breakpoints": true
     }
   ]
 }

@@ -93,11 +93,13 @@ export class CreditsService {
     const resolution = body.options.resolution;
     const duration = base.durations ? body.options.duration : null;
 
+    const computeSource = body.options.compute_source ?? "hosted";
     const priceWhere = duration === null
       ? and(
           eq(modelPrices.modelId, model.id),
           eq(modelPrices.mode, body.mode),
           eq(modelPrices.resolution, resolution),
+          eq(modelPrices.computeSource, computeSource),
           isNull(modelPrices.durationS),
           eq(modelPrices.active, true),
         )
@@ -105,6 +107,7 @@ export class CreditsService {
           eq(modelPrices.modelId, model.id),
           eq(modelPrices.mode, body.mode),
           eq(modelPrices.resolution, resolution),
+          eq(modelPrices.computeSource, computeSource),
           eq(modelPrices.durationS, duration),
           eq(modelPrices.active, true),
         );
@@ -123,6 +126,7 @@ export class CreditsService {
             eq(modelPrices.modelId, model.id),
             eq(modelPrices.mode, body.mode),
             eq(modelPrices.resolution, resolution),
+            eq(modelPrices.computeSource, computeSource),
             isNotNull(modelPrices.durationS),
             eq(modelPrices.active, true),
           ),
@@ -150,6 +154,7 @@ export class CreditsService {
             modelId: model.id,
             mode: body.mode,
             resolution,
+            computeSource,
             // durationS 记录"实际请求秒数"，让对账能看到按几秒收的
             durationS: duration,
             credits: Math.max(1, Math.ceil(duration * perSecond)),
@@ -167,6 +172,7 @@ export class CreditsService {
           modelId: model.id,
           mode: body.mode,
           resolution,
+          computeSource,
           durationS: picked.durationS,
           credits: picked.credits,
           strikeCredits: picked.strike ?? picked.credits,

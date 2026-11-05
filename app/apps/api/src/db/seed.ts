@@ -187,10 +187,12 @@ const scene = (spec: {
 });
 
 /**
- * 46 条模型目录（对齐竞品 `cli-out/model-all.json`）。
+ * 47 条模型目录（46 条对齐竞品 `cli-out/model-all.json`；第 47 条 `jianying-draw`
+ * 是第三方网关接入，不对应竞品 SKU，见条目前注释）。
  *
  * vendor 分布：tomoviee 13（自营）/ jimeng 8 / kling 7 / hailuo 5 / wan 3 /
- * happy-horse 3 / vidu 3 / deepseek 1 / google 1 / midjourney 1 / openai 1 = 46。
+ * happy-horse 3 / vidu 3 / deepseek 1 / google 1 / midjourney 1 / openai 1 /
+ * jianying 1 = 47。
  *
  * id 沿用既有 seed 的 1001..1010（存量测试与数据引用了这些 id），新增的用 1011+。
  * name 是**协议标识**（英文、稳定、对外契约），displayName 是中文展示名——
@@ -1288,6 +1290,41 @@ const MODEL_SEED: ModelSeed[] = [
     modeOrder: { first_last_frame: 3 },
     modes: {
       first_last_frame: video({ ep: "/web/v1/ai/image-to-video", durations: [5, 10], res: [["1080p", "1080P"]], default_ratio: "16:9", default_duration: 5, default_resolution: "1080p", counts: [1,2,3,4], limits: { image: 2 }, max_prompt_length: 2500 }),
+    },
+    sceneModes: {},
+  },
+  /**
+   * 剪影生图网关（第三方逆向协议，OpenAI 兼容、**同步**出图，见
+   * docs/02-architecture/jianying-gateway-integration.md）。
+   *
+   * 三处与竞品目录不同的口径，都是刻意的：
+   * 1. `ratios` 只有 3 个——上游只有 3 张画布（1024² / 1152×864 / 864×1152），
+   *    其余比例是网关本地裁切出来的「假比例」，列出来等于骗用户能控构图（文档 §4）；
+   * 2. 没有 `video` / 多参考档位——这条链路只有文生图与风格迁移（蒙版重绘未接线）；
+   * 3. 定价走占位锚点：上游密钥随 App 版本轮换，随时可能断供，不做计价主链路（文档 §7）。
+   *
+   * `visible` 默认 true 便于联调与评测；上架/置灰由运营在后台决定。
+   */
+  {
+    id: 1047n,
+    vendor: "jianying",
+    name: "jianying-draw",
+    displayName: "剪影 AI 绘图",
+    description: "18 种风格迁移效果，单张同步出图约 10–25 秒",
+    logo: "",
+    capability: "image",
+    types: ["image"],
+    tags: [{ name: "风格迁移" }, { name: "同步出图" }],
+    promotions: [],
+    adapterCode: "jianying:image",
+    visible: true,
+    needVip: false,
+    audioVideoSupport: false,
+    sort: 47,
+    modeOrder: { image2image: 1, text2image: 1 },
+    modes: {
+      text2image: video({ ep: "/v1/images/generations", ratios: ["1:1", "4:3", "3:4"], res: [["1K", "1K"], ["2K", "2K"]], default_ratio: "1:1", default_resolution: "1K", counts: [1,2,3,4], max_prompt_length: 3000 }),
+      image2image: video({ ep: "/v1/images/generations", ratios: ["1:1", "4:3", "3:4"], res: [["1K", "1K"], ["2K", "2K"]], default_ratio: "1:1", default_resolution: "1K", counts: [1,2,3,4], limits: { image: 1 }, max_prompt_length: 3000 }),
     },
     sceneModes: {},
   },

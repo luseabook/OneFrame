@@ -42,6 +42,8 @@ export interface ModelDto {
   mode_order: Record<string, number>;
   modes: Record<string, ModeConfig>;
   scene_modes: Record<string, unknown>;
+  /** hosted | byoc | either（docs/02-architecture/autodl-integration.md §2.7） */
+  compute_source: string;
 }
 
 export interface ModelFilters {
@@ -112,6 +114,7 @@ export class ModelsService {
       mode_order: row.modeOrder as Record<string, number>,
       modes: row.modes as Record<string, ModeConfig>,
       scene_modes: row.sceneModes as Record<string, unknown>,
+      compute_source: row.computeSource,
     };
   }
 }

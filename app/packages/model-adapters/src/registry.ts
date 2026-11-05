@@ -2,6 +2,8 @@ import { ArkImageAdapter, type ArkImageConfig } from "./ark-image";
 import { ArkVideoAdapter, type ArkVideoConfig } from "./ark-video";
 import { DeepSeekChatAdapter, type DeepSeekConfig } from "./deepseek";
 import { HttpVideoAdapter, type HttpVideoConfig } from "./http-video";
+import { H3GatewayAdapter, type H3GatewayConfig } from "./h3-gateway";
+import { JianyingImageAdapter, type JianyingImageConfig } from "./jianying-image";
 import { LipSyncAdapter, type LipSyncConfig } from "./lip-sync";
 import { MockAdapter, type MockAdapterOptions } from "./mock";
 import { MusicAdapter, type MusicConfig } from "./music";
@@ -23,16 +25,30 @@ import type { ModelAdapter } from "./types";
 
 export type AdapterMode = "mock" | "real";
 
+/**
+ * 路由协议固定下来的适配器选择。
+ *
+ * 为什么需要它：`resolveAdapter` 原本只按 `adapter_code` 前缀推断（`volcengine:*` → Ark），
+ * 但同一套 `adapter_code` 可能被路由到不同协议（例如 Seedance 走三方 OpenAI 兼容网关）。
+ * 只要环境里配了 `ARK_API_KEY`，前缀规则就会把请求抢回 Ark——任务看起来"发出去了"，
+ * 实际打到了另一家。路由解析（provider-runtime）必须显式声明命中的适配器。
+ */
+export type AdapterHint = "ark" | "http-video" | "h3" | "deepseek" | "ark-image" | "jianying-image";
+
 export interface AdapterRuntimeOptions {
   mode: AdapterMode;
   mock?: MockAdapterOptions;
   deepseek?: DeepSeekConfig;
   /** 通用 HTTP 视频供应商（火山/百炼网关或自建代理） */
   httpVideo?: HttpVideoConfig;
+  /** 自建 H3 视频网关（自带 GPU 路线；见 docs/02-architecture/autodl-integration.md） */
+  h3?: H3GatewayConfig;
   /** 火山方舟（Ark）视频任务协议 */
   ark?: ArkVideoConfig;
   /** 火山方舟（Ark）图像生成协议（Seedream）；未配置时回落到 ark 的 Key */
   arkImage?: ArkImageConfig;
+  /** 剪影生图网关（自建 FastAPI，OpenAI 兼容，同步出图；见 docs/02-architecture/jianying-gateway-integration.md） */
+  jianyingImage?: JianyingImageConfig;
   /**
    * 显式把既有 adapter_code 映射到 Ark 图像（运营显式选择）。
    * 例：["tomoviee:image"] → Ark Seedream。未配置时这些 code 保持原有报错行为，
@@ -47,6 +63,8 @@ export interface AdapterRuntimeOptions {
    * 真实模式下缺 `apiKey` 会在构造时硬失败（见 postprocess.ts 的注释）。
    */
   postprocess?: PostprocessConfig;
+  /** 路由协议固定下来的适配器；存在时优先于 adapter_code 前缀推断 */
+  adapterHint?: AdapterHint;
 }
 
 /** 后处理能力的运行配置（六类共用；各家的差异化字段走 config 覆盖） */
@@ -137,6 +155,57 @@ function postprocessConfig<T extends { apiKey?: string; baseUrl?: string }>(
 // 未知 code 显式报错，不静默 mock。
 export function resolveAdapter(code: string, options: AdapterRuntimeOptions): ModelAdapter {
   if (options.mode === "mock") return sharedMock;
+
+  // 路由协议优先（P0 修复，见 docs/02-architecture/autodl-integration.md §2.7）：
+  // 命中 hint 时不再看 adapter_code 前缀，避免全局 ARK_API_KEY 抢走三方网关路由。
+  if (options.adapterHint) {
+    switch (options.adapterHint) {
+      case "http-video":
+        if (!options.httpVideo?.baseUrl) {
+          throw new Error(`http-video adapter requires base_url (adapter_code=${code}, route protocol=http-video)`);
+        }
+        return new HttpVideoAdapter(options.httpVideo);
+      case "h3":
+        if (!options.h3?.baseUrl) {
+          throw new Error(`h3 adapter requires H3_GATEWAY_BASE_URL (adapter_code=${code})`);
+        }
+        return new H3GatewayAdapter(options.h3);
+      case "ark":
+        if (!options.ark?.apiKey) {
+          throw new Error(`ark adapter requires ARK_API_KEY (adapter_code=${code}, route protocol=ark)`);
+        }
+        return new ArkVideoAdapter(options.ark);
+      case "ark-image": {
+        const config = arkImageConfigFrom(options);
+        if (!config) throw new Error(`ark image adapter requires ARK_API_KEY (adapter_code=${code})`);
+        return new ArkImageAdapter(config);
+      }
+      case "jianying-image":
+        if (!options.jianyingImage?.baseUrl) {
+          throw new Error(`jianying image adapter requires base_url (adapter_code=${code})`);
+        }
+        return new JianyingImageAdapter(options.jianyingImage);
+      case "deepseek":
+        if (!options.deepseek?.apiKey) throw new Error("deepseek adapter requires DEEPSEEK_API_KEY");
+        return new DeepSeekChatAdapter(options.deepseek);
+    }
+  }
+
+  // 自建档：模型目录里 adapter_code 直接写 h3:video
+  if (code === "h3:video") {
+    if (!options.h3?.baseUrl) {
+      throw new Error("h3 adapter requires H3_GATEWAY_BASE_URL (use ADAPTER_MODE=mock for local)");
+    }
+    return new H3GatewayAdapter(options.h3);
+  }
+
+  // 自建档：模型目录里 adapter_code 直接写 jianying:image（剪影生图网关，同步出图）
+  if (code === "jianying:image") {
+    if (!options.jianyingImage?.baseUrl) {
+      throw new Error("jianying image adapter requires base_url (use ADAPTER_MODE=mock for local)");
+    }
+    return new JianyingImageAdapter(options.jianyingImage);
+  }
 
   if (code === "deepseek:chat") {
     if (!options.deepseek?.apiKey) {
@@ -242,6 +311,7 @@ export {
   FpsDurationUnifyAdapter,
   HttpVideoAdapter,
   ImageInpaintAdapter,
+  JianyingImageAdapter,
   LipSyncAdapter,
   MockAdapter,
   MusicAdapter,

@@ -29,6 +29,33 @@ export function smsIpHourlyLimitDefault(nodeEnv: string | undefined): number {
 // 配置层：启动即校验，缺失/非法直接崩（docs/04-engineering/dev-workflow.md §5）
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // 机队 / 自带算力（BYOC，docs/02-architecture/autodl-integration.md §5）
+  // off = 不暴露 byoc 档位；shadow = 只读展示；on = 允许真实开关机
+  FLEET_ENABLED: z.enum(["off", "shadow", "on"]).default("off"),
+  FLEET_DEFAULT_GPU_SPEC: z.string().default("v-48g"),
+  /** 系统盘扩容（GB）。实测基线 30G，H3 权重 67GB → 默认扩 100G */
+  FLEET_SYSTEM_DISK_GB: z.coerce.number().int().min(0).max(500).default(100),
+  /** community=用户自选社区 H3 镜像（v1，零构建）；private=我方镜像（v2） */
+  FLEET_DEFAULT_IMAGE_SOURCE: z.enum(["app", "private", "community"]).default("app"),
+  /**
+   * 默认应用：zealman 的「MINIMAX-H3提速500高画质」（应用广场，id 来自应用详情页）。
+   * 版本要 pin，不要用 latest——作者一改，出片口径就漂。
+   */
+  FLEET_DEFAULT_APPLICATION_UUID: z.string().default("spcwDDc6XW"),
+  FLEET_DEFAULT_APPLICATION_VERSION: z.string().default("v9.48"),
+  /**
+   * 应用自带启动命令 + 我们的 join 合并模板。
+   * **必须带上应用自己的 autostart**：API 的 start_command 会覆盖应用启动命令，
+   * 只跑 join 的话应用（ComfyUI 服务）根本不会起来。
+   */
+  FLEET_APP_START_COMMAND: z
+    .string()
+    .default("bash /root/zealman-app/scripts/improved-autostart.sh; {join}"),
+  FLEET_DEFAULT_DAILY_CENTS: z.coerce.number().int().min(0).default(5000),
+  FLEET_DEFAULT_MONTH_CENTS: z.coerce.number().int().min(0).default(50000),
+  /** 节点自注册命令模板，含 {pool} 与 {token} 占位符 */
+  FLEET_JOIN_COMMAND: z.string().default(""),
+  FLEET_JOIN_TOKEN: z.string().default(""),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   /**
    * 监听地址。默认 `127.0.0.1`（**loopback**）。
@@ -119,6 +146,16 @@ const envSchema = z.object({
   // worker：只入队（`publish.transcode`），由 worker 消费并真转码 —— 生产形态，
   //   API 不再跑 ffmpeg（长片不占 API 事件循环），且 **API 重启不会把转码丢掉**（任务在 Redis 里）。
   PUBLISH_TRANSCODE_MODE: z.enum(["inline", "worker"]).default("inline"),
+
+  // ── 剪影生图网关（第三方，仅供图像效果目录使用）──
+  /**
+   * 网关根地址（如 http://127.0.0.1:8788）。**只有 `GET /v1/effects` 用它**：
+   * 效果清单以网关为准、失败回落静态表；生成请求不经过 API 进程（worker 直连）。
+   * 为什么用 `z.string().optional()` 而不是 `.url()`：`.env.example` 里留空是常态，
+   * 空串会在启动校验就崩，而这里本来就允许"没接网关"（回落静态表）。
+   * 见 docs/02-architecture/jianying-gateway-integration.md §5。
+   */
+  JIANYING_GATEWAY_BASE_URL: z.string().optional(),
 
   // ── 微信支付 APIv3（WECHAT_*）──
   // 商户号

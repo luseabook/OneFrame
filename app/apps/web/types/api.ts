@@ -74,6 +74,22 @@ export interface ModelDto {
   scene_modes: Record<string, unknown>;
 }
 
+/**
+ * 图像风格迁移效果（剪影生图网关 `GET /v1/effects` 的我方投影）。
+ *
+ * 图生图 `options.effect` 必填：不给就会被网关内置默认值（3D 童话）兜走，
+ * 于是用户上传的任何照片都变成同一种风格——所以才需要这个目录让用户自己选。
+ */
+export interface ImageEffectDto {
+  id: string;
+  /** 网关英文原名，用作 tooltip / aria-label */
+  title: string;
+  /** 中文展示名（胶囊按钮文案） */
+  title_zh: string;
+  /** 该效果对输入图的人脸有要求（前端只做轻提示，不做硬拦截） */
+  need_face: boolean;
+}
+
 export interface QuoteResponse {
   credits: number;
   strike_credits: number;

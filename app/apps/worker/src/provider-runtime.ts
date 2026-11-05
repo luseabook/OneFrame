@@ -69,12 +69,50 @@ export function buildProviderAdapterOptions(
         : {}),
     };
     next.ark = common;
+    next.adapterHint = "ark";
     if (model.capability === "image") {
       next.arkImage = {
         ...common,
         responseFormat: stringOption(routeOptions, providerOptions, "response_format") === "b64_json" ? "b64_json" : "url",
       };
+      next.adapterHint = "ark-image";
     }
+    return next;
+  }
+
+  // 自建 H3 网关（自带 GPU 路线）。网关是「提交 → 排队 → 轮询 → 直传 OSS」协议，
+  // 与 http-video 的差别见 packages/model-adapters/src/h3-gateway.ts 的注释。
+  if (snapshot.protocol === "h3") {
+    next.ark = undefined; // 路由协议优先：别让全局 Ark Key 抢走
+    next.httpVideo = undefined;
+    next.h3 = {
+      baseUrl: snapshot.base_url,
+      apiKey: secret,
+      modelMap,
+      ...(numberOption(routeOptions, providerOptions, "timeout_ms")
+        ? { timeoutMs: numberOption(routeOptions, providerOptions, "timeout_ms") }
+        : {}),
+    };
+    next.adapterHint = "h3";
+    return next;
+  }
+
+  // 剪影生图网关：OpenAI 兼容外形，但**同步**出图且只有 image 能力（见
+  // docs/02-architecture/jianying-gateway-integration.md §3）。不复用 openai-compatible 分支：
+  // 那条分支按 capability 分 text/video，且依赖 GET /models 发现，套上去会走错路径。
+  if (snapshot.protocol === "jianying") {
+    next.ark = undefined; // 路由协议优先：别让全局 Ark Key 抢走（同 h3 口径）
+    next.h3 = undefined;
+    next.httpVideo = undefined;
+    next.jianyingImage = {
+      baseUrl: snapshot.base_url,
+      apiKey: secret,
+      modelMap,
+      ...(numberOption(routeOptions, providerOptions, "timeout_ms")
+        ? { timeoutMs: numberOption(routeOptions, providerOptions, "timeout_ms") }
+        : {}),
+    };
+    next.adapterHint = "jianying-image";
     return next;
   }
 
@@ -85,9 +123,12 @@ export function buildProviderAdapterOptions(
         baseUrl: snapshot.base_url,
         model: snapshot.remote_model_id,
       };
+      next.adapterHint = "deepseek";
       return next;
     }
     if (model.capability === "video") {
+      next.ark = undefined;
+      next.h3 = undefined;
       next.httpVideo = {
         apiKey: secret,
         baseUrl: snapshot.base_url,
@@ -96,6 +137,7 @@ export function buildProviderAdapterOptions(
         pollPath: stringOption(routeOptions, providerOptions, "poll_path"),
         cancelPath: stringOption(routeOptions, providerOptions, "cancel_path"),
       };
+      next.adapterHint = "http-video";
       return next;
     }
     throw new Error(
@@ -104,6 +146,8 @@ export function buildProviderAdapterOptions(
   }
 
   if (snapshot.protocol === "http-video") {
+    next.ark = undefined;
+    next.h3 = undefined;
     next.httpVideo = {
       apiKey: secret,
       baseUrl: snapshot.base_url,
@@ -115,6 +159,7 @@ export function buildProviderAdapterOptions(
         ? { timeoutMs: numberOption(routeOptions, providerOptions, "timeout_ms") }
         : {}),
     };
+    next.adapterHint = "http-video";
     return next;
   }
 

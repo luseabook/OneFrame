@@ -21,6 +21,7 @@ apps/web/
     projects/[id].vue          # 流水线工作台（步骤条 + 分集栏 + 舞台）
     create/[tool].vue          # 工具页统一骨架(参数面板|预览|历史 三栏)
     tools.vue · tasks.vue · assets.vue · credits.vue · pricing.vue · settings.vue
+    compute.vue               # 我的算力（BYOC：绑定 AutoDL / 节点 / 预算 / 账单）
     login.vue · terms.vue · privacy.vue · report.vue
     share/[token].vue          # 公开分享页（只读 + 举报入口）
     admin.vue                  # 运营后台（独立鉴权）
@@ -41,7 +42,7 @@ apps/web/
 | 路由 | 布局 | 说明 |
 |---|---|---|
 | `/` `/login` `/terms` `/privacy` `/report` `/share/*` | `default` | 深色营销壳 |
-| `/home` `/works` `/projects` `/projects/*` `/tasks` `/assets` `/credits` `/settings` `/pricing` `/admin` | `app` | 浅色工作台壳 |
+| `/home` `/works` `/projects` `/projects/*` `/tasks` `/assets` `/credits` `/settings` `/compute` `/pricing` `/admin` | `app` | 浅色工作台壳 |
 | `/create/*` | `tool` | 双栏工具壳 |
 
 > **SSR 策略**：所有数据驱动的工作台页在 `nuxt.config.ts` 的 `routeRules` 中显式设 `ssr: false`。

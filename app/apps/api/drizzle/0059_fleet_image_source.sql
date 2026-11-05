@@ -1,0 +1,1 @@
+ALTER TABLE "gpu_pools" ADD COLUMN "image_source" text DEFAULT 'community' NOT NULL;

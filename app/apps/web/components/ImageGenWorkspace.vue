@@ -4,7 +4,7 @@
 // 与视频工具页同构：左侧参数 + 立即生成，右侧结果与历史。
 // 协议完全复用既有脊柱——`/credits/quote` 报价 → `/generations` 建任务 → `/tasks/:id` 轮询，
 // 不新增任何端点（工具只是"参数面板"，ADR-003）。
-import type { AssetDto, ModelDto, QuoteResponse, TaskDto } from "~/types/api";
+import type { AssetDto, ImageEffectDto, ModelDto, QuoteResponse, TaskDto } from "~/types/api";
 import { statusLabel, TaskStatus } from "~/types/api";
 
 const props = withDefaults(defineProps<{ initialMode?: "text2image" | "image2image" }>(), {
@@ -40,6 +40,20 @@ const imageInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const IMAGE_LIMIT = 3;
 
+/**
+ * 风格目录（图生图专用）。
+ *
+ * 图生图走剪影生图网关做风格迁移时 `options.effect` 是必填的：不给就被网关内置默认值
+ * （3D 童话）兜走，用户上传什么照片都变成同一种风格。所以这个目录只服务图生图，
+ * 且绝不在前端替用户默认选中——空就是空，让「请先选择风格」的守卫去说话。
+ */
+const effects = ref<ImageEffectDto[]>([]);
+const effect = ref("");
+const effectsLoading = ref(false);
+const effectsError = ref("");
+/** 只在首次进图生图时拉一次；失败后归零，下次切回来还能重试 */
+let effectsRequested = false;
+
 const estimatedCredits = ref<number | null>(null);
 const quoting = ref(false);
 const submitting = ref(false);
@@ -59,6 +73,21 @@ const resolutions = computed(
   () => modeCfg.value?.resolution_options ?? [{ value: "1K", label: "1K" }],
 );
 const counts = computed(() => modeCfg.value?.counts ?? [1, 2, 3, 4]);
+/**
+ * 实际可上传张数：**目录优先**。
+ *
+ * 为什么不能只用常量：不同模型对参考图的数量上限不同（剪影生图网关只接受 1 张，
+ * 第 2 张在我方约定里是蒙版位且尚未接线——多传一张会被适配器判成"要重绘"而报错）。
+ * `models.modes[mode].media_limits.image` 就是目录里声明的这个上限。
+ */
+const imageLimit = computed(() => {
+  const configured = modeCfg.value?.media_limits?.image;
+  return typeof configured === "number" && configured > 0 ? configured : IMAGE_LIMIT;
+});
+/** 换模型/换档位把上限压小时，已选的多余图片必须裁掉，否则会带着超限 reference_uris 提交 */
+watch(imageLimit, (limit) => {
+  if (images.value.length > limit) images.value = images.value.slice(0, limit);
+});
 const modeLabel = computed(() => MODE_TABS.find((t) => t.key === mode.value)?.label ?? "图片生成");
 const statusText = computed(() => (task.value ? statusLabel(task.value.status) : ""));
 const taskImages = computed(() =>
@@ -94,10 +123,30 @@ async function loadModels(): Promise<void> {
   applyDefaults();
 }
 
+/** 惰性拉风格目录：拉失败只让「风格」这一行显示一行中文提示，不阻塞文生图 */
+async function loadEffects(): Promise<void> {
+  if (effectsRequested || effectsLoading.value) return;
+  effectsRequested = true;
+  effectsLoading.value = true;
+  effectsError.value = "";
+  try {
+    effects.value = await api.get<ImageEffectDto[]>("/effects");
+  } catch (e) {
+    effects.value = [];
+    effectsError.value = e instanceof Error && e.message ? e.message : "风格加载失败，请稍后重试";
+    effectsRequested = false;
+  } finally {
+    effectsLoading.value = false;
+  }
+}
+
 function switchMode(next: ImgMode): void {
   if (mode.value === next) return;
   mode.value = next;
   images.value = [];
+  // 风格只影响图生图的 options.effect；切回文生图必须清掉，免得残留参数污染请求
+  if (next === "text2image") effect.value = "";
+  else void loadEffects();
   const list = models.value;
   selectedName.value = list[0]?.name ?? "";
   applyDefaults();
@@ -107,11 +156,14 @@ function switchMode(next: ImgMode): void {
 function requestBody(): Record<string, unknown> {
   const input: Record<string, unknown> = { prompt: prompt.value.trim() };
   if (mode.value === "image2image") input.reference_uris = images.value.map((img) => img.url);
+  const options: Record<string, unknown> = { ratio: ratio.value, resolution: resolution.value, count: count.value };
+  // 只在图生图带 effect：文生图不带，免得给别的供应商的参数校验塞一个不认识的字段
+  if (mode.value === "image2image" && effect.value) options.effect = effect.value;
   return {
     mode: mode.value,
     model: selectedName.value,
     input,
-    options: { ratio: ratio.value, resolution: resolution.value, count: count.value },
+    options,
   };
 }
 
@@ -134,11 +186,11 @@ function scheduleQuote(): void {
   quoteTimer = setTimeout(() => void estimateCredits(), 600);
 }
 
-watch([prompt, selectedName, ratio, resolution, count, mode], scheduleQuote);
+watch([prompt, selectedName, ratio, resolution, count, mode, effect], scheduleQuote);
 
 async function onFileChange(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
-  const files = Array.from(input.files ?? []).slice(0, IMAGE_LIMIT - images.value.length);
+  const files = Array.from(input.files ?? []).slice(0, imageLimit.value - images.value.length);
   input.value = "";
   for (const file of files) {
     if (!file.type.startsWith("image/")) {
@@ -213,6 +265,11 @@ async function submit(): Promise<void> {
     error.value = "图生图请先上传一张参考图";
     return;
   }
+  // 守卫放在这里而不是靠后端报错：网关缺 effect 会用内置默认值，用户根本看不见自己没选
+  if (mode.value === "image2image" && !effect.value) {
+    error.value = "请先选择风格";
+    return;
+  }
   submitting.value = true;
   try {
     const q = await quote(true);
@@ -277,6 +334,8 @@ async function download(item: TaskDto, index = 1): Promise<void> {
 
 onMounted(async () => {
   await Promise.all([loadModels(), loadHistory()]);
+  // 直接以图生图进来（initialMode）时也要有风格可选
+  if (mode.value === "image2image") void loadEffects();
 });
 
 onBeforeUnmount(() => {
@@ -318,7 +377,7 @@ onBeforeUnmount(() => {
         <div v-if="mode === 'image2image'" class="field">
           <div class="field-head">
             <span class="field-label">参考图</span>
-            <span class="field-hint">{{ images.length }}/{{ IMAGE_LIMIT }}</span>
+            <span class="field-hint">{{ images.length }}/{{ imageLimit }}</span>
           </div>
           <div class="uploads">
             <div v-for="(img, i) in images" :key="img.id" class="thumb imgt-thumb">
@@ -326,7 +385,7 @@ onBeforeUnmount(() => {
               <button type="button" class="thumb-remove" @click="removeImage(i)">✕</button>
             </div>
             <button
-              v-if="images.length < IMAGE_LIMIT"
+              v-if="images.length < imageLimit"
               type="button"
               class="upload-slot"
               :disabled="uploading"
@@ -405,6 +464,16 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          <!-- 风格目录只服务图生图；空选是合法状态，选择成本由用户承担 -->
+          <div v-if="mode === 'image2image'" class="setting-row">
+            <span class="setting-name">风格</span>
+            <EffectSelect
+              v-model="effect"
+              :effects="effects"
+              :loading="effectsLoading"
+              :error="effectsError"
+            />
+          </div>
         </div>
       </div>
 
@@ -413,8 +482,16 @@ onBeforeUnmount(() => {
           <span>预计消耗</span>
           <b class="imgt-quote">{{ estimatedCredits != null ? `${estimatedCredits} 积分` : "—" }}</b>
         </div>
+        <p v-if="mode === 'image2image' && !effect" class="hint imgt-effect-hint">
+          图生图需先选择风格后再生成。
+        </p>
         <p v-if="error" class="error imgt-error">{{ error }}</p>
-        <button class="submit imgt-submit" type="button" :disabled="submitting || quoting" @click="submit">
+        <button
+          class="submit imgt-submit"
+          type="button"
+          :disabled="submitting || quoting || (mode === 'image2image' && !effect)"
+          @click="submit"
+        >
           {{ submitting ? "提交中…" : "立即生成" }}
         </button>
         <p class="hint">生成内容须遵守平台规范；单价由后台价目表控制，不在此写死。</p>

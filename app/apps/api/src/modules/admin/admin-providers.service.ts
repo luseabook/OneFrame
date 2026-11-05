@@ -8,7 +8,15 @@ import { env } from "../../config/env";
 import { db } from "../../db/database";
 import { decryptSecret, encryptSecret, providerAad, secretFingerprint, secretHint } from "./provider-crypto";
 
-export type ProviderProtocol = "openai-compatible" | "ark" | "http-video";
+/**
+ * 供应商协议族。
+ *
+ * `jianying` = 剪影生图网关（OpenAI 兼容外形，但**同步**出图、只有 image 能力、
+ * 风格迁移效果 id 是私有词汇表），因此不复用 `openai-compatible`：后者在
+ * `provider-runtime.ts` 里按 `GET /models` 发现 + 文本/视频两条分支，套上去会走错分支。
+ * 见 docs/02-architecture/jianying-gateway-integration.md §3。
+ */
+export type ProviderProtocol = "openai-compatible" | "ark" | "http-video" | "jianying";
 
 export interface ProviderInput {
   code: string;

@@ -13,7 +13,7 @@ type AdminRequest = FastifyRequest & { adminAuth?: AdminAuth };
 const emptyToUndefined = (value: unknown) => (value === "" || value === null ? undefined : value);
 const numericId = z.string().trim().regex(/^\d+$/, "must be numeric id");
 
-const providerProtocolSchema = z.enum(["openai-compatible", "ark", "http-video"]);
+const providerProtocolSchema = z.enum(["openai-compatible", "ark", "http-video", "jianying"]);
 
 const providerCreateSchema = z.object({
   code: z.string().trim().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]*$/, "code must be lowercase slug"),

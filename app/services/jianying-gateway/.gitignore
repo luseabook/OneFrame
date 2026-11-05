@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/
+tools/*.json
+tools/test_imgs/
+*.log
+apk_work/

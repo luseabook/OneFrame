@@ -131,3 +131,42 @@
   - 每个新端点/新交互在 PR 描述里写一句"参照证据"（文件:行 或 抓包 transaction）；
   - 没有证据的，写"待取证 + 为何不阻塞"；
   - 评审时把"这是我的偏好"当作需要证据的信号。
+
+---
+
+## ADR-014 视频模型自建推理用「网关 + 节点代理」两层，GPU 侧不承载业务逻辑
+
+- **状态**：Proposed 2026-11-04（待 Owner 决策，详见 [self-hosted-video-inference.md](self-hosted-video-inference.md) §0 D1~D5）
+- **背景**：计划租 GPU（天工云/同类）自建部署 MiniMax H3 开源权重以替代按秒计费的 API。三个硬约束：① H3 三模块中只有 `H3-Base` 开源（768p + 立体声），`Context-IR` 与 `Regenerate-2K` 为 API-only → **本地拿不到 2K**；② 许可证适用地域**排除 EU/英国/韩国/美国**（需单独申请），年营收 >2000 万美元须书面授权，商用须在 UI 显著标注 "MiniMax H3"，且**禁止用其输出改进其它 AI 模型**；③ GPU 池是固定容量、可被抢占、冷启动 1.8~2.7 分钟的自有资源，与"弹性供应商"语义不同。
+- **决策**：
+  1. 自建走**两层**：无状态 `h3-gateway`（鉴权/准入/队列/调度/租约/成本记账/预签 OSS key）+ 有状态 **node agent**（只 pull、只出站、只写自己那一个 key）；不把调度写进 NestJS 进程。
+  2. 新增 `adapter_code = h3:video`，**不复用** `http-video`（后者缺 audio/video 参考、seed/steps、variant，且 poll 语义只认 4 态）。
+  3. 产品分档：**本地 768p 草稿 + API 2K 成片**；本地档不作为独立售卖的成片档。
+  4. `route_snapshot` 增加 `engine` 块（model_commit/variant/quant/steps/sampler），保证可复现与画质归因。
+  5. 产物由节点直传 `staging/`，worker 同 region server-side copy + 打标；**不经网关中转字节**。
+- **理由**：GPU 节点是"会被回收的宠物"，网关是"无状态牲畜"；字节走直传避免 API 带宽成为瓶颈；引擎快照缺失会让"同参数不同结果"无法归因（对比 D4 的路由快照同源问题）。
+- **代价**：多一个服务要部署；需新增 `gpu_usage` 成本记账与节点清单；本地档的合规审核需自建（供应商审核链路不覆盖）。
+
+## ADR-015 自建长任务的轮询从「worker 同步循环」改为 `gen.poll` 延时队列
+
+- **状态**：Proposed 2026-11-04（前置改造，见 self-hosted-video-inference.md §5.4）
+- **背景**：现有生成流水线在 `runGenerationTask` 内同步轮询，1s 间隔、硬上限 15 分钟（system-design §3.2）。自建 GPU 池的排队等待可超 15 分钟（会被误判 `vendor_timeout` + 解冻），且单条任务占满一个 worker 槽位，迫使 worker 并发被动等于 GPU 槽位数。
+- **决策**：submit 成功后投递 `gen.poll`（delay 3s），非终态按 3~5s（退避至 10s）重新入队；终态后在同一处理器里完成转存/打标/结算；看门狗超时阈值按路由分档（selfhost 45min / API 15min）。
+- **理由**：`gen.poll` 本就是 `RESERVED_QUEUES` 预留名（queues.ts:19），启用它是当初留名的目的；队列化后 worker 崩溃不再触发"重新 submit"（system-design §4 已知缺陷），GPU 侧 job_id 可续接。
+- **代价**：需同时补处理器与 `queue-topology.spec.ts` 守卫；轮询频率上升会放大 Redis 压力，靠退避与批量轮询控制。
+
+---
+
+## ADR-016 自带算力（BYOC）走「用户云账号 + 我方编排」，凭证不落库
+
+- **状态**：Accepted 2026-11-04（P0/P1 已落地：迁移 `0058_fleet`、`fleet` 模块、`/v1/compute/*`、`/compute` 页面；详见 [autodl-integration.md](autodl-integration.md) §9）
+- **背景**：希望让用户绑定自己的 GPU 云账号（天工云/同类）自行充值，我方按实际情况开卡、组池、全自动出片。已核实：**AutoDL 有容器实例 Pro API**（create / power_on / power_off / release / snapshot / save_image，`power_on` 可带开机执行命令），阿里云/腾讯云/火山有 OpenAPI + RAM 子账号；其余租卡平台待逐个取证。「散卡组多卡」在无 NVLink 的 PCIe 机器上加速比仅约 3.7×，不等于线性扩容，且 AutoDL Pro API 单实例最多 4 卡。
+- **决策**：
+  1. 新增 `fleet` 域（gpu_accounts / gpu_pools / gpu_nodes / gpu_jobs），与 `provider-management` 的「供应商 + Key」模型**分开**——一个是被调用的外部 API，一个是可创建/销毁的计算资源。
+  2. 两种模式同一套接口：**L1 引导**（用户自己开机，粘一行 join 命令自注册；**不存任何云凭证**）与 **L2 托管**（云 RAM 子账号 + `ExternalId` + STS 临时凭证，用完即弃，只落 RoleArn）。
+  3. join token 一次性、TTL 30min、绑定 pool；注册后换发 24h 轮换的节点证书；节点只能拉本池 job。
+  4. 池容量为 0 时新增 `waiting_for_capacity` 状态，**不得**判 `vendor_timeout`（用户关机会变成"生成失败"）。
+  5. `model_prices` 增加 `compute_source ∈ {hosted, byoc}`：BYOC 档只收平台费，算力由用户直付云厂商。
+  6. 机器来源默认走 **AutoDL 应用实例 API**（`autodl.art/api/v1/adl_dev`，`application_uuid` + `latest`），因为它用同一开发者 Token、用户零点击、权重由应用内公共模型软链接提供；私有镜像（`image_source=private`）保留给将来服务化自建。node agent 始终由开机 `start_command` 注入，不进镜像。
+- **理由**：把凭证风险从产品里摘掉（L1 根本不碰云凭证）；把"全自动"限定在有 API 的平台上，避免承诺做不到的事；算力与平台费分离，才能在 BYOC 档维持软件毛利而非负毛利。
+- **代价**：支持成本显著上升（驱动/镜像/磁盘/带宽/平台限制），必须靠白名单机型 + `doctor` 自检 + 官方镜像压住；BYOC 档 ARPU 低于托管档，只适合工作室/专业版。

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ArkVideoAdapter,
+  H3GatewayAdapter,
+  HttpVideoAdapter,
   LipSyncAdapter,
   MusicAdapter,
   POSTPROCESS_CODES,
@@ -99,4 +102,39 @@ describe("registry：mock 模式下后处理能力也能跑通端到端形状", 
     expect(state.status).toBe("succeeded");
     expect(state.results![0]?.uri.endsWith(".mp3")).toBe(true);
   }, 10_000);
+});
+
+describe("registry：路由协议优先于 adapter_code 前缀（P0 修复）", () => {
+  /**
+   * 回归的是 docs/02-architecture/autodl-integration.md §2.7 的隐患：
+   * `resolveAdapter` 原本只看 adapter_code 前缀，只要环境里配了 ARK_API_KEY，
+   * 同一套 `volcengine:*` 即使被路由到三方 OpenAI 兼容网关也会被抢回 Ark。
+   * 修复后：路由协议显式给出的 hint 优先，未给 hint 时保持旧行为。
+   */
+  it("有 http-video hint 时，全局 ARK Key 不再抢走路由", () => {
+    const adapter = resolveAdapter("volcengine:video", {
+      mode: "real",
+      ark: { apiKey: "ark-key", baseUrl: "http://ark.test" },
+      httpVideo: { baseUrl: "http://gw.test" },
+      adapterHint: "http-video",
+    });
+    expect(adapter).toBeInstanceOf(HttpVideoAdapter);
+  });
+
+  it("没有 hint 时保持旧行为（前缀 → Ark），不破坏既有部署", () => {
+    const adapter = resolveAdapter("volcengine:video", {
+      mode: "real",
+      ark: { apiKey: "ark-key", baseUrl: "http://ark.test" },
+    });
+    expect(adapter).toBeInstanceOf(ArkVideoAdapter);
+  });
+
+  it("h3:video 命中自建网关适配器；缺网关地址时硬失败（不静默 mock）", () => {
+    const adapter = resolveAdapter("h3:video", {
+      mode: "real",
+      h3: { baseUrl: "http://h3-gw.test" },
+    });
+    expect(adapter).toBeInstanceOf(H3GatewayAdapter);
+    expect(() => resolveAdapter("h3:video", { mode: "real" })).toThrow(/H3_GATEWAY_BASE_URL/);
+  });
 });

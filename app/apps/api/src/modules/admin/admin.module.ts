@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { FleetModule } from "../fleet/fleet.module";
 import { BillingModule } from "../billing/billing.module";
 import { AdminAccountsService } from "./admin-accounts.service";
 import { AdminAiLabelService } from "./admin-ai-label.service";
@@ -12,11 +13,12 @@ import { AdminGuard } from "./admin.guard";
 import { AdminOpsController, OpsConfigController } from "./admin-ops.controller";
 import { AdminProvidersController } from "./admin-providers.controller";
 import { AdminProvidersService } from "./admin-providers.service";
+import { AdminFleetController } from "./admin-fleet.controller";
 import { AdminService } from "./admin.service";
 
 @Module({
   // 退款是运营动作：管理端直接复用 BillingService.refundOrder（订单/积分/渠道一致性逻辑只有一处）
-  imports: [BillingModule],
+  imports: [BillingModule, FleetModule],
   controllers: [
     AdminAuthController,
     AdminController,
@@ -31,6 +33,8 @@ import { AdminService } from "./admin.service";
     AdminAiLabelController,
     // 供应商接入（控制面）：Key 加密、测试连接、模型发现、路由
     AdminProvidersController,
+    // 机队（BYOC）：只读 + 强制关机，不代开机器
+    AdminFleetController,
   ],
   providers: [
     AdminAuthService,

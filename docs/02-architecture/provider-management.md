@@ -119,6 +119,7 @@ export interface ProviderConnector {
 | `openai-compatible` | `api` | Bearer / 自定义 header | `GET {base}/v1/models`；base 已以 `/v1` 结尾时不重复拼接 |
 | `ark` | `manual`（待官方取证再评估 `hybrid`） | Bearer | 录入 `ep-xxx` / 模型 ID；当前适配器已支持 `modelMap` |
 | `http-video` | `manual` | Bearer 可选 | submit/poll/cancel 路径由供应商配置 |
+| `jianying` | `manual` | Bearer（= 网关 `API_KEYS`） | 剪影生图网关：**同步出图**（无 vendor_task_id）、只有 `image` 能力、效果 id 是私有权表；不复用 `openai-compatible`（那条分支按 capability 分 text/video）。见 [jianying-gateway-integration](jianying-gateway-integration.md) |
 | `custom:<name>` | 由 connector 声明 | 由 connector 声明 | 新增协议 = 新文件 + fixture 测试，不加数据库字段 |
 
 > Ark 是否存在可用的官方模型列表接口，必须在实施前用官方文档/实测确认。没有证据时，

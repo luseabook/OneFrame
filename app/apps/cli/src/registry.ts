@@ -900,16 +900,7 @@ const pendingCommands: CommandSpec[] = [
     write: true,
     }),
   // 市场 / 广告 / 重绘 / AI 工具（后续批次）
-  http("market", "list", "GET", "market/scripts", "市场剧本列表", "commands/market.md:27", {
-    queryKeys: ["page", "page_size", "keyword", "category_id", "sort"],
-    }),
-  http("market", "get", "GET", "market/scripts/{nm_id}/detail", "市场剧本详情", "commands/market.md:51", {
-    slots: ["nm_id"],
-    positionals: [{ display: "NM_ID", desc: "市场剧本 ID", required: true }],
-    }),
-  http("market", "mine", "GET", "market/creator/works", "我的上架作品", "commands/market.md:99", {
-    queryKeys: ["page", "page_size", "status"],
-    }),
+  // 市场（market）已按 D6（2026-11-04）整体移除，后端无对应路由；CLI 不再保留"永远 404"的命令。
   // 广告剧（ad）—— 第 70 批接线。竞品 CLI 一共 8 个子命令（`commands/ad.md:22-31`），
   // 端点第 44 批就已在 `apps/api/src/modules/ad/ad-drama.controller.ts`（`@Controller("ad-drama")`）
   // 落地，但 CLI 侧 3 条 `todo` 一直写着「当前无端点」。**这 3 条 reason 是过期的**：
@@ -1033,7 +1024,6 @@ export const GROUP_ORDER: readonly string[] = [
   "team",
   "agent",
   "novel",
-  "market",
   "ad",
   "redraw",
   "ai",

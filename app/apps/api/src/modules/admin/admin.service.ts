@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import {
   adminUsers,
   contentReports,

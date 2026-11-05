@@ -32,6 +32,16 @@ export const ErrorCode = {
   VENDOR_ERROR: 745900,
   VENDOR_TIMEOUT: 745901,
 
+  // 7462xx：机队 / 自带算力（BYOC）。设计见 docs/02-architecture/autodl-integration.md §2.6
+  FLEET_TOKEN_INVALID: 746201, // Token 失效/无权限，需重新绑定
+  FLEET_TOKEN_REQUIRED: 746202, // 选了自带算力档但未绑定账号
+  FLEET_QUOTA_EXCEEDED: 746203, // 平台配额/库存不足
+  FLEET_PROVISION_FAILED: 746204, // 创建/开机失败
+  FLEET_NODE_TIMEOUT: 746205, // 节点无法在时限内就绪
+  FLEET_BUDGET_EXCEEDED: 746206, // 用户自设预算触顶
+  FLEET_IMAGE_NOT_READY: 746207, // 运行环境未构建（首次需 build + save_image）
+  FLEET_PROVIDER_ERROR: 746208, // 云平台返回非 Success
+
   IDEMPOTENT_REPLAY: 746001,
   VERSION_CONFLICT: 746002, // Ph3 画布；对应 RE CLI exit 9
   NODE_LOCKED: 746003, // Ph3 画布；对应 RE CLI exit 10

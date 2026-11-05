@@ -1,0 +1,11 @@
+.venv
+venv
+data
+tools
+apk_work
+*.apk
+*.zip
+__pycache__
+*.pyc
+*.log
+.git

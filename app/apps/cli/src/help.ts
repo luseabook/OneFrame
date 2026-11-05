@@ -35,7 +35,6 @@ const GROUP_SUMMARY: Record<string, string> = {
   team: "团队",
   agent: "智能体会话",
   novel: "小说改写（novel 批次）",
-  market: "市场（market 批次）",
   ad: "广告（ad 批次）",
   redraw: "重绘（redraw 批次）",
   ai: "AI 工具（ai 批次）",

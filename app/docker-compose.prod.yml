@@ -165,6 +165,34 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # 剪影生图网关（第三方逆向协议，OpenAI 兼容、同步出图）
+  # 见 docs/02-architecture/jianying-gateway-integration.md
+  #
+  # 三条硬约束，改之前先读文档 §2：
+  # 1. **不 publish 端口**：只用 compose 内网给 worker 调。暴露到宿主机等于把
+  #    「能消耗上游额度」的接口交给任何人都能访问的网段；
+  # 2. env_file 里的 `REMOVE_WATERMARK` 必须是 false（.env.example 已强制写死并注释）；
+  # 3. `.env` 不入库、必须部署时生成（API_KEYS 留空 = 网关无鉴权）。
+  jianying-gateway:
+    build:
+      context: ./services/jianying-gateway
+      dockerfile: Dockerfile
+    env_file:
+      - ./services/jianying-gateway/.env
+    environment:
+      # 容器内必须监听 0.0.0.0，否则 worker 跨容器调不通（宿主机不发布，见上）
+      HOST: "0.0.0.0"
+      PORT: "8788"
+      # 双保险：env_file 被人改坏了也不擦上游 AI 标识
+      REMOVE_WATERMARK: "false"
+      DATA_DIR: /app/data
+    expose:
+      - "8788"
+    volumes:
+      # 生成图/上传图的本地缓存（TTL 24h 自清）。生产建议换成命名卷或直接不挂
+      - jianying-data:/app/data
+    restart: unless-stopped
+
   web:
     build:
       context: .
@@ -223,3 +251,5 @@ volumes:
   pgdata:
   redisdata:
   miniodata:
+  # 剪影网关的本地图片缓存（TTL 24h 自清；命名卷避免容器重建即丢在途转存）
+  jianying-data:

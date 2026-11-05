@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { DbHandle } from "@app/db";
-import { assets, creditAccounts, creditFlows, orders, taskShares, tasks, timelinePublications } from "@app/db";
+import { assets, creditAccounts, creditFlows, extractionTasks, orders, taskShares, tasks, timelinePublications } from "@app/db";
 import { creditIn } from "@app/db";
 import { newId } from "@app/shared";
 
@@ -460,6 +460,19 @@ export async function purgeOldData(db: Db, log: MaintenanceLogger): Promise<{
     .set({ results: [], updatedAt: new Date() })
     .where(and(eq(tasks.status, 3), lt(tasks.updatedAt, resultCutoff), sql`jsonb_array_length(${tasks.results}) > 0`))
     .returning({ id: tasks.id });
+
+  // 物理清理回收站资产前先断开抽取任务对它的引用：`extraction_tasks.source_asset_id`
+  // 是无级联的 RESTRICT 外键，直接删资产会让整轮清理卡在 FK 上（dev 库有历史抽取记录即复现）。
+  // 置空而不是删任务：抽取历史仍可追溯（source_uri 尚在）。
+  const staleAssetIds = db
+    .select({ id: assets.id })
+    .from(assets)
+    .where(and(isNotNull(assets.deletedAt), lt(assets.deletedAt, new Date(Date.now() - 7 * 86_400_000))));
+
+  await db
+    .update(extractionTasks)
+    .set({ sourceAssetId: null })
+    .where(inArray(extractionTasks.sourceAssetId, staleAssetIds));
 
   const deletedAssets = await db
     .delete(assets)

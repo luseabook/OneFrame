@@ -390,6 +390,12 @@ export const models = pgTable(
     modeOrder: jsonb("mode_order").notNull().default({}),
     modes: jsonb("modes").notNull().default({}),
     sceneModes: jsonb("scene_modes").notNull().default({}),
+    /**
+     * 算力来源（docs/02-architecture/autodl-integration.md §2.7）：
+     * `hosted` 我方付供应商；`byoc` 用户自带云账号；`either` 两者皆可，由价目档位决定。
+     * 目录里只描述"默认走哪条"，真正的授权仍由 model_prices/model_routes 上的同名列决定。
+     */
+    computeSource: text("compute_source").notNull().default("hosted"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -410,12 +416,14 @@ export const modelPrices = pgTable(
     strikeCredits: integer("strike_credits"),
     memberCredits: integer("member_credits"), // Beta VIP 启用
     timeLimitedCredits: integer("time_limited_credits"),
+    /** hosted | byoc：同模型同档位可有两个价（平台算力价 / 自带算力价，后者只含平台费） */
+    computeSource: text("compute_source").notNull().default("hosted"),
     active: boolean("active").notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("uq_model_prices").on(t.modelId, t.mode, t.resolution, t.durationS),
+    uniqueIndex("uq_model_prices").on(t.modelId, t.mode, t.resolution, t.durationS, t.computeSource),
     /**
      * 按次计价的档位单独约束。
      *
@@ -425,7 +433,7 @@ export const modelPrices = pgTable(
      * ——等于扣费金额不确定。部分索引才真正锁住"同一档位只有一条价"。
      */
     uniqueIndex("uq_model_prices_per_call")
-      .on(t.modelId, t.mode, t.resolution)
+      .on(t.modelId, t.mode, t.resolution, t.computeSource)
       .where(sql`${t.durationS} is null`),
     index("idx_model_prices_model").on(t.modelId, t.mode),
   ],
@@ -497,6 +505,8 @@ export const modelRoutes = pgTable(
     remoteModelId: text("remote_model_id").notNull(),
     priority: integer("priority").notNull().default(100),
     weight: integer("weight").notNull().default(100),
+    /** 该路由服务的算力来源：hosted（供应商 API）| byoc（用户自带 GPU 池） */
+    computeSource: text("compute_source").notNull().default("hosted"),
     active: boolean("active").notNull().default(true),
     options: jsonb("options").notNull().default({}),
     createdAt: createdAt(),
@@ -507,6 +517,135 @@ export const modelRoutes = pgTable(
     index("idx_model_routes_model").on(t.modelId, t.active, t.priority),
     index("idx_model_routes_provider").on(t.providerId, t.active),
   ],
+);
+
+// ── 机队 / 自带算力（BYOC，设计见 docs/02-architecture/autodl-integration.md）──
+// 用户用自己的 AutoDL 账号买卡，我方只做编排：绑 Token → 开机 → 注册节点 → 出片 → 关机。
+// 与 model_providers 的区别：那是有 Key 就能调的**外部 API**；这是可创建/销毁、按卡时计费的**计算资源**。
+
+/** 用户绑定的云账号；Token 只存密文（AES-256-GCM，与 provider 同口径） */
+export const gpuAccounts = pgTable(
+  "gpu_accounts",
+  {
+    id: pk(),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    spaceId: bigint("space_id", { mode: "bigint" }).references(() => spaces.id),
+    provider: text("provider").notNull().default("autodl"),
+    /** 密文（base64）；绝不回传前端 */
+    tokenCiphertext: text("token_ciphertext").notNull(),
+    encryptionKeyId: text("encryption_key_id").notNull().default("v1"),
+    credentialVersion: integer("credential_version").notNull().default(1),
+    /** 仅末 4 位，用于"是不是同一个 Token"的展示 */
+    tokenHint: text("token_hint").notNull().default(""),
+    tokenFingerprint: text("token_fingerprint").notNull().default(""),
+    status: smallint("status").notNull().default(1), // 1 有效 / 0 已吊销
+    lastCheckAt: timestamp("last_check_at", { withTimezone: true }),
+    lastCheckStatus: text("last_check_status"),
+    consentVersion: text("consent_version").notNull().default("v1"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_gpu_accounts_user").on(t.userId, t.provider)],
+);
+
+/** 逻辑池：一个用户一个池（v1），池里可以有多台节点 */
+export const gpuPools = pgTable(
+  "gpu_pools",
+  {
+    id: pk(),
+    accountId: bigint("account_id", { mode: "bigint" })
+      .notNull()
+      .references(() => gpuAccounts.id, { onDelete: "cascade" }),
+    userId: bigint("user_id", { mode: "bigint" })
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    /** AutoDL gpu_spec_uuid：v-48g / 4090D / 5090-p / h800 / pro6000-p */
+    gpuSpec: text("gpu_spec").notNull().default("v-48g"),
+    gpuCount: integer("gpu_count").notNull().default(1), // AutoDL 上限 4
+    /**
+     * 机器来源（2026-11-05 实测后的口径）：
+     * - `app`：AutoDL 应用实例 API（`application_uuid` + `application_version`），社区/我方应用都走这条，
+     *   用户零点击；权重由应用的公共模型挂载提供，无需下载、无需扩盘
+     * - `private`：私有镜像（`image_uuid`），用于以后自建服务化镜像
+     */
+    imageSource: text("image_source").notNull().default("app"),
+    /** 应用 UUID（应用详情页可见）；imageSource=app 时必填 */
+    applicationUuid: text("application_uuid"),
+    /** 应用版本；`latest` 表示跟随作者最新版，正式环境应 pin 一个具体版本 */
+    applicationVersion: text("application_version").notNull().default("latest"),
+    /** 私有镜像 UUID；imageSource=private 时必填 */
+    imageUuid: text("image_uuid"),
+    systemDiskGb: integer("system_disk_gb").notNull().default(50),
+    lifecycle: text("lifecycle").notNull().default("session"), // session|on_demand|always_on|scheduled
+    idleMinutes: integer("idle_minutes").notNull().default(15),
+    budgetDailyCents: integer("budget_daily_cents").notNull().default(5000),
+    budgetMonthCents: integer("budget_month_cents").notNull().default(50000),
+    state: text("state").notNull().default("idle"), // idle|provisioning|ready|frozen
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("uq_gpu_pools_user").on(t.userId), index("idx_gpu_pools_state").on(t.state)],
+);
+
+/** 实例：生命周期状态机见 autodl-integration.md §4.2 */
+export const gpuNodes = pgTable(
+  "gpu_nodes",
+  {
+    id: pk(),
+    poolId: bigint("pool_id", { mode: "bigint" })
+      .notNull()
+      .references(() => gpuPools.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().default("autodl"),
+    providerInstanceId: text("provider_instance_id").notNull().unique(), // pro-xxxx
+    /** 我方可读实例名：oneframe-p{poolId}-{rand}，用于孤儿对账 */
+    instanceName: text("instance_name").notNull().default(""),
+    gpuSpec: text("gpu_spec").notNull(),
+    vramGb: integer("vram_gb").notNull().default(48),
+    /**
+     * provisioning|booting|loading|ready|busy|draining|stopping|stopped|destroyed|error
+     * （子阶段，不是 tasks.status 的扩展——任务主状态仍是 1~7）
+     */
+    state: text("state").notNull().default("provisioning"),
+    hourlyPriceCents: integer("hourly_price_cents").notNull().default(0),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
+    agentVersion: text("agent_version"),
+    modelCommit: text("model_commit"),
+    variantsLoaded: text("variants_loaded").array().notNull().default(sql`'{}'::text[]`),
+    costAccruedCents: integer("cost_accrued_cents").notNull().default(0),
+    errorCode: text("error_code"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("idx_gpu_nodes_pool_state").on(t.poolId, t.state)],
+);
+
+/** 任务↔节点账：账单报告与预算累计的事实来源 */
+export const gpuJobs = pgTable(
+  "gpu_jobs",
+  {
+    id: pk(),
+    taskId: bigint("task_id", { mode: "bigint" })
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    poolId: bigint("pool_id", { mode: "bigint" })
+      .notNull()
+      .references(() => gpuPools.id, { onDelete: "cascade" }),
+    nodeId: bigint("node_id", { mode: "bigint" }).references(() => gpuNodes.id, { onDelete: "set null" }),
+    queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    gpuSeconds: integer("gpu_seconds").notNull().default(0),
+    costCents: integer("cost_cents").notNull().default(0),
+    status: text("status").notNull().default("queued"), // queued|running|succeeded|failed|cancelled
+    failCode: text("fail_code"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("idx_gpu_jobs_task").on(t.taskId), index("idx_gpu_jobs_pool_time").on(t.poolId, t.createdAt)],
 );
 
 // ── 任务结果文件夹（B7；竞品 result/folder 的本地落地）──

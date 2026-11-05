@@ -47,6 +47,7 @@ const PROTOCOLS = [
   { value: "openai-compatible", label: "OpenAI 兼容", hint: "GET /v1/models 自动发现" },
   { value: "ark", label: "火山方舟 Ark", hint: "手工录入 ep-xxx / 模型 ID" },
   { value: "http-video", label: "HTTP 视频网关", hint: "手工录入模型 ID" },
+  { value: "jianying", label: "剪影生图网关", hint: "手工录入模型别名（如 jianying-draw）" },
 ] as const;
 
 const rows = ref<ProviderRow[]>([]);
