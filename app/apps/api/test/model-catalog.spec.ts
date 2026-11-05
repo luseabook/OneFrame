@@ -5,10 +5,15 @@
  * 目录的消费方（`GET /models`、`credits.price`、画布节点派生、分镜出片）读的都是 DB 行。
  * seed 字面量对但没落库、或落库时被 upsert 弄丢字段，只有查库能发现。
  *
+ * 另有**非竞品**的行不进这 46 条：`toolbox-*`（工具箱单点能力）与 `jianying-draw`
+ * （剪影生图网关，第三方通道，见文末独立 describe）。它们的档位/价格同样要验，
+ * 只是"对齐竞品目录"这个断言不能把它们算进去。
+ *
  * 前置：`pnpm --filter @app/api db:seed` 已跑过（scripts/verify-model-catalog.mjs 会自动跑）。
  */
 import { describe, expect, it, beforeAll } from "vitest";
-import { createDb, models } from "@app/db";
+import { eq } from "drizzle-orm";
+import { createDb, modelPrices, models } from "@app/db";
 
 interface ModeRow {
   endpoint: string;
@@ -27,6 +32,10 @@ type ModelRow = typeof models.$inferSelect;
 
 let rows: ModelRow[] = [];
 let byName: Map<string, ModelRow> = new Map();
+/** 全表（含 toolbox-* 与第三方通道），供非竞品行单独验收 */
+let allRows: ModelRow[] = [];
+let jianyingRow: ModelRow | undefined;
+let jianyingPrices: Array<typeof modelPrices.$inferSelect> = [];
 
 beforeAll(async () => {
   const { db, pool } = createDb(process.env.DATABASE_URL ?? "");
@@ -42,8 +51,13 @@ beforeAll(async () => {
      * 但 `db.select().from(models)` 是直读全表，会把它们算进来。
      * 因此**在本 spec 的取数层面**限定到竞品目录；46 这个数字与它的全部断言不动。
      */
-    rows = all.filter((row) => !row.name.startsWith("toolbox-"));
+    allRows = all;
+    rows = all.filter((row) => !row.name.startsWith("toolbox-") && row.vendor !== "jianying");
     byName = new Map(rows.map((row) => [row.name, row]));
+    jianyingRow = all.find((row) => row.name === "jianying-draw");
+    if (jianyingRow) {
+      jianyingPrices = await db.select().from(modelPrices).where(eq(modelPrices.modelId, jianyingRow.id));
+    }
   } finally {
     await pool.end();
   }
@@ -322,5 +336,62 @@ describe("目录字段完整性（前端全靠这些字段渲染表单）", () =
     expect(byName.get("seedance-2.5")!.displayName).toBe("Seedance 2.5");
     expect(byName.get("tgi-2")!.displayName).toBe("TGI 2");
     expect(byName.get("wan-3.0")!.displayName).toBe("Wan 3.0");
+  });
+});
+
+/**
+ * 第三方通道 `jianying-draw`：**不计入竞品对齐的 46 条**（它不对应任何竞品 SKU），
+ * 但同样必须落库且档位自洽——否则运营在后台点了上架，用户看得见模型却永远报
+ * 「no price for requested model/mode/options」。
+ *
+ * 这条模型是剪影生图网关的入口（docs/02-architecture/jianying-gateway-integration.md）：
+ * 上游只有 3 张画布，所以 ratios 必须恰好是 1:1/4:3/3:4；蒙版重绘本批未接线，所以
+ * image2image 的 media_limits.image 必须是 1（多传一张会被适配器判成"要重绘"而报错）。
+ */
+describe("第三方通道 jianying-draw（非竞品目录，单独验收）", () => {
+  it("已落库、可见、图像能力、adapter_code 指向新协议族", () => {
+    expect(jianyingRow, "seeded model jianying-draw not found（先跑 db:seed）").toBeDefined();
+    const row = jianyingRow!;
+    expect(row.visible).toBe(true);
+    expect(row.vendor).toBe("jianying");
+    expect(row.capability).toBe("image");
+    expect(row.adapterCode).toBe("jianying:image");
+  });
+
+  it("只暴露 3 个上游原生画幅（16:9 之类是裁切产物，不许进目录骗构图）", () => {
+    const modes = modesOf(jianyingRow!);
+    expect(modes.text2image!.ratios).toEqual(["1:1", "4:3", "3:4"]);
+    expect(modes.image2image!.ratios).toEqual(["1:1", "4:3", "3:4"]);
+    expect(modes.text2image!.resolution_options.map((option) => option.value)).toEqual(["1K", "2K"]);
+    expect(modes.text2image!.counts).toEqual([1, 2, 3, 4]);
+  });
+
+  it("图生图参考图上限 1（第 2 张是我方约定的蒙版位，本批未接线）", () => {
+    expect(modesOf(jianyingRow!).image2image!.media_limits?.image).toBe(1);
+  });
+
+  it("每个可提交档位都有价（缺价即 745701，用户永远下不了单）", () => {
+    const modes = modesOf(jianyingRow!);
+    for (const [mode, cfg] of Object.entries(modes)) {
+      for (const option of cfg.resolution_options) {
+        const hit = jianyingPrices.find((price) => price.mode === mode && price.resolution === option.value);
+        expect(hit, `jianying-draw ${mode}/${option.value} 无价`).toBeDefined();
+      }
+    }
+  });
+
+  it("全表里「可提文生图」的图像模型 = 竞品 9 条 + 这条第三方 = 10 条", () => {
+    const canvasCapable = allRows
+      .filter(
+        (row) =>
+          row.capability === "image" &&
+          Object.hasOwn(modesOf(row), "text2image") &&
+          !Object.hasOwn(modesOf(row), "studio_asset_image"),
+      )
+      .map((row) => row.name)
+      .sort();
+    // 竞品那 9 条仍然互斥且一条不少（见上方「场景隔离」describe）；多出的正是第三方通道
+    expect(canvasCapable).toHaveLength(10);
+    expect(canvasCapable).toContain("jianying-draw");
   });
 });
