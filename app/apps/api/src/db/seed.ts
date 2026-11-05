@@ -1729,10 +1729,34 @@ const SKU_SEED: SkuSeed[] = [
   { sku: "studio-year", label: "Studio 会员 · 年", priceCents: 249900, credits: 72000, kind: "vip", period: "year" },
 ];
 
+/**
+ * `--only-new`：只插不改（生产部署补新模型时用）。
+ * 见下方事务里的注释：默认模式会覆盖运营改过的目录字段并重建价格。
+ */
+const ONLY_NEW = process.argv.includes("--only-new");
+
 async function main(): Promise<void> {
   const modelIds = MODEL_SEED.map((m) => m.id);
   await db.transaction(async (tx) => {
+    /**
+     * `--only-new`：只插不改。
+     *
+     * 为什么生产部署必须用它：默认模式下每个模型都是 `onConflictDoUpdate(除 id 外全部字段)`
+     * ——会把运营在后台改过的 `visible` / `sort` / `modes` / `description` 整段刷回 seed 值；
+     * 价格更是 **按模型 delete + insert 重建**，等于把所有运营调价抹平。
+     * 上线只想"给新模型补一行"时用 `pnpm --filter @app/api db:seed -- --only-new`。
+     */
+    const newlyInserted: bigint[] = [];
     for (const model of MODEL_SEED) {
+      if (ONLY_NEW) {
+        const [row] = await tx
+          .insert(models)
+          .values(model)
+          .onConflictDoNothing({ target: models.name })
+          .returning({ id: models.id });
+        if (row) newlyInserted.push(row.id);
+        continue;
+      }
       const { id: _id, ...updatable } = model;
       await tx
         .insert(models)
@@ -1745,42 +1769,61 @@ async function main(): Promise<void> {
      * 为什么：`uq_model_prices` 含 `duration_s`，而 PostgreSQL 把 NULL 视为互不相同，
      * 按次计价的档位无法靠该唯一键去重（详见 schema.ts 里 `uq_model_prices_per_call`
      * 部分索引的注释）。整段重建才是幂等的——连续跑两次 seed，价格行数不变。
+     *
+     * `--only-new` 下反过来：只给**本次新插进来的模型**建价，不 delete 任何既有行。
      */
-    await tx.delete(modelPrices).where(inArray(modelPrices.modelId, modelIds));
-    if (PRICE_SEED.length > 0) {
-      await tx.insert(modelPrices).values(PRICE_SEED);
+    if (ONLY_NEW) {
+      const newIds = new Set(newlyInserted.map((id) => String(id)));
+      const newPrices = PRICE_SEED.filter((price) => newIds.has(String(price.modelId)));
+      if (newPrices.length > 0) await tx.insert(modelPrices).values(newPrices);
+    } else {
+      await tx.delete(modelPrices).where(inArray(modelPrices.modelId, modelIds));
+      if (PRICE_SEED.length > 0) {
+        await tx.insert(modelPrices).values(PRICE_SEED);
+      }
+    }
+
+    return newlyInserted;
+  }).then((newIds) => {
+    if (ONLY_NEW) {
+      console.log(`[seed] --only-new：本次新增模型 ${newIds.length} 个（既有目录与既有价一律未动）`);
     }
   });
 
-  // SKU 目录：按 sku 唯一键 upsert，幂等
+  // SKU 目录：按 sku 唯一键 upsert，幂等；`--only-new` 下改成只插不改
   for (const s of SKU_SEED) {
-    await db
-      .insert(skus)
-      .values({
-        id: BigInt(Date.now()) * 1000n + BigInt(SKU_SEED.indexOf(s)),
+    const row = {
+      id: BigInt(Date.now()) * 1000n + BigInt(SKU_SEED.indexOf(s)),
+      kind: s.kind ?? "credits",
+      period: s.period ?? null,
+      active: true,
+      sku: s.sku,
+      label: s.label,
+      priceCents: s.priceCents,
+      credits: s.credits,
+    };
+    if (ONLY_NEW) {
+      await db.insert(skus).values(row).onConflictDoNothing({ target: skus.sku });
+      continue;
+    }
+    await db.insert(skus).values(row).onConflictDoUpdate({
+      target: skus.sku,
+      set: {
         kind: s.kind ?? "credits",
         period: s.period ?? null,
-        active: true,
-        sku: s.sku,
         label: s.label,
         priceCents: s.priceCents,
         credits: s.credits,
-      })
-      .onConflictDoUpdate({
-        target: skus.sku,
-        set: {
-          kind: s.kind ?? "credits",
-          period: s.period ?? null,
-          label: s.label,
-          priceCents: s.priceCents,
-          credits: s.credits,
-          active: true,
-          updatedAt: new Date(),
-        },
-      });
+        active: true,
+        updatedAt: new Date(),
+      },
+    });
   }
 
-  console.log(`[seed] models=${MODEL_SEED.length}, prices=${PRICE_SEED.length}, skus=${SKU_SEED.length}`);
+  console.log(
+    `[seed] models=${MODEL_SEED.length}, prices=${PRICE_SEED.length}, skus=${SKU_SEED.length}` +
+      (ONLY_NEW ? "（--only-new：只插不改，既有行与既有价一律不动）" : ""),
+  );
   process.exitCode = 0;
 }
 

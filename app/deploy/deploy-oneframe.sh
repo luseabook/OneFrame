@@ -96,8 +96,57 @@ api)
     chown -R oneframe:oneframe dist
     systemctl restart oneframe-api && sleep 6 && systemctl is-active oneframe-api"
   ;;
+worker)
+  # 为什么需要独立分支：worker 的代码在 apps/worker，但它**通过 node_modules 软链吃
+  # packages/*/dist**。只传 apps/worker/dist 会让 provider-runtime 拿到旧适配器
+  # （典型症状：新加的 h3 `audio` 字段发不出去、新 adapter 报 unknown code），
+  # 而 api/web 那边看起来一切正常——线上表现为"功能没生效但没报错"。
+  say "本地构建 worker 及其 workspace 依赖"
+  pnpm --filter @app/shared build
+  pnpm --filter @app/db build
+  pnpm --filter @app/model-adapters build
+  pnpm --filter @app/worker build
+
+  say "暂存（四个 dist 同名，必须按相对路径分开装，否则打成一坨互相覆盖）"
+  STAGE="$TMP/worker-bundle"
+  mkdir -p "$STAGE/apps/worker" "$STAGE/packages"
+  cp -R apps/worker/dist "$STAGE/apps/worker/dist"
+  cp apps/worker/package.json "$STAGE/apps/worker/package.json"
+  for pkg in shared db model-adapters; do
+    mkdir -p "$STAGE/packages/$pkg"
+    cp -R "packages/$pkg/dist" "$STAGE/packages/$pkg/dist"
+  done
+  tar czf "$TMP/worker-bundle.tar.gz" -C "$STAGE" .
+  echo "  包内条目：$(tar tzf "$TMP/worker-bundle.tar.gz" | wc -l)"
+
+  say "上传并逐个原子切换（旧目录留 .bak-<stamp>，失败可秒回）"
+  scp "$TMP/worker-bundle.tar.gz" "$HOST:/tmp/worker-bundle.tar.gz"
+  ssh "$HOST" "set -e
+    cd $APP_DIR
+    rm -rf .bundle-$STAMP && mkdir -p .bundle-$STAMP
+    tar xzf /tmp/worker-bundle.tar.gz -C .bundle-$STAMP
+    test -f .bundle-$STAMP/apps/worker/dist/main.js
+    test -d .bundle-$STAMP/packages/shared/dist
+    test -d .bundle-$STAMP/packages/db/dist
+    test -d .bundle-$STAMP/packages/model-adapters/dist
+    mv apps/worker/dist apps/worker/dist.bak-$STAMP 2>/dev/null || true
+    mv .bundle-$STAMP/apps/worker/dist apps/worker/dist
+    mv packages/shared/dist packages/shared/dist.bak-$STAMP 2>/dev/null || true
+    mv .bundle-$STAMP/packages/shared/dist packages/shared/dist
+    mv packages/db/dist packages/db/dist.bak-$STAMP 2>/dev/null || true
+    mv .bundle-$STAMP/packages/db/dist packages/db/dist
+    mv packages/model-adapters/dist packages/model-adapters/dist.bak-$STAMP 2>/dev/null || true
+    mv .bundle-$STAMP/packages/model-adapters/dist packages/model-adapters/dist
+    chown -R oneframe:oneframe apps/worker/dist packages/shared/dist packages/db/dist packages/model-adapters/dist
+    rm -rf .bundle-$STAMP
+    echo '  switched; previous kept as *.bak-'$STAMP"
+
+  say "重启并等待就绪"
+  ssh "$HOST" "systemctl restart oneframe-worker && sleep 6 && systemctl is-active oneframe-worker"
+  ;;
+
 *)
-  echo "未知目标：$WHAT（只支持 web / api）"; exit 1 ;;
+  echo "未知目标：$WHAT（只支持 web / api / worker）"; exit 1 ;;
 esac
 
 if [ "$SKIP_VERIFY" != "--skip-verify" ]; then
@@ -109,7 +158,8 @@ if [ "$SKIP_VERIFY" != "--skip-verify" ]; then
     echo "  基准绑定 commit=$COMMIT（生成端只记录，判红在校验端）"
     python deploy/server/artifact_digest.py --json --commit "$COMMIT" \
       "api=apps/api/dist" "worker=apps/worker/dist" \
-      "db=packages/db/dist" "web=apps/web/.output" > "$TMP/artifacts.json"
+      "db=packages/db/dist" "adapters=packages/model-adapters/dist" \
+      "web=apps/web/.output" > "$TMP/artifacts.json"
     cat "$TMP/artifacts.json"
     scp -q "$TMP/artifacts.json" "$HOST:$APP_DIR/.artifacts.json"
     ssh "$HOST" "echo '$COMMIT' > $APP_DIR/.deploy-commit"

@@ -311,6 +311,7 @@ BASE_DIST_API="${BASE_DIST_API:-/srv/oneframe/app/apps/api/dist}"
 BASE_DIST_WORKER="${BASE_DIST_WORKER:-/srv/oneframe/app/apps/worker/dist}"
 BASE_DIST_DB="${BASE_DIST_DB:-/srv/oneframe/app/packages/db/dist}"
 BASE_DIST_WEB="${BASE_DIST_WEB:-/srv/oneframe/app/apps/web/.output}"
+BASE_DIST_ADAPTERS="${BASE_DIST_ADAPTERS:-/srv/oneframe/app/packages/model-adapters/dist}"
 # 规则 7：三个产物各自要有①本次改动的可辨识标记②构建时间。
 # 为什么必须逐产物：drizzle/ 缺 0054、worker/dist 停在旧版、web 残留测试代理，
 # 三次的失败形态都是「静默缺失」，没有一个会报错。
@@ -320,9 +321,9 @@ BASELINE="${BASELINE:-/srv/oneframe/app/.artifacts.json}"
 CMP="$HERE/compare_artifacts.py"
 [ -f "$CMP" ] || CMP="/srv/oneframe/app/deploy/server/compare_artifacts.py"
 if [ -f "$CMP" ] && command -v python3 >/dev/null 2>&1; then
-  cmp_out=$(python3 "$CMP" "$BASELINE"     "api=$BASE_DIST_API" "worker=$BASE_DIST_WORKER" "db=$BASE_DIST_DB" "web=$BASE_DIST_WEB" 2>&1)
+  cmp_out=$(python3 "$CMP" "$BASELINE"     "api=$BASE_DIST_API" "worker=$BASE_DIST_WORKER" "db=$BASE_DIST_DB" "adapters=$BASE_DIST_ADAPTERS" "web=$BASE_DIST_WEB" 2>&1)
   echo "$cmp_out" | sed 's/^/   /'
-  if echo "$cmp_out" | grep -q '\[FAIL\]'; then bad "产物与构建机基准不一致（见上）"; else ok "四个产物 sha256 与基准一致"; fi
+  if echo "$cmp_out" | grep -q '\[FAIL\]'; then bad "产物与构建机基准不一致（见上）"; else ok "五个产物 sha256 与基准一致"; fi
 else
   skip "缺 compare_artifacts.py 或 python3，跳过 sha256 核对"
 fi
