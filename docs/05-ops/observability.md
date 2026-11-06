@@ -1,6 +1,7 @@
 # 可观测性
 
-> v1.2 · 2026-10-25 · Sentry + 结构化请求日志（request_id 串联）+ Prometheus 指标 + 业务看板
+> v1.2 · 2026-10-25 · 结构化请求日志（request_id 串联）+ Prometheus 指标 + 业务看板
+> v1.3 · 2026-11-06 · 现状校正：指标名与代码对齐；Sentry **尚未接入**（文中 §5 仅为预案）
 > v1.2 变更：**request_id 结构化请求日志落地**（`apps/api/src/common/logging`），补齐字段表、脱敏规则与告警口径；
 > 与 `docs/06-security-compliance/launch-checklist.md` 的 LOG-01~LOG-05 条目一一对应。
 > v1.1 变更：Sentry 改境内/自建（compliance D4，RE-16）；新增 AI 标识后处理失败率指标（RE-07）
@@ -75,14 +76,23 @@
 
 RED 三件套/API 路由 + 队列 + 供应商：
 
+实际由 `GET /v1/metrics` 直出（`apps/api/src/health/metrics.controller.ts`，手写 Prometheus 文本格式）：
+
 ```
-http_request_duration_seconds{route,method,status}   # P50/P95（由请求日志 duration_ms 聚合）
-http_request_total{route,method,status}
-queue_depth{queue} · queue_age_seconds{queue}         # 仅 4 条实队列：gen.submit/export.zip/timeline.export/publish.transcode
-task_status_total{from,to}                            # 状态机迁移计数
-vendor_request_duration{vendor,op} · vendor_error_total{vendor,code}
-credits_frozen / credits_settled / credits_unfrozen (counter)
+oneframe_tasks_total{status=…}                # 任务状态分布（各状态一条）
+oneframe_tasks_15m                            # 近 15 分钟任务数
+oneframe_failure_ratio_15m                    # 近 15 分钟失败率
+oneframe_orders_stale_pending                 # 超时未支付订单
+oneframe_orders_paid_without_credit           # 已支付未入账（资金链路告警）
+oneframe_rate_limit_unavailable_total         # Redis 不可用导致限流降级的次数
+oneframe_llm_mock_allowed / oneframe_llm_mock_active
+oneframe_process_uptime_seconds
+oneframe_process_resident_memory_bytes
+oneframe_process_heap_used_bytes
 ```
+
+（历史口径提示：上一版的 `http_request_*` / `queue_depth` / `vendor_*` / `credits_*` 名字
+**并不存在** —— 按那些名字配置的告警与面板会静默失效。RED/队列指标见下方"现状"。）
 
 > 现状：`/v1/metrics` 已暴露任务状态分布、15min 失败率、待支付超时、**已支付未入账**、进程指标；
 > **不暴露队列指标**——队列 wait/active/failed/completed/delayed 目前看后台

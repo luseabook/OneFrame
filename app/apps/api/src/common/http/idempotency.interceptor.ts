@@ -110,60 +110,72 @@ export class IdempotencyInterceptor implements NestInterceptor {
       .returning({ id: idempotencyRecords.id });
     if (inserted.length > 0) return { mode: "proceed", recordId: inserted[0]!.id };
 
-    const [row] = await db
-      .select()
-      .from(idempotencyRecords)
-      .where(
-        and(eq(idempotencyRecords.key, key), eq(idempotencyRecords.spaceId, BigInt(spaceId))),
-      )
-      .limit(1);
-    if (!row) return { mode: "proceed", recordId }; // 极端竞态：被并发删掉了，按新请求走
+    /**
+     * 已存在 → 在**行锁**内判定（H: 并发重放竞态）。
+     *
+     * 旧实现在"已过期 / x-force-replay"分支无条件把状态重置为 1 并继续执行：
+     * 两个并发重放都会看到"已过期"，于是同一请求被执行两次 —— 幂等键恰好在最需要它的
+     * 场景（客户端超时后重试）失效。`FOR UPDATE` 把同 key 的判定串行化：
+     * 后到者会等前者落定，再按最新状态走 replay / in-progress。
+     */
+    const claim = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(idempotencyRecords)
+        .where(
+          and(eq(idempotencyRecords.key, key), eq(idempotencyRecords.spaceId, BigInt(spaceId))),
+        )
+        .limit(1)
+        .for("update");
+      if (!row) return { mode: "proceed" as const, recordId }; // 极端竞态：被并发删掉了，按新请求走
 
-    // 同一 key 换了请求体：这是**用错**而不是重放，必须拒绝（否则可能把 A 的结果返给 B）
-    if (row.requestHash !== requestHash) {
-      throw new AppError(
-        ErrorCode.INVALID_PARAM,
-        "idempotency key reused with a different request payload",
-        { field: "Idempotency-Key" },
-      );
-    }
-
-    const expired = row.expireAt.getTime() <= Date.now();
-    if (expired || forceReplay) {
-      await db
-        .update(idempotencyRecords)
-        .set({
-          status: 1,
-          responseBody: null,
-          errorBody: null,
-          expireAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(idempotencyRecords.id, row.id));
-      return { mode: "proceed", recordId: row.id };
-    }
-
-    if (row.status === 2) {
-      if (row.errorBody) {
-        const err = row.errorBody as { code?: number; message?: string };
-        return {
-          mode: "replay_error",
-          code: Number(err.code ?? ErrorCode.BAD_REQUEST),
-          message: String(err.message ?? "request previously failed"),
-        };
+      // 同一 key 换了请求体：这是**用错**而不是重放，必须拒绝（否则可能把 A 的结果返给 B）
+      if (row.requestHash !== requestHash) {
+        throw new AppError(
+          ErrorCode.INVALID_PARAM,
+          "idempotency key reused with a different request payload",
+          { field: "Idempotency-Key" },
+        );
       }
-      return { mode: "replay", data: row.responseBody };
-    }
-    if (row.status === 3) {
-      throw new AppError(
-        ErrorCode.IDEMPOTENT_REPLAY,
-        "previous attempt state is unknown; re-run with x-force-replay: 1 after verifying the result",
-        { record_id: String(row.id) },
-      );
-    }
-    throw new AppError(ErrorCode.IDEMPOTENT_REPLAY, "same request is still in progress", {
-      record_id: String(row.id),
+
+      const expired = row.expireAt.getTime() <= Date.now();
+      if (expired || forceReplay) {
+        await tx
+          .update(idempotencyRecords)
+          .set({
+            status: 1,
+            responseBody: null,
+            errorBody: null,
+            expireAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(idempotencyRecords.id, row.id));
+        return { mode: "proceed" as const, recordId: row.id };
+      }
+
+      if (row.status === 2) {
+        if (row.errorBody) {
+          const err = row.errorBody as { code?: number; message?: string };
+          return {
+            mode: "replay_error" as const,
+            code: Number(err.code ?? ErrorCode.BAD_REQUEST),
+            message: String(err.message ?? "request previously failed"),
+          };
+        }
+        return { mode: "replay" as const, data: row.responseBody };
+      }
+      if (row.status === 3) {
+        throw new AppError(
+          ErrorCode.IDEMPOTENT_REPLAY,
+          "previous attempt state is unknown; re-run with x-force-replay: 1 after verifying the result",
+          { record_id: String(row.id) },
+        );
+      }
+      throw new AppError(ErrorCode.IDEMPOTENT_REPLAY, "same request is still in progress", {
+        record_id: String(row.id),
+      });
     });
+    return claim as BeginResult;
   }
 
   /**

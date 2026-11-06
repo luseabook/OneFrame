@@ -13,9 +13,10 @@
                           ▼
               ┌───────────────────────────┐
               │ NestJS API (apps/api)     │  无状态,水平扩展
-              │ modules: auth·spaces·     │
-              │  models·generations·tasks │
-              │  billing·assets·files·ops │
+              │ modules: 29 个（auth·     │
+              │ billing·tasks·generations │
+              │ ·assets·models·agent·     │
+              │ canvas·film·fleet…）      │
               └───┬──────────┬─────────┬──┘
                   │          │         │
         ┌─────────▼──┐ ┌────▼────┐ ┌──▼──────────────────┐

@@ -206,6 +206,7 @@
     "orderCreated": "订单已创建：{amount} 元 / {credits} 积分",
     "paid": "充值成功，+{credits} 积分",
     "noPayParams": "渠道未返回支付参数，请稍后重试",
+    "invalidPayUrl": "支付链接无效，已取消跳转",
     "orderFailed": "下单失败",
     "orderClosed": "订单已关闭",
     "closeFailed": "关闭失败",

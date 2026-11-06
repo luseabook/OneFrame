@@ -27,7 +27,8 @@
 > 当前 drizzle 报告 **119 张表 / 52 个迁移**（以 `schema.ts` 与 `drizzle/` 为准）。
 > **v2.5 · 2026-11-03 · 供应商运行态与任务结果文件夹（迁移 0052/0053）**：
 > `tasks` 新增 `route_id` / `route_snapshot` / `folder_id`，新增 `task_folders`。
-> 当前 drizzle 报告 **120 张表 / 54 个迁移**（0000–0053）。
+> **v2.6 · 2026-11-06 · 现状校正（审查 C-5）**：`schema.ts` 现定义 **126 张表**，`apps/api/drizzle` 共 **61 个迁移**（0000–0060）。上文 16/26/46/115/119/120 等数字是各批次时点口径；本文件尚未补 0054–0060（资源目录 dir/*、剪影生图、H3 音轨、fleet 三表等）的逐表 DDL，以 `packages/db/src/schema.ts` 与迁移目录为准。
+> 当前 drizzle 报告 **126 张表 / 61 个迁移**（0000–0060）。
 >
 > **v2.3 · 2026-10-26 · 文本类能力 + 价目约束（迁移 0017）**：§2 `model_prices` 补一条**部分唯一索引**
 > `uq_model_prices_per_call(model_id, mode, resolution) WHERE duration_s IS NULL`。

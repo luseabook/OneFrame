@@ -263,7 +263,7 @@ async function loadHistory(): Promise<void> {
 async function download(item: TaskDto, index = 1): Promise<void> {
   try {
     const data = await api.get<{ url: string }>(`/tasks/${item.task_id}/results/${index}/download-url`);
-    window.open(data.url, "_blank");
+    window.open(data.url, "_blank", "noopener");
   } catch (e) {
     toast.error(e instanceof Error ? e.message : "下载失败");
   }

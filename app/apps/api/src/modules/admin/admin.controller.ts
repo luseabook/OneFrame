@@ -5,6 +5,7 @@ import { AppError, ErrorCode, reportResolveSchema } from "@app/shared";
 import { Public } from "../../common/public.decorator";
 import { clientIp } from "../../common/client-ip";
 import { parseOrThrow } from "../../common/zod";
+import { env } from "../../config/env";
 import { BillingService } from "../billing/billing.service";
 import { AdminAuthService } from "./admin-auth.service";
 import { AdminGuard } from "./admin.guard";
@@ -171,10 +172,38 @@ export class AdminAuthController {
 
   @Public()
   @Post("login")
-  async login(@Body() body: unknown, @Req() req: FastifyRequest) {
+  async login(
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
     const input = parseOrThrow(loginSchema, body);
     // 限流按真实客户端 IP：反向代理后 req.ip 是代理节点，会把所有运营算成同一个人
-    return this.auth.login(input.username, input.password, clientIp(req));
+    const result = await this.auth.login(input.username, input.password, clientIp(req));
+    /**
+     * HttpOnly Cookie 双轨（SEC 审查 H-2）：
+     * 浏览器端凭证不再落 localStorage（任何 XSS 都能读走），改由 HttpOnly Cookie 承载；
+     * 响应体仍返回 token，API/脚本客户端（验收 ps1、运维 curl）保持 Bearer 用法不变。
+     *
+     * SameSite=Strict + AdminGuard 的同源校验构成 CSRF 双层防御；
+     * path=/v1/ops 限定它不会被带到用户端端点。
+     */
+    res.setCookie("admin_token", result.token, {
+      httpOnly: true,
+      secure: env.COOKIE_SECURE ?? env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/v1/ops",
+      maxAge: result.expires_in,
+    });
+    return result;
+  }
+
+  /** 退出：清掉 HttpOnly Cookie。幂等，未登录调用也返回成功。 */
+  @Public()
+  @Post("logout")
+  logout(@Res({ passthrough: true }) res: FastifyReply) {
+    res.clearCookie("admin_token", { path: "/v1/ops" });
+    return { ok: true };
   }
 }
 
@@ -187,6 +216,20 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(BillingService) private readonly billing: BillingService,
   ) {}
+
+  /**
+   * 当前管理会话（H-3）：前端路由守卫用它**验证**凭证，而不是只看
+   * localStorage 里"有没有字符串"。AdminGuard 已做了 401/403 分支，
+   * 能走到这里说明 token 验签、账号状态、token_version 全部通过。
+   */
+  @Get("me")
+  me(@Req() req: FastifyRequest & { adminAuth?: { adminId: string; username: string; role: string } }) {
+    return {
+      admin_id: req.adminAuth?.adminId ?? "",
+      username: req.adminAuth?.username ?? "",
+      role: req.adminAuth?.role ?? "",
+    };
+  }
 
   /**
    * 解析任务报表筛选（指标卡 / CSV 导出共用）。

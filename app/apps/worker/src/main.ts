@@ -391,6 +391,15 @@ const workers: Worker[] = HANDLED_QUEUES.map((name) =>
   new Worker(name, handlers[name], {
     connection: redisConnection,
     concurrency: readEnvNumber("WORKER_CONCURRENCY", { default: 5, min: 1, integer: true }),
+    /**
+     * 锁窗口（H-13）：本轮任务可达十几分钟（生成轮询 / 导出打包 / 转码），
+     * BullMQ 默认 lockDuration=30s 由事件循环续约 —— 同步 ZIP 组装或大 JSON
+     * 序列化一旦阻塞事件循环超过窗口，job 会被判 stalled 并被**重派给另一个 worker**。
+     * 放宽到 120s + 显式 stalledInterval，给长任务留出余量。
+     */
+    lockDuration: 120_000,
+    stalledInterval: 60_000,
+    maxStalledCount: 2,
   }).on("error", (err) => log.error({ queue: name, err: err.message }, "worker error")),
 );
 

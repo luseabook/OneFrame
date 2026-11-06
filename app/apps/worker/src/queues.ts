@@ -1,3 +1,5 @@
+import { redisConnectionOptions } from "@app/shared";
+
 // 队列命名（docs/02-architecture/system-design.md §1）
 // 注意：BullMQ 队列名不允许包含 ':'（Redis key 分隔符保留），故用点号
 //
@@ -41,11 +43,8 @@ export const RESERVED_QUEUES = [QUEUES.GEN_POLL, QUEUES.RESULT_TRANSFER, QUEUES.
 
 export type HandledQueueName = (typeof HANDLED_QUEUES)[number];
 
-const url = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
-
 export const redisConnection = {
-  host: url.hostname,
-  port: Number(url.port || 6379),
-  ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+  // 统一解析（shared）：TLS / ACL 用户名 / db 序号都不再被丢掉
+  ...redisConnectionOptions(process.env.REDIS_URL ?? "redis://localhost:6379"),
   maxRetriesPerRequest: null,
 };

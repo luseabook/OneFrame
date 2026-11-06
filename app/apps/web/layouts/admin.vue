@@ -47,8 +47,8 @@ watch(tab, () => {
 });
 
 function logout(): void {
-  localStorage.removeItem("admin_token");
-  void router.push("/admin/login");
+  // Cookie 是 HttpOnly 的，必须请服务端清除
+  void adminLogout().finally(() => router.push("/admin/login"));
 }
 
 function focusSearch(): void {

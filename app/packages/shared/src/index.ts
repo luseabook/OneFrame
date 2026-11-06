@@ -25,3 +25,5 @@ export * from "./env-number";
 // 第 124 批：布尔 / 枚举环境变量的唯一读取入口 —— 拼错一个字母不再静默走到另一侧
 export * from "./env-flag";
 export * from "./provider-secret";
+// 第 125 批：REDIS_URL 解析的唯一入口 —— 不再丢 TLS / ACL 用户名 / db 序号
+export * from "./redis-options";

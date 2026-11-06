@@ -11,3 +11,11 @@ data
 !.env.example
 *.log
 deliverables
+# 证书/ACME 目录绝不进构建上下文（私钥只挂载到 nginx 容器）
+deploy/certs
+deploy/acme-webroot
+# 文档与测试不参与镜像构建
+docs
+**/test
+**/*.spec.ts
+**/*.test.ts

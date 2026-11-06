@@ -151,7 +151,14 @@ export function buildProviderAdapterOptions(
       //   值取任务的 space_id —— 同一空间内所有会话共用一个会话键，稳定且能吃到 prompt cache。
       const headers = headersOption(routeOptions, providerOptions);
       const sessionHeader = stringOption(routeOptions, providerOptions, "session_header");
-      if (sessionHeader && sessionContext) {
+      if (sessionHeader) {
+        // 供应商明确要求会话头：没有上下文时**不能静默省略**——那样只会得到
+        // 难查的上游 4xx 或路由/cache 错乱（供应商的报错文案通常不会提到缺头）。
+        if (!sessionContext) {
+          throw new Error(
+            `provider requires "${sessionHeader}" but no session context is available (task space is missing)`,
+          );
+        }
         Object.assign(headers ?? {}, { [sessionHeader]: sessionContext });
       }
       next.deepseek = {

@@ -11,6 +11,16 @@
 # 静态 upstream 解析会缓存旧 IP → 502。此处用 resolver + 变量实现运行时重解析。
 resolver 127.0.0.11 valid=10s ipv6=off;
 
+# ── 反代层限流（SEC 审查）──────────────────────────────
+# 应用层已有一层频控（sms 5/min、登录失败计数等），但那只在"请求已经打进 Node"之后。
+# 这里是更便宜的粗闸：认证端点按 IP 限速，挡住撞库/短信轰炸的洪泛流量。
+# 值刻意留得比应用层宽（否则正常用户会被反代先挡）：
+#   auth  60r/m：登录/续期/绑定等，多标签页刷新也在阈值内
+#   login  5r/m：密码登录与发码（应用层另有更细口径）
+limit_req_zone $binary_remote_addr zone=oneframe_auth:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=oneframe_login:10m rate=5r/m;
+limit_req_status 429;
+
 # ── 访问日志：**不落查询串**（P1-9）────────────────────────
 # SSE 端点（/v1/agent/task/stream、/v1/.../stream）只能把凭据放在 `?stream_token=`，
 # 而 nginx 默认 combined 格式的 `$request` 会原样带上查询串 → 短时效令牌落盘/进日志采集。
@@ -103,6 +113,32 @@ server {
     return 200 "ok\n";
   }
 
+  # 认证类端点：反代层按 IP 限速（见文件头 zone 定义）
+  location /v1/auth/ {
+    limit_req zone=oneframe_auth burst=20 nodelay;
+    set $api_upstream "api:3000";
+    proxy_pass http://$api_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+  }
+
+  # 管理端登录：撞库价值最高，单独收紧
+  location = /v1/ops/admin/login {
+    limit_req zone=oneframe_login burst=3 nodelay;
+    set $api_upstream "api:3000";
+    proxy_pass http://$api_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+  }
+
   # API 与 Web 同源：/v1 反代到 NestJS，其余到 Nuxt
   location /v1/ {
     set $api_upstream "api:3000";
@@ -113,7 +149,11 @@ server {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_read_timeout 120s;
+    # SSE 端点（agent/task/stream、share stream 等）必须关闭响应缓冲，
+    # 否则 nginx 会攒满 buffer 才下发，前端看到的是"卡住不输出"。
+    proxy_buffering off;
+    # 与 API 的 connectionTimeout（600s）对齐：静默的长连接不被反代层提前掐断
+    proxy_read_timeout 600s;
   }
 
   location / {

@@ -206,6 +206,7 @@
     "orderCreated": "Order created: ¥{amount} / {credits} credits",
     "paid": "Top-up complete, +{credits} credits",
     "noPayParams": "The channel returned no payment parameters. Please try again later.",
+    "invalidPayUrl": "The payment link is invalid; the redirect was blocked.",
     "orderFailed": "Checkout failed",
     "orderClosed": "Order closed",
     "closeFailed": "Failed to close",

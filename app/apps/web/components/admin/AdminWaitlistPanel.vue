@@ -67,7 +67,7 @@ function buildQuery(): string {
 async function handleError(err: unknown, fallbackKey: string): Promise<void> {
   const code = adminErrorCode(err);
   if (code === 401101) {
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

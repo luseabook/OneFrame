@@ -315,11 +315,11 @@ function downloadAll(): void {
     toast.error("暂无可下载的产物");
     return;
   }
-  for (const url of resultUrls.value) window.open(url, "_blank");
+  for (const url of resultUrls.value) window.open(url, "_blank", "noopener");
 }
 
 function openUrl(url: string): void {
-  window.open(url, "_blank");
+  window.open(url, "_blank", "noopener");
 }
 
 onMounted(() => {

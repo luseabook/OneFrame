@@ -2,7 +2,7 @@ name: oneframe
 
 x-app-env: &app-env
   NODE_ENV: production
-  DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@postgres:5432/app
+  DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/app
   REDIS_URL: redis://redis:6379
   # ── 密钥类变量（PR-01/PR-02/PR-05）──────────────────────────────────────
   # 一律用 `${VAR:?}` 强制必填：**不给生产密钥留默认值**。
@@ -18,7 +18,8 @@ x-app-env: &app-env
   # 支付开关必须显式声明（PR-02）：缺省会让生产默认落在 mock 渠道上
   PAYMENT_LIVE: "${PAYMENT_LIVE:?PAYMENT_LIVE is required (true|false)}"
   ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+  # 不再回退 admin12345（公知口令）：缺失时 compose 解析阶段直接报错
+  ADMIN_PASSWORD: "${ADMIN_PASSWORD:?ADMIN_PASSWORD is required (see .env.production.example)}"
   # 本地 HTTP 部署与生产 HTTPS 的差异必须由部署者显式声明（P1-11）：
   # 原来默认 false，照抄 prod compose 上 HTTPS 会得到"登录后刷新即掉线"，
   # 反过来在内网 HTTP 上强行 true 则根本存不下 Cookie。缺省不再替人决定。
@@ -51,7 +52,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
       POSTGRES_DB: app
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -75,7 +76,8 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    # 固定 release tag（:latest 让构建不可复现）；升级时显式改这里
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${S3_ACCESS_KEY:?S3_ACCESS_KEY is required (minioadmin is a public known password)}"
@@ -83,12 +85,14 @@ services:
     volumes:
       - miniodata:/data
     ports:
+      # 9000 需要对外：供应商与浏览器要按 STORAGE_S3_PUBLIC_ENDPOINT 拉预签名 URL。
+      # 若前置了 CDN/反代，把这条改成 "127.0.0.1:9000:9000" 并由反代转发。
       - "9000:9000"
-      - "9001:9001"
+      # 9001 管理控制台**不发布**：它没有 CORS/限流概念，只用 docker exec 或 SSH 隧道访问。
     restart: unless-stopped
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     depends_on:
       - minio
     entrypoint: >
@@ -103,6 +107,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      # 迁移需要 drizzle-kit/tsx + src（devDependencies），单独构建 migrate 目标；
+      # api 运行时镜像不含这些工具（H-5 镜像瘦身）。
+      target: migrate
     command: ["sh", "-c", "./node_modules/.bin/drizzle-kit migrate && ./node_modules/.bin/tsx src/db/seed.ts"]
     environment: *app-env
     depends_on:

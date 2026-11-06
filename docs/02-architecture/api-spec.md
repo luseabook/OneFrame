@@ -698,6 +698,12 @@ worker 侧：`NODE_ENV=production` 时 `ADAPTER_MODE` 必须为 `real`，且至�
 ## 11. ops / admin（独立鉴权 admin_users）
 
 ```
+# ── 登录会话（v1.3 增补：浏览器走 HttpOnly Cookie，脚本客户端继续用 Bearer）──
+POST /ops/admin/login                       // 响应仍返回 {token,expires_in,role}；同时 Set-Cookie: admin_token
+                                            //   (HttpOnly, SameSite=Strict, Path=/v1/ops, maxAge=ADMIN_JWT_TTL_S)
+POST /ops/admin/logout                      // 幂等；清除 admin_token Cookie
+GET  /ops/admin/me                          // 当前会话 {admin_id,username,role}；前端路由守卫用它验证凭证
+
 # ── 公开配置读（未登录前端可用；只按键读，不提供列表/通配）──
 GET  /ops/config/{key}?module=&lang=      // 公告/横幅/定价页文案；lang 以 module 后缀隔离（home@en），未命中回落无语言 module
 

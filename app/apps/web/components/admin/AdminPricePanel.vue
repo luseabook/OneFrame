@@ -119,7 +119,7 @@ async function handleError(e: unknown, fallback: string): Promise<void> {
   if (isAdminAuthError(e)) {
     if (redirecting) return;
     redirecting = true;
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

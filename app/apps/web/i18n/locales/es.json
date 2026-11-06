@@ -206,6 +206,7 @@
     "orderCreated": "Pedido creado: ¥{amount} / {credits} créditos",
     "paid": "Recarga completada, +{credits} créditos",
     "noPayParams": "El canal no devolvió los parámetros de pago. Inténtalo más tarde.",
+    "invalidPayUrl": "El enlace de pago no es válido; se bloqueó la redirección.",
     "orderFailed": "No se pudo crear el pedido",
     "orderClosed": "Pedido cerrado",
     "closeFailed": "No se pudo cerrar",

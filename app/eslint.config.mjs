@@ -54,7 +54,8 @@ export default tseslint.config(
       "vue/first-attribute-linebreak": "off",
       "vue/require-default-prop": "off",
       "vue/require-explicit-emits": "off",
-      "vue/no-v-html": "off",
+      // 安全规则：当前代码零处使用 v-html；保持 warn 让"未来新增"必须显式面对 XSS 评审
+      "vue/no-v-html": "warn",
       "@typescript-eslint/no-explicit-any": "off",
     },
   },

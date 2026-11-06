@@ -206,6 +206,7 @@
     "orderCreated": "注文を作成しました：¥{amount} / {credits} クレジット",
     "paid": "チャージ完了、+{credits} クレジット",
     "noPayParams": "チャネルから支払いパラメータが返されませんでした。しばらくして再度お試しください。",
+    "invalidPayUrl": "支払いリンクが無効なため、リダイレクトを中止しました。",
     "orderFailed": "注文に失敗しました",
     "orderClosed": "注文を閉じました",
     "closeFailed": "閉じるのに失敗しました",

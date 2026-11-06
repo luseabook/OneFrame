@@ -94,7 +94,7 @@ function formatTime(value: string | null): string {
 
 async function fail(e: unknown, fallback: string): Promise<void> {
   if (isAdminAuthError(e)) {
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

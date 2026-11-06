@@ -10,14 +10,20 @@
 #   4) 任何一步失败都不 restart，避免把线上换成半成品。
 #
 # 用法：
-#   HOST=root@113.44.162.107 DOMAIN=oneframe.zltik.top ./deploy/deploy-oneframe.sh web
+#   HOST=deploy@113.44.162.107 DOMAIN=oneframe.zltik.top ./deploy/deploy-oneframe.sh web
+#   安全建议：用专用 deploy 用户（sudoers 只授权 systemctl restart oneframe-*），
+#   避免把 root SSH 当成部署通道。脚本对 root@ 会打警告但不阻断（存量环境兼容）。
 #
 # 本地需能 ssh 到 HOST（密钥优先；本脚本不处理密码）。
 set -euo pipefail
 
 WHAT="${1:?用法: deploy-oneframe.sh <web|api> [--skip-verify]}"
 SKIP_VERIFY="${2:-}"
-HOST="${HOST:?必须提供 HOST，如 root@1.2.3.4}"
+HOST="${HOST:?必须提供 HOST，如 deploy@1.2.3.4}"
+case "$HOST" in
+  root@*) printf '[33m警告：正在用 root 通过 SSH 部署。建议改用专用 deploy 用户（见脚本头注释）。[0m
+' >&2 ;;
+esac
 DOMAIN="${DOMAIN:?必须提供 DOMAIN}"
 APP_DIR="${APP_DIR:-/srv/oneframe/app}"
 ENV_DIR="${ENV_DIR:-/etc/oneframe}"

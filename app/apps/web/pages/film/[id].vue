@@ -382,7 +382,7 @@ async function exportTable() {
       note: string;
     }>(`/film/projects/${projectId.value}/exports`, { table_ids: [currentTableId.value], format: "xlsx" });
     toast.success(t("filmDetail.exported", { rows: res.row_count, format: res.delivered_format, note: res.note }));
-    if (res.download_url) window.open(res.download_url, "_blank");
+    if (res.download_url) window.open(res.download_url, "_blank", "noopener");
   } catch (e) {
     toast.error((e as Error).message || t("filmDetail.exportFailed"));
   } finally {

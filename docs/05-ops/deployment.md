@@ -72,9 +72,9 @@ services:
 
 ### 4.1 A 组：fail-fast（生产守卫聚合报错，缺一项就拒绝启动）
 
-api 侧守卫：`apps/api/src/config/env.ts` → `collectProductionProblems`（:470）、`collectSecretProblems`（:345）、
-`collectPaymentModeProblems`（:387）、`collectPaymentProblems`（:416）、`collectLlmProblems`（:517），
-聚合抛错在 `buildEnv`（:529）。报错**只含变量名与原因，不含值**（OPS-06）。
+api 侧守卫：`apps/api/src/config/env.ts` → `collectProductionProblems`（:551）、`collectSecretProblems`（:426）、
+`collectPaymentModeProblems`（:468）、`collectPaymentProblems`（:497）、`collectLlmProblems`（:646），
+聚合抛错在 `buildEnv`（:692）。报错**只含变量名与原因，不含值**（OPS-06）。
 
 | 变量 | 格式 | 读取方 | 缺了会怎样 |
 |---|---|---|---|
@@ -110,7 +110,7 @@ api 侧守卫：`apps/api/src/config/env.ts` → `collectProductionProblems`（:
 
 | 项 | 现状 | 后果 | 归口 |
 |---|---|---|---|
-| `LLM_MODE` 未设 / `mock` / `real` 缺 Key | **三者一律拒绝启动**（`env.ts:538-548`，与 worker 的 `ADAPTER_MODE` 同口径） | 生产大纲/角色/剧本/分镜若走 mock 就是假文案；现在起不来而不是静默假 | Backend（已实现） |
+| `LLM_MODE` 未设 / `mock` / `real` 缺 Key | **三者一律拒绝启动**（`env.ts` 的 `collectLlmProblems`，与 worker 的 `ADAPTER_MODE` 同口径） | 生产大纲/角色/剧本/分镜若走 mock 就是假文案；现在起不来而不是静默假 | Backend（已实现） |
 | **验收机例外** `ONEFRAME_ALLOW_MOCK_LLM=1` | 只认字面 `1`，写错即响亮失败；每次启动 WARN；**且必须可被机器判定**（`/v1/healthz/ready` 返回 `llmMode/mockAllowed`，`/v1/metrics` 出 gauge） | 没有它这台机器今天发不出 N-09（`HOST=127.0.0.1`）；有它则“在跑假文案”是显式声明而非静默 | Backend 实现；对外机器禁止设置，`STRICT=1` 门禁判红 |
 | 短信验证码 | `apps/api/src/modules/auth/sms.service.ts` 只把 6 位码写进 Redis，**无任何网关调用**；`SMS_PROVIDER/SMS_AK/SMS_SK/SMS_SIGN_NAME/SMS_TEMPLATE_CODE` 在代码里 **0 命中** | 上线后真实用户**永远收不到码，一个都登不进来**（登录唯一入口 `auth.controller.ts:113,121`） | Backend 接网关 或 改邀请制（Chief 定，P0） |
 | `NUXT_PUBLIC_ICP_BEIAN` 空 | `components/SiteLegal.vue` 空串**整段不渲染**且不报错；已加启动守卫 `apps/web/server/plugins/icp-guard.ts`（`NODE_ENV=production` 且号为空 → 进程退出） | 忘配则起不来；**验收机可用 `ONEFRAME_ALLOW_MISSING_ICP=1` 放行，但每次启动必打 WARN，对外机器禁止设置** | Frontend（已实现，`PAGE-07` 守） |

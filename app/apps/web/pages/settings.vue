@@ -106,7 +106,10 @@ async function startOAuthBind(provider: string): Promise<void> {
   error.value = "";
   try {
     const data = await api.post<{ authorize_url: string }>(`/auth/bind/oauth/${provider}/url`, {});
-    window.location.href = data.authorize_url;
+    // 同登录页：绑定跳转只接受 http(s) 授权页
+    const authorizeUrl = safeExternalUrl(data?.authorize_url);
+    if (!authorizeUrl) throw new Error(t("settings.bindFailed"));
+    window.location.href = authorizeUrl;
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("settings.bindFailed");
   } finally {

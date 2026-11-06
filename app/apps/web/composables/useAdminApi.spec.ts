@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminApiError, adminApiBlob } from "./useAdminApi";
 
 /**
@@ -7,7 +7,7 @@ import { AdminApiError, adminApiBlob } from "./useAdminApi";
  * （`apps/api/src/common/http/exception.filter.ts:19-22`），所以在 HTTP 层「未购买/未登录」也是 200。
  * 旧实现只在 `!response.ok` 里判 code —— 于是错误 JSON 被当成 CSV 返回给用户下载。
  *
- * 这里替换 `fetch` 与 `localStorage`，直接驱动真实的 `adminApiBlob`，
+ * 这里替换 `fetch`，直接驱动真实的 `adminApiBlob`，
  * 断言的是**函数行为**而不是「产物里有没有这个字符串」。
  */
 
@@ -15,9 +15,7 @@ const makeResponse = (body: string, contentType: string, init: ResponseInit = {}
   new Response(body, { status: 200, ...init, headers: { "content-type": contentType, ...(init.headers ?? {}) } });
 
 describe("adminApiBlob：HTTP 200 + 业务错误码必须抛错，不得当文件返回", () => {
-  beforeEach(() => {
-    vi.stubGlobal("localStorage", { getItem: () => "admin-token" });
-  });
+  // 凭证是 HttpOnly Cookie（H-2）：JS 读不到，只断言请求确实带上了 credentials
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -30,6 +28,8 @@ describe("adminApiBlob：HTTP 200 + 业务错误码必须抛错，不得当文�
     );
     await expect(adminApiBlob("/ops/export")).rejects.toBeInstanceOf(AdminApiError);
     await expect(adminApiBlob("/ops/export")).rejects.toMatchObject({ code: 403001, message: "无权限导出" });
+    // H-2：凭证走 HttpOnly Cookie，请求必须显式 include（不是 Authorization 头）
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("/v1/ops/export", { credentials: "include" });
   });
 
   it("未登录（200 + code=401101）同样抛错，不会返回空 CSV", async () => {

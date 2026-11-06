@@ -223,7 +223,8 @@ async function kickToLogin(reason: string): Promise<void> {
   if (kicked.value) return;
   kicked.value = true;
   error.value = reason;
-  if (import.meta.client) localStorage.removeItem("admin_token");
+  // 清 HttpOnly Cookie（托管在服务端，前端只能发请求注销）
+  await adminLogout();
   await navigateTo("/admin/login", { replace: true });
 }
 
@@ -1041,11 +1042,7 @@ async function loadTab(next: AdminTab): Promise<void> {
 }
 
 onMounted(async () => {
-  const saved = localStorage.getItem("admin_token");
-  if (!saved) {
-    await navigateTo("/admin/login", { replace: true });
-    return;
-  }
+  // 登录态已由 middleware/admin-auth 向服务端验证（/ops/admin/me），这里不再看 localStorage。
   // 只有身份类错误会跳登录（kickToLogin）；其它错误在各列表自己的错误行里显示，
   // 所以这里不需要外层 try/catch，也不会因为某一个接口 500 就把运营踢下线。
   await loadTab(tab.value);

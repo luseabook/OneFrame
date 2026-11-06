@@ -348,7 +348,7 @@ function startPolling(taskId: string): void {
 async function download(item: TaskDto): Promise<void> {
   try {
     const data = await api.get<{ url: string }>(`/tasks/${item.task_id}/results/1/download-url`);
-    window.open(data.url, "_blank");
+    window.open(data.url, "_blank", "noopener");
   } catch (e) {
     toast.error(e instanceof Error ? e.message : "下载失败");
   }

@@ -2,6 +2,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import type { StorageDriver, StoredObject } from "./types";
+import { assertStorageKey } from "./key";
 
 /** 建连上限（毫秒）：连不上的 endpoint 不该让一次 put/read 挂到天荒地老 */
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
@@ -186,6 +187,8 @@ export class S3Storage implements StorageDriver {
   }
 
   async put(key: string, data: Buffer, contentType: string): Promise<StoredObject> {
+    // 驱动内部自校验（纵深防御）：调用方漏校验时也不能写出 `u/<其他空间>/…` 或路径穿越形态的 key
+    key = assertStorageKey(key);
     const signal = this.requestSignal();
     await this.bounded("put", key, signal, () =>
       this.client.send(
@@ -202,6 +205,7 @@ export class S3Storage implements StorageDriver {
   }
 
   async read(key: string): Promise<Buffer> {
+    key = assertStorageKey(key);
     const signal = this.requestSignal();
     const res = await this.bounded("read", key, signal, () =>
       this.client.send(
@@ -220,6 +224,7 @@ export class S3Storage implements StorageDriver {
   }
 
   async signDownload(key: string, ttlSeconds: number): Promise<string> {
+    key = assertStorageKey(key);
     return getSignedUrl(
       this.signClient,
       new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),

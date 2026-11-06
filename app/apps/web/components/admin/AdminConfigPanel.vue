@@ -92,7 +92,7 @@ async function handleError(err: unknown, fallbackKey: string, target: "page" | "
         ? err.message
         : t(fallbackKey);
   if (code === 401101) {
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

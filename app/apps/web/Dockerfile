@@ -17,5 +17,8 @@ ENV PORT=3001
 ENV NITRO_PORT=3001
 COPY --from=build /app/apps/web/.output ./.output
 COPY --from=build /app/apps/web/package.json ./package.json
+RUN chown -R node:node /app
+# 非 root 运行（H-4）
+USER node
 EXPOSE 3001
 CMD ["node", ".output/server/index.mjs"]

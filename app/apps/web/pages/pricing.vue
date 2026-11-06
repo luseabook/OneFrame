@@ -204,12 +204,17 @@ async function buy(sku: SkuDto): Promise<void> {
       // 支付宝 precreate：展示二维码
       await renderQr(params.qr_code);
     } else if (params.h5_url) {
-      payLink.value = params.h5_url;
-      window.location.href = params.h5_url;
+      // 收银台地址来自服务端响应，只信任 http(s)：防止 javascript:/data: 或被篡改的跳转
+      const target = safeExternalUrl(params.h5_url);
+      if (!target) throw new Error(t("pricing.invalidPayUrl"));
+      payLink.value = target;
+      window.location.href = target;
     } else if (params.pay_url) {
       // 支付宝电脑网站支付：新窗口打开收银台
-      payLink.value = params.pay_url;
-      window.open(params.pay_url, "_blank", "noopener");
+      const target = safeExternalUrl(params.pay_url);
+      if (!target) throw new Error(t("pricing.invalidPayUrl"));
+      payLink.value = target;
+      window.open(target, "_blank", "noopener");
     }
     startPoll(order.order_id);
   } catch (e) {

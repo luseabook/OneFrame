@@ -7,6 +7,8 @@ const WORKER_BITS = 10n;
 const SEQ_BITS = 12n;
 const MAX_WORKER = (1n << WORKER_BITS) - 1n;
 const MAX_SEQ = (1n << SEQ_BITS) - 1n;
+/** 可容忍的时钟回拨上限：超过则拒绝发号（避免自旋长时间阻塞事件循环） */
+const MAX_CLOCK_BACKWARD_MS = 5_000n;
 
 export class Snowflake {
   private lastMs = 0n;
@@ -20,6 +22,21 @@ export class Snowflake {
 
   nextId(): bigint {
     let now = BigInt(Date.now());
+    /**
+     * 时钟回拨（NTP 校正、虚拟机迁移）：旧的 else 分支会把 lastMs 直接改小并 seq 归零，
+     * 于是同一毫秒内可能**再发一遍已发出的 ID**（主键冲突或更糟：两个不同实体同 id）。
+     * 小回拨自旋等时钟追上；大回拨直接拒绝发号，让请求失败而不是产出重复键。
+     */
+    if (now < this.lastMs) {
+      const skewMs = this.lastMs - now;
+      if (skewMs > MAX_CLOCK_BACKWARD_MS) {
+        throw new Error(
+          `clock moved backwards by ${skewMs}ms (max ${MAX_CLOCK_BACKWARD_MS}ms); refusing to generate ids`,
+        );
+      }
+      const target = this.lastMs;
+      while (now < target) now = BigInt(Date.now());
+    }
     if (now === this.lastMs) {
       this.seq = (this.seq + 1n) & MAX_SEQ;
       if (this.seq === 0n) {

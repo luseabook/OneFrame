@@ -1,12 +1,13 @@
-import base64, json, time, random, string, sys
+import base64, json, os, time, random, string, sys
 import requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5, AES
 from Crypto.Util.Padding import pad, unpad
 
-BASE = "http://newapi.jianyingeditor.cn"
-RSA_PUB_B64 = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCb/IxioWuunK3ZcyYX/YzupNZrwjGBUbV9wjB5vghSp7joutnJ6115v5xIBH/qXh1uWfvjFOFdIFBiC+JP3+tRLNYHg/juU+z2SYYN73CSpKVlwgAPA9vUecSASWo2gX0Y2AFeZnuYJxUXNU5+qXhrumv2LFnZ/4SLa6dJmMz8sQIDAQAB"
-AES_KEY = b"8x/A?D(G+KbPeShVmYq3s6v9y$B&E)H@"
+BASE = os.getenv("UPSTREAM_BASE", "http://newapi.jianyingeditor.cn")
+# 协议常量（APK 内嵌）；与 app/jianying.py 的默认值一致，可用环境变量覆盖。
+RSA_PUB_B64 = os.getenv("JY_RSA_PUB_B64", "") or "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCb/IxioWuunK3ZcyYX/YzupNZrwjGBUbV9wjB5vghSp7joutnJ6115v5xIBH/qXh1uWfvjFOFdIFBiC+JP3+tRLNYHg/juU+z2SYYN73CSpKVlwgAPA9vUecSASWo2gX0Y2AFeZnuYJxUXNU5+qXhrumv2LFnZ/4SLa6dJmMz8sQIDAQAB"
+AES_KEY = (os.getenv("JY_AES_KEY", "") or "8x/A?D(G+KbPeShVmYq3s6v9y$B&E)H@").encode("utf-8")
 APP_ID = "com.mediaeditor.video"
 VERSION = "972"
 

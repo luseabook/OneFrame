@@ -8,7 +8,7 @@
 | 层 | 工具 | 覆盖目标 | 重点 |
 |---|---|---|---|
 | 单元 | vitest | 纯逻辑 80%+ | 计价(quote)、冻结结算、状态机迁移、mode 枚举校验、错误码映射 |
-| 集成 | vitest + testcontainers(PG/Redis) | 模块service+repo | 事务性(任务+流水同成败)、幂等重放、限流、轮询 ETag |
+| 集成 | vitest + **本机 PG/Redis**（:55432/:6380，非 testcontainers 隔离） | 模块service+repo | 事务性(任务+流水同成败)、幂等重放、限流、轮询 ETag |
 | 契约 | supertest + 本仓 fixtures | **api-spec.md 全端点** | 实现↔文档一致性,CI 强制 |
 | 适配器 | nock/msw 回放 fixtures | 全部 adapter | 供应商响应归一化/超时/5xx 重试/降级 |
 | E2E | Playwright(staging) | 5 条主干 | J1 旗舰(小说→完集)/J2/J3 旅程冒烟 |

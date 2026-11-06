@@ -1,0 +1,1 @@
+CREATE INDEX "idx_spaces_owner_user" ON "spaces" USING btree ("owner_user_id");

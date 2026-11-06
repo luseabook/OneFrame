@@ -35,13 +35,24 @@ from .config import settings
 log = logging.getLogger("jianying")
 
 # --- embedded protocol constants (from APK g1.e / g1.c / k1.l / j1.c) ------
-_RSA_PUB_B64 = (
+# 这些是上游协议的固定常量（APK 内嵌，非部署密钥）。可通过环境变量
+# JY_RSA_PUB_B64 / JY_AES_KEY 覆盖，方便上游换版时不动代码。
+_PROTOCOL_RSA_PUB_B64 = (
     "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCb/IxioWuunK3ZcyYX/YzupNZrwjGB"
     "UbV9wjB5vghSp7joutnJ6115v5xIBH/qXh1uWfvjFOFdIFBiC+JP3+tRLNYHg/juU+z"
     "2SYYN73CSpKVlwgAPA9vUecSASWo2gX0Y2AFeZnuYJxUXNU5+qXhrumv2LFnZ/4SLa6"
     "dJmMz8sQIDAQAB"
 )
-_AES_KEY = b"8x/A?D(G+KbPeShVmYq3s6v9y$B&E)H@"
+_PROTOCOL_AES_KEY = b"8x/A?D(G+KbPeShVmYq3s6v9y$B&E)H@"
+
+_RSA_PUB_B64 = settings.jy_rsa_pub_b64 or _PROTOCOL_RSA_PUB_B64
+_AES_KEY = (
+    settings.jy_aes_key.encode("utf-8")
+    if settings.jy_aes_key
+    else _PROTOCOL_AES_KEY
+)
+if len(_AES_KEY) not in (16, 24, 32):
+    raise ValueError(f"JY_AES_KEY must be 16/24/32 bytes, got {len(_AES_KEY)}")
 _APP_ID = "com.mediaeditor.video"
 _APP_VERSION = "972"
 
@@ -344,10 +355,21 @@ class JianyingUpstream:
         return await self.post("/app/ai/feature/portal", {"version": 1}, timeout=20)
 
     async def download(self, url: str) -> bytes:
+        """流式下载并限制总字节数：响应体大小不可信（URL 可能来自用户/上游）。"""
         client = self._client_for(url)
-        resp = await client.get(url, timeout=settings.read_timeout)
-        resp.raise_for_status()
-        return resp.content
+        limit = settings.max_download_mb * 1024 * 1024
+        chunks: list[bytes] = []
+        total = 0
+        async with client.stream("GET", url, timeout=settings.read_timeout) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes():
+                total += len(chunk)
+                if total > limit:
+                    raise UpstreamError(
+                        f"downloaded file exceeds {settings.max_download_mb}MB", transient=False
+                    )
+                chunks.append(chunk)
+        return b"".join(chunks)
 
 
 upstream = JianyingUpstream()

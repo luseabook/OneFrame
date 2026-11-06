@@ -1,5 +1,6 @@
 import { Injectable, type OnModuleDestroy } from "@nestjs/common";
 import { Queue } from "bullmq";
+import { redisConnectionOptions } from "@app/shared";
 import { env } from "../config/env";
 
 export const QUEUES = {
@@ -12,13 +13,9 @@ export const QUEUES = {
   PUBLISH_TRANSCODE: "publish.transcode",
 } as const;
 
-function connectionOptions(): { host: string; port: number; password?: string } {
-  const url = new URL(env.REDIS_URL);
-  return {
-    host: url.hostname,
-    port: Number(url.port || 6379),
-    ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-  };
+function connectionOptions() {
+  // 统一解析（shared）：TLS / ACL 用户名 / db 序号都不再被丢掉
+  return redisConnectionOptions(env.REDIS_URL);
 }
 
 @Injectable()

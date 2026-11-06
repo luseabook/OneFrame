@@ -16,8 +16,9 @@
 
 ## 2. 认证与会话
 
-- JWT：HS256+32B 随机密钥（密钥轮换：kid 双密钥并行 7 天）；access 2h，refresh 14d 单次轮换（重放检测：旧 refresh 使用即全家下线并告警）；
+- JWT：HS256+32B 随机密钥；access 2h，refresh 14d 单次轮换（重放检测：旧 refresh 使用即全家下线并告警）；**kid 双密钥轮换尚未实现**（当前单密钥，轮换需改密并让全会话重登）；
 - 登出/改密：Redis 黑名单；
+- 管理端（v1.3）：浏览器凭证改存 **HttpOnly Cookie**（`admin_token`, SameSite=Strict, Path=/v1/ops），不再落 localStorage；写请求在 AdminGuard 做同源校验（CSRF 纵深）；脚本客户端仍可用 Bearer；
 - 短信验证码：6 位，5min 有效，错 5 次作废；发送侧频控（api-spec §13）+ 图形/行为验证码前置；
 - 越权：所有资源访问强制 `space_id` 属主校验（middleware 统一注入，业务不得自查），测试见 testing §2-5。
 
@@ -49,7 +50,7 @@
 ## 6. 密钥治理
 
 - 分级：L1 供应商/支付 Key（仅 worker/api 容器 env）· L2 JWT/加密密钥 · L3 第三方回调 Secret；
-- 入库前 gitleaks 扫描（CI）；轮换：L1 季度、JWT 泄露即时（kid 机制）；
+- 入库前 gitleaks 扫描：**尚未接入 CI**（当前靠 `.gitignore` + 评审；待补）；轮换：L1 季度、JWT 泄露即时（手工换密，kid 机制未实现）；
 - 最小权限：OSS 子账号只授权两桶；供应商账号不开余额自动充值上限。
 
 ## 7. 输入与文件安全
@@ -66,7 +67,7 @@
 
 ## 9. 依赖与供应链
 
-- CI：`pnpm audit --prod` 高危阻断；镜像固定 digest；renovate 周更 PR；
+- CI：`pnpm audit --prod` 高危阻断（**尚未接入**）；镜像固定 release tag（digest 固定待补）；renovate 周更 PR（**尚未接入**）；
 - 依赖准入：新增运行时依赖需在 PR 说明用途（防 typosquat）。
 
 ## 10. 事件响应

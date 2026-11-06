@@ -176,8 +176,8 @@ async function login(): Promise<void> {
   submitting.value = true;
   try {
     await auth.login(phone.value, code.value, inviteCode.value || undefined, true, keepLogin.value);
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
-    await navigateTo(redirect);
+    // 只放行站内路径：原始 query 可被拼成 https://evil.com 构成开放重定向
+    await navigateTo(safeRedirect(route.query.redirect));
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("auth.loginFailed");
     errorSlot.value = "form";
@@ -244,8 +244,8 @@ async function submitPassword(): Promise<void> {
     } else {
       await auth.loginWithPassword(identifier.value.trim(), password.value, keepLogin.value);
     }
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/home";
-    await navigateTo(redirect);
+    // 同短信路径：redirect 必须净化，防开放重定向
+    await navigateTo(safeRedirect(route.query.redirect));
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("auth.loginFailed");
     errorSlot.value = "form";
@@ -319,9 +319,11 @@ async function startOauth(provider: OauthProvider): Promise<void> {
   oauthBusy.value = provider;
   try {
     const res = await api.post<{ authorize_url: string; state: string }>(`/auth/oauth/${provider}/url`);
-    if (!res?.authorize_url) throw new Error(t("auth.oauthNoUrl"));
+    // 只信任 http(s) 授权页，防止响应被篡改后跳到 javascript:/data: 等伪协议
+    const authorizeUrl = safeExternalUrl(res?.authorize_url);
+    if (!authorizeUrl) throw new Error(t("auth.oauthNoUrl"));
     // 整页跳转：第三方授权页会带 state 回到 /auth/oauth/:provider/callback 的落地页
-    window.location.href = res.authorize_url;
+    window.location.href = authorizeUrl;
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("auth.oauthUnavailable", { label: oauthLabelText(provider) });
     errorSlot.value = "form";

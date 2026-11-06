@@ -23,6 +23,18 @@ import { toBigId } from "../../common/bigid";
 /** 每画布固定组槽位数（第 120 批导出：`canvas_nodes.group_ids` 的入站上限必须与之一致） */
 export const MAX_PIN_SLOTS = 7;
 
+
+/**
+ * 参数化的 bigint 数组（防注入的强制口径）。
+ *
+ * 为什么不拼 `ARRAY[${ids.join(",")}]::bigint[]` 字面量：即便上游有正则校验，
+ * 任何一处漏校验/未来放松都是直接可注入点。这里每个元素都走绑定参数（`$n::bigint`），
+ * SQL 文本里不会出现任何数据。
+ */
+function bigintArrayLiteral(ids: readonly (string | bigint)[]) {
+  return sql`ARRAY[${sql.join(ids.map((id) => sql`${String(id)}::bigint`), sql`, `)}]::bigint[]`;
+}
+
 @Injectable()
 export class CanvasGroupService {
   private async mustGetCanvas(spaceId: string, canvasId: string) {
@@ -138,13 +150,17 @@ export class CanvasGroupService {
 
       // 先把本槽位原有成员从这个槽位移除（整体替换语义）
       if (existing && existing.nodeIds.length > 0) {
-        const oldIds = existing.nodeIds.filter((id) => !validNodeIds.includes(id));
+        // 旧实现拿 string[] 直接 `includes` BigInt[]，永远 false —— 会把仍在新集合里的
+        // 成员也先移除再重新加回（多一轮无谓写入，且在并发读窗口里短暂丢归属）。
+        // 统一成字符串集合再比较。
+        const validSet = new Set(validNodeIds.map(String));
+        const oldIds = existing.nodeIds.filter((id) => !validSet.has(String(id)));
         if (oldIds.length > 0) {
           await tx.execute(sql`
             UPDATE canvas_nodes
             SET group_ids = array_remove(group_ids, ${groupId}::bigint),
                 updated_at = now()
-            WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${sql.raw(`ARRAY[${oldIds.join(",")}]::bigint[]`)})
+            WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${bigintArrayLiteral(oldIds)})
           `);
         }
       }
@@ -156,7 +172,7 @@ export class CanvasGroupService {
                 SELECT array_agg(DISTINCT g) FROM unnest(group_ids || ${groupId}::bigint) AS g
               ),
               updated_at = now()
-          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${sql.raw(`ARRAY[${validNodeIds.join(",")}]::bigint[]`)})
+          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${bigintArrayLiteral(validNodeIds)})
         `);
       }
     });
@@ -188,7 +204,7 @@ export class CanvasGroupService {
         await tx.execute(sql`
           UPDATE canvas_nodes
           SET group_ids = array_remove(group_ids, ${row.id}::bigint), updated_at = now()
-          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${sql.raw(`ARRAY[${row.nodeIds.join(",")}]::bigint[]`)})
+          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${bigintArrayLiteral(row.nodeIds)})
         `);
       }
     });
@@ -213,7 +229,7 @@ export class CanvasGroupService {
         await tx.execute(sql`
           UPDATE canvas_nodes
           SET group_ids = array_remove(group_ids, ${row.id}::bigint), updated_at = now()
-          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${sql.raw(`ARRAY[${row.nodeIds.join(",")}]::bigint[]`)})
+          WHERE canvas_id = ${canvas.id}::bigint AND id = ANY(${bigintArrayLiteral(row.nodeIds)})
         `);
       }
     });

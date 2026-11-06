@@ -146,7 +146,7 @@ async function download(item: TaskDto): Promise<void> {
       info.value = t("tasks.mockResult");
       return;
     }
-    window.open(data.url, "_blank");
+    window.open(data.url, "_blank", "noopener");
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("tasks.downloadFailed");
   }
@@ -186,7 +186,7 @@ async function batchDownload(): Promise<void> {
   }
   try {
     const data = await api.post<{ url: string }>("/tasks/batch-download", { task_ids: ids });
-    window.open(data.url, "_blank");
+    window.open(data.url, "_blank", "noopener");
     info.value = t("tasks.packed", { count: ids.length });
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("tasks.batchFailed");

@@ -1,4 +1,4 @@
-import { createDecipheriv, createHash, createVerify, timingSafeEqual } from "node:crypto";
+import { createDecipheriv, createHmac, createVerify, timingSafeEqual } from "node:crypto";
 
 /**
  * 支付回调验签与解密（微信支付 APIv3 / 支付宝）。
@@ -126,7 +126,11 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-/** HMAC-SHA256 十六进制签名（部分聚合支付渠道用此方案） */
+/**
+ * HMAC-SHA256 十六进制签名（部分聚合支付渠道用此方案）。
+ * 必须用 createHmac：`sha256(secret + payload)` 不是 HMAC，
+ * 已知一个签名即可借 Merkle-Damgard 结构做长度扩展攻击伪造更长 payload。
+ */
 export function hmacSha256Hex(secret: string, payload: string): string {
-  return createHash("sha256").update(`${secret}${payload}`).digest("hex");
+  return createHmac("sha256", secret).update(payload).digest("hex");
 }

@@ -12,15 +12,17 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
+import { z } from "zod";
 import { parse as parseFormUrlEncoded } from "node:querystring";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { Public } from "../../common/public.decorator";
 import type { AuthedRequest } from "../../common/auth.types";
 import { clientIp } from "../../common/client-ip";
+import { parseOrThrow } from "../../common/zod";
 import { AppError, ErrorCode, isAppError } from "@app/shared";
 import { env } from "../../config/env";
 import { BillingService } from "./billing.service";
-import { ChannelService } from "./channels/channel.service";
+import { ChannelService, resolveAlipayConfig } from "./channels/channel.service";
 import type { PaymentMode } from "./channels/types";
 import {
   decryptWechatResource,
@@ -41,7 +43,22 @@ const ALIPAY_SUCCESS_BODY = "success";
 const ALIPAY_FAILURE_BODY = "failure";
 
 const CHANNELS = ["mock", "wechat", "alipay"] as const;
-const PAYMENT_MODES: PaymentMode[] = ["native", "h5", "jsapi", "page", "precreate"];
+const PAYMENT_MODES = ["native", "h5", "jsapi", "page", "precreate"] as const satisfies readonly PaymentMode[];
+
+/**
+ * 下单入参（SEC 审查：与其它模块一致改用 zod，而不是手工 as 断言）。
+ * 手工校验有三个问题：多余字段被静默放行、类型错误与缺失报同一句话、
+ * 同一份规则在 `/orders` 与 `/subscribe` 各写一遍必然漂移。
+ */
+const orderInputSchema = z.object({
+  sku: z
+    .string({ required_error: "sku is required", invalid_type_error: "sku is required" })
+    .min(1, "sku is required")
+    .max(128),
+  channel: z.enum(CHANNELS, { errorMap: () => ({ message: "channel must be one of mock|wechat|alipay" }) }).optional(),
+  mode: z.enum(PAYMENT_MODES, { errorMap: () => ({ message: "mode is invalid" }) }).optional(),
+  openid: z.string().max(128).optional(),
+});
 
 /**
  * mock 渠道端点的准入判定（PR-02）。**纯函数**，本机无库也能测（test/payment-guard.spec.ts）。
@@ -93,32 +110,30 @@ export class BillingController {
   /** 下单 */
   @Post("billing/orders")
   async create(@Req() req: AuthedRequest, @Body() body: unknown) {
-    const input = (body ?? {}) as {
-      sku?: unknown;
-      channel?: unknown;
-      mode?: unknown;
-      openid?: unknown;
-    };
-    if (!input.sku || typeof input.sku !== "string") {
-      throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
-    }
-    const channel = (input.channel ?? (env.PAYMENT_LIVE ? "" : "mock")) as string;
-    if (!CHANNELS.includes(channel as (typeof CHANNELS)[number])) {
+    return this.billing.createOrder(req.auth?.spaceId ?? "", req.auth?.userId ?? "", {
+      ...this.parseOrderInput(body),
+      clientIp: clientIp(req),
+    });
+  }
+
+  /**
+   * 下单入参解析（两个入口共用）：schema 负责形状/枚举/nullable，
+   * channel 的"缺省跟随 PAYMENT_LIVE"属于业务默认值，留在这一层。
+   */
+  private parseOrderInput(body: unknown): {
+    sku: string;
+    channel: (typeof CHANNELS)[number];
+    mode?: PaymentMode;
+    openid?: string;
+  } {
+    const input = parseOrThrow(orderInputSchema, body ?? {});
+    const channel = input.channel ?? (env.PAYMENT_LIVE ? undefined : "mock");
+    if (!channel) {
       throw new AppError(ErrorCode.INVALID_PARAM, "channel must be one of mock|wechat|alipay", {
         field: "channel",
       });
     }
-    const mode = typeof input.mode === "string" ? input.mode : undefined;
-    if (mode && !PAYMENT_MODES.includes(mode as PaymentMode)) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "mode is invalid", { field: "mode", allowed: PAYMENT_MODES });
-    }
-    return this.billing.createOrder(req.auth?.spaceId ?? "", req.auth?.userId ?? "", {
-      sku: input.sku,
-      channel: channel as "wechat" | "alipay" | "mock",
-      mode: mode as PaymentMode | undefined,
-      openid: typeof input.openid === "string" ? input.openid : undefined,
-      clientIp: clientIp(req),
-    });
+    return { sku: input.sku, channel, mode: input.mode, openid: input.openid };
   }
 
   /** 订单状态轮询 */
@@ -188,28 +203,15 @@ export class BillingController {
   /** 订阅下单：复用普通下单链路（VIP sku），支付成功由 markPaid 激活订阅 */
   @Post("billing/subscribe")
   async subscribe(@Req() req: AuthedRequest, @Body() body: unknown) {
-    const input = (body ?? {}) as { sku?: unknown; channel?: unknown; mode?: unknown };
-    if (!input.sku || typeof input.sku !== "string") {
-      throw new AppError(ErrorCode.INVALID_PARAM, "sku is required", { field: "sku" });
-    }
+    const input = this.parseOrderInput(body);
     const plans = await this.billing.listPlans();
     if (!plans.some((plan) => plan.sku === input.sku)) {
       throw new AppError(ErrorCode.INVALID_PARAM, "sku is not a subscription plan", { field: "sku" });
     }
-    const channel = (input.channel ?? (env.PAYMENT_LIVE ? "" : "mock")) as string;
-    if (!CHANNELS.includes(channel as (typeof CHANNELS)[number])) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "channel must be one of mock|wechat|alipay", {
-        field: "channel",
-      });
-    }
-    const mode = typeof input.mode === "string" ? input.mode : undefined;
-    if (mode && !PAYMENT_MODES.includes(mode as PaymentMode)) {
-      throw new AppError(ErrorCode.INVALID_PARAM, "mode is invalid", { field: "mode", allowed: PAYMENT_MODES });
-    }
     return this.billing.createOrder(req.auth?.spaceId ?? "", req.auth?.userId ?? "", {
       sku: input.sku,
-      channel: channel as "wechat" | "alipay" | "mock",
-      mode: mode as PaymentMode | undefined,
+      channel: input.channel,
+      mode: input.mode,
       clientIp: clientIp(req),
     });
   }
@@ -348,7 +350,14 @@ export class BillingController {
     const fail = (status: number): void => this.sendText(res, status, ALIPAY_FAILURE_BODY);
 
     try {
-      if (!env.ALIPAY_PUBLIC_KEY) {
+      /**
+       * 走 ChannelService 的统一解析（同下单路径），而不是直接读 env：
+       * `ALIPAY_PUBLIC_KEY` 允许单行 `\n` 转义写法、也允许用 `ALIPAY_PUBLIC_KEY_PATH`
+       * 挂载密钥文件。直接读 env 时这两种配置都会让验签**静默失败**，渠道于是无限重推、
+       * 订单永远不到账。
+       */
+      const alipay = resolveAlipayConfig(env);
+      if (!alipay.config) {
         fail(401);
         return;
       }
@@ -359,7 +368,7 @@ export class BillingController {
       }
       const verified = verifyAlipaySignature({
         params,
-        publicKeyPem: env.ALIPAY_PUBLIC_KEY,
+        publicKeyPem: alipay.config.publicKeyPem,
         signType: params.sign_type,
       });
       if (!verified) {

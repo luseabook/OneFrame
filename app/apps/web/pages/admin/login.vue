@@ -12,6 +12,7 @@ interface Envelope<T> {
 }
 
 const router = useRouter();
+const route = useRoute();
 
 /**
  * 底部提示只在非生产构建中出现（`SEC-03`）。
@@ -29,9 +30,15 @@ const password = ref("");
 const error = ref("");
 const loading = ref(false);
 
-onMounted(() => {
-  // 已登录直接进控制台（避免重复登录）
-  if (localStorage.getItem("admin_token")) void router.replace("/admin");
+onMounted(async () => {
+  // 已登录直接进控制台（避免重复登录）。凭证是 HttpOnly Cookie，JS 看不见，
+  // 所以用服务端验证（/me）而不是 localStorage 是否存在字符串。
+  try {
+    await adminApi("/ops/admin/me");
+    await router.replace(safeRedirect(route.query.redirect, "/admin"));
+  } catch {
+    // 未登录/过期：留在登录页
+  }
 });
 
 async function submit(): Promise<void> {
@@ -44,13 +51,14 @@ async function submit(): Promise<void> {
   try {
     const res = await $fetch<Envelope<{ token: string }>>("/v1/ops/admin/login", {
       method: "POST",
+      // 凭证由响应 Set-Cookie 写入 HttpOnly Cookie；body 里的 token 只给脚本客户端用
+      credentials: "include",
       body: { username: username.value.trim(), password: password.value },
     });
     if (!res || res.code !== 0 || !res.data?.token) {
       throw new Error(res?.msg || t("adminUi.loginFailedWith", { code: res?.code ?? "unknown" }));
     }
-    localStorage.setItem("admin_token", res.data.token);
-    await router.replace("/admin");
+    await router.replace(safeRedirect(route.query.redirect, "/admin"));
   } catch (e) {
     error.value = e instanceof Error ? e.message : t("adminUi.loginFailed");
   } finally {

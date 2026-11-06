@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
 
+# 最小权限：GITHUB_TOKEN 默认可能是 write-all，被入侵的第三方 Action 可借此推代码/改 Issue。
+# 本流水线只读仓库，不需要任何写权限。
+# TODO(SEC)：第三方 Action 应固定到 commit SHA（tag 可变、可被 retag），待联网环境补。
+permissions:
+  contents: read
+
 env:
   DATABASE_URL: postgres://app:app@localhost:5432/app
   REDIS_URL: redis://localhost:6379

@@ -132,7 +132,10 @@ export const spaces = pgTable("spaces", {
   filmEnabled: smallint("film_enabled").notNull().default(0), // 影视版功能准入（L0 闸门）
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}, (t) => [
+  // auth 热路径（每次登录/续期都按 owner_user_id 找个人空间）：无索引会随用户增长退化为全表扫描
+  index("idx_spaces_owner_user").on(t.ownerUserId),
+]);
 
 export const spaceMembers = pgTable(
   "space_members",

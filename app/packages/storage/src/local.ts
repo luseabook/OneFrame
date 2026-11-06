@@ -2,6 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import type { StorageDriver, StoredObject } from "./types";
+import { assertStorageKey } from "./key";
 
 /** 单次 fs 操作总上限（毫秒）：安全网，不是交付约束——256 MiB 在 ~0.9 MB/s 的盘上也够传 */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 5 * 60_000;
@@ -73,6 +74,8 @@ export class LocalStorage implements StorageDriver {
   }
 
   async put(key: string, data: Buffer, contentType: string): Promise<StoredObject> {
+    // 驱动内部自校验（纵深防御）：与 S3 驱动同口径，不能只靠调用方
+    key = assertStorageKey(key);
     const target = this.resolveKey(key);
     const signal = this.operationSignal();
     // 同目录临时文件：rename 在同一目录内是原子的（Windows 的 MoveFileEx 也覆盖已存在目标）
@@ -94,6 +97,7 @@ export class LocalStorage implements StorageDriver {
   }
 
   async read(key: string): Promise<Buffer> {
+    key = assertStorageKey(key);
     const signal = this.operationSignal();
     return this.withinDeadline("read", key, signal, () =>
       this.fs.readFile(this.resolveKey(key), signal ? { signal } : undefined),
@@ -101,6 +105,7 @@ export class LocalStorage implements StorageDriver {
   }
 
   async signDownload(key: string, ttlSeconds: number): Promise<string> {
+    key = assertStorageKey(key);
     const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
     const sig = this.sign(key, expires);
     const base = this.options.publicBaseUrl.replace(/\/$/, "");

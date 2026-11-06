@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { generateKeyPairSync, createSign, createCipheriv, randomBytes } from "node:crypto";
+import { generateKeyPairSync, createSign, createCipheriv, createHash, randomBytes } from "node:crypto";
 import {
   decryptWechatResource,
+  hmacSha256Hex,
   safeEqual,
   verifyAlipaySignature,
   verifyWechatSignature,
@@ -146,6 +147,17 @@ describe("payment signature", () => {
       expect(safeEqual("abc", "abc")).toBe(true);
       expect(safeEqual("abc", "abd")).toBe(false);
       expect(safeEqual("abc", "abcd")).toBe(false);
+    });
+
+    it("hmacSha256Hex is real HMAC, not sha256(secret||payload)", () => {
+      // RFC 4231 test case 1: key="Jefe", data="what do ya want for nothing?"
+      expect(hmacSha256Hex("Jefe", "what do ya want for nothing?")).toBe(
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+      );
+      // 长度扩展攻击回归：sha256(secret+payload) 与 HMAC 必须不同
+      expect(hmacSha256Hex("s3cret", "payload")).not.toBe(
+        createHash("sha256").update("s3cretpayload").digest("hex"),
+      );
     });
   });
 });

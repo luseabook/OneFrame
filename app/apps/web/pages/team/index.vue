@@ -521,7 +521,7 @@ async function exportFlows(): Promise<void> {
       flash(t("teamPage.noFlowsToExport"));
       return;
     }
-    window.open(res.file_uri, "_blank");
+    window.open(res.file_uri, "_blank", "noopener");
     flash(t("teamPage.exportDone", { filename: res.filename, rows: res.row_count }));
   } catch (e) {
     error.value = (e as Error).message;

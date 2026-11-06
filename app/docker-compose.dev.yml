@@ -1,13 +1,18 @@
+# 本地开发依赖。⚠️ 所有端口一律绑定 127.0.0.1：
+# 这些服务（PG/Redis/MinIO）都没有按「对外可暴露」的口径配置认证，
+# 绑 0.0.0.0 等于把无密码 Redis / 弱口令 MinIO / 已知口令 PG 交给整个局域网。
+# 需要跨机器调试时，用 SSH 隧道，不要改回 0.0.0.0。
 services:
   postgres:
     image: postgres:16-alpine
     container_name: app-postgres
     environment:
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
+      # 仅本机开发口令；生产口令见 docker-compose.prod.yml（强制必填）
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: app
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,9 +24,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: app-redis
+    # 未设 requirepass —— 安全性由「只绑回环」保证，勿 publish 到 0.0.0.0
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -31,15 +37,17 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # 固定 release tag：:latest 会让不同机器/不同时间拉到不同版本，问题不可复现
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: app-minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: app
-      MINIO_ROOT_PASSWORD: app12345
+      # 仅本机开发凭据；生产见 docker-compose.prod.yml 的 ${S3_*:?}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-app}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-app12345}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
 

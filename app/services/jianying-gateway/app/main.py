@@ -74,9 +74,21 @@ _effects_cache: dict[str, Any] = {"ts": 0.0, "items": []}
 
 METRICS: dict[str, Any] = {"requests": 0, "errors": 0, "latency_ms_total": 0, "by_status": {}}
 
+# 每 key 的固定窗计数：token → (window_start, count)。键集合 = API_KEYS 数量，不会无界增长。
+_RATE_WINDOWS: dict[str, tuple[float, int]] = {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # H-7：空 API_KEYS = 任何能访问 8788 的进程都能消耗上游额度。
+    # 默认 fail-closed；本地隔离开发可用 ALLOW_OPEN_GATEWAY=1 显式豁免。
+    if not settings.api_keys and not settings.allow_open_gateway:
+        raise RuntimeError(
+            "API_KEYS is empty: refusing to start an unauthenticated gateway "
+            "(set API_KEYS, or ALLOW_OPEN_GATEWAY=1 for isolated local dev)"
+        )
+    if not settings.api_keys:
+        log.warning("gateway started WITHOUT authentication (ALLOW_OPEN_GATEWAY=1)")
     log.info("gateway %s starting, upstream=%s concurrency=%s",
              settings.version, settings.upstream_base, settings.max_concurrency)
     task = asyncio.create_task(storage.cleanup_loop())
@@ -88,12 +100,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="JianYing Image Gateway", version=settings.version, lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS 默认关闭：网关的消费者是我方 worker（服务间调用，无需浏览器跨域）。
+# 确需浏览器直连时用 CORS_ORIGINS 显式白名单，绝不 `*`（那会让任意网页驱动计费接口）。
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-Id", "X-Api-Key"],
+    )
 
 
 # ------------------------------------------------------------------ helpers
@@ -104,22 +119,44 @@ def error_json(status: int, message: str, etype: str = "upstream_error", code: A
     )
 
 
+def upstream_error_json(request: Request, exc: "UpstreamError"):
+    """上游错误的对外投影：详情只进日志，响应给通用文案（H-8/信息泄露）。"""
+    rid = getattr(request.state, "rid", "-")
+    log.warning("[%s] upstream error (code=%s): %s", rid, exc.code, exc.message)
+    return error_json(502, "upstream error", "upstream_error", code=exc.code)
+
+
 @app.middleware("http")
 async def auth_and_trace(request: Request, call_next):
     rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:16]
     request.state.rid = rid
     t0 = time.time()
     path = request.url.path
-    if settings.api_keys and path.startswith("/v1"):
+    # /metrics 同样受 API key 保护（它暴露请求量/错误率/上游地址等运营数据）；
+    # /healthz 留给容器探活，不含业务信息。
+    protected = path.startswith("/v1") or path == "/metrics"
+    if settings.api_keys and protected:
         auth = request.headers.get("Authorization", "")
         token = auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-api-key", "")
         if token not in settings.api_keys:
             return error_json(401, "invalid api key", "authentication_error")
+        # 按 key 的分钟窗限流：没有它，单个 key 可占满全部并发槽（MAX_CONCURRENCY）
+        # 让其他调用方全部排队 —— 是"公平性"问题，不只是防刷。
+        if settings.max_requests_per_minute > 0:
+            now = time.time()
+            start, count = _RATE_WINDOWS.get(token, (now, 0))
+            if now - start >= 60:
+                start, count = now, 0
+            count += 1
+            _RATE_WINDOWS[token] = (start, count)
+            if count > settings.max_requests_per_minute:
+                return error_json(429, "rate limit exceeded", "rate_limit_error")
     try:
         response = await call_next(request)
     except Exception as exc:  # pragma: no cover - safety net
+        # H-8：内部异常细节只进日志，响应给通用文案（不泄露路径/堆栈/上游实现）
         log.exception("[%s] unhandled: %s", rid, exc)
-        return error_json(500, f"internal error: {exc}")
+        return error_json(500, "internal error", "internal_error")
     elapsed_ms = (time.time() - t0) * 1000
     response.headers["X-Request-Id"] = rid
     METRICS["requests"] += 1
@@ -351,7 +388,7 @@ async def images_generations(body: ImageGenerationRequest, request: Request):
     except CircuitOpenError as exc:
         return error_json(503, exc.message, "upstream_unavailable")
     except UpstreamError as exc:
-        return error_json(502, exc.message, "upstream_error", code=exc.code)
+        return upstream_error_json(request, exc)
 
     return ImageResponse(created=int(time.time()), data=results).model_dump(exclude_none=True)
 
@@ -367,7 +404,13 @@ async def images_edits(request: Request):
 
     image = field("image")
     prompt = field("prompt")
-    n = int(field("n", "1") or 1)
+    # 表单路径此前对非数字直接抛 ValueError（500）；与 JSON 模型同口径：1..4 的整数
+    try:
+        n = int(field("n", "1") or 1)
+    except ValueError:
+        return error_json(400, "`n` must be an integer", "invalid_request_error", param="n")
+    if n < 1 or n > 4:
+        return error_json(400, "`n` must be between 1 and 4", "invalid_request_error", param="n")
     size = field("size") or None
     aspect_ratio = field("aspect_ratio") or None
     resolution = field("resolution") or None
@@ -424,7 +467,7 @@ async def images_edits(request: Request):
     except CircuitOpenError as exc:
         return error_json(503, exc.message, "upstream_unavailable")
     except UpstreamError as exc:
-        return error_json(502, exc.message, "upstream_error", code=exc.code)
+        return upstream_error_json(request, exc)
 
     return ImageResponse(created=int(time.time()), data=results).model_dump(exclude_none=True)
 
@@ -449,7 +492,7 @@ async def chat_completions(body: ChatCompletionRequest, request: Request):
     except CircuitOpenError as exc:
         return error_json(503, exc.message, "upstream_unavailable")
     except UpstreamError as exc:
-        return error_json(502, exc.message, "upstream_error", code=exc.code)
+        return upstream_error_json(request, exc)
 
     content = f"![generated]({img.url})\n\n{img.url}"
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"

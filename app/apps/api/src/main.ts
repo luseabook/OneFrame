@@ -33,6 +33,34 @@ async function bootstrap(): Promise<void> {
 
   await app.register(cookie as unknown as Parameters<typeof app.register>[0]);
 
+  /**
+   * 安全响应头（SEC 审查 H-6）：nginx 已设置一套（deploy/nginx.conf.template），
+   * 但直连 API 的场景（内网调试、健康检查、绕过反代）拿不到。这里做纵深防御：
+   * 不依赖任何插件，onRequest 钩子对**所有**响应生效（含异常信封）。
+   *
+   * 为什么不加 CORS：本项目 API 与 Web 同源（nginx 反代 /v1），无跨域消费方 ——
+   * 「不设 Access-Control-*」是安全默认值（浏览器跨源直接拒绝）。将来若确有跨域
+   * 客户端，必须用**显式白名单**，绝不可 `*` + credentials。
+   */
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addHook("onRequest", (req, reply, done) => {
+      reply.header("X-Content-Type-Options", "nosniff");
+      reply.header("X-Frame-Options", "DENY");
+      reply.header("Referrer-Policy", "no-referrer");
+      reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+      // API 只返回 JSON/文件字节，不需要加载任何子资源；frame-ancestors 防点击劫持
+      reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+      // 资源只允许同站引用（图片/视频直链被第三方页面嵌入时由浏览器拦截）
+      reply.header("Cross-Origin-Resource-Policy", "same-site");
+      // HSTS 只对 HTTPS 请求发：内网 HTTP 部署发了它反而会把浏览器锁死
+      if (req.protocol === "https") {
+        reply.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+      }
+      done();
+    });
+
   app.setGlobalPrefix("v1");
   app.useGlobalFilters(new AllExceptionsFilter());
   // 顺序有意义：幂等账本必须在信封**外层**（重放时缓存的是裸 data，

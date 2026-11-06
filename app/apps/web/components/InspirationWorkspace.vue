@@ -170,7 +170,7 @@ function useTemplate(text: string): void {
 }
 
 function openResult(url: string): void {
-  window.open(url, "_blank");
+  window.open(url, "_blank", "noopener");
 }
 
 onMounted(() => {

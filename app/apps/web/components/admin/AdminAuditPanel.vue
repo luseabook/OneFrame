@@ -4,7 +4,7 @@
  *
  * 为什么独立成组件：`pages/admin/index.vue` 已近千行，而这三个新面板各自都有
  * 「筛选条件 + 分页 + 错误/空态」三份状态；塞回单页会让它变成"改一处怕碰十处"。
- * 面板只依赖 `useAdminApi`（后台是独立身份域，token 存 `localStorage.admin_token`）。
+ * 面板只依赖 `useAdminApi`（后台是独立身份域，凭证走 HttpOnly Cookie，JS 不可读）。
  */
 import { adminApi, downloadAdminCsv, adminErrorCode } from "~/composables/useAdminApi";
 const { t } = useI18n();
@@ -117,7 +117,7 @@ function buildQuery(): string {
 async function handleError(err: unknown, fallbackKey: string): Promise<void> {
   const code = adminErrorCode(err);
   if (code === 401101) {
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

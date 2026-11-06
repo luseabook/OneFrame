@@ -49,8 +49,12 @@ class Settings:
     request_timeout: int = _int("REQUEST_TIMEOUT", 300)  # whole-request budget (s)
 
     # --- auth -------------------------------------------------------------
-    # empty list = open gateway
+    # 【必填】网关访问控制。留空时默认**拒绝启动**（fail-closed）；
+    # 只有显式设置 ALLOW_OPEN_GATEWAY=1 才允许无鉴权（仅限隔离的本机开发）。
     api_keys: list[str] = _list("API_KEYS", "")
+    allow_open_gateway: bool = _bool("ALLOW_OPEN_GATEWAY", False)
+    # 浏览器跨域白名单（逗号分隔）。默认空 = 不发 CORS 头（服务间调用不需要）。
+    cors_origins: list[str] = _list("CORS_ORIGINS", "")
 
     # --- upstream -----------------------------------------------------------
     upstream_base: str = _str("UPSTREAM_BASE", "http://newapi.jianyingeditor.cn")
@@ -60,6 +64,10 @@ class Settings:
     upstream_retries: int = _int("UPSTREAM_RETRIES", 3)
     retry_backoff: float = _float("RETRY_BACKOFF", 1.2)
     trust_env: bool = _bool("TRUST_ENV", True)
+    # 协议常量（逆向自 com.mediaeditor.video 5.2.2，非部署密钥：上游 APK 内固定）。
+    # 保留默认值以便开箱即用；上游换版时可只改环境变量，不必改代码。
+    jy_rsa_pub_b64: str = _str("JY_RSA_PUB_B64", "")
+    jy_aes_key: str = _str("JY_AES_KEY", "")
 
     # --- circuit breaker ----------------------------------------------------
     cb_fail_threshold: int = _int("CB_FAIL_THRESHOLD", 8)
@@ -74,6 +82,10 @@ class Settings:
     upload_fallback: str = _str("UPLOAD_FALLBACK", "none").lower()
     upload_fallback_ttl: str = _str("UPLOAD_FALLBACK_TTL", "1h")
     max_upload_mb: int = _int("MAX_UPLOAD_MB", 20)
+    # 从上游下载生成图/参考图的大小上限（防被篡改的 URL 返回超大响应打满内存）
+    max_download_mb: int = _int("MAX_DOWNLOAD_MB", 24)
+    # 每个 API key 每分钟请求上限（0 = 不限）。防止单个 key 占满全部并发槽饿死他人。
+    max_requests_per_minute: int = _int("MAX_REQUESTS_PER_MINUTE", 60)
 
     default_model: str = _str("DEFAULT_MODEL", "jianying-draw")
     default_style: str = _str("DEFAULT_STYLE", "")

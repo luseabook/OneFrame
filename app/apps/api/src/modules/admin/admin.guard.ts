@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { adminUsers } from "@app/db";
 import { AppError, ErrorCode } from "@app/shared";
 import { db } from "../../db/database";
+import { env } from "../../config/env";
 import { AdminAuthService, type AdminAuth } from "./admin-auth.service";
 
 /**
@@ -27,12 +28,24 @@ export class AdminGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<FastifyRequest & { adminAuth?: AdminAuth }>();
     const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
+    /**
+     * 凭证来源（H-2）：Bearer 来自 API/脚本客户端；HttpOnly Cookie 来自运营后台浏览器。
+     * Cookie 源额外做**同源校验**（写请求）——SameSite=Strict 已在现代浏览器挡住跨站表单，
+     * 这一层防的是旧浏览器/代理改写，属于纵深防御，不影响 Bearer 客户端。
+     */
+    const cookieToken = (req.cookies as Record<string, string | undefined> | undefined)?.admin_token;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : cookieToken;
+    if (!token) {
       throw new AppError(ErrorCode.UNAUTHORIZED, "admin auth required");
+    }
+    if (!header?.startsWith("Bearer ") && !READ_ONLY_METHODS.has(req.method)) {
+      // 开发环境经 Nuxt dev 代理时 Host 可能被改写成上游地址，同源校验会误杀；
+      // 生产（nginx 显式 `proxy_set_header Host $host`）才强制。
+      if (env.NODE_ENV === "production") assertSameOrigin(req);
     }
     let payload: AdminAuth;
     try {
-      payload = this.auth.verify(header.slice(7));
+      payload = this.auth.verify(token);
     } catch {
       // 已携带凭证但不是管理员（普通用户 token）→ 403；无凭证仍 401
       throw new AppError(ErrorCode.FORBIDDEN, "admin only");
@@ -83,3 +96,31 @@ export class AdminGuard implements CanActivate {
 
 /** 无副作用的 HTTP 方法（viewer 可执行） */
 const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Cookie 凭证的写请求同源校验。
+ *
+ * 为什么必须有：Cookie 会自动携带，若反代层把 API 暴露在另一个站点下，
+ * 恶意页面就能借运营的浏览器发起写操作（CSRF）。Origin/Referer 二者取其一，
+ * 均缺失（非浏览器客户端）时拒绝 Cookie 写请求——这类客户端请改用 Bearer。
+ */
+function assertSameOrigin(req: FastifyRequest): void {
+  const source = req.headers.origin ?? req.headers.referer;
+  if (!source) {
+    throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
+  }
+  let sourceHost: string;
+  try {
+    sourceHost = new URL(source).host;
+  } catch {
+    throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
+  }
+  // 反代可能保留 Host 或注入 X-Forwarded-Host（CDN）；两者任一匹配即可
+  const allowed = [req.headers.host, req.headers["x-forwarded-host"]]
+    .flatMap((value) => (typeof value === "string" ? value.split(",") : []))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!allowed.includes(sourceHost)) {
+    throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
+  }
+}

@@ -85,7 +85,7 @@ function categoryLabel(key: string): string {
  */
 async function fail(e: unknown, fallbackKey: string): Promise<void> {
   if (isAdminAuthError(e)) {
-    localStorage.removeItem("admin_token");
+    await adminLogout();
     await navigateTo("/admin/login", { replace: true });
     return;
   }

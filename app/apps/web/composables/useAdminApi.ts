@@ -1,12 +1,14 @@
 /**
  * 运营后台专用 API 客户端。
  *
- * 为什么不复用 `useApi`：后台是**独立身份域**——token 只存在
- * `localStorage.admin_token`，不参与用户端 refresh，也不带 `X-Space-Id` / `X-Lang`。
- * 两套身份混用会让"这条操作是谁做的"变成糊涂账（admin_users 与 users 的 id 空间不同，
- * 见 `packages/db/src/schema.ts` 的 admin 相关注释）。
+ * 为什么不复用 `useApi`：后台是**独立身份域**——不参与用户端 refresh，
+ * 也不带 `X-Space-Id` / `X-Lang`。两套身份混用会让"这条操作是谁做的"变成糊涂账
+ * （admin_users 与 users 的 id 空间不同，见 `packages/db/src/schema.ts` 的 admin 相关注释）。
  *
- * 只在客户端调用（后台页全部 `ssr:false`），所以这里直接用 localStorage。
+ * 凭证（SEC H-2）：由后端 `POST /v1/ops/admin/login` 写入 **HttpOnly Cookie**
+ * （`admin_token`，path=/v1/ops，SameSite=Strict），JS 读不到、XSS 偷不走。
+ * 这里不再从 localStorage 取 token，只靠 `credentials: "include"` 自动携带。
+ * 脚本/API 客户端仍可用 Bearer（登录响应体仍返回 token）。
  */
 
 import { filenameFromDisposition, isEnvelopeContentType, readEnvelopeError } from "~/utils/download-response";
@@ -28,9 +30,13 @@ export class AdminApiError extends Error {
   }
 }
 
-export function adminToken(): string {
-  if (import.meta.server) return "";
-  return localStorage.getItem("admin_token") ?? "";
+/** 退出登录：清后端 HttpOnly Cookie（失败不阻断跳转，页面照样回登录页） */
+export async function adminLogout(): Promise<void> {
+  try {
+    await $fetch("/v1/ops/admin/logout", { method: "POST", credentials: "include" });
+  } catch {
+    // 网络错误 / 已过期都无妨：Cookie 过期后同样无效
+  }
 }
 
 export function adminErrorCode(error: unknown): number | undefined {
@@ -64,16 +70,14 @@ export interface AdminRequestOptions {
  * 非 0 code 一律抛 `AdminApiError`（保留 msg，页面直接展示）。
  */
 export async function adminApi<T>(path: string, options: AdminRequestOptions = {}): Promise<T> {
-  const token = adminToken();
   let envelope: AdminEnvelope<T> | undefined;
   try {
     envelope = await $fetch<AdminEnvelope<T>>(`/v1${path}`, {
       method: options.method ?? "GET",
+      // HttpOnly Cookie 必须显式 include（同源 fetch 默认也会带，但不依赖默认值）
+      credentials: "include",
       ...(options.body === undefined ? {} : { body: options.body as never }),
-      headers: {
-        ...(options.headers ?? {}),
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
+      headers: options.headers ?? {},
     });
   } catch (error) {
     // 后端错误信封在 `error.data` 里（$fetch 对非 2xx 会抛）；能解出 code 就按业务错误处理
@@ -96,10 +100,7 @@ export async function adminApi<T>(path: string, options: AdminRequestOptions = {
  * 结果把错误 JSON 当 CSV 返回给用户下载。判据抽在 `~/utils/download-response`。
  */
 export async function adminApiBlob(path: string): Promise<{ blob: Blob; filename: string }> {
-  const token = adminToken();
-  const response = await fetch(`/v1${path}`, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
-  });
+  const response = await fetch(`/v1${path}`, { credentials: "include" });
 
   if (isEnvelopeContentType(response.headers.get("content-type"))) {
     const envelope = await response.json().catch(() => null);
