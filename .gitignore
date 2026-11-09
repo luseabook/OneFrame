@@ -98,3 +98,8 @@ app/deploy/certs/*
 app/deploy/acme-webroot/*
 !app/deploy/acme-webroot/.gitkeep
 
+# 本地运维工具（含批量注册/代理/指纹类脚本）只在本地使用，不进公开仓库；
+# 文档编辑产生的 .bak 备份同理。
+tools/
+*.bak*
+
