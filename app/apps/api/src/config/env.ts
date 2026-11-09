@@ -207,6 +207,28 @@ const envSchema = z.object({
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default("deepseek-chat"),
+  /**
+   * 文本步骤的**供应商超时**（毫秒）。默认 120s。
+   *
+   * 为什么不是适配器的 30s 默认值：2026-11-07 创作者验收实测，拆分镜要模型吐一整张
+   * 分镜表（十几镜 × 场景/景别/提示词/时长），reasoning 模型在 30s 内**必然被 abort**，
+   * 表现出来就是「点了 AI拆分镜 没反应」。30s 适合单轮问答，不适合结构化长输出。
+   *
+   * 注意这条要比反向代理的 `proxy_read_timeout` 小，否则用户先看到 nginx 504。
+   */
+  DEEPSEEK_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(120_000),
+  /**
+   * 供应商要求的**附加请求头**（JSON 对象，值必须是字符串）。
+   *
+   * 为什么需要：不是所有 OpenAI 兼容网关都只认 Authorization。OpenCode Zen Go 在协议之外
+   * 强制 `x-opencode-session`（缺失直接 400 `MissingSessionID`）并要求客户端自报 UA。
+   * 这类要求是**供应商局部**的，与 worker 侧 `provider_options.headers` 同口径：
+   * 从配置注入，不把任何一家的怪要求写死进适配器。
+   *
+   * 与 `packages/model-adapters` 的 `VendorHttpClient` 合并顺序一致：
+   * 附加头先铺、`authorization` 最后写 —— 配置里塞同名头也顶不掉鉴权。
+   */
+  DEEPSEEK_EXTRA_HEADERS: z.string().optional(),
 
   // 语音转写（Agent STT，第 4 批）：竞品 `agent/stt-token`（rt:126）。
   // 我方策略：**厂商 Key 不下发浏览器**，只下发短期会话令牌；缺 Key 时 /

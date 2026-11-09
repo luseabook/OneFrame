@@ -16,7 +16,12 @@ import { decryptSecret, encryptSecret, providerAad, secretFingerprint, secretHin
  * `provider-runtime.ts` 里按 `GET /models` 发现 + 文本/视频两条分支，套上去会走错分支。
  * 见 docs/02-architecture/jianying-gateway-integration.md §3。
  */
-export type ProviderProtocol = "openai-compatible" | "ark" | "http-video" | "jianying";
+/**
+ * 与 `apps/worker/src/provider-runtime.ts` 的协议分支保持同步：
+ * 那边认 ark / h3 / jianying / openai-compatible / http-video 五种，
+ * 这里少写一个 `h3` 的后果就是「后台建不出 H3 供应商」，运营只能绕去改库。
+ */
+export type ProviderProtocol = "openai-compatible" | "ark" | "http-video" | "h3" | "jianying";
 
 export interface ProviderInput {
   code: string;
@@ -132,6 +137,40 @@ function toRouteDto(row: {
   };
 }
 
+/**
+ * 主机是否属于「内网/本机/容器」范围。
+ *
+ * 用途只有一个：决定 `http://` 的 base_url 是否**允许**（公网明文传 Key 不行，
+ * 但自建网关就在本机或容器网络里，强制 https 等于逼运维去配一张自签证书）。
+ * 注意这里不用 `isPrivateIp`：它对**非 IP 字符串**返回 true（SSRF 探测那侧要保守），
+ * 直接复用会把任何 `http://api.foo.com` 放行。
+ */
+function hostIsInternal(host: string): boolean {
+  const name = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!name) return false;
+  if (name === "localhost" || name === "::1") return true;
+  if (!name.includes(".")) return true; // 单标签 = 容器名 / 主机名（jianying-gateway、redis…）
+  if (name.endsWith(".local") || name.endsWith(".internal") || name.endsWith(".localdomain")) return true;
+  // 严格 IP 形态（v4/v6）
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
+  if (v4) {
+    const [a, b] = v4.slice(1).map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  if (name.includes(":")) {
+    return name === "::1" || name.startsWith("fc") || name.startsWith("fd") || name.startsWith("fe80:");
+  }
+  return false;
+}
+
 function normalizeBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, "");
   let url: URL;
@@ -140,8 +179,18 @@ function normalizeBaseUrl(raw: string): string {
   } catch {
     throw new AppError(ErrorCode.INVALID_PARAM, "base_url must be a valid URL", { field: "base_url" });
   }
-  if (url.protocol !== "https:" && !(env.NODE_ENV !== "production" && url.protocol === "http:")) {
-    throw new AppError(ErrorCode.INVALID_PARAM, "base_url must use https", { field: "base_url" });
+  /**
+   * https 为默认；`http://` **仅**放行内网/本机/容器主机名。
+   *
+   * 为什么放宽（2026-11-07 验收实测）：剪影生图网关跑在同一台机器的 127.0.0.1:8788，
+   * 旧实现「生产环境一律 https」直接拒绝，运维在浏览器里根本建不出这条供应商 ——
+   * 文档 §5 写的 `base_url=http://jianying-gateway:8788` 也就成了死条款。
+   * 公网 http 仍然拒绝：Key 明文出网是不可接受的，这条不是可用性换安全。
+   */
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && hostIsInternal(url.hostname))) {
+    throw new AppError(ErrorCode.INVALID_PARAM, "base_url must use https (http is allowed only for internal hosts)", {
+      field: "base_url",
+    });
   }
   if (url.username || url.password) {
     throw new AppError(ErrorCode.INVALID_PARAM, "base_url must not contain credentials", { field: "base_url" });

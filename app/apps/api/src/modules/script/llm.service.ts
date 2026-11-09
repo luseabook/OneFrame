@@ -63,6 +63,31 @@ function pickFromPool(pool: readonly string[], count: number, seed: number): str
 }
 
 // LLM 步骤：mock 确定性输出（本地/CI），real 走 DeepSeek（JSON 强约束 + Zod 校验 + 输出审核）
+/**
+ * 解析 `DEEPSEEK_EXTRA_HEADERS`（JSON 对象，值必须是字符串）。
+ *
+ * 为什么放这里而不是适配器里：附加头是**供应商局部**的配置（OpenCode Zen 的
+ * `x-opencode-session`、自报 UA），适配器只负责把 `extraHeaders` 原样铺进请求。
+ * 坏配置（数组、数字值、坏 JSON）一律**丢**——表现为供应商 4xx，看得见是配置问题；
+ * 若在启动期抛错，人手一次写错 JSON 就把整个 API 打挂，反而更难排查。
+ */
+function parseExtraHeaders(raw: string | undefined): Record<string, string> | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const name = key.trim().toLowerCase();
+    if (name && typeof value === "string" && value.trim()) out[name] = value.trim();
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 @Injectable()
 export class LlmService {
   private readonly deepseek =
@@ -71,6 +96,11 @@ export class LlmService {
           apiKey: env.DEEPSEEK_API_KEY,
           baseUrl: env.DEEPSEEK_BASE_URL,
           model: env.DEEPSEEK_MODEL,
+          // 长结构化输出（分镜表/大纲）在 30s 内完不成：见 env 里 DEEPSEEK_TIMEOUT_MS 的说明
+          timeoutMs: env.DEEPSEEK_TIMEOUT_MS,
+          // 超时属于"明确失败"，重试只会把用户等待翻倍；网络抖动仍由适配器内部 429/5xx 处理
+          maxRetries: 1,
+          extraHeaders: parseExtraHeaders(env.DEEPSEEK_EXTRA_HEADERS),
         })
       : null;
 

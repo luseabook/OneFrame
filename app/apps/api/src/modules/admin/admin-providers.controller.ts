@@ -13,7 +13,13 @@ type AdminRequest = FastifyRequest & { adminAuth?: AdminAuth };
 const emptyToUndefined = (value: unknown) => (value === "" || value === null ? undefined : value);
 const numericId = z.string().trim().regex(/^\d+$/, "must be numeric id");
 
-const providerProtocolSchema = z.enum(["openai-compatible", "ark", "http-video", "jianying"]);
+/**
+ * 可接入的供应商协议族。必须与 `apps/worker/src/provider-runtime.ts` 的
+ * `adapterOptionsFromSnapshot` 分支**一一对应**：那边认四种协议（ark / h3 / jianying /
+ * openai-compatible / http-video），这边少一个 `h3` 的后果是「后台建不出 H3 供应商，
+ * 但代码明明支持」——运营只能绕去改库，是最典型的配置面缺口。
+ */
+const providerProtocolSchema = z.enum(["openai-compatible", "ark", "http-video", "h3", "jianying"]);
 
 const providerCreateSchema = z.object({
   code: z.string().trim().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]*$/, "code must be lowercase slug"),

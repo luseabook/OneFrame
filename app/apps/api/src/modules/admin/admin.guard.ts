@@ -104,22 +104,45 @@ const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * 恶意页面就能借运营的浏览器发起写操作（CSRF）。Origin/Referer 二者取其一，
  * 均缺失（非浏览器客户端）时拒绝 Cookie 写请求——这类客户端请改用 Bearer。
  */
+/**
+ * 取一个 URL/Host 值的**主机名**（不含端口），失败返回 null。
+ *
+ * 为什么只比主机名、不比端口：
+ * nginx 用 `proxy_set_header Host $host` 转发时，`$host` **不含端口**（这是刻意写的，
+ * 用来让 `server_name` 精确匹配域名）。于是后台挂在非 80 端口（如 IP 直连 `:8080`）时，
+ * 浏览器发的 `Origin: http://1.2.3.4:8080` 与上游看到的 `Host: 1.2.3.4` 永远不相等 ——
+ * 结果是**所有写操作被自己的 CSRF 防线拦死**（读请求因为只校验 GET/HEAD 不受影响，
+ * 症状极具迷惑性：页面能看、一点保存就 403101）。2026-11-07 验收实测踩到。
+ *
+ * 安全代价：同主机不同端口会被视作同源。跨站请求的 Origin 主机名与本机不同，仍被拒；
+ * 真正把"攻击者可控制同主机另一端口"当威胁时，正确做法是 nginx 传 `$http_host`
+ * 并在本函数里恢复端口比较 —— 但那是基础设施改动，不该由这段守卫替运维决定。
+ */
+function hostOnly(value: string): string | null {
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    // 兼容三种入参：完整 URL（Origin/Referer）、`host:port`、裸 host
+    return new URL(text.includes("://") ? text : `http://${text}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function assertSameOrigin(req: FastifyRequest): void {
   const source = req.headers.origin ?? req.headers.referer;
   if (!source) {
     throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
   }
-  let sourceHost: string;
-  try {
-    sourceHost = new URL(source).host;
-  } catch {
+  const sourceHost = hostOnly(source);
+  if (!sourceHost) {
     throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
   }
   // 反代可能保留 Host 或注入 X-Forwarded-Host（CDN）；两者任一匹配即可
   const allowed = [req.headers.host, req.headers["x-forwarded-host"]]
     .flatMap((value) => (typeof value === "string" ? value.split(",") : []))
-    .map((value) => value.trim())
-    .filter(Boolean);
+    .map((value) => hostOnly(value))
+    .filter((value): value is string => Boolean(value));
   if (!allowed.includes(sourceHost)) {
     throw new AppError(ErrorCode.FORBIDDEN, "cross-site admin request rejected");
   }

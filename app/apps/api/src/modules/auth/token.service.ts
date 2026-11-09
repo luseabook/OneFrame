@@ -117,7 +117,26 @@ export class TokenService {
   async consumeRefresh(userId: string, jti: string): Promise<boolean> {
     // 原子「比对并删除」：并发的两次 /auth/refresh 只能有一次成功（见 RedisService.delIfCurrent）。
     // 分开的 GET + DEL 会让两个调用都读到同一 jti 并各自签发新会话 —— 重放检测形同虚设。
-    return this.redis.delIfCurrent(`refresh:user:${userId}`, jti, `refresh:jti:${jti}`);
+    const consumed = await this.redis.delIfCurrent(`refresh:user:${userId}`, jti, `refresh:jti:${jti}`);
+    if (consumed) {
+      /**
+       * 60 秒宽限窗口（2026-11-07 创作者验收实测）。
+       *
+       * 现象：刷新一下页面就被踢回登录页。refresh 是「单次消费 + 轮换」，但浏览器在
+       * **响应回来之前页面被导航打断**时不会保存新的 Set-Cookie；下一次刷新仍拿旧 jti 过来，
+       * 服务端判定 `refresh token reused` → 401 → 前端清会话。
+       * 触发条件很日常：SPA 启动时多个请求同时 401（并发 refresh）、用户手快连点刷新、
+       * 或从外部链接直接落到受保护路由。
+       *
+       * 为什么是「按 jti 宽限」而不是「整体不轮换」：
+       * - 键名带 jti，只放行**刚刚被消费的那一枚**，60s 自然过期，不复用其他会话；
+       * - 登出 / 改密走 `revokeRefresh` 删主键，旧 token 依旧立即失效（安全语义不变）；
+       * - 仍然每次签发新对，被盗 token 的最大窗口从「TTL」缩到「60s + 一次使用」。
+       */
+      await this.redis.set(`refresh:grace:${jti}`, "1", 60).catch(() => undefined);
+      return true;
+    }
+    return (await this.redis.get(`refresh:grace:${jti}`)) === "1";
   }
 
   /**

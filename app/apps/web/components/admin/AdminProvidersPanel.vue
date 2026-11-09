@@ -43,10 +43,39 @@ interface DiscoverResult {
   latency_ms?: number;
 }
 
+/** 我方模型（GET /ops/admin/models 返回裸数组，不是 { list }） */
+interface ModelRow {
+  id: string;
+  name: string;
+  displayName?: string;
+  display_name?: string;
+  capability?: string;
+  visible?: boolean;
+}
+
+/** 模型路由（service 直接回 camelCase，没走 DTO —— 两种都兼容读） */
+interface RouteRow {
+  id: string;
+  modelId?: string;
+  model_id?: string;
+  providerId?: string;
+  provider_id?: string;
+  remoteModelId?: string;
+  remote_model_id?: string;
+  priority?: number;
+  weight?: number;
+  active?: boolean;
+  modelName?: string;
+  model_name?: string;
+  providerName?: string;
+  provider_name?: string;
+}
+
 const PROTOCOLS = [
   { value: "openai-compatible", label: "OpenAI 兼容", hint: "GET /v1/models 自动发现" },
   { value: "ark", label: "火山方舟 Ark", hint: "手工录入 ep-xxx / 模型 ID" },
   { value: "http-video", label: "HTTP 视频网关", hint: "手工录入模型 ID" },
+  { value: "h3", label: "H3 视频网关（自建 GPU）", hint: "手工录入模型别名（如 h3-base）" },
   { value: "jianying", label: "剪影生图网关", hint: "手工录入模型别名（如 jianying-draw）" },
 ] as const;
 
@@ -72,7 +101,43 @@ const form = reactive({
   base_url: "",
   api_key: "",
   auth_type: "bearer" as "bearer" | "header",
+  /**
+   * 高级选项（JSON）。必须给入口的原因：OpenCode Zen 这类网关在 OpenAI 协议之外
+   * 强制私有头（`x-opencode-session`、自报 UA），缺失直接 400 `MissingSessionID`。
+   * 后端 `POST/PATCH /ops/admin/providers` 早就接受 `options`，只有前端没有入口 ——
+   * 那等于"代码支持、运营做不到"，是配置面最典型的断头路。
+   */
+  options: "",
 });
+
+/** 空串 → undefined（不带该字段，后端保留原值）；非法/非对象 → null（调用方报错） */
+function parseOptionsJson(raw: string): Record<string, unknown> | undefined | null {
+  const text = raw.trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+const modelRows = ref<ModelRow[]>([]);
+const routeRows = ref<RouteRow[]>([]);
+const routeBusy = ref("");
+const routeForm = reactive({
+  model_id: "",
+  provider_id: "",
+  remote_model_id: "",
+  priority: 100,
+});
+const canCreateRoute = computed(
+  () =>
+    routeForm.model_id.trim().length > 0 &&
+    routeForm.provider_id.trim().length > 0 &&
+    routeForm.remote_model_id.trim().length > 0,
+);
 
 const canSubmit = computed(
   () =>
@@ -146,6 +211,11 @@ async function toggleModels(row: ProviderRow): Promise<void> {
 
 async function createProvider(): Promise<void> {
   if (!canSubmit.value || saving.value) return;
+  const options = parseOptionsJson(form.options);
+  if (options === null) {
+    error.value = "高级选项必须是 JSON 对象，例如 {\"headers\":{\"user-agent\":\"oneframe/1.0\"},\"session_header\":\"x-opencode-session\"}";
+    return;
+  }
   saving.value = true;
   error.value = "";
   ok.value = "";
@@ -159,6 +229,7 @@ async function createProvider(): Promise<void> {
         base_url: form.base_url.trim(),
         api_key: form.api_key,
         auth_type: form.auth_type,
+        ...(options ? { options } : {}),
       },
     });
     ok.value = `已创建供应商 ${form.name.trim()}`;
@@ -166,6 +237,7 @@ async function createProvider(): Promise<void> {
     form.name = "";
     form.base_url = "";
     form.api_key = "";
+    form.options = "";
     createOpen.value = false;
     await load();
   } catch (e) {
@@ -283,6 +355,81 @@ async function importManual(row: ProviderRow): Promise<void> {
   }
 }
 
+async function loadRouteData(): Promise<void> {
+  routeBusy.value = "load";
+  error.value = "";
+  try {
+    const [modelData, routeData] = await Promise.all([
+      adminApi<ModelRow[] | { list: ModelRow[] }>("/ops/admin/models"),
+      adminApi<{ list: RouteRow[] }>("/ops/admin/model-routes"),
+    ]);
+    modelRows.value = Array.isArray(modelData) ? modelData : (modelData.list ?? []);
+    routeRows.value = routeData.list ?? [];
+  } catch (e) {
+    await fail(e, "加载接线数据失败");
+  } finally {
+    routeBusy.value = "";
+  }
+}
+
+async function createRoute(): Promise<void> {
+  if (!canCreateRoute.value || routeBusy.value) return;
+  routeBusy.value = "create";
+  error.value = "";
+  ok.value = "";
+  try {
+    await adminApi<RouteRow>("/ops/admin/model-routes", {
+      method: "POST",
+      body: {
+        model_id: routeForm.model_id,
+        provider_id: routeForm.provider_id,
+        remote_model_id: routeForm.remote_model_id.trim(),
+        priority: routeForm.priority,
+      },
+    });
+    ok.value = "路由已建立：该模型现在能真正调到供应商";
+    routeForm.remote_model_id = "";
+    await Promise.all([loadRouteData(), load()]);
+  } catch (e) {
+    await fail(e, "建立路由失败");
+  } finally {
+    routeBusy.value = "";
+  }
+}
+
+async function toggleRoute(row: RouteRow): Promise<void> {
+  routeBusy.value = `${row.id}:toggle`;
+  error.value = "";
+  ok.value = "";
+  try {
+    await adminApi<RouteRow>(`/ops/admin/model-routes/${row.id}`, {
+      method: "PATCH",
+      body: { active: !routeActive(row) },
+    });
+    await Promise.all([loadRouteData(), load()]);
+  } catch (e) {
+    await fail(e, "更新路由失败");
+  } finally {
+    routeBusy.value = "";
+  }
+}
+
+function routeModelName(row: RouteRow): string {
+  return row.modelName ?? row.model_name ?? "-";
+}
+
+function routeProviderName(row: RouteRow): string {
+  return row.providerName ?? row.provider_name ?? "-";
+}
+
+function routeRemote(row: RouteRow): string {
+  return row.remoteModelId ?? row.remote_model_id ?? "-";
+}
+
+function routeActive(row: RouteRow): boolean {
+  return row.active !== false;
+}
+
 function testLabel(result: ProviderTestResult): string {
   if (result.ok) return `连接成功${result.latency_ms === undefined ? "" : ` · ${result.latency_ms}ms`}`;
   const kinds: Record<string, string> = {
@@ -314,7 +461,10 @@ function modelsFor(id: string): ProviderModelRow[] {
   return models.value[id] ?? [];
 }
 
-onMounted(() => void load());
+onMounted(() => {
+  void load();
+  void loadRouteData();
+});
 </script>
 
 <template>
@@ -363,6 +513,18 @@ onMounted(() => void load());
           <option value="bearer">Bearer</option>
           <option value="header">自定义 Header</option>
         </select>
+      </label>
+      <label class="field field-wide">
+        <span>高级选项（JSON，可选）</span>
+        <textarea
+          v-model="form.options"
+          class="input manual-text"
+          rows="3"
+          placeholder='{"headers":{"user-agent":"oneframe-worker/1.0"},"session_header":"x-opencode-session"}'
+        ></textarea>
+        <span class="muted small">
+          headers = 静态请求头；session_header = 需要「每会话稳定」的活值（取 space_id）。OpenCode Zen 必须填这两项，否则 400 MissingSessionID。
+        </span>
       </label>
       <div class="form-actions">
         <button class="mini primary" type="submit" :disabled="saving || !canSubmit">
@@ -474,10 +636,83 @@ onMounted(() => void load());
         </div>
       </article>
     </div>
+
+    <div class="route-block">
+      <div class="panel-head">
+        <div>
+          <h2>模型接线（路由）</h2>
+          <p class="muted small">
+            我方模型 → 供应商的远端模型 ID。只建供应商不建路由，创作页点了只会报「该模型暂不可用」；
+            路由是「能不能真调到」的唯一开关。
+          </p>
+        </div>
+        <button class="mini" type="button" :disabled="routeBusy === 'load'" @click="loadRouteData">
+          {{ routeBusy === "load" ? "刷新中…" : "刷新" }}
+        </button>
+      </div>
+
+      <form class="provider-form" @submit.prevent="createRoute">
+        <label class="field">
+          <span>我方模型</span>
+          <select v-model="routeForm.model_id" class="input">
+            <option value="" disabled>选择模型</option>
+            <option v-for="m in modelRows" :key="m.id" :value="m.id">
+              {{ m.name }}（{{ m.displayName ?? m.display_name }}）
+            </option>
+          </select>
+        </label>
+        <label class="field">
+          <span>供应商</span>
+          <select v-model="routeForm.provider_id" class="input">
+            <option value="" disabled>选择供应商</option>
+            <option v-for="p in rows" :key="p.id" :value="p.id">{{ p.code }} · {{ p.name }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>远端模型 ID</span>
+          <input v-model="routeForm.remote_model_id" class="input" placeholder="deepseek-v4.1-flash" maxlength="200" />
+        </label>
+        <div class="form-actions">
+          <button class="mini primary" type="submit" :disabled="routeBusy === 'create' || !canCreateRoute">
+            {{ routeBusy === "create" ? "保存中…" : "新增路由" }}
+          </button>
+        </div>
+      </form>
+
+      <p v-if="routeRows.length === 0" class="muted small">还没有路由。</p>
+      <template v-else>
+        <div class="model-line route-line route-head">
+          <span>模型</span>
+          <span>供应商</span>
+          <span>远端模型</span>
+          <span>状态</span>
+          <span></span>
+        </div>
+        <div v-for="row in routeRows" :key="row.id" class="model-line route-line">
+          <span class="mono">{{ routeModelName(row) }}</span>
+          <span class="muted">{{ routeProviderName(row) }}</span>
+          <code class="mono">{{ routeRemote(row) }}</code>
+          <span class="badge" :data-status="routeActive(row) ? '3' : '4'">{{ routeActive(row) ? "启用" : "停用" }}</span>
+          <button class="mini" type="button" :disabled="routeBusy === `${row.id}:toggle`" @click="toggleRoute(row)">
+            {{ routeActive(row) ? "停用" : "启用" }}
+          </button>
+        </div>
+      </template>
+    </div>
   </section>
 </template>
 
 <style scoped>
+.route-block {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.route-line {
+  grid-template-columns: 1.4fr 1fr 1.8fr 0.6fr 0.7fr;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
